@@ -1,0 +1,17 @@
+myai:
+  base_url: https://mikasa,icu/v1
+  api_key: sk-uyGv4CXNUgIlUcQH1vMuGI1nEvmElxeJg617Y1rOUfVGngRl
+  model: gpt-5.5
+
+mongo:
+  uri: mongodb://mikasa:mikasa@170.106.115.187:27017/
+  database: myai
+
+redis:
+  addr: 170.106.115.187:6379
+  password: "mikasa"
+  db: 0
+
+thread:
+  core: 5
+  queueSize: 10

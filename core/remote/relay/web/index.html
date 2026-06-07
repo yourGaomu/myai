@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyAI Remote</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark">M</div>
+          <div>
+            <h1>MyAI Remote</h1>
+            <p id="connectionText">Disconnected</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Agents</h2>
+            <button id="refreshAgents" class="icon-button" type="button" title="Refresh agents">Refresh</button>
+          </div>
+          <div id="agentList" class="agent-list"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Pair</h2>
+          <form id="pairForm" class="pair-form">
+            <input id="bindCode" autocomplete="one-time-code" inputmode="numeric" maxlength="6" placeholder="000000" />
+            <button id="pairButton" type="submit">Pair</button>
+          </form>
+          <p id="pairText">No device paired</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Access</h2>
+            <button id="refreshAuth" class="icon-button" type="button" title="Refresh access">Refresh</button>
+          </div>
+          <div id="authList" class="auth-list"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Target</h2>
+          <label>
+            User
+            <input id="userId" autocomplete="off" value="local" />
+          </label>
+          <label>
+            Device
+            <input id="deviceId" autocomplete="off" value="pc-local" />
+          </label>
+          <label>
+            Session
+            <input id="sessionId" autocomplete="off" placeholder="optional" />
+          </label>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h2>Console</h2>
+            <p id="requestText">Ready</p>
+          </div>
+          <button id="connectButton" type="button">Connect</button>
+        </header>
+
+        <section id="messages" class="messages" aria-live="polite"></section>
+
+        <section id="permissionBox" class="permission-box hidden">
+          <div>
+            <strong id="permissionTitle">Tool permission</strong>
+            <pre id="permissionArgs"></pre>
+          </div>
+          <div class="permission-actions">
+            <button id="denyPermission" class="secondary danger" type="button">Deny</button>
+            <button id="allowPermission" type="button">Allow</button>
+          </div>
+        </section>
+
+        <form id="composer" class="composer">
+          <textarea id="messageInput" rows="3" placeholder="Type a message for the computer Agent"></textarea>
+          <button id="sendButton" type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
