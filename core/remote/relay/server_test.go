@@ -59,6 +59,138 @@ func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
 	}
 }
 
+func TestRelayForwardsSessionMessages(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionList,
+		RequestID:   "session-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedToAgent := readTestMessage(t, agentConn, protocol.TypeSessionList)
+	if forwardedToAgent.RequestID != "session-req-1" {
+		t.Fatalf("expected request id session-req-1, got %s", forwardedToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionListResult,
+		RequestID: "session-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedToClient := readTestMessage(t, clientConn, protocol.TypeSessionListResult)
+	if forwardedToClient.RequestID != "session-req-1" {
+		t.Fatalf("expected request id session-req-1, got %s", forwardedToClient.RequestID)
+	}
+}
+
+func TestRelayForwardsFileMessages(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeFileList,
+		RequestID:   "file-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedToAgent := readTestMessage(t, agentConn, protocol.TypeFileList)
+	if forwardedToAgent.RequestID != "file-req-1" {
+		t.Fatalf("expected request id file-req-1, got %s", forwardedToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeFileListResult,
+		RequestID: "file-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedToClient := readTestMessage(t, clientConn, protocol.TypeFileListResult)
+	if forwardedToClient.RequestID != "file-req-1" {
+		t.Fatalf("expected request id file-req-1, got %s", forwardedToClient.RequestID)
+	}
+}
+
+func TestRelayForwardsChangeMessages(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeChangesList,
+		RequestID:   "changes-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedToAgent := readTestMessage(t, agentConn, protocol.TypeChangesList)
+	if forwardedToAgent.RequestID != "changes-req-1" {
+		t.Fatalf("expected request id changes-req-1, got %s", forwardedToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeChangesListResult,
+		RequestID: "changes-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedToClient := readTestMessage(t, clientConn, protocol.TypeChangesListResult)
+	if forwardedToClient.RequestID != "changes-req-1" {
+		t.Fatalf("expected request id changes-req-1, got %s", forwardedToClient.RequestID)
+	}
+}
+
 func TestRelayRejectsClientWithoutToken(t *testing.T) {
 	server := NewServer("")
 	testServer := httptest.NewServer(server.routes())

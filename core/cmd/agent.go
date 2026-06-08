@@ -17,6 +17,7 @@ var (
 	agentUserID    string
 	agentDeviceID  string
 	agentBindCode  string
+	agentWorkspace string
 )
 
 var agentCmd = &cobra.Command{
@@ -33,6 +34,7 @@ var agentCmd = &cobra.Command{
 			UserID:      agentUserID,
 			DeviceID:    agentDeviceID,
 			BindingCode: agentBindCode,
+			Workspace:   agentWorkspace,
 		}, core.GetApp().GetChatService())
 
 		return a.Run(ctx)
@@ -46,4 +48,5 @@ func init() {
 	agentCmd.Flags().StringVar(&agentUserID, "user", "local", "user id")
 	agentCmd.Flags().StringVar(&agentDeviceID, "device", "pc-local", "device id")
 	agentCmd.Flags().StringVar(&agentBindCode, "bind-code", "", "fixed pairing code")
+	agentCmd.Flags().StringVar(&agentWorkspace, "workspace", ".", "workspace directory for remote file preview and local tools")
 }

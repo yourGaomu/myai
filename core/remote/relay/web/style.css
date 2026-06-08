@@ -126,6 +126,7 @@ p {
 }
 
 .panel-head,
+.panel-actions,
 .topbar,
 .permission-actions {
   display: flex;
@@ -178,6 +179,7 @@ textarea:focus {
 }
 
 .agent-list,
+.session-list,
 .auth-list {
   display: flex;
   flex-direction: column;
@@ -197,6 +199,7 @@ textarea:focus {
 }
 
 .agent-item,
+.session-item,
 .auth-item {
   display: grid;
   gap: 3px;
@@ -210,7 +213,9 @@ textarea:focus {
 }
 
 .agent-item:hover,
-.agent-item.active {
+.agent-item.active,
+.session-item:hover,
+.session-item.active {
   border-color: var(--accent);
   background: #edf8f6;
 }
@@ -220,12 +225,14 @@ textarea:focus {
 }
 
 .agent-item strong,
+.session-item strong,
 .auth-item strong {
   overflow-wrap: anywhere;
   font-size: 13px;
 }
 
 .agent-item span,
+.session-item span,
 .auth-item span {
   color: var(--muted);
   font-size: 12px;

@@ -4,6 +4,8 @@ const state = {
   activeRequestID: "",
   activeAssistant: null,
   pendingPermission: null,
+  pendingSessionRequestID: "",
+  sessions: [],
   clientToken: localStorage.getItem("myai_client_token") || "",
 };
 
@@ -16,6 +18,9 @@ const el = {
   bindCode: document.querySelector("#bindCode"),
   pairButton: document.querySelector("#pairButton"),
   pairText: document.querySelector("#pairText"),
+  refreshSessions: document.querySelector("#refreshSessions"),
+  newSession: document.querySelector("#newSession"),
+  sessionList: document.querySelector("#sessionList"),
   refreshAuth: document.querySelector("#refreshAuth"),
   authList: document.querySelector("#authList"),
   userId: document.querySelector("#userId"),
@@ -43,6 +48,7 @@ function setConnected(connected) {
   el.connectionText.textContent = connected ? "Connected" : "Disconnected";
   el.connectButton.textContent = connected ? "Reconnect" : "Connect";
   el.sendButton.disabled = !connected;
+  renderSessions(state.sessions);
 }
 
 function connect() {
@@ -54,7 +60,10 @@ function connect() {
   state.socket = socket;
   el.connectionText.textContent = "Connecting";
 
-  socket.addEventListener("open", () => setConnected(true));
+  socket.addEventListener("open", () => {
+    setConnected(true);
+    requestSessions();
+  });
   socket.addEventListener("close", () => setConnected(false));
   socket.addEventListener("error", () => addMessage("error", "WebSocket connection error"));
   socket.addEventListener("message", (event) => {
@@ -104,6 +113,7 @@ async function pairDevice(bindCode) {
     el.bindCode.value = "";
     await loadAgents();
     await loadAuthorizations();
+    requestSessions();
   } catch (err) {
     el.pairText.textContent = err.message;
   } finally {
@@ -166,7 +176,7 @@ function renderAuthorizations(authorizations) {
       : authorization.client_name || "Browser";
 
     const meta = document.createElement("span");
-    meta.textContent = `Last seen ${formatTime(authorization.last_seen_at)} · expires ${formatDate(authorization.expires_at)}`;
+    meta.textContent = `Last seen ${formatTime(authorization.last_seen_at)} / expires ${formatDate(authorization.expires_at)}`;
 
     const actions = document.createElement("div");
     actions.className = "auth-actions";
@@ -302,6 +312,47 @@ function sendUserMessage(content) {
   });
 }
 
+function requestSessions() {
+  if (!state.clientToken) {
+    renderSessions([]);
+    return;
+  }
+
+  state.pendingSessionRequestID = newRequestID();
+  sendEnvelope("session_list", {
+    request_id: state.pendingSessionRequestID,
+  });
+}
+
+function newRemoteSession() {
+  if (!state.clientToken) {
+    addMessage("error", "Please pair this browser with an agent first");
+    return;
+  }
+
+  state.pendingSessionRequestID = newRequestID();
+  sendEnvelope("session_new", {
+    request_id: state.pendingSessionRequestID,
+  });
+}
+
+function loadRemoteSession(sessionID) {
+  if (!sessionID) {
+    return;
+  }
+  if (!state.clientToken) {
+    addMessage("error", "Please pair this browser with an agent first");
+    return;
+  }
+
+  state.pendingSessionRequestID = newRequestID();
+  sendEnvelope("session_load", {
+    request_id: state.pendingSessionRequestID,
+    session_id: sessionID,
+    payload: { session_id: sessionID },
+  });
+}
+
 function sendPermissionResult(allowed) {
   if (!state.pendingPermission) {
     return;
@@ -335,7 +386,7 @@ function sendEnvelope(type, overrides) {
 }
 
 function handleMessage(message) {
-  if (message.request_id && state.activeRequestID && message.request_id !== state.activeRequestID) {
+  if (!shouldHandleMessage(message)) {
     return;
   }
 
@@ -361,6 +412,13 @@ function handleMessage(message) {
     case "permission_ask":
       showPermission(message);
       break;
+    case "session_list_result":
+      applySessionList(readPayload(message));
+      break;
+    case "session_changed":
+      applySessionChanged(readPayload(message));
+      addMessage("event", `Session ${shortID(el.sessionId.value)} selected`);
+      break;
     case "error": {
       const errorText = readPayload(message).message || "Remote error";
       addMessage("error", errorText);
@@ -377,6 +435,99 @@ function handleMessage(message) {
 
 function readPayload(message) {
   return message.payload || {};
+}
+
+function isSessionMessage(type) {
+  return type === "session_list_result" || type === "session_changed";
+}
+
+function isPassiveMessage(type) {
+  return isSessionMessage(type);
+}
+
+function isTrackedRequest(requestID) {
+  return (
+    requestID === state.activeRequestID ||
+    requestID === state.pendingSessionRequestID
+  );
+}
+
+function shouldHandleMessage(message) {
+  if (!message.request_id) {
+    return true;
+  }
+  if (isPassiveMessage(message.type)) {
+    return true;
+  }
+  if (message.type === "error") {
+    return isTrackedRequest(message.request_id) || !state.activeRequestID;
+  }
+  if (!state.activeRequestID) {
+    return true;
+  }
+  return isTrackedRequest(message.request_id);
+}
+
+function applySessionList(payload) {
+  state.sessions = payload.sessions || [];
+  if (payload.current_session_id) {
+    el.sessionId.value = payload.current_session_id;
+  }
+  renderSessions(state.sessions);
+}
+
+function applySessionChanged(payload) {
+  state.sessions = payload.sessions || [];
+  if (payload.current_session_id) {
+    el.sessionId.value = payload.current_session_id;
+  } else if (payload.session && payload.session.id) {
+    el.sessionId.value = payload.session.id;
+  }
+  renderSessions(state.sessions);
+}
+
+function renderSessions(sessions) {
+  el.sessionList.innerHTML = "";
+
+  if (!state.clientToken) {
+    const empty = document.createElement("p");
+    empty.textContent = "Pair first";
+    el.sessionList.appendChild(empty);
+    return;
+  }
+
+  if (!state.connected) {
+    const empty = document.createElement("p");
+    empty.textContent = "Connect first";
+    el.sessionList.appendChild(empty);
+    return;
+  }
+
+  if (sessions.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "No sessions loaded";
+    el.sessionList.appendChild(empty);
+    return;
+  }
+
+  sessions.forEach((session) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "session-item";
+    if (session.id === el.sessionId.value) {
+      item.classList.add("active");
+    }
+
+    const title = document.createElement("strong");
+    title.textContent = session.title || "New chat";
+
+    const meta = document.createElement("span");
+    meta.textContent = `${shortID(session.id)} / ${session.model || "model"} / ${formatTime(session.updated_at)}`;
+
+    item.append(title, meta);
+    item.addEventListener("click", () => loadRemoteSession(session.id));
+    el.sessionList.appendChild(item);
+  });
 }
 
 function appendAssistant(text) {
@@ -417,6 +568,13 @@ function newRequestID() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function shortID(value) {
+  if (!value) {
+    return "-";
+  }
+  return value.length > 8 ? value.slice(0, 8) : value;
+}
+
 function restorePairing() {
   const userID = localStorage.getItem("myai_user_id") || "";
   const deviceID = localStorage.getItem("myai_device_id") || "";
@@ -433,16 +591,20 @@ function restorePairing() {
 
 function clearPairing(text) {
   state.clientToken = "";
+  state.sessions = [];
   localStorage.removeItem("myai_client_token");
   el.pairText.textContent = text;
   el.authList.innerHTML = "";
   const empty = document.createElement("p");
   empty.textContent = "Pair first";
   el.authList.appendChild(empty);
+  renderSessions([]);
 }
 
 el.connectButton.addEventListener("click", connect);
 el.refreshAgents.addEventListener("click", loadAgents);
+el.refreshSessions.addEventListener("click", requestSessions);
+el.newSession.addEventListener("click", newRemoteSession);
 el.refreshAuth.addEventListener("click", loadAuthorizations);
 el.allowPermission.addEventListener("click", () => sendPermissionResult(true));
 el.denyPermission.addEventListener("click", () => sendPermissionResult(false));

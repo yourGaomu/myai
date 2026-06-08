@@ -12,8 +12,11 @@ import (
 	"github.com/gorilla/websocket"
 
 	"myai/core/llm"
+	"myai/core/remote/changes"
+	"myai/core/remote/files"
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	"myai/core/store/data"
 )
 
 type Config struct {
@@ -21,28 +24,39 @@ type Config struct {
 	UserID      string
 	DeviceID    string
 	BindingCode string
+	Workspace   string
 }
 
 type Agent struct {
 	config            Config
 	chatService       *service.ChatService
+	fileService       *files.Service
+	changeService     *changes.Service
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
 	permissionMu      sync.Mutex
 	permissions       map[string]chan bool
 	permissionTimeout time.Duration
+	fileServiceErr    error
+	changeServiceErr  error
 }
 
 func New(config Config, chatService *service.ChatService) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
+	fileService, err := files.New(config.Workspace)
+	changeService, changeErr := changes.New(config.Workspace)
 
 	return &Agent{
 		config:            config,
 		chatService:       chatService,
+		fileService:       fileService,
+		changeService:     changeService,
 		permissions:       make(map[string]chan bool),
 		permissionTimeout: 60 * time.Second,
+		fileServiceErr:    err,
+		changeServiceErr:  changeErr,
 	}
 }
 
@@ -59,12 +73,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.chatService == nil {
 		return fmt.Errorf("chat service is nil")
 	}
+	if a.fileServiceErr != nil {
+		return fmt.Errorf("file workspace is invalid: %w", a.fileServiceErr)
+	}
+	if a.changeServiceErr != nil {
+		return fmt.Errorf("change workspace is invalid: %w", a.changeServiceErr)
+	}
 
 	fmt.Println("agent starting...")
 	fmt.Println("server:", a.config.ServerURL)
 	fmt.Println("user:", a.config.UserID)
 	fmt.Println("device:", a.config.DeviceID)
 	fmt.Println("binding code:", a.config.BindingCode)
+	fmt.Println("workspace:", a.fileService.Root())
 
 	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, nil)
 	if err != nil {
@@ -86,7 +107,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	readDone := make(chan error, 1)
 	go a.readLoop(ctx, conn, readDone)
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -158,6 +179,20 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		go a.processUserMessage(ctx, conn, message)
 	case protocol.TypePermissionResult:
 		return a.handlePermissionResult(message)
+	case protocol.TypeSessionList:
+		return a.handleSessionList(ctx, conn, message)
+	case protocol.TypeSessionNew:
+		return a.handleSessionNew(ctx, conn, message)
+	case protocol.TypeSessionLoad:
+		return a.handleSessionLoad(ctx, conn, message)
+	case protocol.TypeFileList:
+		return a.handleFileList(ctx, conn, message)
+	case protocol.TypeFileRead:
+		return a.handleFileRead(ctx, conn, message)
+	case protocol.TypeChangesList:
+		return a.handleChangesList(ctx, conn, message)
+	case protocol.TypeChangeDiff:
+		return a.handleChangeDiff(ctx, conn, message)
 	default:
 		return nil
 	}
@@ -196,6 +231,143 @@ func (a *Agent) handlePermissionResult(message protocol.Message) error {
 	return nil
 }
 
+func (a *Agent) handleSessionList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	payload, err := a.sessionListPayload(ctx)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionListResult, message.RequestID, payload.CurrentSessionID, payload)
+}
+
+func (a *Agent) handleSessionNew(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.NewSession(ctx); err != nil {
+		return err
+	}
+	return a.writeSessionChanged(ctx, conn, message.RequestID)
+}
+
+func (a *Agent) handleSessionLoad(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionLoadPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session load failed: %w", err)
+	}
+	sessionID := payload.SessionID
+	if sessionID == "" {
+		sessionID = message.SessionID
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.LoadSession(ctx, sessionID); err != nil {
+		return err
+	}
+	return a.writeSessionChanged(ctx, conn, message.RequestID)
+}
+
+func (a *Agent) handleFileList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.FileListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode file list failed: %w", err)
+	}
+
+	result, err := a.fileService.List(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeFileListResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleFileRead(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.FileReadPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode file read failed: %w", err)
+	}
+
+	result, err := a.fileService.Read(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeFileReadResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleChangesList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.ChangesListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode changes list failed: %w", err)
+	}
+
+	result, err := a.changeService.List(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeChangesListResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleChangeDiff(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.ChangeDiffPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode change diff failed: %w", err)
+	}
+
+	result, err := a.changeService.Diff(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeChangeDiffResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) writeSessionChanged(ctx context.Context, conn *websocket.Conn, requestID string) error {
+	payload, err := a.sessionChangedPayload(ctx)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionChanged, requestID, payload.CurrentSessionID, payload)
+}
+
+func (a *Agent) sessionListPayload(ctx context.Context) (protocol.SessionListResultPayload, error) {
+	sessions, err := a.chatService.ListSessions(ctx)
+	if err != nil {
+		return protocol.SessionListResultPayload{}, err
+	}
+	return protocol.SessionListResultPayload{
+		CurrentSessionID: a.chatService.CurrentSessionID(),
+		Sessions:         sessionSummaries(sessions),
+	}, nil
+}
+
+func (a *Agent) sessionChangedPayload(ctx context.Context) (protocol.SessionChangedPayload, error) {
+	list, err := a.sessionListPayload(ctx)
+	if err != nil {
+		return protocol.SessionChangedPayload{}, err
+	}
+
+	current := findSessionSummary(list.Sessions, list.CurrentSessionID)
+	if current.ID == "" {
+		current = protocol.SessionSummary{
+			ID:             list.CurrentSessionID,
+			Model:          a.chatService.CurrentModelID(),
+			PermissionMode: string(a.chatService.CurrentPermissionMode()),
+			ContextWindowK: a.chatService.CurrentContextWindowK(),
+		}
+	}
+
+	return protocol.SessionChangedPayload{
+		CurrentSessionID: list.CurrentSessionID,
+		Session:          current,
+		Sessions:         list.Sessions,
+	}, nil
+}
+
 func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
 	if err != nil {
@@ -205,9 +377,19 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		return fmt.Errorf("user message content is empty")
 	}
 
+	sessionID := message.SessionID
+	if sessionID != "" && sessionID != a.chatService.CurrentSessionID() {
+		if err := a.chatService.LoadSession(ctx, sessionID); err != nil {
+			return err
+		}
+	}
+	if sessionID == "" {
+		sessionID = a.chatService.CurrentSessionID()
+	}
+
 	sendErrCh := make(chan error, 1)
 	send := func(messageType protocol.MessageType, payload any) {
-		if err := a.writeRemoteMessage(conn, messageType, message.RequestID, message.SessionID, payload); err != nil {
+		if err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload); err != nil {
 			select {
 			case sendErrCh <- err:
 			default:
@@ -226,6 +408,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 			})
 		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
+			message.SessionID = sessionID
 			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
 		},
 	})
@@ -240,6 +423,31 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	}
 
 	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{Content: response.Result.Content})
+}
+
+func sessionSummaries(sessions []data.SessionRecord) []protocol.SessionSummary {
+	summaries := make([]protocol.SessionSummary, 0, len(sessions))
+	for _, session := range sessions {
+		summaries = append(summaries, protocol.SessionSummary{
+			ID:             session.ID,
+			Title:          session.Title,
+			Model:          session.Model,
+			PermissionMode: session.PermissionMode,
+			ContextWindowK: session.ContextWindowK,
+			CreatedAt:      session.CreatedAt,
+			UpdatedAt:      session.UpdatedAt,
+		})
+	}
+	return summaries
+}
+
+func findSessionSummary(sessions []protocol.SessionSummary, sessionID string) protocol.SessionSummary {
+	for _, session := range sessions {
+		if session.ID == sessionID {
+			return session
+		}
+	}
+	return protocol.SessionSummary{}
 }
 
 func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, message protocol.Message, request llm.ToolPermissionRequest, sendErrCh chan<- error) bool {
