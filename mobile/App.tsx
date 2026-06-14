@@ -17,11 +17,16 @@ import type {
   AssistantDeltaPayload,
   ChangeDiffResultPayload,
   ChangeEntry,
+  ChangeRevertResultPayload,
   ChangesListResultPayload,
   ErrorPayload,
   FileEntry,
   FileListResultPayload,
   FileReadResultPayload,
+  HistoryCheckpoint,
+  HistoryDiffResultPayload,
+  HistoryListResultPayload,
+  HistoryRevertResultPayload,
   PairResponse,
   PermissionAskPayload,
   PermissionResultPayload,
@@ -49,6 +54,8 @@ type PermissionState = {
 type ViewMode = "chat" | "files" | "changes";
 
 const defaultRelayURL = "http://127.0.0.1:18080";
+const maxAttachedFiles = 5;
+const maxAttachedFileChars = 12000;
 
 export default function App() {
   const [relayURL, setRelayURL] = useState(defaultRelayURL);
@@ -71,6 +78,10 @@ export default function App() {
   const [changesClean, setChangesClean] = useState(false);
   const [selectedChange, setSelectedChange] = useState("");
   const [changeDiff, setChangeDiff] = useState<ChangeDiffResultPayload | null>(null);
+  const [historyCheckpoints, setHistoryCheckpoints] = useState<HistoryCheckpoint[]>([]);
+  const [historyDiff, setHistoryDiff] = useState<HistoryDiffResultPayload | null>(null);
+  const [historyMessage, setHistoryMessage] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<FileReadResultPayload[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [messages, setMessages] = useState<ChatItem[]>([]);
   const [pendingPermission, setPendingPermission] = useState<PermissionState | null>(null);
@@ -89,6 +100,8 @@ export default function App() {
     () => changes.find((entry) => entry.path === selectedChange),
     [changes, selectedChange],
   );
+  const canRevertSelectedChange = Boolean(changeDiff?.restorable || selectedChangeEntry?.restorable);
+  const filePreviewAttached = Boolean(filePreview && attachedFiles.some((file) => file.path === filePreview.path));
 
   const addMessage = useCallback((role: ChatItem["role"], text: string) => {
     setMessages((current) => [...current, { id: newRequestID(), role, text }]);
@@ -170,6 +183,20 @@ export default function App() {
     });
   }, [clientToken, sendEnvelope]);
 
+  const requestHistory = useCallback(() => {
+    if (!clientToken) {
+      setHistoryCheckpoints([]);
+      setHistoryDiff(null);
+      setHistoryMessage("");
+      return;
+    }
+
+    sendEnvelope("history_list", {
+      request_id: newRequestID(),
+      payload: { limit: 50 },
+    });
+  }, [clientToken, sendEnvelope]);
+
   const connect = useCallback(() => {
     if (!clientToken) {
       addMessage("error", "Pair this phone before connecting");
@@ -188,6 +215,7 @@ export default function App() {
       requestSessions();
       requestFiles(".");
       requestChanges();
+      requestHistory();
     };
     socket.onclose = () => {
       setConnected(false);
@@ -205,7 +233,7 @@ export default function App() {
         addMessage("error", `Invalid relay message: ${messageFromError(error)}`);
       }
     };
-  }, [addMessage, clientToken, normalizedRelayURL, requestChanges, requestFiles, requestSessions]);
+  }, [addMessage, clientToken, normalizedRelayURL, requestChanges, requestFiles, requestHistory, requestSessions]);
 
   const pairDevice = useCallback(async () => {
     const code = bindCode.trim();
@@ -240,7 +268,7 @@ export default function App() {
 
   const sendUserMessage = useCallback(() => {
     const content = messageInput.trim();
-    if (!content) {
+    if (!content && attachedFiles.length === 0) {
       return;
     }
 
@@ -248,14 +276,15 @@ export default function App() {
     activeRequestIDRef.current = requestID;
     activeAssistantIDRef.current = "";
     setPendingPermission(null);
-    addMessage("user", content);
+    addMessage("user", userMessageEcho(content, attachedFiles));
     setMessageInput("");
+    setAttachedFiles([]);
 
     sendEnvelope("user_message", {
       request_id: requestID,
-      payload: { content },
+      payload: { content: messageWithAttachedFiles(content, attachedFiles) },
     });
-  }, [addMessage, messageInput, sendEnvelope]);
+  }, [addMessage, attachedFiles, messageInput, sendEnvelope]);
 
   const newSession = useCallback(() => {
     sendEnvelope("session_new", { request_id: newRequestID() });
@@ -318,6 +347,70 @@ export default function App() {
     [sendEnvelope],
   );
 
+  const revertSelectedChange = useCallback(() => {
+    const path = changeDiff?.path || selectedChange;
+    if (!path || !canRevertSelectedChange) {
+      return;
+    }
+
+    Alert.alert("Revert file change?", `Restore ${path} to the saved baseline.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Revert",
+        style: "destructive",
+        onPress: () => {
+          sendEnvelope("change_revert", {
+            request_id: newRequestID(),
+            payload: { path },
+          });
+        },
+      },
+    ]);
+  }, [canRevertSelectedChange, changeDiff?.path, selectedChange, sendEnvelope]);
+
+  const revertHistoryCheckpoint = useCallback(
+    (checkpointID: string) => {
+      if (!checkpointID) {
+        return;
+      }
+
+      const checkpoint = historyCheckpoints.find((item) => item.id === checkpointID);
+      const title = checkpoint?.title || `Checkpoint ${shortID(checkpointID)}`;
+      const detail = checkpoint
+        ? `${checkpoint.change_count} file(s) from ${formatDateTime(checkpoint.created_at)} will be restored.`
+        : "This checkpoint will be restored.";
+
+      Alert.alert("Revert checkpoint?", `${title}\n${detail}`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Revert",
+          style: "destructive",
+          onPress: () => {
+            sendEnvelope("history_revert", {
+              request_id: newRequestID(),
+              payload: { checkpoint_id: checkpointID },
+            });
+          },
+        },
+      ]);
+    },
+    [historyCheckpoints, sendEnvelope],
+  );
+
+  const previewHistoryCheckpoint = useCallback(
+    (checkpointID: string) => {
+      if (!checkpointID) {
+        return;
+      }
+
+      sendEnvelope("history_diff", {
+        request_id: newRequestID(),
+        payload: { checkpoint_id: checkpointID },
+      });
+    },
+    [sendEnvelope],
+  );
+
   const goToParent = useCallback(() => {
     if (!fileParent) {
       return;
@@ -325,6 +418,35 @@ export default function App() {
     setFilePreview(null);
     requestFiles(fileParent);
   }, [fileParent, requestFiles]);
+
+  const attachFilePreview = useCallback(() => {
+    if (!filePreview) {
+      return;
+    }
+    if (filePreview.binary) {
+      addMessage("error", "Binary files cannot be attached to chat yet");
+      return;
+    }
+    if (!filePreview.content) {
+      addMessage("error", "File content is empty");
+      return;
+    }
+
+    setAttachedFiles((current) => {
+      if (current.some((file) => file.path === filePreview.path)) {
+        return current;
+      }
+      if (current.length >= maxAttachedFiles) {
+        return [...current.slice(1), filePreview];
+      }
+      return [...current, filePreview];
+    });
+    setViewMode("chat");
+  }, [addMessage, filePreview]);
+
+  const removeAttachedFile = useCallback((path: string) => {
+    setAttachedFiles((current) => current.filter((file) => file.path !== path));
+  }, []);
 
   const sendPermissionResult = useCallback(
     (allowed: boolean) => {
@@ -362,6 +484,7 @@ export default function App() {
           requestSessions();
           requestFiles(filePath);
           requestChanges();
+          requestHistory();
           break;
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
@@ -398,6 +521,18 @@ export default function App() {
         case "change_diff_result":
           applyChangeDiff(message.payload as ChangeDiffResultPayload | undefined);
           break;
+        case "change_revert_result":
+          applyChangeRevert(message.payload as ChangeRevertResultPayload | undefined);
+          break;
+        case "history_list_result":
+          applyHistoryList(message.payload as HistoryListResultPayload | undefined);
+          break;
+        case "history_diff_result":
+          applyHistoryDiff(message.payload as HistoryDiffResultPayload | undefined);
+          break;
+        case "history_revert_result":
+          applyHistoryRevert(message.payload as HistoryRevertResultPayload | undefined);
+          break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
           addMessage("error", payload.message || "Remote error");
@@ -408,7 +543,7 @@ export default function App() {
           addMessage("event", `Message: ${message.type}`);
       }
     },
-    [addMessage, appendAssistant, filePath, requestChanges, requestFiles, requestSessions],
+    [addMessage, appendAssistant, filePath, requestChanges, requestFiles, requestHistory, requestSessions],
   );
 
   const applySessionList = (payload?: SessionListResultPayload) => {
@@ -461,6 +596,49 @@ export default function App() {
     setSelectedChange(payload.path || "");
     setChangeDiff(payload);
     setViewMode("changes");
+  };
+
+  const applyChangeRevert = (payload?: ChangeRevertResultPayload) => {
+    if (!payload) {
+      return;
+    }
+    addMessage("event", payload.message || `Reverted ${payload.path}`);
+    setSelectedChange("");
+    setChangeDiff(null);
+    requestChanges();
+    requestHistory();
+    requestFiles(filePath);
+  };
+
+  const applyHistoryList = (payload?: HistoryListResultPayload) => {
+    const checkpoints = payload?.checkpoints || [];
+    setHistoryCheckpoints(checkpoints);
+    setHistoryMessage(checkpoints.length === 0 ? "No file history recorded yet" : "");
+    if (historyDiff && !checkpoints.some((checkpoint) => checkpoint.id === historyDiff.checkpoint_id)) {
+      setHistoryDiff(null);
+    }
+  };
+
+  const applyHistoryDiff = (payload?: HistoryDiffResultPayload) => {
+    if (!payload) {
+      return;
+    }
+    setHistoryDiff(payload);
+    setHistoryMessage(payload.message || "");
+    setViewMode("changes");
+  };
+
+  const applyHistoryRevert = (payload?: HistoryRevertResultPayload) => {
+    if (!payload) {
+      return;
+    }
+    addMessage("event", payload.message || `Reverted checkpoint ${shortID(payload.checkpoint_id)}`);
+    setSelectedChange("");
+    setChangeDiff(null);
+    setHistoryDiff(null);
+    requestChanges();
+    requestHistory();
+    requestFiles(filePath);
   };
 
   return (
@@ -554,15 +732,14 @@ export default function App() {
                 </Pressable>
               </View>
             </View>
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              onChangeText={setSessionID}
-              placeholder="Current session"
-              placeholderTextColor="#6f7280"
-              style={styles.input}
-              value={sessionID}
-            />
+            {sessionID ? (
+              <View style={styles.currentSessionBox}>
+                <Text style={styles.currentSessionText}>{shortID(sessionID)}</Text>
+                <Text style={styles.currentSessionMeta}>
+                  {activeSession?.model || "model"} / {activeSession?.permission_mode || "permission"}
+                </Text>
+              </View>
+            ) : null}
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.sessionRow}>
                 {sessions.length === 0 ? (
@@ -661,9 +838,18 @@ export default function App() {
 
               {filePreview ? (
                 <View style={styles.previewBox}>
-                  <Text style={styles.previewTitle}>
-                    {filePreview.name} / {filePreview.language} / {formatBytes(filePreview.size)}
-                  </Text>
+                  <View style={styles.previewHeader}>
+                    <Text style={[styles.previewTitle, styles.flex]}>
+                      {filePreview.name} / {filePreview.language} / {formatBytes(filePreview.size)}
+                    </Text>
+                    <Pressable
+                      disabled={filePreview.binary || filePreviewAttached}
+                      onPress={attachFilePreview}
+                      style={[styles.previewButton, (filePreview.binary || filePreviewAttached) && styles.disabledButton]}
+                    >
+                      <Text style={styles.previewButtonText}>{filePreviewAttached ? "Attached" : "Attach"}</Text>
+                    </Pressable>
+                  </View>
                   {filePreview.binary ? (
                     <Text style={styles.emptyText}>Binary file preview is not available.</Text>
                   ) : (
@@ -686,9 +872,14 @@ export default function App() {
                   <Text style={styles.panelTitle}>Changes</Text>
                   <Text style={styles.pathText}>{changesClean ? "Clean workspace" : `${changes.length} changed file(s)`}</Text>
                 </View>
-                <Pressable onPress={requestChanges} style={styles.smallButton}>
-                  <Text style={styles.smallButtonText}>Refresh</Text>
-                </Pressable>
+                <View style={styles.rowCompact}>
+                  <Pressable onPress={requestHistory} style={styles.smallButton}>
+                    <Text style={styles.smallButtonText}>History</Text>
+                  </Pressable>
+                  <Pressable onPress={requestChanges} style={styles.smallButton}>
+                    <Text style={styles.smallButtonText}>Refresh</Text>
+                  </Pressable>
+                </View>
               </View>
 
               <View style={styles.changeList}>
@@ -720,6 +911,13 @@ export default function App() {
                       {changeDiff.truncated ? " / truncated" : ""}
                     </Text>
                     <Pressable
+                      disabled={!canRevertSelectedChange}
+                      onPress={revertSelectedChange}
+                      style={[styles.previewButton, !canRevertSelectedChange && styles.disabledButton]}
+                    >
+                      <Text style={styles.previewButtonText}>Revert</Text>
+                    </Pressable>
+                    <Pressable
                       disabled={!canOpenSelectedChangeFile}
                       onPress={openSelectedChangeFile}
                       style={[styles.previewButton, !canOpenSelectedChangeFile && styles.disabledButton]}
@@ -736,6 +934,63 @@ export default function App() {
                   )}
                 </View>
               ) : null}
+
+              <View style={styles.historyBox}>
+                <View style={styles.previewHeader}>
+                  <Text style={[styles.previewTitle, styles.flex]}>File History</Text>
+                  <Pressable onPress={requestHistory} style={styles.previewButton}>
+                    <Text style={styles.previewButtonText}>Refresh</Text>
+                  </Pressable>
+                </View>
+                {historyMessage ? <Text style={styles.emptyText}>{historyMessage}</Text> : null}
+                {!historyMessage && historyCheckpoints.length === 0 ? (
+                  <Text style={styles.emptyText}>{clientToken ? "No history loaded" : "Pair first"}</Text>
+                ) : (
+                  historyCheckpoints.map((checkpoint) => (
+                    <View key={checkpoint.id} style={styles.historyRow}>
+                      <View style={styles.flex}>
+                        <Text style={styles.fileName}>{checkpoint.title || `Checkpoint ${shortID(checkpoint.id)}`}</Text>
+                        <Text style={styles.fileMeta}>
+                          {checkpoint.change_count} file(s) / {formatDateTime(checkpoint.created_at)}
+                        </Text>
+                      </View>
+                      <Pressable onPress={() => previewHistoryCheckpoint(checkpoint.id)} style={styles.previewButton}>
+                        <Text style={styles.previewButtonText}>Diff</Text>
+                      </Pressable>
+                      <Pressable onPress={() => revertHistoryCheckpoint(checkpoint.id)} style={styles.previewButton}>
+                        <Text style={styles.previewButtonText}>Revert</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+                {historyDiff ? (
+                  <View style={styles.historyDiffBox}>
+                    <Text style={styles.previewTitle}>
+                      Checkpoint {shortID(historyDiff.checkpoint_id)} / {(historyDiff.files || []).length} file(s)
+                    </Text>
+                    {(historyDiff.files || []).length === 0 ? (
+                      <Text style={styles.emptyText}>{historyDiff.message || "No diff is available."}</Text>
+                    ) : (
+                      (historyDiff.files || []).map((file) => (
+                        <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.historyDiffFile}>
+                          <Text style={styles.fileName}>
+                            {file.path}
+                            {file.truncated ? " / truncated" : ""}
+                          </Text>
+                          <Text style={styles.fileMeta}>{file.change_type || "changed"}</Text>
+                          {file.binary ? (
+                            <Text style={styles.emptyText}>{file.message || "Binary diff is not available."}</Text>
+                          ) : (
+                            <ScrollView horizontal>
+                              <Text style={styles.codeText}>{file.diff || file.message || "No diff is available."}</Text>
+                            </ScrollView>
+                          )}
+                        </View>
+                      ))
+                    )}
+                  </View>
+                ) : null}
+              </View>
             </View>
           ) : null}
 
@@ -757,16 +1012,37 @@ export default function App() {
           ) : null}
 
           <View style={styles.composer}>
-            <TextInput
-              multiline
-              onChangeText={setMessageInput}
-              placeholder="Ask the PC Agent..."
-              style={[styles.input, styles.messageInput]}
-              value={messageInput}
-            />
-            <Pressable onPress={sendUserMessage} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Send</Text>
-            </Pressable>
+            {attachedFiles.length > 0 ? (
+              <View style={styles.attachmentTray}>
+                {attachedFiles.map((file) => (
+                  <View key={file.path} style={styles.attachmentChip}>
+                    <View style={styles.flex}>
+                      <Text style={styles.attachmentTitle}>{file.name}</Text>
+                      <Text style={styles.attachmentMeta}>
+                        {file.path} / {formatBytes(file.size)}
+                        {file.truncated ? " / truncated" : ""}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => removeAttachedFile(file.path)} style={styles.attachmentRemove}>
+                      <Text style={styles.attachmentRemoveText}>Remove</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            <View style={styles.composerRow}>
+              <TextInput
+                multiline
+                onChangeText={setMessageInput}
+                placeholder="Message, @files, /commands"
+                placeholderTextColor="#6f7280"
+                style={[styles.input, styles.messageInput]}
+                value={messageInput}
+              />
+              <Pressable onPress={sendUserMessage} style={styles.sendButton}>
+                <Text style={styles.sendButtonText}>Send</Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -808,6 +1084,41 @@ function parentPathOf(path: string) {
   return normalized.slice(0, index);
 }
 
+function messageWithAttachedFiles(content: string, files: FileReadResultPayload[]) {
+  if (files.length === 0) {
+    return content;
+  }
+
+  const fileBlocks = files.map((file) => {
+    const body = truncateText(file.content || "", maxAttachedFileChars);
+    return [
+      `<file path="${file.path}" language="${file.language}" size="${file.size}">`,
+      body,
+      file.truncated || (file.content || "").length > maxAttachedFileChars ? "\n[content truncated]" : "",
+      "</file>",
+    ].join("\n");
+  });
+
+  const prompt = content || "请阅读我附加的文件内容，并告诉我你看到了什么。";
+  return `${prompt}\n\nAttached files:\n${fileBlocks.join("\n\n")}`;
+}
+
+function userMessageEcho(content: string, files: FileReadResultPayload[]) {
+  const text = content || "Sent attached file context";
+  if (files.length === 0) {
+    return text;
+  }
+  const names = files.map((file) => `@${file.path}`).join("\n");
+  return `${text}\n\n${names}`;
+}
+
+function truncateText(text: string, maxChars: number) {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return text.slice(0, maxChars);
+}
+
 function messageFromError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -820,6 +1131,17 @@ function formatBytes(size: number) {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDateTime(value?: string) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
 }
 
 function changeLabel(entry: ChangeEntry) {
@@ -871,44 +1193,87 @@ function changeBadgeStyle(entry: ChangeEntry) {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#0d1110",
   },
   keyboard: {
     flex: 1,
   },
   content: {
-    gap: 14,
-    padding: 16,
-    paddingBottom: 28,
+    gap: 10,
+    padding: 12,
+    paddingBottom: 18,
   },
   header: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
+    paddingHorizontal: 2,
+    paddingTop: 4,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
   },
   title: {
-    color: "#17202a",
-    fontSize: 26,
+    color: "#f4f0f8",
+    fontSize: 22,
     fontWeight: "800",
   },
   subtitle: {
-    color: "#667085",
+    color: "#8d91a0",
+    fontSize: 12,
     marginTop: 4,
   },
-  statusDot: {
+  ghostButton: {
+    borderColor: "#2b2d35",
     borderRadius: 8,
-    height: 16,
-    width: 16,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  ghostButtonText: {
+    color: "#d8d5df",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  statusPill: {
+    alignItems: "center",
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  statusPillOnline: {
+    backgroundColor: "#123a32",
+  },
+  statusPillOffline: {
+    backgroundColor: "#3a2224",
+  },
+  statusPillText: {
+    color: "#f4f0f8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  statusDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
   },
   statusDotOnline: {
-    backgroundColor: "#0f766e",
+    backgroundColor: "#35d07f",
   },
   statusDotOffline: {
-    backgroundColor: "#b42318",
+    backgroundColor: "#ff6961",
   },
   panel: {
-    backgroundColor: "#ffffff",
-    borderColor: "#d6dde7",
+    backgroundColor: "#141419",
+    borderColor: "#24262f",
     borderRadius: 8,
     borderWidth: 1,
     gap: 10,
@@ -920,16 +1285,16 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   panelTitle: {
-    color: "#17202a",
-    fontSize: 16,
+    color: "#f4f0f8",
+    fontSize: 15,
     fontWeight: "700",
   },
   input: {
-    backgroundColor: "#ffffff",
-    borderColor: "#d6dde7",
+    backgroundColor: "#1d1d23",
+    borderColor: "#2c2d36",
     borderRadius: 8,
     borderWidth: 1,
-    color: "#17202a",
+    color: "#f4f0f8",
     minHeight: 42,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -948,36 +1313,36 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: "center",
-    backgroundColor: "#0f766e",
+    backgroundColor: "#f4f0f8",
     borderRadius: 8,
     justifyContent: "center",
     minHeight: 42,
     paddingHorizontal: 16,
   },
   primaryButtonText: {
-    color: "#ffffff",
+    color: "#101014",
     fontWeight: "700",
   },
   secondaryButton: {
     alignItems: "center",
-    backgroundColor: "#eef3f8",
+    backgroundColor: "#24262f",
     borderRadius: 8,
     justifyContent: "center",
     minHeight: 42,
     paddingHorizontal: 16,
   },
   secondaryButtonText: {
-    color: "#17202a",
+    color: "#f4f0f8",
     fontWeight: "700",
   },
   smallButton: {
-    backgroundColor: "#eef3f8",
+    backgroundColor: "#24262f",
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   smallButtonText: {
-    color: "#17202a",
+    color: "#d8d5df",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -985,8 +1350,10 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   segmented: {
-    backgroundColor: "#e9eef5",
+    backgroundColor: "#141419",
+    borderColor: "#24262f",
     borderRadius: 8,
+    borderWidth: 1,
     flexDirection: "row",
     padding: 4,
   },
@@ -997,14 +1364,14 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   segmentActive: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "#24262f",
   },
   segmentText: {
-    color: "#667085",
+    color: "#8d91a0",
     fontWeight: "700",
   },
   segmentTextActive: {
-    color: "#17202a",
+    color: "#f4f0f8",
   },
   sessionRow: {
     flexDirection: "row",
@@ -1012,24 +1379,43 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   sessionChip: {
-    borderColor: "#d6dde7",
+    backgroundColor: "#18181e",
+    borderColor: "#282a33",
     borderRadius: 8,
     borderWidth: 1,
     minWidth: 132,
     padding: 10,
   },
   sessionChipActive: {
-    backgroundColor: "#edf8f6",
-    borderColor: "#0f766e",
+    backgroundColor: "#20252c",
+    borderColor: "#5f8df7",
   },
   sessionTitle: {
-    color: "#17202a",
+    color: "#f4f0f8",
     fontWeight: "700",
   },
   sessionMeta: {
-    color: "#667085",
+    color: "#8d91a0",
     fontSize: 12,
     marginTop: 3,
+  },
+  currentSessionBox: {
+    backgroundColor: "#101014",
+    borderColor: "#24262f",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  currentSessionText: {
+    color: "#f4f0f8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  currentSessionMeta: {
+    color: "#8d91a0",
+    fontSize: 12,
   },
   chatPanel: {
     minHeight: 260,
@@ -1041,7 +1427,7 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   pathText: {
-    color: "#667085",
+    color: "#8d91a0",
     fontSize: 12,
     marginTop: 3,
   },
@@ -1050,7 +1436,8 @@ const styles = StyleSheet.create({
   },
   fileRow: {
     alignItems: "center",
-    borderColor: "#d6dde7",
+    backgroundColor: "#17171c",
+    borderColor: "#252731",
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: "row",
@@ -1058,17 +1445,17 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   fileIcon: {
-    color: "#0f766e",
+    color: "#8d91a0",
     fontSize: 11,
     fontWeight: "800",
     width: 28,
   },
   fileName: {
-    color: "#17202a",
+    color: "#f4f0f8",
     fontWeight: "700",
   },
   fileMeta: {
-    color: "#667085",
+    color: "#8d91a0",
     fontSize: 12,
     marginTop: 2,
   },
@@ -1077,7 +1464,8 @@ const styles = StyleSheet.create({
   },
   changeRow: {
     alignItems: "center",
-    borderColor: "#d6dde7",
+    backgroundColor: "#17171c",
+    borderColor: "#252731",
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: "row",
@@ -1085,8 +1473,43 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   changeRowActive: {
-    backgroundColor: "#edf8f6",
-    borderColor: "#0f766e",
+    backgroundColor: "#20252c",
+    borderColor: "#5f8df7",
+  },
+  historyBox: {
+    backgroundColor: "#101014",
+    borderColor: "#24262f",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    padding: 12,
+  },
+  historyRow: {
+    alignItems: "center",
+    backgroundColor: "#17171c",
+    borderColor: "#252731",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    padding: 10,
+  },
+  historyDiffBox: {
+    backgroundColor: "#0f1117",
+    borderColor: "#252731",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    maxHeight: 420,
+    padding: 10,
+  },
+  historyDiffFile: {
+    backgroundColor: "#151820",
+    borderColor: "#252b36",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+    padding: 10,
   },
   changeBadge: {
     borderRadius: 6,
@@ -1100,19 +1523,21 @@ const styles = StyleSheet.create({
     width: 30,
   },
   changeBadgeModified: {
-    backgroundColor: "#0f766e",
+    backgroundColor: "#5f8df7",
   },
   changeBadgeAdded: {
-    backgroundColor: "#15803d",
+    backgroundColor: "#2ea043",
   },
   changeBadgeDeleted: {
-    backgroundColor: "#b42318",
+    backgroundColor: "#da3633",
   },
   changeBadgeRenamed: {
-    backgroundColor: "#6d5bd0",
+    backgroundColor: "#8957e5",
   },
   previewBox: {
-    backgroundColor: "#111827",
+    backgroundColor: "#101014",
+    borderColor: "#24262f",
+    borderWidth: 1,
     borderRadius: 8,
     gap: 8,
     maxHeight: 360,
@@ -1124,23 +1549,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previewTitle: {
-    color: "#d1d5db",
+    color: "#d8d5df",
     fontSize: 12,
     fontWeight: "700",
   },
   previewButton: {
-    backgroundColor: "#263244",
+    backgroundColor: "#24262f",
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   previewButtonText: {
-    color: "#f9fafb",
+    color: "#f4f0f8",
     fontSize: 12,
     fontWeight: "700",
   },
   codeText: {
-    color: "#e5e7eb",
+    color: "#d8d5df",
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
     fontSize: 12,
     lineHeight: 18,
@@ -1154,59 +1579,113 @@ const styles = StyleSheet.create({
   },
   userMessage: {
     alignSelf: "flex-end",
-    backgroundColor: "#dff4ef",
+    backgroundColor: "#263b33",
     maxWidth: "88%",
   },
   assistantMessage: {
     alignSelf: "flex-start",
-    backgroundColor: "#f0f4f8",
+    backgroundColor: "#1d1d23",
     maxWidth: "88%",
   },
   eventMessage: {
     alignSelf: "stretch",
-    backgroundColor: "#fff8ed",
-    borderColor: "#f1c48b",
+    backgroundColor: "#272217",
+    borderColor: "#5f4a20",
     borderWidth: 1,
   },
   errorMessage: {
     alignSelf: "stretch",
-    backgroundColor: "#fff1f0",
-    borderColor: "#f2b8b5",
+    backgroundColor: "#2e1f22",
+    borderColor: "#6b2d31",
     borderWidth: 1,
   },
   messageText: {
-    color: "#17202a",
+    color: "#f4f0f8",
     lineHeight: 20,
   },
   permissionBox: {
-    backgroundColor: "#fff8ed",
-    borderColor: "#f1c48b",
+    backgroundColor: "#272217",
+    borderColor: "#5f4a20",
     borderRadius: 8,
     borderWidth: 1,
     gap: 10,
     padding: 12,
   },
   permissionTitle: {
-    color: "#b54708",
+    color: "#f0b65a",
     fontWeight: "800",
   },
   permissionArgs: {
-    color: "#667085",
+    color: "#d8d5df",
     lineHeight: 19,
   },
   composer: {
-    backgroundColor: "#ffffff",
-    borderColor: "#d6dde7",
+    backgroundColor: "#141419",
+    borderColor: "#24262f",
     borderRadius: 8,
     borderWidth: 1,
     gap: 10,
-    padding: 12,
+    padding: 8,
+  },
+  attachmentTray: {
+    gap: 8,
+  },
+  attachmentChip: {
+    alignItems: "center",
+    backgroundColor: "#101014",
+    borderColor: "#24262f",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  attachmentTitle: {
+    color: "#f4f0f8",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  attachmentMeta: {
+    color: "#8d91a0",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  attachmentRemove: {
+    backgroundColor: "#24262f",
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  attachmentRemoveText: {
+    color: "#d8d5df",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  composerRow: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    gap: 10,
   },
   messageInput: {
-    minHeight: 82,
+    flex: 1,
+    maxHeight: 120,
+    minHeight: 44,
     textAlignVertical: "top",
   },
+  sendButton: {
+    alignItems: "center",
+    backgroundColor: "#f4f0f8",
+    borderRadius: 8,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 14,
+  },
+  sendButtonText: {
+    color: "#101014",
+    fontWeight: "800",
+  },
   emptyText: {
-    color: "#667085",
+    color: "#8d91a0",
   },
 });

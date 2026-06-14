@@ -36,7 +36,7 @@ Do not use `127.0.0.1` on a real phone unless the Relay also runs on that phone.
 5. Tap `Connect`.
 6. Chat, switch sessions, and approve or deny tool permissions.
 7. Open `Files` to browse and preview files from the PC Agent workspace.
-8. Open `Changes` to inspect Git changes, preview diffs, and jump to the changed file.
+8. Open `Changes` to inspect changes compared with the SQLite workspace history baseline, preview diffs, jump to files, and revert restorable files.
 
 ## Build Android APK
 

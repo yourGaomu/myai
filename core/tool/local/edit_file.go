@@ -10,10 +10,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"myai/core/history"
 	tooldef "myai/core/tool/tool"
 )
 
-type EditFileTool struct{}
+type EditFileTool struct {
+	recorder  historyRecorder
+	workspace string
+}
 
 type editFileArgs struct {
 	Path       string `json:"path"`
@@ -26,10 +30,24 @@ type editFileResult struct {
 	Path         string `json:"path"`
 	Replacements int    `json:"replacements"`
 	Bytes        int    `json:"bytes"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+	HistoryError string `json:"history_error,omitempty"`
 }
 
 func NewEditFileTool() *EditFileTool {
 	return &EditFileTool{}
+}
+
+func NewEditFileToolWithRecorder(recorder historyRecorder) *EditFileTool {
+	return &EditFileTool{recorder: recorder}
+}
+
+func NewEditFileToolWithWorkspace(workspace string) *EditFileTool {
+	return &EditFileTool{workspace: workspace}
+}
+
+func NewEditFileToolWithWorkspaceAndRecorder(workspace string, recorder historyRecorder) *EditFileTool {
+	return &EditFileTool{workspace: workspace, recorder: recorder}
 }
 
 func (t *EditFileTool) Name() string {
@@ -70,7 +88,12 @@ func (t *EditFileTool) Permission() tooldef.Permission {
 }
 
 func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	input, err := normalizeEditFileArgs(args)
+	workspace, err := toolWorkspace(t.workspace)
+	if err != nil {
+		return "", err
+	}
+
+	input, err := normalizeEditFileArgs(workspace, args)
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +101,13 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 		return "", err
 	}
 
-	workspace, err := os.Getwd()
+	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
+	if err != nil {
+		return "", err
+	}
+	defer closeRecorder()
+
+	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
 		return "", err
 	}
@@ -118,6 +147,15 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 		Replacements: replacementCount(replacements, input.ReplaceAll),
 		Bytes:        len([]byte(nextContent)),
 	}
+	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordOptions{
+		Title:  "edit_file " + result.Path,
+		Reason: "replace text",
+	})
+	if err != nil {
+		result.HistoryError = err.Error()
+	} else {
+		result.CheckpointID = checkpointID
+	}
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return "", err
@@ -125,7 +163,7 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 	return string(output), nil
 }
 
-func normalizeEditFileArgs(args json.RawMessage) (editFileArgs, error) {
+func normalizeEditFileArgs(workspace string, args json.RawMessage) (editFileArgs, error) {
 	var input editFileArgs
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &input); err != nil {
@@ -141,7 +179,7 @@ func normalizeEditFileArgs(args json.RawMessage) (editFileArgs, error) {
 		return editFileArgs{}, errors.New("old_text is empty")
 	}
 
-	path, err := cleanWorkspaceWritePath(input.Path)
+	path, err := cleanWorkspaceWritePath(workspace, input.Path)
 	if err != nil {
 		return editFileArgs{}, err
 	}

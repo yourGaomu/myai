@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"myai/core/contextmgr"
+	"myai/core/history"
 	"myai/core/llm"
 	"myai/core/session"
 	"myai/core/store/cache"
@@ -141,6 +142,22 @@ func (s *ChatService) SendMessageStream(ctx context.Context, input string, strea
 		title = titleFromInput(input)
 	}
 	s.persistUserMessageAsync(current.ID, current.Model, title, input)
+	requestID := uuid.NewString()
+	taskRecorder := history.NewTaskRecorder(history.RecordOptions{
+		Title:     title,
+		Reason:    "user request",
+		SessionID: current.ID,
+		RequestID: requestID,
+	})
+	defer func() {
+		if _, err := taskRecorder.Save(context.Background()); err != nil {
+			log.Printf("save task history checkpoint failed: %v", err)
+		}
+		if err := taskRecorder.Close(); err != nil {
+			log.Printf("close task history recorder failed: %v", err)
+		}
+	}()
+	ctx = history.WithTaskRecorder(ctx, taskRecorder)
 
 	model := s.client.GetModel(current.Model)
 	if model == nil {

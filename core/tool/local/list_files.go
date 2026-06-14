@@ -18,7 +18,9 @@ const (
 	maxListFilesDepth        = 4
 )
 
-type ListFilesTool struct{}
+type ListFilesTool struct {
+	workspace string
+}
 
 type listFilesArgs struct {
 	Path          string `json:"path"`
@@ -45,6 +47,10 @@ type listFileEntry struct {
 
 func NewListFilesTool() *ListFilesTool {
 	return &ListFilesTool{}
+}
+
+func NewListFilesToolWithWorkspace(workspace string) *ListFilesTool {
+	return &ListFilesTool{workspace: workspace}
 }
 
 func (t *ListFilesTool) Name() string {
@@ -88,17 +94,24 @@ func (t *ListFilesTool) Permission() tooldef.Permission {
 }
 
 func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	input := normalizeListFilesArgs(args)
+	workspace, err := toolWorkspace(t.workspace)
+	if err != nil {
+		return "", err
+	}
+	input, err := normalizeListFilesArgs(workspace, args)
+	if err != nil {
+		return "", err
+	}
 	entries := make([]listFileEntry, 0)
 	truncated := false
 
-	err := walkFiles(ctx, input.Path, input.Path, 1, input, &entries, &truncated)
+	err = walkFiles(ctx, input.Path, input.Path, 1, input, &entries, &truncated)
 	if err != nil {
 		return "", err
 	}
 
 	result := listFilesResult{
-		Path:      filepath.ToSlash(input.Path),
+		Path:      filepath.ToSlash(relativePath(workspace, input.Path)),
 		Count:     len(entries),
 		Truncated: truncated,
 		Entries:   entries,
@@ -111,7 +124,7 @@ func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (string,
 	return string(output), nil
 }
 
-func normalizeListFilesArgs(args json.RawMessage) listFilesArgs {
+func normalizeListFilesArgs(workspace string, args json.RawMessage) (listFilesArgs, error) {
 	input := listFilesArgs{
 		Path:     ".",
 		MaxDepth: defaultListFilesMaxDepth,
@@ -125,7 +138,11 @@ func normalizeListFilesArgs(args json.RawMessage) listFilesArgs {
 	if input.Path == "" {
 		input.Path = "."
 	}
-	input.Path = filepath.Clean(input.Path)
+	path, err := cleanWorkspacePath(workspace, input.Path)
+	if err != nil {
+		return listFilesArgs{}, err
+	}
+	input.Path = path
 
 	if input.Limit <= 0 {
 		input.Limit = defaultListFilesLimit
@@ -144,7 +161,7 @@ func normalizeListFilesArgs(args json.RawMessage) listFilesArgs {
 		input.MaxDepth = 1
 	}
 
-	return input
+	return input, nil
 }
 
 func walkFiles(ctx context.Context, root string, dir string, depth int, input listFilesArgs, entries *[]listFileEntry, truncated *bool) error {

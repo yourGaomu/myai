@@ -189,6 +189,114 @@ func TestRelayForwardsChangeMessages(t *testing.T) {
 	if forwardedToClient.RequestID != "changes-req-1" {
 		t.Fatalf("expected request id changes-req-1, got %s", forwardedToClient.RequestID)
 	}
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeChangeRevert,
+		RequestID:   "changes-revert-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedRevertToAgent := readTestMessage(t, agentConn, protocol.TypeChangeRevert)
+	if forwardedRevertToAgent.RequestID != "changes-revert-1" {
+		t.Fatalf("expected request id changes-revert-1, got %s", forwardedRevertToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeChangeRevertResult,
+		RequestID: "changes-revert-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedRevertToClient := readTestMessage(t, clientConn, protocol.TypeChangeRevertResult)
+	if forwardedRevertToClient.RequestID != "changes-revert-1" {
+		t.Fatalf("expected request id changes-revert-1, got %s", forwardedRevertToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeHistoryList,
+		RequestID:   "history-list-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedHistoryToAgent := readTestMessage(t, agentConn, protocol.TypeHistoryList)
+	if forwardedHistoryToAgent.RequestID != "history-list-1" {
+		t.Fatalf("expected request id history-list-1, got %s", forwardedHistoryToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeHistoryListResult,
+		RequestID: "history-list-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedHistoryToClient := readTestMessage(t, clientConn, protocol.TypeHistoryListResult)
+	if forwardedHistoryToClient.RequestID != "history-list-1" {
+		t.Fatalf("expected request id history-list-1, got %s", forwardedHistoryToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeHistoryDiff,
+		RequestID:   "history-diff-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedHistoryDiffToAgent := readTestMessage(t, agentConn, protocol.TypeHistoryDiff)
+	if forwardedHistoryDiffToAgent.RequestID != "history-diff-1" {
+		t.Fatalf("expected request id history-diff-1, got %s", forwardedHistoryDiffToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeHistoryDiffResult,
+		RequestID: "history-diff-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedHistoryDiffToClient := readTestMessage(t, clientConn, protocol.TypeHistoryDiffResult)
+	if forwardedHistoryDiffToClient.RequestID != "history-diff-1" {
+		t.Fatalf("expected request id history-diff-1, got %s", forwardedHistoryDiffToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeHistoryRevert,
+		RequestID:   "history-revert-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedHistoryRevertToAgent := readTestMessage(t, agentConn, protocol.TypeHistoryRevert)
+	if forwardedHistoryRevertToAgent.RequestID != "history-revert-1" {
+		t.Fatalf("expected request id history-revert-1, got %s", forwardedHistoryRevertToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeHistoryRevertResult,
+		RequestID: "history-revert-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedHistoryRevertToClient := readTestMessage(t, clientConn, protocol.TypeHistoryRevertResult)
+	if forwardedHistoryRevertToClient.RequestID != "history-revert-1" {
+		t.Fatalf("expected request id history-revert-1, got %s", forwardedHistoryRevertToClient.RequestID)
+	}
 }
 
 func TestRelayRejectsClientWithoutToken(t *testing.T) {

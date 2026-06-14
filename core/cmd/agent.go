@@ -24,6 +24,7 @@ var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Start myai remote agent",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		core.SetWorkspace(agentWorkspace)
 		core.InitApp()
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

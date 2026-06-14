@@ -30,7 +30,9 @@ var skippedSearchDirs = map[string]bool{
 	".vscode":      true,
 }
 
-type SearchFilesTool struct{}
+type SearchFilesTool struct {
+	workspace string
+}
 
 type searchFilesArgs struct {
 	Path          string `json:"path"`
@@ -56,6 +58,10 @@ type searchFileMatch struct {
 
 func NewSearchFilesTool() *SearchFilesTool {
 	return &SearchFilesTool{}
+}
+
+func NewSearchFilesToolWithWorkspace(workspace string) *SearchFilesTool {
+	return &SearchFilesTool{workspace: workspace}
 }
 
 func (t *SearchFilesTool) Name() string {
@@ -100,7 +106,11 @@ func (t *SearchFilesTool) Permission() tooldef.Permission {
 }
 
 func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	input, err := normalizeSearchFilesArgs(args)
+	workspace, err := toolWorkspace(t.workspace)
+	if err != nil {
+		return "", err
+	}
+	input, err := normalizeSearchFilesArgs(workspace, args)
 	if err != nil {
 		return "", err
 	}
@@ -153,7 +163,7 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (strin
 	})
 
 	result := searchFilesResult{
-		Path:      filepath.ToSlash(input.Path),
+		Path:      filepath.ToSlash(relativePath(workspace, input.Path)),
 		Query:     input.Query,
 		Count:     len(matches),
 		Truncated: truncated,
@@ -166,7 +176,7 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (strin
 	return string(output), nil
 }
 
-func normalizeSearchFilesArgs(args json.RawMessage) (searchFilesArgs, error) {
+func normalizeSearchFilesArgs(workspace string, args json.RawMessage) (searchFilesArgs, error) {
 	input := searchFilesArgs{
 		Path:  ".",
 		Limit: defaultSearchFilesLimit,
@@ -181,7 +191,11 @@ func normalizeSearchFilesArgs(args json.RawMessage) (searchFilesArgs, error) {
 	if input.Path == "" {
 		input.Path = "."
 	}
-	input.Path = filepath.Clean(input.Path)
+	path, err := cleanWorkspacePath(workspace, input.Path)
+	if err != nil {
+		return searchFilesArgs{}, err
+	}
+	input.Path = path
 	input.Query = strings.TrimSpace(input.Query)
 
 	if input.Limit <= 0 {

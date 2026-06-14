@@ -79,6 +79,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.changeServiceErr != nil {
 		return fmt.Errorf("change workspace is invalid: %w", a.changeServiceErr)
 	}
+	defer a.changeService.Close()
 
 	fmt.Println("agent starting...")
 	fmt.Println("server:", a.config.ServerURL)
@@ -193,6 +194,14 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleChangesList(ctx, conn, message)
 	case protocol.TypeChangeDiff:
 		return a.handleChangeDiff(ctx, conn, message)
+	case protocol.TypeChangeRevert:
+		return a.handleChangeRevert(ctx, conn, message)
+	case protocol.TypeHistoryList:
+		return a.handleHistoryList(ctx, conn, message)
+	case protocol.TypeHistoryDiff:
+		return a.handleHistoryDiff(ctx, conn, message)
+	case protocol.TypeHistoryRevert:
+		return a.handleHistoryRevert(ctx, conn, message)
 	default:
 		return nil
 	}
@@ -324,6 +333,58 @@ func (a *Agent) handleChangeDiff(ctx context.Context, conn *websocket.Conn, mess
 		return err
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeChangeDiffResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleChangeRevert(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.ChangeRevertPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode change revert failed: %w", err)
+	}
+
+	result, err := a.changeService.Revert(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeChangeRevertResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleHistoryList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.HistoryListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode history list failed: %w", err)
+	}
+
+	result, err := a.changeService.History(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeHistoryListResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleHistoryDiff(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.HistoryDiffPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode history diff failed: %w", err)
+	}
+
+	result, err := a.changeService.HistoryDiff(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeHistoryDiffResult, message.RequestID, message.SessionID, result)
+}
+
+func (a *Agent) handleHistoryRevert(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.HistoryRevertPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode history revert failed: %w", err)
+	}
+
+	result, err := a.changeService.RevertCheckpoint(ctx, payload)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeHistoryRevertResult, message.RequestID, message.SessionID, result)
 }
 
 func (a *Agent) writeSessionChanged(ctx context.Context, conn *websocket.Conn, requestID string) error {

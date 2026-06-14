@@ -1,11 +1,12 @@
 module myai
 
-go 1.24.4
+go 1.25.0
 
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -35,7 +36,7 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 )
 
 require (
@@ -50,6 +51,6 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tmc/langchaingo v0.1.14
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )

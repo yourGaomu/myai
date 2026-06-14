@@ -42,16 +42,22 @@ type Application struct {
 	toolRegister   *tool.RegisterTools
 	sandbox        sandbox.Sandbox
 	defaultModelID string
+	workspace      string
 }
 
 var (
-	instance *Application
-	once     sync.Once
+	instance            *Application
+	once                sync.Once
+	configuredWorkspace string
 )
+
+func SetWorkspace(workspace string) {
+	configuredWorkspace = workspace
+}
 
 func InitApp() {
 	once.Do(func() {
-		instance = &Application{}
+		instance = &Application{workspace: configuredWorkspace}
 		instance.InitViper()
 		instance.InitMongoDb()
 		instance.InitRedisDb()
@@ -184,7 +190,7 @@ func (app *Application) InitSessionManage() {
 }
 
 func (app *Application) InitSandbox() {
-	localSandbox, err := sandbox.NewLocalSandbox("")
+	localSandbox, err := sandbox.NewLocalSandbox(app.workspace)
 	if err != nil {
 		panic(err)
 	}
@@ -244,12 +250,12 @@ func (app *Application) GetChatService() *service.ChatService {
 
 func (app *Application) InitRegister() *tool.RegisterTools {
 	tools := tool.NewRegisterTools()
-	tools.Register(local.NewListFilesTool())
-	tools.Register(local.NewReadFileTool())
-	tools.Register(local.NewSearchFilesTool())
-	tools.Register(local.NewWriteFileTool())
-	tools.Register(local.NewEditFileTool())
-	tools.Register(local.NewShellTool(app.sandbox))
+	tools.Register(local.NewListFilesToolWithWorkspace(app.workspace))
+	tools.Register(local.NewReadFileToolWithWorkspace(app.workspace))
+	tools.Register(local.NewSearchFilesToolWithWorkspace(app.workspace))
+	tools.Register(local.NewWriteFileToolWithWorkspace(app.workspace))
+	tools.Register(local.NewEditFileToolWithWorkspace(app.workspace))
+	tools.Register(local.NewShellToolWithWorkspace(app.workspace, app.sandbox))
 	app.toolRegister = tools
 	return tools
 }

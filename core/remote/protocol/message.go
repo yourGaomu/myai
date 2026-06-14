@@ -8,29 +8,37 @@ import (
 type MessageType string
 
 const (
-	TypeAgentOnline       MessageType = "agent_online"
-	TypeAgentOffline      MessageType = "agent_offline"
-	TypeUserMessage       MessageType = "user_message"
-	TypeAssistantDelta    MessageType = "assistant_delta"
-	TypeAssistantDone     MessageType = "assistant_done"
-	TypeToolCall          MessageType = "tool_call"
-	TypePermissionAsk     MessageType = "permission_ask"
-	TypePermissionResult  MessageType = "permission_result"
-	TypeSessionList       MessageType = "session_list"
-	TypeSessionListResult MessageType = "session_list_result"
-	TypeSessionNew        MessageType = "session_new"
-	TypeSessionLoad       MessageType = "session_load"
-	TypeSessionChanged    MessageType = "session_changed"
-	TypeFileList          MessageType = "file_list"
-	TypeFileListResult    MessageType = "file_list_result"
-	TypeFileRead          MessageType = "file_read"
-	TypeFileReadResult    MessageType = "file_read_result"
-	TypeChangesList       MessageType = "changes_list"
-	TypeChangesListResult MessageType = "changes_list_result"
-	TypeChangeDiff        MessageType = "change_diff"
-	TypeChangeDiffResult  MessageType = "change_diff_result"
-	TypeError             MessageType = "error"
-	TypeHeartbeat         MessageType = "heartbeat"
+	TypeAgentOnline         MessageType = "agent_online"
+	TypeAgentOffline        MessageType = "agent_offline"
+	TypeUserMessage         MessageType = "user_message"
+	TypeAssistantDelta      MessageType = "assistant_delta"
+	TypeAssistantDone       MessageType = "assistant_done"
+	TypeToolCall            MessageType = "tool_call"
+	TypePermissionAsk       MessageType = "permission_ask"
+	TypePermissionResult    MessageType = "permission_result"
+	TypeSessionList         MessageType = "session_list"
+	TypeSessionListResult   MessageType = "session_list_result"
+	TypeSessionNew          MessageType = "session_new"
+	TypeSessionLoad         MessageType = "session_load"
+	TypeSessionChanged      MessageType = "session_changed"
+	TypeFileList            MessageType = "file_list"
+	TypeFileListResult      MessageType = "file_list_result"
+	TypeFileRead            MessageType = "file_read"
+	TypeFileReadResult      MessageType = "file_read_result"
+	TypeChangesList         MessageType = "changes_list"
+	TypeChangesListResult   MessageType = "changes_list_result"
+	TypeChangeDiff          MessageType = "change_diff"
+	TypeChangeDiffResult    MessageType = "change_diff_result"
+	TypeChangeRevert        MessageType = "change_revert"
+	TypeChangeRevertResult  MessageType = "change_revert_result"
+	TypeHistoryList         MessageType = "history_list"
+	TypeHistoryListResult   MessageType = "history_list_result"
+	TypeHistoryDiff         MessageType = "history_diff"
+	TypeHistoryDiffResult   MessageType = "history_diff_result"
+	TypeHistoryRevert       MessageType = "history_revert"
+	TypeHistoryRevertResult MessageType = "history_revert_result"
+	TypeError               MessageType = "error"
+	TypeHeartbeat           MessageType = "heartbeat"
 )
 
 type Message struct {
@@ -151,10 +159,12 @@ type ChangeEntry struct {
 	Untracked      bool   `json:"untracked"`
 	Deleted        bool   `json:"deleted"`
 	Renamed        bool   `json:"renamed"`
+	Restorable     bool   `json:"restorable"`
 }
 
 type ChangesListResultPayload struct {
 	Repository bool          `json:"repository"`
+	Source     string        `json:"source,omitempty"`
 	Root       string        `json:"root,omitempty"`
 	Entries    []ChangeEntry `json:"entries"`
 	Count      int           `json:"count"`
@@ -168,11 +178,74 @@ type ChangeDiffPayload struct {
 }
 
 type ChangeDiffResultPayload struct {
-	Path      string `json:"path"`
-	Diff      string `json:"diff,omitempty"`
-	Truncated bool   `json:"truncated"`
-	Binary    bool   `json:"binary"`
-	Message   string `json:"message,omitempty"`
+	Path       string `json:"path"`
+	Diff       string `json:"diff,omitempty"`
+	Truncated  bool   `json:"truncated"`
+	Binary     bool   `json:"binary"`
+	Restorable bool   `json:"restorable"`
+	Message    string `json:"message,omitempty"`
+}
+
+type ChangeRevertPayload struct {
+	Path string `json:"path"`
+}
+
+type ChangeRevertResultPayload struct {
+	Path     string `json:"path"`
+	Reverted bool   `json:"reverted"`
+	Message  string `json:"message,omitempty"`
+}
+
+type HistoryListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+type HistoryCheckpoint struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	RequestID   string    `json:"request_id,omitempty"`
+	ChangeCount int       `json:"change_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type HistoryListResultPayload struct {
+	Root        string              `json:"root,omitempty"`
+	Checkpoints []HistoryCheckpoint `json:"checkpoints"`
+	Count       int                 `json:"count"`
+}
+
+type HistoryDiffPayload struct {
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+type HistoryFileDiff struct {
+	Path       string `json:"path"`
+	ChangeType string `json:"change_type"`
+	Diff       string `json:"diff,omitempty"`
+	Truncated  bool   `json:"truncated"`
+	Binary     bool   `json:"binary"`
+	Restorable bool   `json:"restorable"`
+	Message    string `json:"message,omitempty"`
+}
+
+type HistoryDiffResultPayload struct {
+	CheckpointID string            `json:"checkpoint_id"`
+	Files        []HistoryFileDiff `json:"files"`
+	Count        int               `json:"count"`
+	Message      string            `json:"message,omitempty"`
+}
+
+type HistoryRevertPayload struct {
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+type HistoryRevertResultPayload struct {
+	CheckpointID string   `json:"checkpoint_id"`
+	Reverted     bool     `json:"reverted"`
+	Paths        []string `json:"paths"`
+	Message      string   `json:"message,omitempty"`
 }
 
 type ErrorPayload struct {

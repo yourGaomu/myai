@@ -7,12 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"myai/core/history"
 	"myai/core/sandbox"
 	tooldef "myai/core/tool/tool"
 )
 
 type ShellTool struct {
-	sandbox sandbox.Sandbox
+	sandbox   sandbox.Sandbox
+	workspace string
 }
 
 type shellArgs struct {
@@ -24,6 +26,10 @@ type shellArgs struct {
 
 func NewShellTool(sandbox sandbox.Sandbox) *ShellTool {
 	return &ShellTool{sandbox: sandbox}
+}
+
+func NewShellToolWithWorkspace(workspace string, sandbox sandbox.Sandbox) *ShellTool {
+	return &ShellTool{workspace: workspace, sandbox: sandbox}
 }
 
 func (t *ShellTool) Name() string {
@@ -73,6 +79,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 		return "", err
 	}
 
+	recorder, before, historyErr := t.snapshotBeforeShell(ctx)
 	result, err := t.sandbox.Run(ctx, sandbox.RunRequest{
 		Command:        input.Command,
 		WorkDir:        input.WorkDir,
@@ -82,12 +89,55 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
+	if recorder != nil && before != nil {
+		if _, recordErr := recorder.RecordWorkspaceChanges(ctx, before, history.RecordOptions{
+			Title:  "shell " + input.Command,
+			Reason: "shell command",
+		}); recordErr != nil && historyErr == nil {
+			historyErr = recordErr
+		}
+	}
+	if historyErr != nil {
+		result.ErrorMessage = appendShellHistoryError(result.ErrorMessage, historyErr)
+	}
 
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (t *ShellTool) snapshotBeforeShell(ctx context.Context) (*history.TaskWorkspaceRecorder, map[string]history.FileSnapshot, error) {
+	task := history.TaskRecorderFromContext(ctx)
+	if task == nil {
+		return nil, nil, nil
+	}
+
+	workspace, err := toolWorkspace(t.workspace)
+	if err != nil {
+		return nil, nil, err
+	}
+	recorder, err := task.WorkspaceRecorder(workspace)
+	if err != nil {
+		return nil, nil, err
+	}
+	before, err := recorder.SnapshotWorkspace(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return recorder, before, nil
+}
+
+func appendShellHistoryError(existing string, err error) string {
+	if err == nil {
+		return existing
+	}
+	text := "history error: " + err.Error()
+	if strings.TrimSpace(existing) == "" {
+		return text
+	}
+	return existing + "; " + text
 }
 
 func normalizeShellArgs(args json.RawMessage) (shellArgs, error) {

@@ -9,10 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"myai/core/history"
 	tooldef "myai/core/tool/tool"
 )
 
-type WriteFileTool struct{}
+type WriteFileTool struct {
+	recorder  historyRecorder
+	workspace string
+}
 
 type writeFileArgs struct {
 	Path       string `json:"path"`
@@ -23,13 +27,27 @@ type writeFileArgs struct {
 }
 
 type writeFileResult struct {
-	Path      string `json:"path"`
-	Bytes     int    `json:"bytes"`
-	Operation string `json:"operation"`
+	Path         string `json:"path"`
+	Bytes        int    `json:"bytes"`
+	Operation    string `json:"operation"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+	HistoryError string `json:"history_error,omitempty"`
 }
 
 func NewWriteFileTool() *WriteFileTool {
 	return &WriteFileTool{}
+}
+
+func NewWriteFileToolWithRecorder(recorder historyRecorder) *WriteFileTool {
+	return &WriteFileTool{recorder: recorder}
+}
+
+func NewWriteFileToolWithWorkspace(workspace string) *WriteFileTool {
+	return &WriteFileTool{workspace: workspace}
+}
+
+func NewWriteFileToolWithWorkspaceAndRecorder(workspace string, recorder historyRecorder) *WriteFileTool {
+	return &WriteFileTool{workspace: workspace, recorder: recorder}
 }
 
 func (t *WriteFileTool) Permission() tooldef.Permission {
@@ -74,7 +92,12 @@ func (t *WriteFileTool) Schema() any {
 }
 
 func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	input, err := normalizeWriteFileArgs(args)
+	workspace, err := toolWorkspace(t.workspace)
+	if err != nil {
+		return "", err
+	}
+
+	input, err := normalizeWriteFileArgs(workspace, args)
 	if err != nil {
 		return "", err
 	}
@@ -82,7 +105,13 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 		return "", err
 	}
 
-	workspace, err := os.Getwd()
+	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
+	if err != nil {
+		return "", err
+	}
+	defer closeRecorder()
+
+	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
 		return "", err
 	}
@@ -121,6 +150,15 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 		Bytes:     len([]byte(input.Content)),
 		Operation: operation,
 	}
+	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordOptions{
+		Title:  "write_file " + result.Path,
+		Reason: operation,
+	})
+	if err != nil {
+		result.HistoryError = err.Error()
+	} else {
+		result.CheckpointID = checkpointID
+	}
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return "", err
@@ -128,7 +166,7 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 	return string(output), nil
 }
 
-func normalizeWriteFileArgs(args json.RawMessage) (writeFileArgs, error) {
+func normalizeWriteFileArgs(workspace string, args json.RawMessage) (writeFileArgs, error) {
 	input := writeFileArgs{
 		CreateDirs: true,
 	}
@@ -142,7 +180,7 @@ func normalizeWriteFileArgs(args json.RawMessage) (writeFileArgs, error) {
 	if input.Path == "" {
 		return writeFileArgs{}, errors.New("path is empty")
 	}
-	path, err := cleanWorkspaceWritePath(input.Path)
+	path, err := cleanWorkspaceWritePath(workspace, input.Path)
 	if err != nil {
 		return writeFileArgs{}, err
 	}
@@ -151,12 +189,19 @@ func normalizeWriteFileArgs(args json.RawMessage) (writeFileArgs, error) {
 	return input, nil
 }
 
-func cleanWorkspaceWritePath(path string) (string, error) {
-	workspace, err := os.Getwd()
+func cleanWorkspaceWritePath(workspace string, path string) (string, error) {
+	return cleanWorkspacePath(workspace, path)
+}
+
+func cleanWorkspacePath(workspace string, path string) (string, error) {
+	workspace, err := toolWorkspace(workspace)
 	if err != nil {
 		return "", err
 	}
 
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workspace, path)
+	}
 	absPath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return "", err
@@ -164,13 +209,25 @@ func cleanWorkspaceWritePath(path string) (string, error) {
 
 	rel, err := filepath.Rel(workspace, absPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("path is outside workspace: %s", path)
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path is outside workspace: %s", path)
 	}
 
 	return absPath, nil
+}
+
+func toolWorkspace(workspace string) (string, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		current, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		workspace = current
+	}
+	return filepath.Abs(filepath.Clean(workspace))
 }
 
 func appendFile(path string, content string) error {

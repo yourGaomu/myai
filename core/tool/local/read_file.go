@@ -8,7 +8,9 @@ import (
 	tooldef "myai/core/tool/tool"
 )
 
-type ReadFileTool struct{}
+type ReadFileTool struct {
+	workspace string
+}
 
 type readFileArgs struct {
 	Path string `json:"path"`
@@ -16,6 +18,10 @@ type readFileArgs struct {
 
 func NewReadFileTool() *ReadFileTool {
 	return &ReadFileTool{}
+}
+
+func NewReadFileToolWithWorkspace(workspace string) *ReadFileTool {
+	return &ReadFileTool{workspace: workspace}
 }
 
 func (t *ReadFileTool) Name() string {
@@ -48,8 +54,12 @@ func (t *ReadFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 	if err := json.Unmarshal(args, &input); err != nil {
 		return "", err
 	}
+	path, err := cleanWorkspacePath(t.workspace, input.Path)
+	if err != nil {
+		return "", err
+	}
 
-	content, err := os.ReadFile(input.Path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}

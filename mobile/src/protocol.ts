@@ -19,6 +19,14 @@ export type MessageType =
   | "changes_list_result"
   | "change_diff"
   | "change_diff_result"
+  | "change_revert"
+  | "change_revert_result"
+  | "history_list"
+  | "history_list_result"
+  | "history_diff"
+  | "history_diff_result"
+  | "history_revert"
+  | "history_revert_result"
   | "error";
 
 export type RelayMessage<TPayload = unknown> = {
@@ -134,10 +142,12 @@ export type ChangeEntry = {
   untracked?: boolean;
   deleted?: boolean;
   renamed?: boolean;
+  restorable?: boolean;
 };
 
 export type ChangesListResultPayload = {
   repository: boolean;
+  source?: string;
   root?: string;
   entries?: ChangeEntry[];
   count?: number;
@@ -155,5 +165,68 @@ export type ChangeDiffResultPayload = {
   diff?: string;
   truncated: boolean;
   binary: boolean;
+  restorable?: boolean;
+  message?: string;
+};
+
+export type ChangeRevertPayload = {
+  path: string;
+};
+
+export type ChangeRevertResultPayload = {
+  path: string;
+  reverted: boolean;
+  message?: string;
+};
+
+export type HistoryListPayload = {
+  limit?: number;
+};
+
+export type HistoryCheckpoint = {
+  id: string;
+  title?: string;
+  reason?: string;
+  session_id?: string;
+  request_id?: string;
+  change_count: number;
+  created_at?: string;
+};
+
+export type HistoryListResultPayload = {
+  root?: string;
+  checkpoints?: HistoryCheckpoint[];
+  count?: number;
+};
+
+export type HistoryDiffPayload = {
+  checkpoint_id: string;
+};
+
+export type HistoryFileDiff = {
+  path: string;
+  change_type: string;
+  diff?: string;
+  truncated: boolean;
+  binary: boolean;
+  restorable?: boolean;
+  message?: string;
+};
+
+export type HistoryDiffResultPayload = {
+  checkpoint_id: string;
+  files?: HistoryFileDiff[];
+  count?: number;
+  message?: string;
+};
+
+export type HistoryRevertPayload = {
+  checkpoint_id: string;
+};
+
+export type HistoryRevertResultPayload = {
+  checkpoint_id: string;
+  reverted: boolean;
+  paths?: string[];
   message?: string;
 };

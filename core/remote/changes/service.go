@@ -3,16 +3,19 @@ package changes
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
+	"sync"
 	"unicode/utf8"
 
+	"myai/core/history"
 	"myai/core/remote/protocol"
 )
 
@@ -20,7 +23,8 @@ const (
 	defaultChangeLimit = 200
 	maxChangeLimit     = 1000
 	maxDiffBytes       = 256 * 1024
-	gitTimeout         = 10 * time.Second
+	maxSnapshotBytes   = 512 * 1024
+	maxDiffLineProduct = 250000
 )
 
 var ignoredNames = map[string]bool{
@@ -43,10 +47,28 @@ var sensitiveNames = map[string]bool{
 }
 
 type Service struct {
-	root string
+	root     string
+	store    *history.SQLiteStore
+	mu       sync.RWMutex
+	baseline map[string]snapshotEntry
+}
+
+type snapshotEntry struct {
+	Path      string
+	Size      int64
+	Hash      [32]byte
+	Content   []byte
+	Binary    bool
+	TooLarge  bool
+	Mode      os.FileMode
+	Available bool
 }
 
 func New(root string) (*Service, error) {
+	return NewWithHistoryPath(root, "")
+}
+
+func NewWithHistoryPath(root string, historyPath string) (*Service, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
@@ -67,20 +89,72 @@ func New(root string) (*Service, error) {
 		return nil, fmt.Errorf("workspace is not a directory: %s", abs)
 	}
 
-	return &Service{root: abs}, nil
+	if strings.TrimSpace(historyPath) == "" {
+		historyPath, err = history.DefaultSQLitePath(abs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	store, err := history.OpenSQLite(historyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	service := &Service{
+		root:     abs,
+		store:    store,
+		baseline: make(map[string]snapshotEntry),
+	}
+	if err := service.loadOrCreateBaseline(context.Background()); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	return service, nil
+}
+
+func (s *Service) Close() error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return s.store.Close()
+}
+
+func (s *Service) Reset(ctx context.Context) error {
+	snapshot, err := s.scan(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ReplaceBaseline(ctx, s.root, snapshotToHistory(snapshot)); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.baseline = snapshot
+	return nil
+}
+
+func (s *Service) loadOrCreateBaseline(ctx context.Context) error {
+	exists, err := s.store.HasBaseline(ctx, s.root)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return s.Reset(ctx)
+	}
+
+	files, err := s.store.LoadBaseline(ctx, s.root)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.baseline = historyToSnapshot(files)
+	return nil
 }
 
 func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload) (protocol.ChangesListResultPayload, error) {
-	repoRoot, err := s.repoRoot(ctx)
-	if err != nil {
-		return protocol.ChangesListResultPayload{
-			Repository: false,
-			Entries:    []protocol.ChangeEntry{},
-			Clean:      true,
-			Message:    "workspace is not a git repository",
-		}, nil
-	}
-
 	limit := payload.Limit
 	if limit <= 0 {
 		limit = defaultChangeLimit
@@ -89,61 +163,71 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 		limit = maxChangeLimit
 	}
 
-	workspacePathspec, err := repoRelativePath(repoRoot, s.root)
+	current, err := s.scan(ctx)
 	if err != nil {
 		return protocol.ChangesListResultPayload{}, err
 	}
 
-	args := []string{"status", "--porcelain=v1", "--untracked-files=normal"}
-	if workspacePathspec != "." {
-		args = append(args, "--", workspacePathspec)
-	}
-	output, _, err := runGit(ctx, repoRoot, 0, args...)
-	if err != nil {
-		return protocol.ChangesListResultPayload{}, err
-	}
+	s.mu.RLock()
+	baseline := copySnapshot(s.baseline)
+	s.mu.RUnlock()
 
 	entries := make([]protocol.ChangeEntry, 0)
+	for path, base := range baseline {
+		if _, ok := current[path]; !ok {
+			entries = append(entries, protocol.ChangeEntry{
+				Path:       path,
+				Status:     "deleted",
+				Deleted:    true,
+				Unstaged:   true,
+				Restorable: base.Available,
+			})
+		}
+	}
+	for path, now := range current {
+		base, ok := baseline[path]
+		switch {
+		case !ok:
+			entries = append(entries, protocol.ChangeEntry{
+				Path:       path,
+				Status:     "added",
+				Untracked:  true,
+				Unstaged:   true,
+				Restorable: true,
+			})
+		case base.Hash != now.Hash || base.Size != now.Size || base.Binary != now.Binary || base.TooLarge != now.TooLarge:
+			entries = append(entries, protocol.ChangeEntry{
+				Path:       path,
+				Status:     "modified",
+				Unstaged:   true,
+				Restorable: base.Available,
+			})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.ToLower(entries[i].Path) < strings.ToLower(entries[j].Path)
+	})
+
 	truncated := false
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		entry, ok := parseStatusLine(line)
-		if !ok {
-			continue
-		}
-		entry, ok = entryToWorkspace(entry, repoRoot, s.root)
-		if !ok || shouldHidePath(entry.Path) {
-			continue
-		}
-		if len(entries) >= limit {
-			truncated = true
-			break
-		}
-		entries = append(entries, entry)
+	if len(entries) > limit {
+		entries = entries[:limit]
+		truncated = true
 	}
 
 	return protocol.ChangesListResultPayload{
-		Repository: true,
-		Root:       filepath.ToSlash(repoRoot),
+		Repository: false,
+		Source:     "sqlite",
+		Root:       filepath.ToSlash(s.root),
 		Entries:    entries,
 		Count:      len(entries),
 		Truncated:  truncated,
 		Clean:      len(entries) == 0,
+		Message:    "Changes are compared with the SQLite workspace history baseline.",
 	}, nil
 }
 
 func (s *Service) Diff(ctx context.Context, payload protocol.ChangeDiffPayload) (protocol.ChangeDiffResultPayload, error) {
-	repoRoot, err := s.repoRoot(ctx)
-	if err != nil {
-		return protocol.ChangeDiffResultPayload{
-			Path:    payload.Path,
-			Message: "workspace is not a git repository",
-		}, nil
-	}
-
 	rel, abs, err := cleanPath(s.root, payload.Path)
 	if err != nil {
 		return protocol.ChangeDiffResultPayload{}, err
@@ -152,235 +236,619 @@ func (s *Service) Diff(ctx context.Context, payload protocol.ChangeDiffPayload) 
 		return protocol.ChangeDiffResultPayload{}, fmt.Errorf("refusing to preview sensitive change: %s", rel)
 	}
 
-	repoRel, err := repoRelativePath(repoRoot, abs)
+	s.mu.RLock()
+	base, hadBase := s.baseline[rel]
+	s.mu.RUnlock()
+
+	now, exists, err := snapshotPath(s.root, abs, rel)
 	if err != nil {
 		return protocol.ChangeDiffResultPayload{}, err
 	}
 
-	staged, stagedTruncated, err := runGit(ctx, repoRoot, maxDiffBytes, "diff", "--cached", "--no-color", "--", repoRel)
-	if err != nil {
-		return protocol.ChangeDiffResultPayload{}, err
-	}
-	unstaged, unstagedTruncated, err := runGit(ctx, repoRoot, maxDiffBytes, "diff", "--no-color", "--", repoRel)
-	if err != nil {
-		return protocol.ChangeDiffResultPayload{}, err
-	}
-
-	diff := combineDiffs(staged, unstaged)
-	truncated := stagedTruncated || unstagedTruncated
-	if strings.TrimSpace(diff) == "" {
-		untrackedDiff, untrackedTruncated, binary, err := s.untrackedDiff(abs, rel)
-		if err != nil {
-			return protocol.ChangeDiffResultPayload{}, err
-		}
-		diff = untrackedDiff
-		truncated = untrackedTruncated
+	switch {
+	case !hadBase && !exists:
 		return protocol.ChangeDiffResultPayload{
-			Path:      rel,
-			Diff:      diff,
-			Truncated: truncated,
-			Binary:    binary,
-			Message:   emptyDiffMessage(diff, binary),
+			Path:    rel,
+			Message: "No diff is available for this path.",
+		}, nil
+	case hadBase && !exists:
+		diff, truncated, binary := deletionDiff(base)
+		return protocol.ChangeDiffResultPayload{
+			Path:       rel,
+			Diff:       diff,
+			Truncated:  truncated,
+			Binary:     binary,
+			Restorable: base.Available,
+			Message:    emptyDiffMessage(diff, binary),
+		}, nil
+	case !hadBase && exists:
+		diff, truncated, binary := additionDiff(now)
+		return protocol.ChangeDiffResultPayload{
+			Path:       rel,
+			Diff:       diff,
+			Truncated:  truncated,
+			Binary:     binary,
+			Restorable: true,
+			Message:    emptyDiffMessage(diff, binary),
+		}, nil
+	default:
+		diff, truncated, binary := modifiedDiff(base, now)
+		return protocol.ChangeDiffResultPayload{
+			Path:       rel,
+			Diff:       diff,
+			Truncated:  truncated,
+			Binary:     binary,
+			Restorable: base.Available,
+			Message:    emptyDiffMessage(diff, binary),
 		}, nil
 	}
+}
 
-	return protocol.ChangeDiffResultPayload{
-		Path:      rel,
-		Diff:      diff,
-		Truncated: truncated,
-		Binary:    false,
+func (s *Service) Revert(ctx context.Context, payload protocol.ChangeRevertPayload) (protocol.ChangeRevertResultPayload, error) {
+	rel, abs, err := cleanPath(s.root, payload.Path)
+	if err != nil {
+		return protocol.ChangeRevertResultPayload{}, err
+	}
+	if shouldHidePath(rel) {
+		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("refusing to revert sensitive change: %s", rel)
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.ChangeRevertResultPayload{}, err
+	}
+
+	s.mu.RLock()
+	base, ok := s.baseline[rel]
+	s.mu.RUnlock()
+	if !ok {
+		info, err := os.Stat(abs)
+		if errors.Is(err, os.ErrNotExist) {
+			return protocol.ChangeRevertResultPayload{}, fmt.Errorf("new file no longer exists: %s", rel)
+		}
+		if err != nil {
+			return protocol.ChangeRevertResultPayload{}, err
+		}
+		if info.IsDir() {
+			return protocol.ChangeRevertResultPayload{}, fmt.Errorf("cannot revert directory: %s", rel)
+		}
+		if err := os.Remove(abs); err != nil {
+			return protocol.ChangeRevertResultPayload{}, err
+		}
+		return protocol.ChangeRevertResultPayload{
+			Path:     rel,
+			Reverted: true,
+			Message:  "New file removed from the workspace.",
+		}, nil
+	}
+	if !base.Available {
+		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("baseline content is not available for: %s", rel)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return protocol.ChangeRevertResultPayload{}, err
+	}
+	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(abs); err != nil {
+			return protocol.ChangeRevertResultPayload{}, err
+		}
+	}
+	if err := os.WriteFile(abs, base.Content, base.Mode.Perm()); err != nil {
+		return protocol.ChangeRevertResultPayload{}, err
+	}
+
+	return protocol.ChangeRevertResultPayload{
+		Path:     rel,
+		Reverted: true,
+		Message:  "File restored to the SQLite workspace history baseline.",
 	}, nil
 }
 
-func (s *Service) repoRoot(ctx context.Context) (string, error) {
-	output, _, err := runGit(ctx, s.root, 0, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", err
+func (s *Service) History(ctx context.Context, payload protocol.HistoryListPayload) (protocol.HistoryListResultPayload, error) {
+	limit := payload.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
 	}
 
-	root := filepath.Clean(strings.TrimSpace(output))
-	if root == "" {
-		return "", errors.New("git repository root is empty")
+	checkpoints, err := s.store.ListCheckpoints(ctx, s.root, limit)
+	if err != nil {
+		return protocol.HistoryListResultPayload{}, err
 	}
-	return root, nil
+
+	items := make([]protocol.HistoryCheckpoint, 0, len(checkpoints))
+	for _, checkpoint := range checkpoints {
+		items = append(items, protocol.HistoryCheckpoint{
+			ID:          checkpoint.ID,
+			Title:       checkpoint.Title,
+			Reason:      checkpoint.Reason,
+			SessionID:   checkpoint.SessionID,
+			RequestID:   checkpoint.RequestID,
+			ChangeCount: checkpoint.ChangeCount,
+			CreatedAt:   checkpoint.CreatedAt,
+		})
+	}
+
+	return protocol.HistoryListResultPayload{
+		Root:        filepath.ToSlash(s.root),
+		Checkpoints: items,
+		Count:       len(items),
+	}, nil
 }
 
-func runGit(ctx context.Context, dir string, outputLimit int, args ...string) (string, bool, error) {
-	runCtx, cancel := context.WithTimeout(ctx, gitTimeout)
-	defer cancel()
+func (s *Service) HistoryDiff(ctx context.Context, payload protocol.HistoryDiffPayload) (protocol.HistoryDiffResultPayload, error) {
+	changes, err := s.store.LoadCheckpointChanges(ctx, s.root, payload.CheckpointID)
+	if err != nil {
+		return protocol.HistoryDiffResultPayload{}, err
+	}
+	if len(changes) == 0 {
+		return protocol.HistoryDiffResultPayload{}, fmt.Errorf("checkpoint has no file changes: %s", payload.CheckpointID)
+	}
 
-	allArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(runCtx, "git", allArgs...)
-
-	stdout := newLimitedBuffer(outputLimit)
-	var stderr bytes.Buffer
-	cmd.Stdout = stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
+	files := make([]protocol.HistoryFileDiff, 0, len(changes))
+	for _, change := range changes {
+		if shouldHidePath(change.Path) {
+			return protocol.HistoryDiffResultPayload{}, fmt.Errorf("refusing to preview sensitive change: %s", change.Path)
 		}
-		return stdout.String(), stdout.Truncated(), fmt.Errorf("git %s failed: %s", strings.Join(args, " "), message)
+		item := storedChangeDiff(change)
+		files = append(files, item)
 	}
 
-	return stdout.String(), stdout.Truncated(), nil
+	return protocol.HistoryDiffResultPayload{
+		CheckpointID: payload.CheckpointID,
+		Files:        files,
+		Count:        len(files),
+	}, nil
 }
 
-func parseStatusLine(line string) (protocol.ChangeEntry, bool) {
-	if len(line) < 4 {
-		return protocol.ChangeEntry{}, false
-	}
-
-	index := line[0]
-	worktree := line[1]
-	pathField := strings.TrimSpace(line[3:])
-	if pathField == "" {
-		return protocol.ChangeEntry{}, false
-	}
-
-	entry := protocol.ChangeEntry{
-		Path:           cleanGitPath(pathField),
-		Status:         statusLabel(index, worktree),
-		IndexStatus:    string(index),
-		WorktreeStatus: string(worktree),
-		Staged:         isStaged(index),
-		Unstaged:       isUnstaged(worktree),
-		Untracked:      index == '?' && worktree == '?',
-		Deleted:        index == 'D' || worktree == 'D',
-		Renamed:        index == 'R' || worktree == 'R',
-	}
-
-	if strings.Contains(pathField, " -> ") {
-		parts := strings.SplitN(pathField, " -> ", 2)
-		entry.OldPath = cleanGitPath(parts[0])
-		entry.Path = cleanGitPath(parts[1])
-	}
-
-	return entry, true
-}
-
-func cleanGitPath(path string) string {
-	path = strings.Trim(path, `"`)
-	path = strings.TrimSpace(path)
-	return filepath.ToSlash(path)
-}
-
-func statusLabel(index byte, worktree byte) string {
-	switch {
-	case index == '?' && worktree == '?':
-		return "untracked"
-	case index == 'R' || worktree == 'R':
-		return "renamed"
-	case index == 'A' || worktree == 'A':
-		return "added"
-	case index == 'D' || worktree == 'D':
-		return "deleted"
-	case index == 'M' || worktree == 'M':
-		return "modified"
-	case index == 'C' || worktree == 'C':
-		return "copied"
-	default:
-		return "changed"
-	}
-}
-
-func isStaged(status byte) bool {
-	return status != ' ' && status != '?' && status != '!'
-}
-
-func isUnstaged(status byte) bool {
-	return status != ' ' && status != '?' && status != '!'
-}
-
-func combineDiffs(staged string, unstaged string) string {
-	staged = strings.TrimRight(staged, "\r\n")
-	unstaged = strings.TrimRight(unstaged, "\r\n")
-
-	if staged == "" {
-		return unstaged
-	}
-	if unstaged == "" {
-		return staged
-	}
-	return "# Staged changes\n\n" + staged + "\n\n# Unstaged changes\n\n" + unstaged
-}
-
-func (s *Service) untrackedDiff(abs string, rel string) (string, bool, bool, error) {
-	info, err := os.Stat(abs)
+func (s *Service) RevertCheckpoint(ctx context.Context, payload protocol.HistoryRevertPayload) (protocol.HistoryRevertResultPayload, error) {
+	changes, err := s.store.LoadCheckpointChanges(ctx, s.root, payload.CheckpointID)
 	if err != nil {
-		return "", false, false, nil
+		return protocol.HistoryRevertResultPayload{}, err
+	}
+	if len(changes) == 0 {
+		return protocol.HistoryRevertResultPayload{}, fmt.Errorf("checkpoint has no file changes: %s", payload.CheckpointID)
+	}
+
+	reverted := make([]string, 0, len(changes))
+	for i := len(changes) - 1; i >= 0; i-- {
+		change := changes[i]
+		if shouldHidePath(change.Path) {
+			return protocol.HistoryRevertResultPayload{}, fmt.Errorf("refusing to revert sensitive change: %s", change.Path)
+		}
+		if err := s.revertStoredChange(ctx, change); err != nil {
+			return protocol.HistoryRevertResultPayload{}, err
+		}
+		reverted = append(reverted, change.Path)
+	}
+
+	return protocol.HistoryRevertResultPayload{
+		CheckpointID: payload.CheckpointID,
+		Reverted:     true,
+		Paths:        reverted,
+		Message:      fmt.Sprintf("Reverted checkpoint %s.", payload.CheckpointID),
+	}, nil
+}
+
+func storedChangeDiff(change history.StoredFileChange) protocol.HistoryFileDiff {
+	item := protocol.HistoryFileDiff{
+		Path:       change.Path,
+		ChangeType: change.ChangeType,
+		Restorable: change.Before == nil || change.Before.Available,
+	}
+
+	switch {
+	case change.Before == nil && change.After == nil:
+		item.Message = "No diff is available for this file change."
+	case change.Before == nil:
+		diff, truncated, binary := historyAdditionDiff(change.After)
+		item.Diff = diff
+		item.Truncated = truncated
+		item.Binary = binary
+		item.Message = emptyDiffMessage(diff, binary)
+	case change.After == nil:
+		diff, truncated, binary := historyDeletionDiff(change.Before)
+		item.Diff = diff
+		item.Truncated = truncated
+		item.Binary = binary
+		item.Message = emptyDiffMessage(diff, binary)
+	default:
+		diff, truncated, binary := historyModifiedDiff(change.Before, change.After)
+		item.Diff = diff
+		item.Truncated = truncated
+		item.Binary = binary
+		item.Message = emptyDiffMessage(diff, binary)
+	}
+	return item
+}
+
+func (s *Service) revertStoredChange(ctx context.Context, change history.StoredFileChange) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rel, abs, err := cleanPath(s.root, change.Path)
+	if err != nil {
+		return err
+	}
+	if change.Before == nil {
+		info, err := os.Stat(abs)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return fmt.Errorf("cannot revert directory: %s", rel)
+		}
+		return os.Remove(abs)
+	}
+	if !change.Before.Available {
+		return fmt.Errorf("checkpoint content is not available for: %s", rel)
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(abs); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(abs, change.Before.Content, change.Before.Mode.Perm())
+}
+
+func (s *Service) scan(ctx context.Context) (map[string]snapshotEntry, error) {
+	result := make(map[string]snapshotEntry)
+	err := filepath.WalkDir(s.root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if path == s.root {
+			return nil
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			if shouldHidePath(name) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if shouldHidePath(name) {
+			return nil
+		}
+
+		rel, err := s.relative(path)
+		if err != nil {
+			return err
+		}
+		item, exists, err := snapshotPath(s.root, path, rel)
+		if err != nil {
+			return err
+		}
+		if exists {
+			result[rel] = item
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func snapshotPath(root string, abs string, rel string) (snapshotEntry, bool, error) {
+	linkInfo, err := os.Lstat(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		return snapshotEntry{}, false, nil
+	}
+	if err != nil {
+		return snapshotEntry{}, false, err
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return snapshotEntry{}, false, nil
+		}
+		target = filepath.Clean(target)
+		if !insideRoot(root, target) {
+			return snapshotEntry{}, false, nil
+		}
+		abs = target
+	}
+
+	info, err := os.Stat(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		return snapshotEntry{}, false, nil
+	}
+	if err != nil {
+		return snapshotEntry{}, false, err
 	}
 	if info.IsDir() {
-		return "", false, false, nil
+		return snapshotEntry{}, false, nil
+	}
+
+	entry := snapshotEntry{
+		Path: rel,
+		Size: info.Size(),
+		Mode: info.Mode(),
 	}
 
 	file, err := os.Open(abs)
 	if err != nil {
-		return "", false, false, err
+		return snapshotEntry{}, false, err
 	}
 	defer file.Close()
 
-	readLimit := maxDiffBytes
-	if info.Size() < int64(readLimit) {
-		readLimit = int(info.Size())
+	content, digest, err := readSnapshotContent(file, info.Size())
+	if err != nil {
+		return snapshotEntry{}, false, err
 	}
-	buffer := make([]byte, readLimit)
-	n, err := io.ReadFull(file, buffer)
+	entry.Hash = digest
+	entry.Binary = isBinary(content)
+	entry.TooLarge = info.Size() > int64(maxSnapshotBytes)
+	entry.Available = !entry.Binary && !entry.TooLarge
+	if entry.Available {
+		entry.Content = append([]byte(nil), content...)
+	}
+	return entry, true, nil
+}
+
+func readSnapshotContent(file *os.File, size int64) ([]byte, [32]byte, error) {
+	hasher := sha256.New()
+	limit := maxSnapshotBytes
+	if size < int64(limit) {
+		limit = int(size)
+	}
+	content := make([]byte, limit)
+	n, err := io.ReadFull(io.TeeReader(file, hasher), content)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return "", false, false, err
+		return nil, [32]byte{}, err
+	}
+	content = content[:n]
+	if _, err := io.Copy(hasher, file); err != nil {
+		return nil, [32]byte{}, err
 	}
 
-	content := buffer[:n]
-	if isBinary(content) {
-		return "", info.Size() > int64(maxDiffBytes), true, nil
-	}
+	return content, hashSum(hasher), nil
+}
 
-	text := string(content)
-	lineCount := countLines(text)
-	var builder strings.Builder
-	builder.WriteString("diff --git a/")
-	builder.WriteString(rel)
-	builder.WriteString(" b/")
-	builder.WriteString(rel)
-	builder.WriteString("\nnew file mode 100644\n--- /dev/null\n+++ b/")
-	builder.WriteString(rel)
-	builder.WriteString(fmt.Sprintf("\n@@ -0,0 +1,%d @@\n", lineCount))
-	for _, line := range strings.SplitAfter(text, "\n") {
-		if line == "" {
-			continue
+func hashSum(hasher hash.Hash) [32]byte {
+	var digest [32]byte
+	copy(digest[:], hasher.Sum(nil))
+	return digest
+}
+
+func copySnapshot(source map[string]snapshotEntry) map[string]snapshotEntry {
+	copied := make(map[string]snapshotEntry, len(source))
+	for key, value := range source {
+		if value.Content != nil {
+			value.Content = append([]byte(nil), value.Content...)
 		}
-		builder.WriteString("+")
-		builder.WriteString(line)
-		if !strings.HasSuffix(line, "\n") {
+		copied[key] = value
+	}
+	return copied
+}
+
+func snapshotToHistory(source map[string]snapshotEntry) map[string]history.FileSnapshot {
+	result := make(map[string]history.FileSnapshot, len(source))
+	for key, value := range source {
+		item := history.FileSnapshot{
+			Path:      value.Path,
+			Size:      value.Size,
+			Hash:      value.Hash,
+			Binary:    value.Binary,
+			TooLarge:  value.TooLarge,
+			Mode:      value.Mode,
+			Available: value.Available,
+		}
+		if value.Content != nil {
+			item.Content = append([]byte(nil), value.Content...)
+		}
+		result[key] = item
+	}
+	return result
+}
+
+func historyToSnapshot(source map[string]history.FileSnapshot) map[string]snapshotEntry {
+	result := make(map[string]snapshotEntry, len(source))
+	for key, value := range source {
+		item := snapshotEntry{
+			Path:      value.Path,
+			Size:      value.Size,
+			Hash:      value.Hash,
+			Binary:    value.Binary,
+			TooLarge:  value.TooLarge,
+			Mode:      value.Mode,
+			Available: value.Available,
+		}
+		if value.Content != nil {
+			item.Content = append([]byte(nil), value.Content...)
+		}
+		result[key] = item
+	}
+	return result
+}
+
+func historyAdditionDiff(entry *history.FileSnapshot) (string, bool, bool) {
+	if entry == nil {
+		return "", false, false
+	}
+	return additionDiff(historyFileToSnapshot(*entry))
+}
+
+func historyDeletionDiff(entry *history.FileSnapshot) (string, bool, bool) {
+	if entry == nil {
+		return "", false, false
+	}
+	return deletionDiff(historyFileToSnapshot(*entry))
+}
+
+func historyModifiedDiff(base *history.FileSnapshot, now *history.FileSnapshot) (string, bool, bool) {
+	if base == nil || now == nil {
+		return "", false, false
+	}
+	return modifiedDiff(historyFileToSnapshot(*base), historyFileToSnapshot(*now))
+}
+
+func historyFileToSnapshot(value history.FileSnapshot) snapshotEntry {
+	item := snapshotEntry{
+		Path:      value.Path,
+		Size:      value.Size,
+		Hash:      value.Hash,
+		Content:   value.Content,
+		Binary:    value.Binary,
+		TooLarge:  value.TooLarge,
+		Mode:      value.Mode,
+		Available: value.Available,
+	}
+	if value.Content != nil {
+		item.Content = append([]byte(nil), value.Content...)
+	}
+	return item
+}
+
+func additionDiff(entry snapshotEntry) (string, bool, bool) {
+	if entry.Binary || entry.TooLarge {
+		return "", entry.TooLarge, true
+	}
+	diff, truncated := fileDiff("", string(entry.Content), entry.Path)
+	return diff, truncated, false
+}
+
+func deletionDiff(entry snapshotEntry) (string, bool, bool) {
+	if entry.Binary || entry.TooLarge || !entry.Available {
+		return "", entry.TooLarge, true
+	}
+	diff, truncated := fileDiff(string(entry.Content), "", entry.Path)
+	return diff, truncated, false
+}
+
+func modifiedDiff(base snapshotEntry, now snapshotEntry) (string, bool, bool) {
+	if base.Binary || now.Binary || base.TooLarge || now.TooLarge || !base.Available || !now.Available {
+		return "", base.TooLarge || now.TooLarge, true
+	}
+	diff, truncated := fileDiff(string(base.Content), string(now.Content), now.Path)
+	return diff, truncated, false
+}
+
+func fileDiff(oldText string, newText string, path string) (string, bool) {
+	oldLines := splitLines(oldText)
+	newLines := splitLines(newText)
+	truncated := false
+
+	var builder strings.Builder
+	builder.WriteString("diff --myai a/")
+	builder.WriteString(path)
+	builder.WriteString(" b/")
+	builder.WriteString(path)
+	builder.WriteString("\n--- a/")
+	builder.WriteString(path)
+	builder.WriteString("\n+++ b/")
+	builder.WriteString(path)
+	builder.WriteString(fmt.Sprintf("\n@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines)))
+
+	var ops []lineOp
+	if len(oldLines)*len(newLines) > maxDiffLineProduct {
+		truncated = true
+		ops = compactDiffLines(oldLines, newLines)
+	} else {
+		ops = diffLines(oldLines, newLines)
+	}
+	for _, op := range ops {
+		switch op.kind {
+		case "equal":
+			builder.WriteString(" ")
+		case "delete":
+			builder.WriteString("-")
+		case "insert":
+			builder.WriteString("+")
+		}
+		builder.WriteString(op.text)
+		if !strings.HasSuffix(op.text, "\n") {
 			builder.WriteString("\n")
 		}
 	}
 
 	diff := builder.String()
-	truncated := info.Size() > int64(maxDiffBytes)
 	if len(diff) > maxDiffBytes {
-		diff = diff[:maxDiffBytes]
-		truncated = true
+		return diff[:maxDiffBytes], true
 	}
-	return diff, truncated, false, nil
+	return diff, truncated
 }
 
-func countLines(text string) int {
+type lineOp struct {
+	kind string
+	text string
+}
+
+func diffLines(oldLines []string, newLines []string) []lineOp {
+	m, n := len(oldLines), len(newLines)
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := m - 1; i >= 0; i-- {
+		for j := n - 1; j >= 0; j-- {
+			if oldLines[i] == newLines[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	ops := make([]lineOp, 0, m+n)
+	i, j := 0, 0
+	for i < m && j < n {
+		if oldLines[i] == newLines[j] {
+			ops = append(ops, lineOp{kind: "equal", text: oldLines[i]})
+			i++
+			j++
+		} else if dp[i+1][j] >= dp[i][j+1] {
+			ops = append(ops, lineOp{kind: "delete", text: oldLines[i]})
+			i++
+		} else {
+			ops = append(ops, lineOp{kind: "insert", text: newLines[j]})
+			j++
+		}
+	}
+	for i < m {
+		ops = append(ops, lineOp{kind: "delete", text: oldLines[i]})
+		i++
+	}
+	for j < n {
+		ops = append(ops, lineOp{kind: "insert", text: newLines[j]})
+		j++
+	}
+	return ops
+}
+
+func compactDiffLines(oldLines []string, newLines []string) []lineOp {
+	ops := make([]lineOp, 0, len(oldLines)+len(newLines))
+	for _, line := range oldLines {
+		ops = append(ops, lineOp{kind: "delete", text: line})
+	}
+	for _, line := range newLines {
+		ops = append(ops, lineOp{kind: "insert", text: line})
+	}
+	return ops
+}
+
+func splitLines(text string) []string {
 	if text == "" {
-		return 0
+		return []string{}
 	}
-	count := strings.Count(text, "\n")
-	if !strings.HasSuffix(text, "\n") {
-		count++
-	}
-	return count
+	return strings.SplitAfter(text, "\n")
 }
 
 func emptyDiffMessage(diff string, binary bool) string {
 	if binary {
-		return "Binary file diff is not available."
+		return "Binary or oversized file diff is not available."
 	}
 	if strings.TrimSpace(diff) == "" {
 		return "No diff is available for this path."
@@ -410,57 +878,15 @@ func cleanPath(root string, path string) (string, string, error) {
 	return filepath.ToSlash(rel), abs, nil
 }
 
-func repoRelativePath(repoRoot string, target string) (string, error) {
-	rel, err := filepath.Rel(repoRoot, target)
+func (s *Service) relative(abs string) (string, error) {
+	rel, err := filepath.Rel(s.root, abs)
 	if err != nil {
 		return "", err
 	}
 	if rel == "." {
 		return ".", nil
 	}
-	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("path is outside git repository: %s", target)
-	}
 	return filepath.ToSlash(rel), nil
-}
-
-func entryToWorkspace(entry protocol.ChangeEntry, repoRoot string, workspace string) (protocol.ChangeEntry, bool) {
-	path, ok := repoPathToWorkspace(entry.Path, repoRoot, workspace)
-	if !ok {
-		return protocol.ChangeEntry{}, false
-	}
-	entry.Path = path
-
-	if entry.OldPath != "" {
-		if oldPath, ok := repoPathToWorkspace(entry.OldPath, repoRoot, workspace); ok {
-			entry.OldPath = oldPath
-		} else {
-			entry.OldPath = ""
-		}
-	}
-
-	return entry, true
-}
-
-func repoPathToWorkspace(path string, repoRoot string, workspace string) (string, bool) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", false
-	}
-
-	abs := filepath.Clean(filepath.Join(repoRoot, filepath.FromSlash(path)))
-	if !insideRoot(workspace, abs) {
-		return "", false
-	}
-
-	rel, err := filepath.Rel(workspace, abs)
-	if err != nil {
-		return "", false
-	}
-	if rel == "." {
-		return ".", true
-	}
-	return filepath.ToSlash(rel), true
 }
 
 func insideRoot(root string, target string) bool {
@@ -489,43 +915,4 @@ func isBinary(content []byte) bool {
 		return true
 	}
 	return !utf8.Valid(content)
-}
-
-type limitedBuffer struct {
-	buffer    bytes.Buffer
-	limit     int
-	truncated bool
-}
-
-func newLimitedBuffer(limit int) *limitedBuffer {
-	return &limitedBuffer{limit: limit}
-}
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.limit <= 0 {
-		_, _ = b.buffer.Write(p)
-		return len(p), nil
-	}
-
-	remaining := b.limit - b.buffer.Len()
-	if remaining <= 0 {
-		b.truncated = true
-		return len(p), nil
-	}
-	if len(p) > remaining {
-		b.truncated = true
-		_, _ = b.buffer.Write(p[:remaining])
-		return len(p), nil
-	}
-
-	_, _ = b.buffer.Write(p)
-	return len(p), nil
-}
-
-func (b *limitedBuffer) String() string {
-	return b.buffer.String()
-}
-
-func (b *limitedBuffer) Truncated() bool {
-	return b.truncated
 }
