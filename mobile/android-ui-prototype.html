@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MyAI Android Comic UI Prototype</title>
+  <style>
+    :root {
+      --ink: #12100e;
+      --paper: #fffaf0;
+      --paper-2: #f5eefc;
+      --yellow: #ffd84f;
+      --cyan: #4fd7ee;
+      --green: #b9e9b0;
+      --coral: #ff7f68;
+      --muted: #6c665f;
+      --line: 4px solid var(--ink);
+      color-scheme: light;
+      font-family: "Arial Black", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      align-items: center;
+      background: #efe4d2;
+      color: var(--ink);
+      display: flex;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 26px;
+    }
+
+    .phone {
+      background: var(--ink);
+      border: 5px solid var(--ink);
+      box-shadow: 14px 14px 0 rgba(18, 16, 14, 0.22);
+      height: 844px;
+      max-height: calc(100vh - 52px);
+      overflow: hidden;
+      position: relative;
+      width: 390px;
+    }
+
+    .screen {
+      background:
+        linear-gradient(166deg, transparent 0 12%, var(--cyan) 12% 42%, transparent 42%),
+        linear-gradient(18deg, transparent 0 52%, var(--yellow) 52% 76%, transparent 76%),
+        linear-gradient(152deg, transparent 0 58%, var(--green) 58% 69%, transparent 69%),
+        #f2e8d8;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .status-bar {
+      align-items: center;
+      display: flex;
+      font-size: 14px;
+      font-weight: 1000;
+      justify-content: space-between;
+      letter-spacing: 0;
+      padding: 11px 16px 6px;
+    }
+
+    .status-icons {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    .app-top {
+      background: var(--paper);
+      border: var(--line);
+      display: grid;
+      gap: 8px;
+      margin: 8px 14px 10px;
+      padding: 12px 14px;
+    }
+
+    .title-row {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      align-items: center;
+      background: var(--yellow);
+      border: 4px solid var(--ink);
+      display: flex;
+      flex: 0 0 42px;
+      font-size: 20px;
+      font-weight: 1000;
+      height: 42px;
+      justify-content: center;
+      transform: rotate(-3deg);
+    }
+
+    .brand h1 {
+      font-size: 30px;
+      line-height: 0.94;
+      margin: 0;
+    }
+
+    .brand p {
+      color: var(--muted);
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      margin: 3px 0 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stamp {
+      background: var(--coral);
+      border: 4px solid var(--ink);
+      box-shadow: 3px 3px 0 var(--ink);
+      font-size: 13px;
+      font-weight: 1000;
+      padding: 7px 9px;
+      white-space: nowrap;
+    }
+
+    .content {
+      overflow: auto;
+      padding: 0 14px 118px;
+      scrollbar-width: none;
+    }
+
+    .content::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-panel {
+      display: none;
+      gap: 12px;
+    }
+
+    .tab-panel.active {
+      display: grid;
+    }
+
+    .comic-panel {
+      background: var(--paper);
+      border: var(--line);
+      box-shadow: 5px 5px 0 rgba(18, 16, 14, 0.18);
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .panel-head {
+      align-items: end;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .panel-head h2 {
+      font-size: 25px;
+      line-height: 1;
+      margin: 0;
+    }
+
+    .panel-head span {
+      color: var(--muted);
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .filter-box {
+      background: var(--paper);
+      border: var(--line);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr 74px;
+      padding: 12px;
+    }
+
+    .field {
+      border: 3px solid var(--ink);
+      display: grid;
+      gap: 5px;
+      padding: 9px 10px;
+    }
+
+    .field label {
+      color: #756d81;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .field strong {
+      font-size: 22px;
+      line-height: 1.1;
+    }
+
+    .refresh {
+      align-items: center;
+      background: var(--paper);
+      border: var(--line);
+      cursor: pointer;
+      display: flex;
+      font-size: 34px;
+      font-weight: 1000;
+      justify-content: center;
+    }
+
+    .metrics {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .metric {
+      background: var(--paper-2);
+      border: 3px solid var(--ink);
+      padding: 10px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      margin-bottom: 3px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .chat-stack,
+    .list-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .bubble {
+      border: 3px solid var(--ink);
+      box-shadow: 4px 4px 0 rgba(18, 16, 14, 0.16);
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.55;
+      max-width: 92%;
+      padding: 11px 12px;
+    }
+
+    .bubble.user {
+      background: #fff1c2;
+      justify-self: end;
+    }
+
+    .bubble.ai {
+      background: var(--paper);
+      justify-self: start;
+    }
+
+    .bubble.event {
+      background: #e9e1f4;
+      max-width: 100%;
+      width: 100%;
+    }
+
+    .bubble small {
+      color: var(--muted);
+      display: block;
+      font-size: 11px;
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+
+    .tool-strip {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .tool-item {
+      align-items: center;
+      background: #ffffff;
+      border: 3px solid var(--ink);
+      display: flex;
+      font-size: 12px;
+      font-weight: 1000;
+      justify-content: space-between;
+      padding: 8px 9px;
+    }
+
+    .task-card {
+      background: #eee6f7;
+      border: 0;
+      box-shadow: 0 10px 16px rgba(18, 16, 14, 0.12);
+      display: grid;
+      gap: 9px;
+      padding: 14px;
+      position: relative;
+    }
+
+    .task-id {
+      background: var(--coral);
+      border: 3px solid var(--ink);
+      display: inline-block;
+      font-size: 17px;
+      font-weight: 1000;
+      padding: 4px 9px;
+      width: fit-content;
+    }
+
+    .task-title {
+      font-size: 17px;
+      font-weight: 1000;
+      line-height: 1.35;
+      margin: 0;
+    }
+
+    .task-meta {
+      color: #3e3836;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .task-actions {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .status-stamp {
+      background: var(--coral);
+      border: 3px solid var(--ink);
+      font-size: 16px;
+      font-weight: 1000;
+      padding: 6px 10px;
+    }
+
+    .mini-button {
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 1000;
+      padding: 7px 10px;
+    }
+
+    .mini-button.yellow {
+      background: var(--yellow);
+    }
+
+    .mini-button.red {
+      background: var(--coral);
+    }
+
+    .row-card {
+      align-items: center;
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      display: flex;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .row-icon {
+      align-items: center;
+      background: var(--yellow);
+      border: 3px solid var(--ink);
+      display: flex;
+      flex: 0 0 39px;
+      font-size: 15px;
+      font-weight: 1000;
+      height: 39px;
+      justify-content: center;
+    }
+
+    .row-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .row-main strong {
+      display: block;
+      font-size: 15px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .row-main span {
+      color: var(--muted);
+      display: block;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      margin-top: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview {
+      background: var(--paper);
+      border: var(--line);
+      display: grid;
+      overflow: hidden;
+    }
+
+    .preview-head {
+      align-items: center;
+      border-bottom: 3px solid var(--ink);
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      padding: 10px 12px;
+    }
+
+    .preview-head strong {
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    pre {
+      background: #fffdf8;
+      color: var(--ink);
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.55;
+      margin: 0;
+      overflow: auto;
+      padding: 12px;
+      white-space: pre;
+    }
+
+    .diff-add {
+      color: #087b3d;
+    }
+
+    .diff-del {
+      color: #c62828;
+    }
+
+    .diff-meta {
+      color: #315fc9;
+    }
+
+    .permission {
+      background: #fff2bf;
+      border: var(--line);
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .permission h3 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .permission p {
+      color: #403933;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .composer {
+      background: var(--paper);
+      border-top: var(--line);
+      bottom: 78px;
+      display: grid;
+      gap: 8px;
+      left: 0;
+      padding: 10px 12px;
+      position: absolute;
+      right: 0;
+    }
+
+    .attachment {
+      align-items: center;
+      background: #fff6d7;
+      border: 3px solid var(--ink);
+      display: flex;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 900;
+      gap: 8px;
+      padding: 8px 10px;
+    }
+
+    .input-row {
+      align-items: stretch;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 42px 1fr 50px;
+    }
+
+    .square-button,
+    .send-button {
+      align-items: center;
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      color: var(--ink);
+      cursor: pointer;
+      display: flex;
+      font-size: 23px;
+      font-weight: 1000;
+      justify-content: center;
+    }
+
+    .send-button {
+      background: var(--yellow);
+    }
+
+    textarea {
+      background: #fffdf8;
+      border: 3px solid var(--ink);
+      color: var(--ink);
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+      height: 46px;
+      line-height: 1.35;
+      outline: 0;
+      padding: 10px;
+      resize: none;
+    }
+
+    .bottom-nav {
+      background: var(--paper);
+      border-top: var(--line);
+      bottom: 0;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      height: 78px;
+      left: 0;
+      padding: 8px 10px;
+      position: absolute;
+      right: 0;
+    }
+
+    .nav-item {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      color: #65605a;
+      cursor: pointer;
+      display: grid;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 1000;
+      gap: 4px;
+      justify-items: center;
+    }
+
+    .nav-item span:first-child {
+      font-size: 25px;
+      line-height: 1;
+    }
+
+    .nav-item.active {
+      background: var(--yellow);
+      border: 4px solid var(--ink);
+      color: var(--ink);
+    }
+
+    .modal {
+      align-items: end;
+      background: rgba(18, 16, 14, 0.48);
+      display: none;
+      inset: 0;
+      padding: 14px;
+      position: absolute;
+      z-index: 20;
+    }
+
+    .modal.show {
+      display: flex;
+    }
+
+    .modal-card {
+      background: var(--paper);
+      border: var(--line);
+      box-shadow: 7px 7px 0 rgba(18, 16, 14, 0.32);
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      width: 100%;
+    }
+
+    .modal-card h3 {
+      font-size: 22px;
+      margin: 0;
+    }
+
+    .modal-card p {
+      color: #423c37;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .modal-actions {
+      display: grid;
+      gap: 9px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    @media (max-width: 520px) {
+      body {
+        padding: 0;
+      }
+
+      .phone {
+        border: 0;
+        box-shadow: none;
+        height: 100vh;
+        max-height: none;
+        width: 100vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="phone" aria-label="MyAI Android comic UI prototype">
+    <section class="screen">
+      <div class="status-bar">
+        <span>00:21:20</span>
+        <span class="status-icons">2.00KB/S  5G  ▰▰▰  77%</span>
+      </div>
+
+      <header class="app-top">
+        <div class="title-row">
+          <div class="brand">
+            <div class="brand-mark">M</div>
+            <div>
+              <h1>MYAI</h1>
+              <p>手机控制电脑 · local / pc-local</p>
+            </div>
+          </div>
+          <div class="stamp">在线</div>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="tab-panel active" id="tab-chat">
+          <div class="comic-panel">
+            <div class="panel-head">
+              <h2>对话</h2>
+              <span>工具、权限、结果都在这里。</span>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <strong>128K</strong>
+                <span>上下文窗口</span>
+              </div>
+              <div class="metric">
+                <strong>2.7K</strong>
+                <span>本次 tokens</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-stack">
+            <article class="bubble user">
+              <small>你</small>
+              帮我实现 shell 变更追踪，并且测试通过。
+            </article>
+            <article class="bubble ai">
+              <small>MyAI</small>
+              我会把 shell 执行前后的文件快照纳入同一个任务 checkpoint。
+              <div class="tool-strip">
+                <div class="tool-item"><span>read_file</span><span>recorder.go</span></div>
+                <div class="tool-item"><span>edit_file</span><span>4 files</span></div>
+                <div class="tool-item"><span>shell</span><span>go test ./...</span></div>
+              </div>
+            </article>
+            <article class="bubble event">
+              <small>系统记录</small>
+              checkpoint 已保存：6 个文件变更，可查看 diff 或一键回滚。
+            </article>
+            <article class="permission">
+              <h3>需要执行权限</h3>
+              <p>shell 将运行：go test ./...<br />权限模式：ask，本次执行需要你确认。</p>
+              <div class="modal-actions">
+                <button class="mini-button">拒绝</button>
+                <button class="mini-button yellow">允许</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-files">
+          <div class="comic-panel">
+            <div class="panel-head">
+              <h2>文件</h2>
+              <span>D:/Go_All/myai</span>
+            </div>
+            <div class="filter-box">
+              <div class="field">
+                <label>按路径筛选</label>
+                <strong>core/history</strong>
+              </div>
+              <button class="refresh">↻</button>
+            </div>
+          </div>
+
+          <div class="list-stack">
+            <div class="row-card">
+              <div class="row-icon">DIR</div>
+              <div class="row-main">
+                <strong>core</strong>
+                <span>backend source</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="row-icon">GO</div>
+              <div class="row-main">
+                <strong>recorder.go</strong>
+                <span>history snapshot recorder</span>
+              </div>
+              <button class="mini-button yellow">打开</button>
+            </div>
+            <div class="row-card">
+              <div class="row-icon">MD</div>
+              <div class="row-main">
+                <strong>README.md</strong>
+                <span>1.1 KB · 可附加</span>
+              </div>
+              <button class="mini-button">附加</button>
+            </div>
+          </div>
+
+          <div class="preview">
+            <div class="preview-head">
+              <strong>recorder.go</strong>
+              <button class="mini-button">附加到对话</button>
+            </div>
+            <pre>func RecordWorkspaceChanges(ctx context.Context, before map[string]FileSnapshot) {
+  // shell 执行后统一写入任务级 checkpoint
+}</pre>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-history">
+          <div class="comic-panel">
+            <div class="panel-head">
+              <h2>历史</h2>
+              <span>筛选、批量处理、回看结果都放这里。</span>
+            </div>
+            <div class="filter-box">
+              <div>
+                <div class="field">
+                  <label>按关键词筛选</label>
+                  <strong>checkpoint</strong>
+                </div>
+              </div>
+              <button class="refresh">↻</button>
+            </div>
+          </div>
+
+          <div class="comic-panel">
+            <div class="task-card">
+              <span class="task-id">#58</span>
+              <p class="task-title">实现 shell 文件变更追踪，纳入任务级 checkpoint</p>
+              <div class="task-actions">
+                <span class="task-meta">编程 · gpt-5.5 · 6 files · 1分24秒</span>
+                <span class="status-stamp">已完成</span>
+              </div>
+              <div class="task-actions">
+                <button class="mini-button yellow">查看 Diff</button>
+                <button class="mini-button red" data-modal="revert">回滚</button>
+              </div>
+            </div>
+
+            <div class="task-card">
+              <span class="task-id">#57</span>
+              <p class="task-title">设计 Android 端漫画风 UI 原型</p>
+              <div class="task-actions">
+                <span class="task-meta">设计 · prototype · 1 file</span>
+                <span class="status-stamp">已完成</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preview">
+            <div class="preview-head">
+              <strong>#58 Diff 预览</strong>
+              <button class="mini-button red" data-modal="revert">回滚</button>
+            </div>
+            <pre><span class="diff-meta">diff --myai a/core/tool/local/shell.go b/core/tool/local/shell.go</span>
+<span class="diff-add">+ before := SnapshotWorkspace()</span>
+<span class="diff-add">+ RecordWorkspaceChanges(before)</span>
+<span class="diff-del">- return shell result only</span></pre>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-settings">
+          <div class="comic-panel">
+            <div class="panel-head">
+              <h2>设置</h2>
+              <span>连接、模型、权限</span>
+            </div>
+            <div class="list-stack">
+              <div class="row-card">
+                <div class="row-icon">WS</div>
+                <div class="row-main">
+                  <strong>Relay</strong>
+                  <span>ws://127.0.0.1:18080/ws/client</span>
+                </div>
+                <span class="status-stamp">在线</span>
+              </div>
+              <div class="row-card">
+                <div class="row-icon">AI</div>
+                <div class="row-main">
+                  <strong>模型</strong>
+                  <span>GPT-5.5 · 128K context</span>
+                </div>
+                <button class="mini-button yellow">切换</button>
+              </div>
+              <div class="row-card">
+                <div class="row-icon">盾</div>
+                <div class="row-main">
+                  <strong>权限模式</strong>
+                  <span>ask · 写入和执行前确认</span>
+                </div>
+                <button class="mini-button">修改</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer">
+        <div class="attachment">
+          <span class="task-id">附加</span>
+          README.md · 1.1 KB
+        </div>
+        <div class="input-row">
+          <button class="square-button">＋</button>
+          <textarea>帮我继续优化 UI</textarea>
+          <button class="send-button">↑</button>
+        </div>
+      </footer>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="nav-item active" data-tab="chat"><span>✦</span><span>对话</span></button>
+        <button class="nav-item" data-tab="files"><span>▣</span><span>文件</span></button>
+        <button class="nav-item" data-tab="history"><span>↺</span><span>历史</span></button>
+        <button class="nav-item" data-tab="settings"><span>⚙</span><span>设置</span></button>
+      </nav>
+
+      <div class="modal" id="revert-modal" role="dialog" aria-modal="true" aria-label="确认回滚">
+        <div class="modal-card">
+          <h3>确认回滚？</h3>
+          <p>将恢复 #58 checkpoint 中的 6 个文件。建议先查看 Diff，确认没有误操作。</p>
+          <div class="modal-actions">
+            <button class="mini-button" data-close>取消</button>
+            <button class="mini-button red" data-close>确认回滚</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const panels = document.querySelectorAll(".tab-panel");
+    const navItems = document.querySelectorAll(".nav-item");
+    const modal = document.querySelector("#revert-modal");
+
+    navItems.forEach((item) => {
+      item.addEventListener("click", () => {
+        const tab = item.dataset.tab;
+        panels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
+        navItems.forEach((nav) => nav.classList.toggle("active", nav === item));
+      });
+    });
+
+    document.querySelectorAll("[data-modal='revert']").forEach((button) => {
+      button.addEventListener("click", () => modal.classList.add("show"));
+    });
+
+    document.querySelectorAll("[data-close]").forEach((button) => {
+      button.addEventListener("click", () => modal.classList.remove("show"));
+    });
+
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.classList.remove("show");
+      }
+    });
+  </script>
+</body>
+</html>
