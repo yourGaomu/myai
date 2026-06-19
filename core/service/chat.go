@@ -121,19 +121,36 @@ func (s *ChatService) SendMessage(ctx context.Context, input string) (ChatRespon
 }
 
 func (s *ChatService) SendMessageStream(ctx context.Context, input string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	return s.SendMessageStreamForSession(ctx, s.CurrentSessionID(), input, stream)
+}
+
+func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	if strings.TrimSpace(input) == "" {
 		return ChatResponse{}, errors.New("input is empty")
 	}
 	if s.client == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
 	}
-
-	if err := s.sessions.AddUserMessage(input); err != nil {
-		return ChatResponse{}, err
+	if s.sessions == nil {
+		return ChatResponse{}, errors.New("session manager is nil")
 	}
 
-	current, err := s.sessions.Current()
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		if err := s.NewSession(ctx); err != nil {
+			return ChatResponse{}, err
+		}
+		sessionID = s.CurrentSessionID()
+	}
+
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
+		return ChatResponse{}, err
+	}
+	if err := s.sessions.AddUserMessageTo(current.ID, input); err != nil {
 		return ChatResponse{}, err
 	}
 
@@ -174,16 +191,19 @@ func (s *ChatService) SendMessageStream(ctx context.Context, input string, strea
 		return ChatResponse{}, err
 	}
 
-	if err := s.sessions.AddAssistantMessage(result.Content); err != nil {
+	if err := s.sessions.AddAssistantMessageTo(current.ID, result.Content); err != nil {
 		return ChatResponse{}, err
 	}
-	s.persistAssistantMessageAsync(current.ID, result)
+	if err := s.sessions.AddUsageTo(current.ID, result.Usage); err != nil {
+		return ChatResponse{}, err
+	}
+	s.persistAssistantMessageAsync(sessionRecordFromSession(current, ""), result)
 	s.persistCurrentSessionAsync(current.ID)
 
 	return ChatResponse{
 		SessionID: current.ID,
 		Result:    result,
-		Context:   s.CurrentContextInfo(),
+		Context:   contextInfoFromSession(current),
 		Compact:   compactInfo,
 	}, nil
 }
@@ -221,7 +241,7 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 			return result, nil
 		}
 
-		toolMessages, toolRecords, err := s.callTools(ctx, current.ID, result.ToolCalls, stream)
+		toolMessages, toolRecords, err := s.callTools(ctx, current, result.ToolCalls, stream)
 		if err != nil {
 			return llm.ChatResult{}, err
 		}
@@ -386,9 +406,12 @@ func truncateForSummary(text string, maxLength int) string {
 	return string(runes[:maxLength]) + "\n[truncated]"
 }
 
-func (s *ChatService) callTools(ctx context.Context, sessionID string, calls []llms.ToolCall, stream llm.ChatStreamHandler) ([]llms.MessageContent, []data.MessageRecord, error) {
+func (s *ChatService) callTools(ctx context.Context, current *session.Session, calls []llms.ToolCall, stream llm.ChatStreamHandler) ([]llms.MessageContent, []data.MessageRecord, error) {
 	if s.tools == nil {
 		return nil, nil, errors.New("tool registry is nil")
+	}
+	if current == nil {
+		return nil, nil, errors.New("session is nil")
 	}
 
 	messages := make([]llms.MessageContent, 0, len(calls))
@@ -412,7 +435,7 @@ func (s *ChatService) callTools(ctx context.Context, sessionID string, calls []l
 
 		records = append(records, data.MessageRecord{
 			ID:            uuid.NewString(),
-			SessionID:     sessionID,
+			SessionID:     current.ID,
 			Role:          data.RoleToolCall,
 			ToolCallID:    call.ID,
 			ToolName:      call.FunctionCall.Name,
@@ -420,7 +443,7 @@ func (s *ChatService) callTools(ctx context.Context, sessionID string, calls []l
 			CreatedAt:     createdAt.Add(time.Duration(index*2) * time.Nanosecond),
 		})
 
-		result, permissionAllowed := s.allowToolCall(call.FunctionCall.Name, call.FunctionCall.Arguments, permission, stream)
+		result, permissionAllowed := s.allowToolCall(current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, stream)
 		if permissionAllowed {
 			result, err = registeredTool.Call(ctx, []byte(call.FunctionCall.Arguments))
 		}
@@ -444,7 +467,7 @@ func (s *ChatService) callTools(ctx context.Context, sessionID string, calls []l
 		})
 		records = append(records, data.MessageRecord{
 			ID:            uuid.NewString(),
-			SessionID:     sessionID,
+			SessionID:     current.ID,
 			Role:          data.RoleTool,
 			Content:       result,
 			ToolCallID:    call.ID,
@@ -458,12 +481,15 @@ func (s *ChatService) callTools(ctx context.Context, sessionID string, calls []l
 	return messages, records, nil
 }
 
-func (s *ChatService) allowToolCall(name string, arguments string, permission tooldef.Permission, stream llm.ChatStreamHandler) (string, bool) {
+func (s *ChatService) allowToolCall(current *session.Session, name string, arguments string, permission tooldef.Permission, stream llm.ChatStreamHandler) (string, bool) {
 	if permission == tooldef.PermissionRead {
 		return "", true
 	}
 
-	mode := s.CurrentPermissionMode()
+	mode := session.PermissionModeAsk
+	if current != nil {
+		mode = session.NormalizePermissionMode(current.PermissionMode)
+	}
 	switch mode {
 	case session.PermissionModeReadonly:
 		return fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, name, permission), false
@@ -515,26 +541,12 @@ func (s *ChatService) NewSession(ctx context.Context) error {
 }
 
 func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
-	if sessionID == "" {
-		return errors.New("session id is empty")
-	}
-
-	record, err := s.getSession(ctx, sessionID)
+	current, err := s.ensureSessionInMemory(ctx, sessionID, true)
 	if err != nil {
 		return err
 	}
 
-	messages, err := s.messagesFromStore(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	permissionMode := session.PermissionMode(record.PermissionMode)
-	if err := s.sessions.PutSessionWithState(record.ID, record.Model, permissionMode, record.ContextWindowK, record.Summary, record.CompactedMessages, messages); err != nil {
-		return err
-	}
-
-	return s.saveCurrentSession(ctx, record.ID)
+	return s.saveCurrentSession(ctx, current.ID)
 }
 
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
@@ -564,6 +576,21 @@ func (s *ChatService) ListSessions(ctx context.Context) ([]data.SessionRecord, e
 	return s.store.ListSessions(ctx)
 }
 
+func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string) ([]data.MessageRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return nil, errors.New("session id is empty")
+	}
+	if s.store == nil {
+		return nil, nil
+	}
+
+	return s.store.ListMessages(ctx, sessionID)
+}
+
 func (s *ChatService) ListModels() []llm.ModelInfo {
 	if s.client == nil {
 		return nil
@@ -573,6 +600,10 @@ func (s *ChatService) ListModels() []llm.ModelInfo {
 }
 
 func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
+	return s.SwitchModelForSession(ctx, s.CurrentSessionID(), modelID)
+}
+
+func (s *ChatService) SwitchModelForSession(ctx context.Context, sessionID string, modelID string) error {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
 		return errors.New("model id is empty")
@@ -587,19 +618,29 @@ func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
 		return errors.New("session manager is nil")
 	}
 
-	if err := s.sessions.SwitchModel(modelID); err != nil {
-		return err
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return s.sessions.SwitchModel(modelID)
 	}
 
-	current, err := s.sessions.Current()
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
 		return err
 	}
+
+	if err := s.sessions.SwitchModelForSession(current.ID, modelID); err != nil {
+		return err
+	}
+	current.Model = modelID
 
 	return s.saveSession(ctx, current.ID, current.Model, "")
 }
 
 func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error {
+	return s.SetPermissionModeForSession(ctx, s.CurrentSessionID(), mode)
+}
+
+func (s *ChatService) SetPermissionModeForSession(ctx context.Context, sessionID string, mode string) error {
 	if s.sessions == nil {
 		return errors.New("session manager is nil")
 	}
@@ -608,38 +649,50 @@ func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error 
 	if !session.IsPermissionMode(permissionMode) {
 		return fmt.Errorf("unsupported permission mode: %s", mode)
 	}
-	if err := s.sessions.SetPermissionMode(permissionMode); err != nil {
-		return err
-	}
 
-	current, err := s.sessions.Current()
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
 		return err
 	}
+
+	if err := s.sessions.SetPermissionModeForSession(current.ID, permissionMode); err != nil {
+		return err
+	}
+	current.PermissionMode = permissionMode
 
 	return s.saveSession(ctx, current.ID, current.Model, "")
 }
 
 func (s *ChatService) SetContextWindowK(ctx context.Context, windowK int) error {
+	return s.SetContextWindowKForSession(ctx, s.CurrentSessionID(), windowK)
+}
+
+func (s *ChatService) SetContextWindowKForSession(ctx context.Context, sessionID string, windowK int) error {
 	if s.sessions == nil {
 		return errors.New("session manager is nil")
 	}
 	if err := contextmgr.ValidateWindowK(windowK); err != nil {
 		return err
 	}
-	if err := s.sessions.SetContextWindowK(windowK); err != nil {
-		return err
-	}
 
-	current, err := s.sessions.Current()
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
 		return err
 	}
+
+	if err := s.sessions.SetContextWindowKForSession(current.ID, windowK); err != nil {
+		return err
+	}
+	current.ContextWindowK = contextmgr.NormalizeWindowK(windowK)
 
 	return s.saveSession(ctx, current.ID, current.Model, "")
 }
 
 func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, error) {
+	return s.CompactSession(ctx, s.CurrentSessionID())
+}
+
+func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (ContextInfo, error) {
 	if s.sessions == nil {
 		return ContextInfo{}, errors.New("session manager is nil")
 	}
@@ -647,7 +700,7 @@ func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, e
 		return ContextInfo{}, errors.New("llm client is nil")
 	}
 
-	current, err := s.sessions.Current()
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
 		return ContextInfo{}, err
 	}
@@ -659,12 +712,12 @@ func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, e
 
 	if err := s.compactSession(ctx, current, model); err != nil {
 		if errors.Is(err, errNotEnoughHistoryToCompact) {
-			return s.CurrentContextInfo(), err
+			return contextInfoFromSession(current), err
 		}
 		return ContextInfo{}, err
 	}
 
-	return s.CurrentContextInfo(), nil
+	return contextInfoFromSession(current), nil
 }
 
 func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.Session, model *llm.Model) (CompactInfo, error) {
@@ -702,7 +755,7 @@ func (s *ChatService) compactSession(ctx context.Context, current *session.Sessi
 	if err != nil {
 		return err
 	}
-	if err := s.sessions.SetSummary(summary, cutoff); err != nil {
+	if err := s.sessions.SetSummaryForSession(current.ID, summary, cutoff); err != nil {
 		return err
 	}
 	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
@@ -815,6 +868,20 @@ func (s *ChatService) CurrentContextWindowK() int {
 	return contextmgr.NormalizeWindowK(s.sessions.CurrentContextWindowK())
 }
 
+func (s *ChatService) CurrentUsage() llm.TokenUsage {
+	if s.sessions == nil {
+		return llm.TokenUsage{}
+	}
+	return s.sessions.CurrentUsage()
+}
+
+func (s *ChatService) CurrentLastUsage() llm.TokenUsage {
+	if s.sessions == nil {
+		return llm.TokenUsage{}
+	}
+	return s.sessions.CurrentLastUsage()
+}
+
 func (s *ChatService) CurrentContextInfo() ContextInfo {
 	if s.sessions == nil {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
@@ -825,8 +892,19 @@ func (s *ChatService) CurrentContextInfo() ContextInfo {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
 	}
 
-	info, _ := contextmgr.AnalyzeWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
-	return info
+	return contextInfoFromSession(current)
+}
+
+func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID string) (ContextInfo, error) {
+	if s.sessions == nil {
+		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, errors.New("session manager is nil")
+	}
+
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
+	if err != nil {
+		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, err
+	}
+	return contextInfoFromSession(current), nil
 }
 
 func (s *ChatService) saveSession(ctx context.Context, sessionID string, model string, title string) error {
@@ -844,30 +922,42 @@ func (s *ChatService) saveSession(ctx context.Context, sessionID string, model s
 	summary := ""
 	compactedMessages := 0
 	var compactedAt *time.Time
-	if current, err := s.sessions.Current(); err == nil && current != nil && current.ID == sessionID {
+	var usage *data.TokenUsageRecord
+	var lastUsage *data.TokenUsageRecord
+	hasCurrentState := false
+	if current, err := s.sessions.GetSession(sessionID); err == nil && current != nil && current.ID == sessionID {
+		hasCurrentState = true
 		permissionMode = string(session.NormalizePermissionMode(current.PermissionMode))
 		contextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
 		summary = current.Summary
 		compactedMessages = current.CompactedMessages
+		usage = tokenUsageRecord(current.Usage)
+		lastUsage = tokenUsageRecord(current.LastUsage)
 		if summary != "" {
 			now := time.Now()
 			compactedAt = &now
 		}
 	}
 
-	now := time.Now()
-	record, err := s.getSession(ctx, sessionID)
-	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		return err
-	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = now
-	}
-	if record.Title != "" && record.Title != "New chat" {
-		title = record.Title
+	if !hasCurrentState {
+		record, err := s.getSession(ctx, sessionID)
+		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+			return err
+		}
+		if record.PermissionMode != "" {
+			permissionMode = record.PermissionMode
+		}
+		if record.ContextWindowK > 0 {
+			contextWindowK = record.ContextWindowK
+		}
+		summary = record.Summary
+		compactedMessages = record.CompactedMessages
+		compactedAt = record.CompactedAt
+		usage = record.Usage
+		lastUsage = record.LastUsage
 	}
 
-	return s.store.SaveSession(ctx, data.SessionRecord{
+	return s.saveSessionRecord(ctx, data.SessionRecord{
 		ID:                sessionID,
 		Model:             model,
 		PermissionMode:    permissionMode,
@@ -876,9 +966,158 @@ func (s *ChatService) saveSession(ctx context.Context, sessionID string, model s
 		CompactedMessages: compactedMessages,
 		CompactedAt:       compactedAt,
 		Title:             title,
-		CreatedAt:         record.CreatedAt,
-		UpdatedAt:         now,
+		Usage:             usage,
+		LastUsage:         lastUsage,
 	})
+}
+
+func (s *ChatService) saveSessionRecord(ctx context.Context, record data.SessionRecord) error {
+	if s.store == nil {
+		return nil
+	}
+	if record.ID == "" {
+		return errors.New("session id is empty")
+	}
+	if record.Model == "" {
+		record.Model = s.modelID
+	}
+	if record.PermissionMode == "" {
+		record.PermissionMode = string(session.PermissionModeAsk)
+	}
+	record.ContextWindowK = contextmgr.NormalizeWindowK(record.ContextWindowK)
+	if record.Title == "" {
+		record.Title = "New chat"
+	}
+
+	now := time.Now()
+	existing, err := s.getSession(ctx, record.ID)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return err
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = existing.CreatedAt
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	if existing.Title != "" && existing.Title != "New chat" {
+		record.Title = existing.Title
+	}
+	record.UpdatedAt = now
+
+	return s.store.SaveSession(ctx, record)
+}
+
+func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID string, setCurrent bool) (*session.Session, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, errors.New("session id is empty")
+	}
+	if s.sessions == nil {
+		return nil, errors.New("session manager is nil")
+	}
+
+	current, err := s.sessions.GetSession(sessionID)
+	if err == nil {
+		if setCurrent {
+			if err := s.sessions.UseSession(sessionID); err != nil {
+				return nil, err
+			}
+		}
+		return current, nil
+	}
+
+	record, err := s.getSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	messages, err := s.messagesFromStore(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	put := s.sessions.PutSessionWithUsageNoCurrent
+	if setCurrent {
+		put = s.sessions.PutSessionWithUsage
+	}
+	if err := put(
+		record.ID,
+		record.Model,
+		session.PermissionMode(record.PermissionMode),
+		record.ContextWindowK,
+		record.Summary,
+		record.CompactedMessages,
+		tokenUsageFromRecord(record.Usage),
+		tokenUsageFromRecord(record.LastUsage),
+		messages,
+	); err != nil {
+		return nil, err
+	}
+
+	return s.sessions.GetSession(record.ID)
+}
+
+func contextInfoFromSession(current *session.Session) ContextInfo {
+	if current == nil {
+		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
+	}
+
+	info, _ := contextmgr.AnalyzeWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
+	return info
+}
+
+func sessionRecordFromSession(current *session.Session, title string) data.SessionRecord {
+	if current == nil {
+		return data.SessionRecord{}
+	}
+
+	return data.SessionRecord{
+		ID:                current.ID,
+		Model:             current.Model,
+		PermissionMode:    string(session.NormalizePermissionMode(current.PermissionMode)),
+		ContextWindowK:    contextmgr.NormalizeWindowK(current.ContextWindowK),
+		Summary:           current.Summary,
+		CompactedMessages: current.CompactedMessages,
+		Title:             title,
+		Usage:             tokenUsageRecord(current.Usage),
+		LastUsage:         tokenUsageRecord(current.LastUsage),
+	}
+}
+
+func tokenUsageRecord(usage llm.TokenUsage) *data.TokenUsageRecord {
+	if !usage.Available &&
+		usage.PromptTokens == 0 &&
+		usage.CompletionTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.PromptCachedTokens == 0 {
+		return nil
+	}
+
+	return &data.TokenUsageRecord{
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		ReasoningTokens:    usage.ReasoningTokens,
+		PromptCachedTokens: usage.PromptCachedTokens,
+		Available:          usage.Available,
+	}
+}
+
+func tokenUsageFromRecord(record *data.TokenUsageRecord) llm.TokenUsage {
+	if record == nil {
+		return llm.TokenUsage{}
+	}
+
+	return llm.TokenUsage{
+		PromptTokens:       record.PromptTokens,
+		CompletionTokens:   record.CompletionTokens,
+		TotalTokens:        record.TotalTokens,
+		ReasoningTokens:    record.ReasoningTokens,
+		PromptCachedTokens: record.PromptCachedTokens,
+		Available:          record.Available,
+	}
 }
 
 func (s *ChatService) saveAssistantMessage(ctx context.Context, sessionID string, result llm.ChatResult) error {
@@ -919,13 +1158,16 @@ func (s *ChatService) persistUserMessageAsync(sessionID string, model string, ti
 	})
 }
 
-func (s *ChatService) persistAssistantMessageAsync(sessionID string, result llm.ChatResult) {
+func (s *ChatService) persistAssistantMessageAsync(sessionRecord data.SessionRecord, result llm.ChatResult) {
 	s.runAsync(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if err := s.saveAssistantMessage(ctx, sessionID, result); err != nil {
+		if err := s.saveAssistantMessage(ctx, sessionRecord.ID, result); err != nil {
 			log.Printf("save assistant message failed: %v", err)
+		}
+		if err := s.saveSessionRecord(ctx, sessionRecord); err != nil {
+			log.Printf("save assistant session failed: %v", err)
 		}
 	})
 }

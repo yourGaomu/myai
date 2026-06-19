@@ -8,37 +8,49 @@ import (
 type MessageType string
 
 const (
-	TypeAgentOnline         MessageType = "agent_online"
-	TypeAgentOffline        MessageType = "agent_offline"
-	TypeUserMessage         MessageType = "user_message"
-	TypeAssistantDelta      MessageType = "assistant_delta"
-	TypeAssistantDone       MessageType = "assistant_done"
-	TypeToolCall            MessageType = "tool_call"
-	TypePermissionAsk       MessageType = "permission_ask"
-	TypePermissionResult    MessageType = "permission_result"
-	TypeSessionList         MessageType = "session_list"
-	TypeSessionListResult   MessageType = "session_list_result"
-	TypeSessionNew          MessageType = "session_new"
-	TypeSessionLoad         MessageType = "session_load"
-	TypeSessionChanged      MessageType = "session_changed"
-	TypeFileList            MessageType = "file_list"
-	TypeFileListResult      MessageType = "file_list_result"
-	TypeFileRead            MessageType = "file_read"
-	TypeFileReadResult      MessageType = "file_read_result"
-	TypeChangesList         MessageType = "changes_list"
-	TypeChangesListResult   MessageType = "changes_list_result"
-	TypeChangeDiff          MessageType = "change_diff"
-	TypeChangeDiffResult    MessageType = "change_diff_result"
-	TypeChangeRevert        MessageType = "change_revert"
-	TypeChangeRevertResult  MessageType = "change_revert_result"
-	TypeHistoryList         MessageType = "history_list"
-	TypeHistoryListResult   MessageType = "history_list_result"
-	TypeHistoryDiff         MessageType = "history_diff"
-	TypeHistoryDiffResult   MessageType = "history_diff_result"
-	TypeHistoryRevert       MessageType = "history_revert"
-	TypeHistoryRevertResult MessageType = "history_revert_result"
-	TypeError               MessageType = "error"
-	TypeHeartbeat           MessageType = "heartbeat"
+	TypeAgentOnline                MessageType = "agent_online"
+	TypeAgentOffline               MessageType = "agent_offline"
+	TypeUserMessage                MessageType = "user_message"
+	TypeAssistantDelta             MessageType = "assistant_delta"
+	TypeAssistantDone              MessageType = "assistant_done"
+	TypeToolCall                   MessageType = "tool_call"
+	TypePermissionAsk              MessageType = "permission_ask"
+	TypePermissionResult           MessageType = "permission_result"
+	TypeSessionList                MessageType = "session_list"
+	TypeSessionListResult          MessageType = "session_list_result"
+	TypeSessionNew                 MessageType = "session_new"
+	TypeSessionLoad                MessageType = "session_load"
+	TypeSessionChanged             MessageType = "session_changed"
+	TypeSessionHistory             MessageType = "session_history"
+	TypeSessionHistoryResult       MessageType = "session_history_result"
+	TypeSessionPermissionSet       MessageType = "session_permission_set"
+	TypeSessionPermissionSetResult MessageType = "session_permission_set_result"
+	TypeSessionContextSet          MessageType = "session_context_set"
+	TypeSessionContextSetResult    MessageType = "session_context_set_result"
+	TypeSessionCompact             MessageType = "session_compact"
+	TypeSessionCompactResult       MessageType = "session_compact_result"
+	TypeModelList                  MessageType = "model_list"
+	TypeModelListResult            MessageType = "model_list_result"
+	TypeModelSwitch                MessageType = "model_switch"
+	TypeModelSwitchResult          MessageType = "model_switch_result"
+	TypeFileList                   MessageType = "file_list"
+	TypeFileListResult             MessageType = "file_list_result"
+	TypeFileRead                   MessageType = "file_read"
+	TypeFileReadResult             MessageType = "file_read_result"
+	TypeChangesList                MessageType = "changes_list"
+	TypeChangesListResult          MessageType = "changes_list_result"
+	TypeChangeDiff                 MessageType = "change_diff"
+	TypeChangeDiffResult           MessageType = "change_diff_result"
+	TypeChangeRevert               MessageType = "change_revert"
+	TypeChangeRevertResult         MessageType = "change_revert_result"
+	TypeHistoryList                MessageType = "history_list"
+	TypeHistoryListResult          MessageType = "history_list_result"
+	TypeHistoryDiff                MessageType = "history_diff"
+	TypeHistoryDiffResult          MessageType = "history_diff_result"
+	TypeHistoryRevert              MessageType = "history_revert"
+	TypeHistoryRevertResult        MessageType = "history_revert_result"
+	TypeError                      MessageType = "error"
+	TypeHeartbeat                  MessageType = "heartbeat"
 )
 
 type Message struct {
@@ -65,7 +77,17 @@ type AssistantDeltaPayload struct {
 }
 
 type AssistantDonePayload struct {
-	Content string `json:"content"`
+	Content string     `json:"content"`
+	Usage   TokenUsage `json:"usage,omitempty"`
+}
+
+type TokenUsage struct {
+	PromptTokens       int  `json:"prompt_tokens,omitempty"`
+	CompletionTokens   int  `json:"completion_tokens,omitempty"`
+	TotalTokens        int  `json:"total_tokens,omitempty"`
+	ReasoningTokens    int  `json:"reasoning_tokens,omitempty"`
+	PromptCachedTokens int  `json:"prompt_cached_tokens,omitempty"`
+	Available          bool `json:"available,omitempty"`
 }
 
 type ToolCallPayload struct {
@@ -88,13 +110,15 @@ type SessionLoadPayload struct {
 }
 
 type SessionSummary struct {
-	ID             string    `json:"id"`
-	Title          string    `json:"title"`
-	Model          string    `json:"model"`
-	PermissionMode string    `json:"permission_mode"`
-	ContextWindowK int       `json:"context_window_k"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	Model          string      `json:"model"`
+	PermissionMode string      `json:"permission_mode"`
+	ContextWindowK int         `json:"context_window_k"`
+	Usage          *TokenUsage `json:"usage,omitempty"`
+	LastUsage      *TokenUsage `json:"last_usage,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
 type SessionListResultPayload struct {
@@ -106,6 +130,90 @@ type SessionChangedPayload struct {
 	CurrentSessionID string           `json:"current_session_id"`
 	Session          SessionSummary   `json:"session"`
 	Sessions         []SessionSummary `json:"sessions"`
+}
+
+type SessionHistoryPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SessionHistoryMessage struct {
+	ID            string     `json:"id"`
+	Role          string     `json:"role"`
+	Content       string     `json:"content,omitempty"`
+	Reasoning     string     `json:"reasoning,omitempty"`
+	ToolCallID    string     `json:"tool_call_id,omitempty"`
+	ToolName      string     `json:"tool_name,omitempty"`
+	ToolArguments string     `json:"tool_arguments,omitempty"`
+	ToolError     string     `json:"tool_error,omitempty"`
+	Usage         TokenUsage `json:"usage,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type SessionHistoryResultPayload struct {
+	SessionID string                  `json:"session_id"`
+	Messages  []SessionHistoryMessage `json:"messages"`
+	Count     int                     `json:"count"`
+}
+
+type SessionPermissionSetPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Mode      string `json:"mode"`
+}
+
+type SessionContextSetPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	WindowK   int    `json:"window_k"`
+}
+
+type SessionCompactPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type ContextInfo struct {
+	WindowK           int  `json:"window_k"`
+	FullTokens        int  `json:"full_tokens"`
+	SelectedTokens    int  `json:"selected_tokens"`
+	SummaryTokens     int  `json:"summary_tokens"`
+	FullMessages      int  `json:"full_messages"`
+	SelectedMessages  int  `json:"selected_messages"`
+	CompactedMessages int  `json:"compacted_messages"`
+	HasSummary        bool `json:"has_summary"`
+	Truncated         bool `json:"truncated"`
+}
+
+type SessionSettingsResultPayload struct {
+	CurrentSessionID string           `json:"current_session_id"`
+	Session          SessionSummary   `json:"session"`
+	Sessions         []SessionSummary `json:"sessions"`
+	Context          ContextInfo      `json:"context,omitempty"`
+	Message          string           `json:"message,omitempty"`
+}
+
+type ModelSummary struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	ModelName string `json:"model_name,omitempty"`
+	Enabled   bool   `json:"enabled"`
+	IsDefault bool   `json:"is_default"`
+}
+
+type ModelListPayload struct{}
+
+type ModelListResultPayload struct {
+	CurrentModelID string         `json:"current_model_id"`
+	Models         []ModelSummary `json:"models"`
+}
+
+type ModelSwitchPayload struct {
+	ModelID string `json:"model_id"`
+}
+
+type ModelSwitchResultPayload struct {
+	CurrentModelID string         `json:"current_model_id"`
+	Models         []ModelSummary `json:"models"`
+	Session        SessionSummary `json:"session"`
+	Message        string         `json:"message,omitempty"`
 }
 
 type FileListPayload struct {

@@ -11,6 +11,18 @@ export type MessageType =
   | "session_new"
   | "session_load"
   | "session_changed"
+  | "session_history"
+  | "session_history_result"
+  | "session_permission_set"
+  | "session_permission_set_result"
+  | "session_context_set"
+  | "session_context_set_result"
+  | "session_compact"
+  | "session_compact_result"
+  | "model_list"
+  | "model_list_result"
+  | "model_switch"
+  | "model_switch_result"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -51,6 +63,16 @@ export type AssistantDeltaPayload = {
 
 export type AssistantDonePayload = {
   content?: string;
+  usage?: TokenUsage;
+};
+
+export type TokenUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  reasoning_tokens?: number;
+  prompt_cached_tokens?: number;
+  available?: boolean;
 };
 
 export type ErrorPayload = {
@@ -78,6 +100,8 @@ export type SessionSummary = {
   model?: string;
   permission_mode?: string;
   context_window_k?: number;
+  usage?: TokenUsage;
+  last_usage?: TokenUsage;
   created_at?: string;
   updated_at?: string;
 };
@@ -89,6 +113,88 @@ export type SessionListResultPayload = {
 
 export type SessionChangedPayload = SessionListResultPayload & {
   session?: SessionSummary;
+};
+
+export type SessionHistoryPayload = {
+  session_id?: string;
+};
+
+export type SessionHistoryMessage = {
+  id: string;
+  role: "user" | "assistant" | "tool_call" | "tool" | string;
+  content?: string;
+  reasoning?: string;
+  tool_call_id?: string;
+  tool_name?: string;
+  tool_arguments?: string;
+  tool_error?: string;
+  usage?: TokenUsage;
+  created_at?: string;
+};
+
+export type SessionHistoryResultPayload = {
+  session_id: string;
+  messages?: SessionHistoryMessage[];
+  count?: number;
+};
+
+export type SessionPermissionSetPayload = {
+  session_id?: string;
+  mode: string;
+};
+
+export type SessionContextSetPayload = {
+  session_id?: string;
+  window_k: number;
+};
+
+export type SessionCompactPayload = {
+  session_id?: string;
+};
+
+export type ContextInfo = {
+  window_k?: number;
+  full_tokens?: number;
+  selected_tokens?: number;
+  summary_tokens?: number;
+  full_messages?: number;
+  selected_messages?: number;
+  compacted_messages?: number;
+  has_summary?: boolean;
+  truncated?: boolean;
+};
+
+export type SessionSettingsResultPayload = {
+  current_session_id?: string;
+  session?: SessionSummary;
+  sessions?: SessionSummary[];
+  context?: ContextInfo;
+  message?: string;
+};
+
+export type ModelSummary = {
+  id: string;
+  name?: string;
+  provider?: string;
+  model_name?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+};
+
+export type ModelListResultPayload = {
+  current_model_id?: string;
+  models?: ModelSummary[];
+};
+
+export type ModelSwitchPayload = {
+  model_id: string;
+};
+
+export type ModelSwitchResultPayload = {
+  current_model_id?: string;
+  models?: ModelSummary[];
+  session?: SessionSummary;
+  message?: string;
 };
 
 export type FileListPayload = {

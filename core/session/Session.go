@@ -4,6 +4,7 @@ import (
 	"github.com/tmc/langchaingo/llms"
 
 	"myai/core/contextmgr"
+	"myai/core/llm"
 )
 
 const systemPrompt = `You are myai, a local AI coding assistant.
@@ -53,10 +54,12 @@ type Session struct {
 	ContextWindowK    int
 	Summary           string
 	CompactedMessages int
+	Usage             llm.TokenUsage
+	LastUsage         llm.TokenUsage
 	Messages          []llms.MessageContent
 }
 
-func newSession(id, model string, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, messages []llms.MessageContent) *Session {
+func newSession(id, model string, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []llms.MessageContent) *Session {
 	if len(messages) == 0 {
 		messages = defaultMessages()
 	}
@@ -70,6 +73,8 @@ func newSession(id, model string, permissionMode PermissionMode, contextWindowK 
 		ContextWindowK:    contextWindowK,
 		Summary:           summary,
 		CompactedMessages: contextmgr.NormalizeCompactedMessages(messages, compactedMessages),
+		Usage:             usage,
+		LastUsage:         lastUsage,
 		Messages:          messages,
 	}
 }
@@ -86,10 +91,17 @@ func (s *Session) AddAssistantMessage(content string) {
 	)
 }
 
+func (s *Session) AddUsage(usage llm.TokenUsage) {
+	s.Usage = s.Usage.Add(usage)
+	s.LastUsage = usage
+}
+
 func (s *Session) Clear() {
 	s.Messages = defaultMessages()
 	s.Summary = ""
 	s.CompactedMessages = 0
+	s.Usage = llm.TokenUsage{}
+	s.LastUsage = llm.TokenUsage{}
 }
 
 func defaultMessages() []llms.MessageContent {

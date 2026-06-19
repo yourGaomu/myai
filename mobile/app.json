@@ -31,6 +31,14 @@
             "usesCleartextTraffic": true
           }
         }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "hidden": true,
+          "style": "dark",
+          "enforceContrast": false
+        }
       ]
     ],
     "extra": {

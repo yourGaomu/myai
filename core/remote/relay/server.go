@@ -90,7 +90,30 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/ws/agent", s.handleAgent)
 	mux.HandleFunc("/ws/client", s.handleClient)
 	mux.Handle("/", s.webHandler())
-	return mux
+	return corsMiddleware(mux)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		} else {
+			w.Header().Add("Vary", "Origin")
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "600")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +226,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionHistoryResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	}
 
@@ -212,7 +235,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
-	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionHistory, protocol.TypeSessionPermissionSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
@@ -240,7 +263,7 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 		return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 	}
 
-	if message.Type == protocol.TypeAssistantDone || message.Type == protocol.TypeSessionListResult || message.Type == protocol.TypeSessionChanged || message.Type == protocol.TypeFileListResult || message.Type == protocol.TypeFileReadResult || message.Type == protocol.TypeChangesListResult || message.Type == protocol.TypeChangeDiffResult || message.Type == protocol.TypeChangeRevertResult || message.Type == protocol.TypeHistoryListResult || message.Type == protocol.TypeHistoryDiffResult || message.Type == protocol.TypeHistoryRevertResult || message.Type == protocol.TypeError {
+	if message.Type == protocol.TypeAssistantDone || message.Type == protocol.TypeSessionListResult || message.Type == protocol.TypeSessionChanged || message.Type == protocol.TypeSessionHistoryResult || message.Type == protocol.TypeSessionPermissionSetResult || message.Type == protocol.TypeSessionContextSetResult || message.Type == protocol.TypeSessionCompactResult || message.Type == protocol.TypeModelListResult || message.Type == protocol.TypeModelSwitchResult || message.Type == protocol.TypeFileListResult || message.Type == protocol.TypeFileReadResult || message.Type == protocol.TypeChangesListResult || message.Type == protocol.TypeChangeDiffResult || message.Type == protocol.TypeChangeRevertResult || message.Type == protocol.TypeHistoryListResult || message.Type == protocol.TypeHistoryDiffResult || message.Type == protocol.TypeHistoryRevertResult || message.Type == protocol.TypeError {
 		defer s.unregisterClient(message.RequestID)
 	}
 	return client.peer.writeJSON(message)

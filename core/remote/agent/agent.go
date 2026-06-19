@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type Agent struct {
 	chatService       *service.ChatService
 	fileService       *files.Service
 	changeService     *changes.Service
+	runtimes          *sessionRuntimeManager
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
 	permissionMu      sync.Mutex
@@ -53,11 +55,43 @@ func New(config Config, chatService *service.ChatService) *Agent {
 		chatService:       chatService,
 		fileService:       fileService,
 		changeService:     changeService,
+		runtimes:          newSessionRuntimeManager(),
 		permissions:       make(map[string]chan bool),
 		permissionTimeout: 60 * time.Second,
 		fileServiceErr:    err,
 		changeServiceErr:  changeErr,
 	}
+}
+
+type sessionRuntime struct {
+	mu sync.Mutex
+}
+
+type sessionRuntimeManager struct {
+	mu       sync.Mutex
+	sessions map[string]*sessionRuntime
+}
+
+func newSessionRuntimeManager() *sessionRuntimeManager {
+	return &sessionRuntimeManager{
+		sessions: make(map[string]*sessionRuntime),
+	}
+}
+
+func (m *sessionRuntimeManager) get(sessionID string) *sessionRuntime {
+	if sessionID == "" {
+		sessionID = "__default__"
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime := m.sessions[sessionID]
+	if runtime == nil {
+		runtime = &sessionRuntime{}
+		m.sessions[sessionID] = runtime
+	}
+	return runtime
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -186,6 +220,18 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionNew(ctx, conn, message)
 	case protocol.TypeSessionLoad:
 		return a.handleSessionLoad(ctx, conn, message)
+	case protocol.TypeSessionHistory:
+		return a.handleSessionHistory(ctx, conn, message)
+	case protocol.TypeSessionPermissionSet:
+		return a.handleSessionPermissionSet(ctx, conn, message)
+	case protocol.TypeSessionContextSet:
+		return a.handleSessionContextSet(ctx, conn, message)
+	case protocol.TypeSessionCompact:
+		return a.handleSessionCompact(ctx, conn, message)
+	case protocol.TypeModelList:
+		return a.handleModelList(ctx, conn, message)
+	case protocol.TypeModelSwitch:
+		return a.handleModelSwitch(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:
@@ -210,8 +256,13 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 }
 
 func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) {
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
+	sessionID := strings.TrimSpace(message.SessionID)
+	if sessionID == "" {
+		sessionID = a.chatService.CurrentSessionID()
+	}
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
 
 	if err := a.handleUserMessage(ctx, conn, message); err != nil {
 		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
@@ -281,6 +332,222 @@ func (a *Agent) handleSessionLoad(ctx context.Context, conn *websocket.Conn, mes
 		return err
 	}
 	return a.writeSessionChanged(ctx, conn, message.RequestID)
+}
+
+func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionHistoryPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session history failed: %w", err)
+	}
+	sessionID := payload.SessionID
+	if sessionID == "" {
+		sessionID = message.SessionID
+	}
+	if sessionID == "" {
+		sessionID = a.chatService.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	records, err := a.chatService.ListSessionMessages(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	payloadResult := protocol.SessionHistoryResultPayload{
+		SessionID: sessionID,
+		Messages:  sessionHistoryMessages(records),
+		Count:     len(records),
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryResult, message.RequestID, sessionID, payloadResult)
+}
+
+func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload := a.modelListPayload()
+	return a.writeRemoteMessage(conn, protocol.TypeModelListResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
+	list, err := a.sessionListPayload(ctx)
+	if err != nil {
+		return protocol.SessionSettingsResultPayload{}, err
+	}
+
+	current := findSessionSummary(list.Sessions, sessionID)
+	if current.ID == "" {
+		current = protocol.SessionSummary{
+			ID:             sessionID,
+			Model:          a.chatService.CurrentModelID(),
+			PermissionMode: string(a.chatService.CurrentPermissionMode()),
+			ContextWindowK: a.chatService.CurrentContextWindowK(),
+			Usage:          tokenUsagePayloadPtr(a.chatService.CurrentUsage()),
+			LastUsage:      tokenUsagePayloadPtr(a.chatService.CurrentLastUsage()),
+		}
+	}
+
+	if current.ID != "" {
+		if session, err := a.chatService.ContextInfoForSession(ctx, current.ID); err == nil {
+			info = session
+		}
+	}
+
+	return protocol.SessionSettingsResultPayload{
+		CurrentSessionID: list.CurrentSessionID,
+		Session:          current,
+		Sessions:         list.Sessions,
+		Context:          contextInfoPayload(info),
+		Message:          message,
+	}, nil
+}
+
+func (a *Agent) handleSessionPermissionSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionPermissionSetPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session permission set failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.SetPermissionModeForSession(ctx, sessionID, payload.Mode); err != nil {
+		return err
+	}
+	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	result, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Permission mode set to %s.", payload.Mode))
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionPermissionSetResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionContextSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionContextSetPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session context set failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.SetContextWindowKForSession(ctx, sessionID, payload.WindowK); err != nil {
+		return err
+	}
+	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	result, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Context window set to %dK.", payload.WindowK))
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionContextSetResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionCompact(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionCompactPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session compact failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	info, err := a.chatService.CompactSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	result, err := a.sessionSettingsPayload(ctx, sessionID, info, "Context compacted.")
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionCompactResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleModelSwitch(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.ModelSwitchPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode model switch failed: %w", err)
+	}
+	sessionID := resolveSessionID("", message.SessionID, a.chatService.CurrentSessionID())
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.SwitchModelForSession(ctx, sessionID, payload.ModelID); err != nil {
+		return err
+	}
+
+	info, _ := a.chatService.ContextInfoForSession(ctx, sessionID)
+	sessionPayload, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Switched model to %s.", payload.ModelID))
+	if err != nil {
+		return err
+	}
+	result := protocol.ModelSwitchResultPayload{
+		CurrentModelID: payload.ModelID,
+		Models:         modelSummaries(a.chatService.ListModels()),
+		Session:        sessionPayload.Session,
+		Message:        sessionPayload.Message,
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeModelSwitchResult, message.RequestID, sessionID, result)
+}
+
+func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
+	return protocol.ContextInfo{
+		WindowK:           info.WindowK,
+		FullTokens:        info.FullTokens,
+		SelectedTokens:    info.SelectedTokens,
+		SummaryTokens:     info.SummaryTokens,
+		FullMessages:      info.FullMessages,
+		SelectedMessages:  info.SelectedMessages,
+		CompactedMessages: info.CompactedMessages,
+		HasSummary:        info.HasSummary,
+		Truncated:         info.Truncated,
+	}
+}
+
+func resolveSessionID(payloadSessionID string, messageSessionID string, currentSessionID string) string {
+	sessionID := strings.TrimSpace(payloadSessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(messageSessionID)
+	}
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(currentSessionID)
+	}
+	return sessionID
 }
 
 func (a *Agent) handleFileList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -419,6 +686,8 @@ func (a *Agent) sessionChangedPayload(ctx context.Context) (protocol.SessionChan
 			Model:          a.chatService.CurrentModelID(),
 			PermissionMode: string(a.chatService.CurrentPermissionMode()),
 			ContextWindowK: a.chatService.CurrentContextWindowK(),
+			Usage:          tokenUsagePayloadPtr(a.chatService.CurrentUsage()),
+			LastUsage:      tokenUsagePayloadPtr(a.chatService.CurrentLastUsage()),
 		}
 	}
 
@@ -427,6 +696,13 @@ func (a *Agent) sessionChangedPayload(ctx context.Context) (protocol.SessionChan
 		Session:          current,
 		Sessions:         list.Sessions,
 	}, nil
+}
+
+func (a *Agent) modelListPayload() protocol.ModelListResultPayload {
+	return protocol.ModelListResultPayload{
+		CurrentModelID: a.chatService.CurrentModelID(),
+		Models:         modelSummaries(a.chatService.ListModels()),
+	}
 }
 
 func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -438,14 +714,12 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		return fmt.Errorf("user message content is empty")
 	}
 
-	sessionID := message.SessionID
-	if sessionID != "" && sessionID != a.chatService.CurrentSessionID() {
-		if err := a.chatService.LoadSession(ctx, sessionID); err != nil {
-			return err
-		}
-	}
+	sessionID := strings.TrimSpace(message.SessionID)
 	if sessionID == "" {
 		sessionID = a.chatService.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
 	}
 
 	sendErrCh := make(chan error, 1)
@@ -458,7 +732,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		}
 	}
 
-	response, err := a.chatService.SendMessageStream(ctx, payload.Content, llm.ChatStreamHandler{
+	response, err := a.chatService.SendMessageStreamForSession(ctx, sessionID, payload.Content, llm.ChatStreamHandler{
 		OnAnswer: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Content: text})
 		},
@@ -483,7 +757,10 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	default:
 	}
 
-	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{Content: response.Result.Content})
+	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
+		Content: response.Result.Content,
+		Usage:   tokenUsagePayload(response.Result.Usage),
+	})
 }
 
 func sessionSummaries(sessions []data.SessionRecord) []protocol.SessionSummary {
@@ -495,11 +772,108 @@ func sessionSummaries(sessions []data.SessionRecord) []protocol.SessionSummary {
 			Model:          session.Model,
 			PermissionMode: session.PermissionMode,
 			ContextWindowK: session.ContextWindowK,
+			Usage:          tokenUsageRecordToPayload(session.Usage),
+			LastUsage:      tokenUsageRecordToPayload(session.LastUsage),
 			CreatedAt:      session.CreatedAt,
 			UpdatedAt:      session.UpdatedAt,
 		})
 	}
 	return summaries
+}
+
+func sessionHistoryMessages(records []data.MessageRecord) []protocol.SessionHistoryMessage {
+	messages := make([]protocol.SessionHistoryMessage, 0, len(records))
+	for _, record := range records {
+		messages = append(messages, protocol.SessionHistoryMessage{
+			ID:            record.ID,
+			Role:          record.Role,
+			Content:       record.Content,
+			Reasoning:     record.Reasoning,
+			ToolCallID:    record.ToolCallID,
+			ToolName:      record.ToolName,
+			ToolArguments: record.ToolArguments,
+			ToolError:     record.ToolError,
+			Usage:         tokenUsageRecordFromMessage(record),
+			CreatedAt:     record.CreatedAt,
+		})
+	}
+	return messages
+}
+
+func tokenUsageRecordFromMessage(record data.MessageRecord) protocol.TokenUsage {
+	return protocol.TokenUsage{
+		PromptTokens:       record.PromptTokens,
+		CompletionTokens:   record.CompletionTokens,
+		TotalTokens:        record.TotalTokens,
+		ReasoningTokens:    record.ReasoningTokens,
+		PromptCachedTokens: record.PromptCachedTokens,
+		Available: record.PromptTokens > 0 ||
+			record.CompletionTokens > 0 ||
+			record.TotalTokens > 0 ||
+			record.ReasoningTokens > 0 ||
+			record.PromptCachedTokens > 0,
+	}
+}
+
+func tokenUsageRecordToPayload(usage *data.TokenUsageRecord) *protocol.TokenUsage {
+	if usage == nil {
+		return nil
+	}
+	payload := protocol.TokenUsage{
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		ReasoningTokens:    usage.ReasoningTokens,
+		PromptCachedTokens: usage.PromptCachedTokens,
+		Available:          usage.Available,
+	}
+	if tokenUsagePayloadIsZero(payload) {
+		return nil
+	}
+	return &payload
+}
+
+func tokenUsagePayloadPtr(usage llm.TokenUsage) *protocol.TokenUsage {
+	payload := tokenUsagePayload(usage)
+	if tokenUsagePayloadIsZero(payload) {
+		return nil
+	}
+	return &payload
+}
+
+func tokenUsagePayloadIsZero(usage protocol.TokenUsage) bool {
+	return !usage.Available &&
+		usage.PromptTokens == 0 &&
+		usage.CompletionTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.PromptCachedTokens == 0
+}
+
+func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
+	summaries := make([]protocol.ModelSummary, 0, len(models))
+	for _, model := range models {
+		summaries = append(summaries, protocol.ModelSummary{
+			ID:        model.ID,
+			Name:      model.Name,
+			Provider:  model.Provider,
+			ModelName: model.ModelName,
+			Enabled:   model.Enabled,
+			IsDefault: model.IsDefault,
+		})
+	}
+	return summaries
+}
+
+func tokenUsagePayload(usage llm.TokenUsage) protocol.TokenUsage {
+	return protocol.TokenUsage{
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		ReasoningTokens:    usage.ReasoningTokens,
+		PromptCachedTokens: usage.PromptCachedTokens,
+		Available:          usage.Available,
+	}
 }
 
 func findSessionSummary(sessions []protocol.SessionSummary, sessionID string) protocol.SessionSummary {

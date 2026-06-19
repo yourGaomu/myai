@@ -101,6 +101,185 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 	if forwardedToClient.RequestID != "session-req-1" {
 		t.Fatalf("expected request id session-req-1, got %s", forwardedToClient.RequestID)
 	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionHistory,
+		RequestID:   "session-history-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedHistoryToAgent := readTestMessage(t, agentConn, protocol.TypeSessionHistory)
+	if forwardedHistoryToAgent.RequestID != "session-history-1" {
+		t.Fatalf("expected request id session-history-1, got %s", forwardedHistoryToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionHistoryResult,
+		RequestID: "session-history-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedHistoryToClient := readTestMessage(t, clientConn, protocol.TypeSessionHistoryResult)
+	if forwardedHistoryToClient.RequestID != "session-history-1" {
+		t.Fatalf("expected request id session-history-1, got %s", forwardedHistoryToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionPermissionSet,
+		RequestID:   "session-permission-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedPermissionToAgent := readTestMessage(t, agentConn, protocol.TypeSessionPermissionSet)
+	if forwardedPermissionToAgent.RequestID != "session-permission-1" {
+		t.Fatalf("expected request id session-permission-1, got %s", forwardedPermissionToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionPermissionSetResult,
+		RequestID: "session-permission-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedPermissionToClient := readTestMessage(t, clientConn, protocol.TypeSessionPermissionSetResult)
+	if forwardedPermissionToClient.RequestID != "session-permission-1" {
+		t.Fatalf("expected request id session-permission-1, got %s", forwardedPermissionToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionContextSet,
+		RequestID:   "session-context-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedContextToAgent := readTestMessage(t, agentConn, protocol.TypeSessionContextSet)
+	if forwardedContextToAgent.RequestID != "session-context-1" {
+		t.Fatalf("expected request id session-context-1, got %s", forwardedContextToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionContextSetResult,
+		RequestID: "session-context-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedContextToClient := readTestMessage(t, clientConn, protocol.TypeSessionContextSetResult)
+	if forwardedContextToClient.RequestID != "session-context-1" {
+		t.Fatalf("expected request id session-context-1, got %s", forwardedContextToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionCompact,
+		RequestID:   "session-compact-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedCompactToAgent := readTestMessage(t, agentConn, protocol.TypeSessionCompact)
+	if forwardedCompactToAgent.RequestID != "session-compact-1" {
+		t.Fatalf("expected request id session-compact-1, got %s", forwardedCompactToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionCompactResult,
+		RequestID: "session-compact-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedCompactToClient := readTestMessage(t, clientConn, protocol.TypeSessionCompactResult)
+	if forwardedCompactToClient.RequestID != "session-compact-1" {
+		t.Fatalf("expected request id session-compact-1, got %s", forwardedCompactToClient.RequestID)
+	}
+}
+
+func TestRelayForwardsModelMessages(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeModelList,
+		RequestID:   "model-list-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedListToAgent := readTestMessage(t, agentConn, protocol.TypeModelList)
+	if forwardedListToAgent.RequestID != "model-list-1" {
+		t.Fatalf("expected request id model-list-1, got %s", forwardedListToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeModelListResult,
+		RequestID: "model-list-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedListToClient := readTestMessage(t, clientConn, protocol.TypeModelListResult)
+	if forwardedListToClient.RequestID != "model-list-1" {
+		t.Fatalf("expected request id model-list-1, got %s", forwardedListToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeModelSwitch,
+		RequestID:   "model-switch-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedSwitchToAgent := readTestMessage(t, agentConn, protocol.TypeModelSwitch)
+	if forwardedSwitchToAgent.RequestID != "model-switch-1" {
+		t.Fatalf("expected request id model-switch-1, got %s", forwardedSwitchToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeModelSwitchResult,
+		RequestID: "model-switch-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedSwitchToClient := readTestMessage(t, clientConn, protocol.TypeModelSwitchResult)
+	if forwardedSwitchToClient.RequestID != "model-switch-1" {
+		t.Fatalf("expected request id model-switch-1, got %s", forwardedSwitchToClient.RequestID)
+	}
 }
 
 func TestRelayForwardsFileMessages(t *testing.T) {
@@ -351,6 +530,36 @@ func TestRelayPairsAgentByBindCode(t *testing.T) {
 	}
 	if pair.ClientToken == "" {
 		t.Fatalf("expected client token")
+	}
+}
+
+func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	request, err := http.NewRequest(http.MethodOptions, testServer.URL+"/pair", nil)
+	if err != nil {
+		t.Fatalf("new preflight request failed: %v", err)
+	}
+	request.Header.Set("Origin", "http://localhost:19006")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type")
+
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("send preflight request failed: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, response.StatusCode)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:19006" {
+		t.Fatalf("expected CORS origin http://localhost:19006, got %q", got)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "content-type") {
+		t.Fatalf("expected CORS headers to include content-type, got %q", got)
 	}
 }
 

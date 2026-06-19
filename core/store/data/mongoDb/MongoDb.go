@@ -59,6 +59,8 @@ func (m *MongoStore) SaveSession(ctx context.Context, session data.SessionRecord
 				"compacted_messages": session.CompactedMessages,
 				"compacted_at":       session.CompactedAt,
 				"title":              session.Title,
+				"usage":              session.Usage,
+				"last_usage":         session.LastUsage,
 				"updated_at":         session.UpdatedAt,
 			},
 			"$setOnInsert": bson.M{

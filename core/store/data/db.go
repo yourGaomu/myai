@@ -6,16 +6,27 @@ import (
 )
 
 type SessionRecord struct {
-	ID                string     `bson:"_id" json:"id"`
-	Model             string     `bson:"model" json:"model"`
-	PermissionMode    string     `bson:"permission_mode" json:"permission_mode"`
-	ContextWindowK    int        `bson:"context_window_k" json:"context_window_k"`
-	Summary           string     `bson:"summary,omitempty" json:"summary,omitempty"`
-	CompactedMessages int        `bson:"compacted_messages,omitempty" json:"compacted_messages,omitempty"`
-	CompactedAt       *time.Time `bson:"compacted_at,omitempty" json:"compacted_at,omitempty"`
-	Title             string     `bson:"title" json:"title"`
-	CreatedAt         time.Time  `bson:"created_at" json:"created_at"`
-	UpdatedAt         time.Time  `bson:"updated_at" json:"updated_at"`
+	ID                string            `bson:"_id" json:"id"`
+	Model             string            `bson:"model" json:"model"`
+	PermissionMode    string            `bson:"permission_mode" json:"permission_mode"`
+	ContextWindowK    int               `bson:"context_window_k" json:"context_window_k"`
+	Summary           string            `bson:"summary,omitempty" json:"summary,omitempty"`
+	CompactedMessages int               `bson:"compacted_messages,omitempty" json:"compacted_messages,omitempty"`
+	CompactedAt       *time.Time        `bson:"compacted_at,omitempty" json:"compacted_at,omitempty"`
+	Title             string            `bson:"title" json:"title"`
+	Usage             *TokenUsageRecord `bson:"usage,omitempty" json:"usage,omitempty"`
+	LastUsage         *TokenUsageRecord `bson:"last_usage,omitempty" json:"last_usage,omitempty"`
+	CreatedAt         time.Time         `bson:"created_at" json:"created_at"`
+	UpdatedAt         time.Time         `bson:"updated_at" json:"updated_at"`
+}
+
+type TokenUsageRecord struct {
+	PromptTokens       int  `bson:"prompt_tokens,omitempty" json:"prompt_tokens,omitempty"`
+	CompletionTokens   int  `bson:"completion_tokens,omitempty" json:"completion_tokens,omitempty"`
+	TotalTokens        int  `bson:"total_tokens,omitempty" json:"total_tokens,omitempty"`
+	ReasoningTokens    int  `bson:"reasoning_tokens,omitempty" json:"reasoning_tokens,omitempty"`
+	PromptCachedTokens int  `bson:"prompt_cached_tokens,omitempty" json:"prompt_cached_tokens,omitempty"`
+	Available          bool `bson:"available,omitempty" json:"available,omitempty"`
 }
 
 type ModelConfig struct {
