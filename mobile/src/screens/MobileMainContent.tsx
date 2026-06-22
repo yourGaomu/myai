@@ -25,6 +25,7 @@ export function MobileMainContent({
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
           clientToken={common.clientToken}
+          compact={settings.compact}
           connected={settings.connected}
           context={settings.context}
           currentModelID={settings.currentModelID}
@@ -34,6 +35,7 @@ export function MobileMainContent({
           onBindCodeChange={settings.onBindCodeChange}
           onClose={settings.onCloseSettings}
           onConnect={settings.onConnect}
+          onDeleteSession={settings.onDeleteSession}
           onDeviceIDChange={settings.onDeviceIDChange}
           onLoadSession={settings.onLoadSession}
           onNewSession={settings.onNewSession}
@@ -124,7 +126,11 @@ export function MobileMainContent({
         <SessionsPanel
           buttonFeedback={common.buttonFeedback}
           clientToken={common.clientToken}
+          deletedSessions={sessions.deletedSessions}
+          onDeleteSession={sessions.onDeleteSession}
           onNewSession={settings.onNewSession}
+          onRefreshDeletedSessions={sessions.onRefreshDeletedSessions}
+          onRestoreSession={sessions.onRestoreSession}
           onSelectSession={sessions.onSelectSession}
           pendingSessions={common.pendingActions.sessions}
           sessionID={settings.sessionID}

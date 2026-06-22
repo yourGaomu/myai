@@ -1,6 +1,8 @@
 package contextmgr
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"unicode"
@@ -12,6 +14,8 @@ const (
 	DefaultWindowK = 16
 	MinWindowK     = 4
 	MaxWindowK     = 256
+
+	DefaultCompactTriggerRatio = 0.70
 )
 
 type Info struct {
@@ -19,11 +23,22 @@ type Info struct {
 	FullTokens        int
 	SelectedTokens    int
 	SummaryTokens     int
+	PrefixTokens      int
+	CacheableTokens   int
 	FullMessages      int
 	SelectedMessages  int
 	CompactedMessages int
 	HasSummary        bool
 	Truncated         bool
+	SummaryVersion    int
+	SummaryHash       string
+	PrefixHash        string
+}
+
+type Snapshot struct {
+	Info     Info
+	Messages []llms.MessageContent
+	Prefix   []llms.MessageContent
 }
 
 func NormalizeWindowK(windowK int) int {
@@ -57,9 +72,39 @@ func Analyze(messages []llms.MessageContent, windowK int) (Info, []llms.MessageC
 }
 
 func AnalyzeWithSummary(messages []llms.MessageContent, summary string, compactedMessages int, windowK int) (Info, []llms.MessageContent) {
+	snapshot := BuildSnapshot(messages, summary, compactedMessages, windowK)
+	return snapshot.Info, snapshot.Messages
+}
+
+func BuildSnapshot(messages []llms.MessageContent, summary string, compactedMessages int, windowK int) Snapshot {
 	summary = strings.TrimSpace(summary)
 	base, recent := buildBaseAndRecent(messages, summary, compactedMessages)
-	return analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
+	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
+	info.SummaryVersion = info.CompactedMessages
+	info.SummaryHash = StableTextHash(summary)
+	info.PrefixTokens = EstimateMessagesTokens(base)
+	info.CacheableTokens = info.PrefixTokens
+	info.PrefixHash = StableMessagesHash(base)
+
+	return Snapshot{
+		Info:     info,
+		Messages: selected,
+		Prefix:   base,
+	}
+}
+
+func ShouldCompact(info Info, triggerRatio float64) bool {
+	if info.WindowK <= 0 {
+		return false
+	}
+	if triggerRatio <= 0 {
+		triggerRatio = DefaultCompactTriggerRatio
+	}
+	budget := info.WindowK * 1000
+	if budget <= 0 {
+		return false
+	}
+	return info.Truncated || float64(info.SelectedTokens) >= float64(budget)*triggerRatio
 }
 
 func CompactSplit(messages []llms.MessageContent, compactedMessages int, keepChunks int) ([]llms.MessageContent, []llms.MessageContent, int) {
@@ -241,6 +286,29 @@ func EstimateMessagesTokens(messages []llms.MessageContent) int {
 	return total
 }
 
+func StableMessagesHash(messages []llms.MessageContent) string {
+	var builder strings.Builder
+	for _, message := range messages {
+		builder.WriteString(string(message.Role))
+		builder.WriteString("\n")
+		for _, part := range message.Parts {
+			writeStablePart(&builder, part)
+			builder.WriteString("\n")
+		}
+		builder.WriteString("---\n")
+	}
+	return StableTextHash(builder.String())
+}
+
+func StableTextHash(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
 func splitSystemMessage(messages []llms.MessageContent) ([]llms.MessageContent, []llms.MessageContent) {
 	if len(messages) == 0 || messages[0].Role != llms.ChatMessageTypeSystem {
 		return nil, messages
@@ -287,6 +355,34 @@ func estimatePartTokens(part llms.ContentPart) int {
 		return EstimateTextTokens(value.ToolCallID + " " + value.Name + " " + value.Content)
 	default:
 		return EstimateTextTokens(fmt.Sprint(value))
+	}
+}
+
+func writeStablePart(builder *strings.Builder, part llms.ContentPart) {
+	switch value := part.(type) {
+	case llms.TextContent:
+		builder.WriteString("text:")
+		builder.WriteString(value.Text)
+	case llms.ToolCall:
+		builder.WriteString("tool_call:")
+		builder.WriteString(value.ID)
+		builder.WriteString(":")
+		builder.WriteString(value.Type)
+		if value.FunctionCall != nil {
+			builder.WriteString(":")
+			builder.WriteString(value.FunctionCall.Name)
+			builder.WriteString(":")
+			builder.WriteString(value.FunctionCall.Arguments)
+		}
+	case llms.ToolCallResponse:
+		builder.WriteString("tool_result:")
+		builder.WriteString(value.ToolCallID)
+		builder.WriteString(":")
+		builder.WriteString(value.Name)
+		builder.WriteString(":")
+		builder.WriteString(value.Content)
+	default:
+		builder.WriteString(fmt.Sprint(value))
 	}
 }
 

@@ -209,6 +209,60 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 	if forwardedCompactToClient.RequestID != "session-compact-1" {
 		t.Fatalf("expected request id session-compact-1, got %s", forwardedCompactToClient.RequestID)
 	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionDelete,
+		RequestID:   "session-delete-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedDeleteToAgent := readTestMessage(t, agentConn, protocol.TypeSessionDelete)
+	if forwardedDeleteToAgent.RequestID != "session-delete-1" {
+		t.Fatalf("expected request id session-delete-1, got %s", forwardedDeleteToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionDeleteResult,
+		RequestID: "session-delete-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedDeleteToClient := readTestMessage(t, clientConn, protocol.TypeSessionDeleteResult)
+	if forwardedDeleteToClient.RequestID != "session-delete-1" {
+		t.Fatalf("expected request id session-delete-1, got %s", forwardedDeleteToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionRestore,
+		RequestID:   "session-restore-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedRestoreToAgent := readTestMessage(t, agentConn, protocol.TypeSessionRestore)
+	if forwardedRestoreToAgent.RequestID != "session-restore-1" {
+		t.Fatalf("expected request id session-restore-1, got %s", forwardedRestoreToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionRestoreResult,
+		RequestID: "session-restore-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedRestoreToClient := readTestMessage(t, clientConn, protocol.TypeSessionRestoreResult)
+	if forwardedRestoreToClient.RequestID != "session-restore-1" {
+		t.Fatalf("expected request id session-restore-1, got %s", forwardedRestoreToClient.RequestID)
+	}
 }
 
 func TestRelayForwardsModelMessages(t *testing.T) {

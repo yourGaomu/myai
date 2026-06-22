@@ -20,6 +20,10 @@ const (
 	TypeSessionListResult          MessageType = "session_list_result"
 	TypeSessionNew                 MessageType = "session_new"
 	TypeSessionLoad                MessageType = "session_load"
+	TypeSessionDelete              MessageType = "session_delete"
+	TypeSessionDeleteResult        MessageType = "session_delete_result"
+	TypeSessionRestore             MessageType = "session_restore"
+	TypeSessionRestoreResult       MessageType = "session_restore_result"
 	TypeSessionChanged             MessageType = "session_changed"
 	TypeSessionHistory             MessageType = "session_history"
 	TypeSessionHistoryResult       MessageType = "session_history_result"
@@ -77,8 +81,10 @@ type AssistantDeltaPayload struct {
 }
 
 type AssistantDonePayload struct {
-	Content string     `json:"content"`
-	Usage   TokenUsage `json:"usage,omitempty"`
+	Content string      `json:"content"`
+	Usage   TokenUsage  `json:"usage,omitempty"`
+	Context ContextInfo `json:"context,omitempty"`
+	Compact CompactInfo `json:"compact,omitempty"`
 }
 
 type TokenUsage struct {
@@ -105,7 +111,19 @@ type PermissionResultPayload struct {
 	Allowed bool `json:"allowed"`
 }
 
+type SessionListPayload struct {
+	IncludeDeleted bool `json:"include_deleted,omitempty"`
+}
+
 type SessionLoadPayload struct {
+	SessionID string `json:"session_id"`
+}
+
+type SessionDeletePayload struct {
+	SessionID string `json:"session_id"`
+}
+
+type SessionRestorePayload struct {
 	SessionID string `json:"session_id"`
 }
 
@@ -117,6 +135,8 @@ type SessionSummary struct {
 	ContextWindowK int         `json:"context_window_k"`
 	Usage          *TokenUsage `json:"usage,omitempty"`
 	LastUsage      *TokenUsage `json:"last_usage,omitempty"`
+	Deleted        bool        `json:"deleted,omitempty"`
+	DeletedAt      *time.Time  `json:"deleted_at,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 }
@@ -124,6 +144,7 @@ type SessionSummary struct {
 type SessionListResultPayload struct {
 	CurrentSessionID string           `json:"current_session_id"`
 	Sessions         []SessionSummary `json:"sessions"`
+	IncludeDeleted   bool             `json:"include_deleted,omitempty"`
 }
 
 type SessionChangedPayload struct {
@@ -170,15 +191,34 @@ type SessionCompactPayload struct {
 }
 
 type ContextInfo struct {
-	WindowK           int  `json:"window_k"`
-	FullTokens        int  `json:"full_tokens"`
-	SelectedTokens    int  `json:"selected_tokens"`
-	SummaryTokens     int  `json:"summary_tokens"`
-	FullMessages      int  `json:"full_messages"`
-	SelectedMessages  int  `json:"selected_messages"`
-	CompactedMessages int  `json:"compacted_messages"`
-	HasSummary        bool `json:"has_summary"`
-	Truncated         bool `json:"truncated"`
+	WindowK           int    `json:"window_k"`
+	FullTokens        int    `json:"full_tokens"`
+	SelectedTokens    int    `json:"selected_tokens"`
+	SummaryTokens     int    `json:"summary_tokens"`
+	PrefixTokens      int    `json:"prefix_tokens"`
+	CacheableTokens   int    `json:"cacheable_tokens"`
+	FullMessages      int    `json:"full_messages"`
+	SelectedMessages  int    `json:"selected_messages"`
+	CompactedMessages int    `json:"compacted_messages"`
+	HasSummary        bool   `json:"has_summary"`
+	Truncated         bool   `json:"truncated"`
+	SummaryVersion    int    `json:"summary_version"`
+	SummaryHash       string `json:"summary_hash,omitempty"`
+	PrefixHash        string `json:"prefix_hash,omitempty"`
+}
+
+type CompactInfo struct {
+	Triggered         bool   `json:"triggered,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	BeforeTokens      int    `json:"before_tokens,omitempty"`
+	AfterTokens       int    `json:"after_tokens,omitempty"`
+	NewMessages       int    `json:"new_messages,omitempty"`
+	CompactedMessages int    `json:"compacted_messages,omitempty"`
+	SummaryTokens     int    `json:"summary_tokens,omitempty"`
+	SummaryVersion    int    `json:"summary_version,omitempty"`
+	SummaryHash       string `json:"summary_hash,omitempty"`
+	PrefixHash        string `json:"prefix_hash,omitempty"`
+	CacheableTokens   int    `json:"cacheable_tokens,omitempty"`
 }
 
 type SessionSettingsResultPayload struct {

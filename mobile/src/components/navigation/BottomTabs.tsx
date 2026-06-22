@@ -39,7 +39,7 @@ export function BottomTabs({
         <Text style={[styles.segmentText, viewMode === "sessions" && styles.segmentTextActive]}>会话</Text>
       </Pressable>
       <Pressable onPress={onSettingsPress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "settings" && styles.segmentActive], pressed)}>
-        <Text style={[styles.segmentText, viewMode === "settings" && styles.segmentTextActive]}>⚙</Text>
+        <Text style={[styles.segmentIconText, viewMode === "settings" && styles.segmentTextActive]}>⚙</Text>
       </Pressable>
     </View>
   );
@@ -58,14 +58,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 6,
     flex: 1,
-    paddingVertical: 9,
+    justifyContent: "center",
+    minHeight: 38,
+    paddingVertical: 7,
   },
   segmentActive: {
     backgroundColor: "#ffd84f",
   },
   segmentText: {
     color: "#6c665f",
+    fontSize: 13,
     fontWeight: "900",
+  },
+  segmentIconText: {
+    color: "#6c665f",
+    fontSize: 16,
+    fontWeight: "900",
+    lineHeight: 18,
   },
   segmentTextActive: {
     color: "#12100e",

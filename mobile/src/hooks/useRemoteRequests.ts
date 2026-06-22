@@ -71,6 +71,21 @@ export function useRemoteRequests({
     return true;
   }, [clearSessions, clientToken, sendEnvelope, startPending, stopPending]);
 
+  const requestDeletedSessions = useCallback(() => {
+    if (!clientToken) {
+      return false;
+    }
+    startPending("sessions");
+    if (!sendEnvelope("session_list", {
+      request_id: newRequestID(),
+      payload: { include_deleted: true },
+    })) {
+      stopPending("sessions");
+      return false;
+    }
+    return true;
+  }, [clientToken, sendEnvelope, startPending, stopPending]);
+
   const requestModels = useCallback(() => {
     if (!clientToken) {
       clearModels();
@@ -178,6 +193,7 @@ export function useRemoteRequests({
     requestFiles,
     requestHistory,
     requestModels,
+    requestDeletedSessions,
     requestSessionHistory,
     requestSessions,
   };

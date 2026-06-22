@@ -10,6 +10,10 @@ export type MessageType =
   | "session_list_result"
   | "session_new"
   | "session_load"
+  | "session_delete"
+  | "session_delete_result"
+  | "session_restore"
+  | "session_restore_result"
   | "session_changed"
   | "session_history"
   | "session_history_result"
@@ -64,6 +68,8 @@ export type AssistantDeltaPayload = {
 export type AssistantDonePayload = {
   content?: string;
   usage?: TokenUsage;
+  context?: ContextInfo;
+  compact?: CompactInfo;
 };
 
 export type TokenUsage = {
@@ -102,6 +108,8 @@ export type SessionSummary = {
   context_window_k?: number;
   usage?: TokenUsage;
   last_usage?: TokenUsage;
+  deleted?: boolean;
+  deleted_at?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -109,6 +117,7 @@ export type SessionSummary = {
 export type SessionListResultPayload = {
   current_session_id?: string;
   sessions?: SessionSummary[];
+  include_deleted?: boolean;
 };
 
 export type SessionChangedPayload = SessionListResultPayload & {
@@ -117,6 +126,14 @@ export type SessionChangedPayload = SessionListResultPayload & {
 
 export type SessionHistoryPayload = {
   session_id?: string;
+};
+
+export type SessionDeletePayload = {
+  session_id: string;
+};
+
+export type SessionRestorePayload = {
+  session_id: string;
 };
 
 export type SessionHistoryMessage = {
@@ -157,11 +174,30 @@ export type ContextInfo = {
   full_tokens?: number;
   selected_tokens?: number;
   summary_tokens?: number;
+  prefix_tokens?: number;
+  cacheable_tokens?: number;
   full_messages?: number;
   selected_messages?: number;
   compacted_messages?: number;
   has_summary?: boolean;
   truncated?: boolean;
+  summary_version?: number;
+  summary_hash?: string;
+  prefix_hash?: string;
+};
+
+export type CompactInfo = {
+  triggered?: boolean;
+  reason?: string;
+  before_tokens?: number;
+  after_tokens?: number;
+  new_messages?: number;
+  compacted_messages?: number;
+  summary_tokens?: number;
+  summary_version?: number;
+  summary_hash?: string;
+  prefix_hash?: string;
+  cacheable_tokens?: number;
 };
 
 export type SessionSettingsResultPayload = {

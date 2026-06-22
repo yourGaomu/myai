@@ -220,6 +220,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionNew(ctx, conn, message)
 	case protocol.TypeSessionLoad:
 		return a.handleSessionLoad(ctx, conn, message)
+	case protocol.TypeSessionDelete:
+		return a.handleSessionDelete(ctx, conn, message)
+	case protocol.TypeSessionRestore:
+		return a.handleSessionRestore(ctx, conn, message)
 	case protocol.TypeSessionHistory:
 		return a.handleSessionHistory(ctx, conn, message)
 	case protocol.TypeSessionPermissionSet:
@@ -292,10 +296,15 @@ func (a *Agent) handlePermissionResult(message protocol.Message) error {
 }
 
 func (a *Agent) handleSessionList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	request, err := protocol.DecodePayload[protocol.SessionListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session list failed: %w", err)
+	}
+
 	a.requestMu.Lock()
 	defer a.requestMu.Unlock()
 
-	payload, err := a.sessionListPayload(ctx)
+	payload, err := a.sessionListPayload(ctx, request.IncludeDeleted)
 	if err != nil {
 		return err
 	}
@@ -332,6 +341,60 @@ func (a *Agent) handleSessionLoad(ctx context.Context, conn *websocket.Conn, mes
 		return err
 	}
 	return a.writeSessionChanged(ctx, conn, message.RequestID)
+}
+
+func (a *Agent) handleSessionDelete(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionDeletePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session delete failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.DeleteSession(ctx, sessionID); err != nil {
+		return err
+	}
+	payloadResult, err := a.sessionChangedPayload(ctx)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionDeleteResult, message.RequestID, payloadResult.CurrentSessionID, payloadResult)
+}
+
+func (a *Agent) handleSessionRestore(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionRestorePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session restore failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, "")
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.RestoreSession(ctx, sessionID); err != nil {
+		return err
+	}
+	payloadResult, err := a.sessionChangedPayload(ctx)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionRestoreResult, message.RequestID, payloadResult.CurrentSessionID, payloadResult)
 }
 
 func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -372,7 +435,7 @@ func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, messa
 }
 
 func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
-	list, err := a.sessionListPayload(ctx)
+	list, err := a.sessionListPayload(ctx, false)
 	if err != nil {
 		return protocol.SessionSettingsResultPayload{}, err
 	}
@@ -531,11 +594,32 @@ func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
 		FullTokens:        info.FullTokens,
 		SelectedTokens:    info.SelectedTokens,
 		SummaryTokens:     info.SummaryTokens,
+		PrefixTokens:      info.PrefixTokens,
+		CacheableTokens:   info.CacheableTokens,
 		FullMessages:      info.FullMessages,
 		SelectedMessages:  info.SelectedMessages,
 		CompactedMessages: info.CompactedMessages,
 		HasSummary:        info.HasSummary,
 		Truncated:         info.Truncated,
+		SummaryVersion:    info.SummaryVersion,
+		SummaryHash:       info.SummaryHash,
+		PrefixHash:        info.PrefixHash,
+	}
+}
+
+func compactInfoPayload(info service.CompactInfo) protocol.CompactInfo {
+	return protocol.CompactInfo{
+		Triggered:         info.Triggered,
+		Reason:            info.Reason,
+		BeforeTokens:      info.BeforeTokens,
+		AfterTokens:       info.AfterTokens,
+		NewMessages:       info.NewMessages,
+		CompactedMessages: info.CompactedMessages,
+		SummaryTokens:     info.SummaryTokens,
+		SummaryVersion:    info.SummaryVersion,
+		SummaryHash:       info.SummaryHash,
+		PrefixHash:        info.PrefixHash,
+		CacheableTokens:   info.CacheableTokens,
 	}
 }
 
@@ -662,19 +746,20 @@ func (a *Agent) writeSessionChanged(ctx context.Context, conn *websocket.Conn, r
 	return a.writeRemoteMessage(conn, protocol.TypeSessionChanged, requestID, payload.CurrentSessionID, payload)
 }
 
-func (a *Agent) sessionListPayload(ctx context.Context) (protocol.SessionListResultPayload, error) {
-	sessions, err := a.chatService.ListSessions(ctx)
+func (a *Agent) sessionListPayload(ctx context.Context, includeDeleted bool) (protocol.SessionListResultPayload, error) {
+	sessions, err := a.chatService.ListSessionsWithDeleted(ctx, includeDeleted)
 	if err != nil {
 		return protocol.SessionListResultPayload{}, err
 	}
 	return protocol.SessionListResultPayload{
 		CurrentSessionID: a.chatService.CurrentSessionID(),
 		Sessions:         sessionSummaries(sessions),
+		IncludeDeleted:   includeDeleted,
 	}, nil
 }
 
 func (a *Agent) sessionChangedPayload(ctx context.Context) (protocol.SessionChangedPayload, error) {
-	list, err := a.sessionListPayload(ctx)
+	list, err := a.sessionListPayload(ctx, false)
 	if err != nil {
 		return protocol.SessionChangedPayload{}, err
 	}
@@ -760,6 +845,8 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
 		Content: response.Result.Content,
 		Usage:   tokenUsagePayload(response.Result.Usage),
+		Context: contextInfoPayload(response.Context),
+		Compact: compactInfoPayload(response.Compact),
 	})
 }
 
@@ -774,6 +861,8 @@ func sessionSummaries(sessions []data.SessionRecord) []protocol.SessionSummary {
 			ContextWindowK: session.ContextWindowK,
 			Usage:          tokenUsageRecordToPayload(session.Usage),
 			LastUsage:      tokenUsageRecordToPayload(session.LastUsage),
+			Deleted:        session.Deleted,
+			DeletedAt:      session.DeletedAt,
 			CreatedAt:      session.CreatedAt,
 			UpdatedAt:      session.UpdatedAt,
 		})

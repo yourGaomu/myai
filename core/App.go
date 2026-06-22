@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"myai/core/sandbox"
+	"myai/core/skill"
 	"myai/core/tool"
 	"myai/core/tool/local"
+	tooldef "myai/core/tool/tool"
 	"sync"
 	"time"
 
@@ -40,6 +42,7 @@ type Application struct {
 	cache          cache.Cache
 	chatService    *service.ChatService
 	toolRegister   *tool.RegisterTools
+	skillManager   *skill.Manager
 	sandbox        sandbox.Sandbox
 	defaultModelID string
 	workspace      string
@@ -68,6 +71,7 @@ func InitApp() {
 		instance.InitSessionManage()
 		instance.InitSandbox()
 		instance.InitRegister()
+		instance.InitSkillManager()
 		instance.InitChatService()
 	})
 }
@@ -205,6 +209,7 @@ func (app *Application) InitChatService() {
 		app.cache,
 		app.threadPool,
 		app.toolRegister,
+		app.skillManager,
 		app.defaultModelID,
 	)
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
@@ -250,18 +255,34 @@ func (app *Application) GetChatService() *service.ChatService {
 
 func (app *Application) InitRegister() *tool.RegisterTools {
 	tools := tool.NewRegisterTools()
-	tools.Register(local.NewListFilesToolWithWorkspace(app.workspace))
-	tools.Register(local.NewReadFileToolWithWorkspace(app.workspace))
-	tools.Register(local.NewSearchFilesToolWithWorkspace(app.workspace))
-	tools.Register(local.NewWriteFileToolWithWorkspace(app.workspace))
-	tools.Register(local.NewEditFileToolWithWorkspace(app.workspace))
-	tools.Register(local.NewShellToolWithWorkspace(app.workspace, app.sandbox))
+	localTools := []tooldef.Tool{
+		local.NewListFilesToolWithWorkspace(app.workspace),
+		local.NewReadFileToolWithWorkspace(app.workspace),
+		local.NewSearchFilesToolWithWorkspace(app.workspace),
+		local.NewWriteFileToolWithWorkspace(app.workspace),
+		local.NewEditFileToolWithWorkspace(app.workspace),
+		local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
+	}
+	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools
 	return tools
 }
 
 func (app *Application) GetToolRegister() *tool.RegisterTools {
 	return app.toolRegister
+}
+
+func (app *Application) InitSkillManager() *skill.Manager {
+	root := app.viper.GetString("skill.root")
+	if root == "" {
+		root = "skills"
+	}
+	app.skillManager = skill.NewManager(root)
+	return app.skillManager
+}
+
+func (app *Application) GetSkillManager() *skill.Manager {
+	return app.skillManager
 }
 
 func (app *Application) loadModelConfigs(ctx context.Context) ([]data.ModelConfig, error) {

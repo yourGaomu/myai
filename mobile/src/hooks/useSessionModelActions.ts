@@ -1,3 +1,4 @@
+import { Alert } from "react-native";
 import { useCallback, type RefObject } from "react";
 
 import type { RelayMessage, SessionSummary, TokenUsage } from "../protocol";
@@ -80,6 +81,53 @@ export function useSessionModelActions({
     ],
   );
 
+  const deleteSession = useCallback(
+    (targetSessionID: string) => {
+      const nextSessionID = targetSessionID.trim();
+      if (!nextSessionID) {
+        return;
+      }
+
+      Alert.alert("Delete session?", "This session will move to the recycle bin and can be restored later.", [
+        { style: "cancel", text: "Cancel" },
+        {
+          style: "destructive",
+          text: "Delete",
+          onPress: () => {
+            startPending("sessions");
+            if (!sendEnvelope("session_delete", {
+              request_id: newRequestID(),
+              session_id: nextSessionID,
+              payload: { session_id: nextSessionID },
+            })) {
+              stopPending("sessions");
+            }
+          },
+        },
+      ]);
+    },
+    [sendEnvelope, startPending, stopPending],
+  );
+
+  const restoreSession = useCallback(
+    (targetSessionID: string) => {
+      const nextSessionID = targetSessionID.trim();
+      if (!nextSessionID) {
+        return;
+      }
+
+      startPending("sessions");
+      if (!sendEnvelope("session_restore", {
+        request_id: newRequestID(),
+        session_id: nextSessionID,
+        payload: { session_id: nextSessionID },
+      })) {
+        stopPending("sessions");
+      }
+    },
+    [sendEnvelope, startPending, stopPending],
+  );
+
   const switchModel = useCallback(
     (modelID: string) => {
       if (!modelID || modelID === currentModelID) {
@@ -98,8 +146,10 @@ export function useSessionModelActions({
   );
 
   return {
+    deleteSession,
     loadSession,
     newSession,
+    restoreSession,
     switchModel,
   };
 }

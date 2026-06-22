@@ -16,6 +16,7 @@ import (
 	"myai/core/history"
 	"myai/core/llm"
 	"myai/core/session"
+	"myai/core/skill"
 	"myai/core/store/cache"
 	"myai/core/store/data"
 	"myai/core/tool"
@@ -39,6 +40,7 @@ type ChatService struct {
 	cache    cache.Cache
 	pool     *utills.ThreadPool
 	tools    *tool.RegisterTools
+	skills   *skill.Manager
 	modelID  string
 	userID   string
 }
@@ -47,11 +49,16 @@ type ContextInfo = contextmgr.Info
 
 type CompactInfo struct {
 	Triggered         bool
+	Reason            string
 	BeforeTokens      int
 	AfterTokens       int
 	NewMessages       int
 	CompactedMessages int
 	SummaryTokens     int
+	SummaryVersion    int
+	SummaryHash       string
+	PrefixHash        string
+	CacheableTokens   int
 }
 
 type ChatResponse struct {
@@ -68,6 +75,7 @@ func NewChatService(
 	cache cache.Cache,
 	pool *utills.ThreadPool,
 	tools *tool.RegisterTools,
+	skills *skill.Manager,
 	modelID string,
 ) *ChatService {
 	if modelID == "" {
@@ -81,6 +89,7 @@ func NewChatService(
 		cache:    cache,
 		pool:     pool,
 		tools:    tools,
+		skills:   skills,
 		modelID:  modelID,
 		userID:   defaultUserID,
 	}
@@ -203,7 +212,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	return ChatResponse{
 		SessionID: current.ID,
 		Result:    result,
-		Context:   contextInfoFromSession(current),
+		Context:   s.contextInfo(ctx, current),
 		Compact:   compactInfo,
 	}, nil
 }
@@ -228,7 +237,7 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 	reasoningParts := make([]string, 0, maxAgentToolRounds)
 
 	for round := 0; round < maxAgentToolRounds; round++ {
-		result, err := model.ChatWithStreamToolsHandler(s.contextMessages(current), s.llmToolsForSession(current), stream)
+		result, err := model.ChatWithStreamToolsHandler(s.contextSnapshot(ctx, current).Messages, s.llmToolsForSession(current), stream)
 		if err != nil {
 			return llm.ChatResult{}, err
 		}
@@ -250,7 +259,7 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 		s.persistToolRecordsAsync(toolRecords)
 	}
 
-	result, err := model.ChatWithStreamHandler(s.contextMessages(current), stream)
+	result, err := model.ChatWithStreamHandler(s.contextSnapshot(ctx, current).Messages, stream)
 	if err != nil {
 		return llm.ChatResult{}, err
 	}
@@ -263,10 +272,51 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 }
 
 func (s *ChatService) contextMessages(current *session.Session) []llms.MessageContent {
+	return s.contextSnapshot(context.Background(), current).Messages
+}
+
+func (s *ChatService) contextSnapshot(ctx context.Context, current *session.Session) contextmgr.Snapshot {
 	if current == nil {
-		return nil
+		return contextmgr.Snapshot{}
 	}
-	return contextmgr.BuildWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
+	return contextmgr.BuildSnapshot(s.messagesWithSkills(ctx, current.Messages), current.Summary, current.CompactedMessages, current.ContextWindowK)
+}
+
+func (s *ChatService) messagesWithSkills(ctx context.Context, messages []llms.MessageContent) []llms.MessageContent {
+	prompt := strings.TrimSpace(s.skillPrompt(ctx))
+	if prompt == "" {
+		return messages
+	}
+
+	withSkills := make([]llms.MessageContent, 0, len(messages))
+	if len(messages) > 0 && messages[0].Role == llms.ChatMessageTypeSystem {
+		basePrompt := strings.TrimSpace(rawMessageText(messages[0]))
+		if basePrompt == "" {
+			withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, prompt))
+		} else {
+			withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, basePrompt+"\n\n"+prompt))
+		}
+		withSkills = append(withSkills, messages[1:]...)
+		return withSkills
+	}
+
+	withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, prompt))
+	withSkills = append(withSkills, messages...)
+	return withSkills
+}
+
+func (s *ChatService) skillPrompt(ctx context.Context) string {
+	if s.skills == nil {
+		return ""
+	}
+	return s.skills.Prompt(ctx)
+}
+
+func (s *ChatService) contextInfo(ctx context.Context, current *session.Session) ContextInfo {
+	if current == nil {
+		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
+	}
+	return s.contextSnapshot(ctx, current).Info
 }
 
 func (s *ChatService) summarizeMessages(ctx context.Context, model *llm.Model, existingSummary string, messages []llms.MessageContent) (string, error) {
@@ -549,6 +599,59 @@ func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
 	return s.saveCurrentSession(ctx, current.ID)
 }
 
+func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return errors.New("session id is empty")
+	}
+	if s.sessions == nil {
+		return errors.New("session manager is nil")
+	}
+
+	deletingCurrent := sessionID == s.CurrentSessionID()
+	if s.store != nil {
+		if _, err := s.getSession(ctx, sessionID); err != nil {
+			return err
+		}
+		if err := s.store.MarkSessionDeleted(ctx, sessionID, time.Now()); err != nil {
+			return err
+		}
+	}
+
+	if err := s.sessions.RemoveSession(sessionID); err != nil {
+		return err
+	}
+	if !deletingCurrent {
+		return nil
+	}
+
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, record := range sessions {
+		if record.ID != "" && record.ID != sessionID {
+			return s.LoadSession(ctx, record.ID)
+		}
+	}
+	return s.NewSession(ctx)
+}
+
+func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session id is empty")
+	}
+	if s.store == nil {
+		return errors.New("store is nil")
+	}
+
+	return s.store.MarkSessionRestored(ctx, sessionID, time.Now())
+}
+
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
 	current, err := s.sessions.Current()
 	if err != nil {
@@ -569,11 +672,19 @@ func (s *ChatService) ClearCurrent(ctx context.Context) error {
 }
 
 func (s *ChatService) ListSessions(ctx context.Context) ([]data.SessionRecord, error) {
+	return s.ListSessionsWithDeleted(ctx, false)
+}
+
+func (s *ChatService) ListDeletedSessions(ctx context.Context) ([]data.SessionRecord, error) {
+	return s.ListSessionsWithDeleted(ctx, true)
+}
+
+func (s *ChatService) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]data.SessionRecord, error) {
 	if s.store == nil {
 		return nil, nil
 	}
 
-	return s.store.ListSessions(ctx)
+	return s.store.ListSessionsWithDeleted(ctx, includeDeleted)
 }
 
 func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string) ([]data.MessageRecord, error) {
@@ -585,10 +696,21 @@ func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string)
 		return nil, errors.New("session id is empty")
 	}
 	if s.store == nil {
-		return nil, nil
+		return s.memorySessionMessages(sessionID), nil
+	}
+	if _, err := s.getSession(ctx, sessionID); err != nil {
+		return nil, err
 	}
 
-	return s.store.ListMessages(ctx, sessionID)
+	records, err := s.store.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) > 0 {
+		return records, nil
+	}
+
+	return s.memorySessionMessages(sessionID), nil
 }
 
 func (s *ChatService) ListModels() []llm.ModelInfo {
@@ -712,12 +834,12 @@ func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (Con
 
 	if err := s.compactSession(ctx, current, model); err != nil {
 		if errors.Is(err, errNotEnoughHistoryToCompact) {
-			return contextInfoFromSession(current), err
+			return s.contextInfo(ctx, current), err
 		}
 		return ContextInfo{}, err
 	}
 
-	return contextInfoFromSession(current), nil
+	return s.contextInfo(ctx, current), nil
 }
 
 func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.Session, model *llm.Model) (CompactInfo, error) {
@@ -725,22 +847,27 @@ func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.
 		return CompactInfo{}, nil
 	}
 
-	before, _ := contextmgr.AnalyzeWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
-	if !before.Truncated {
+	before := s.contextSnapshot(ctx, current).Info
+	if !contextmgr.ShouldCompact(before, contextmgr.DefaultCompactTriggerRatio) {
 		return CompactInfo{}, nil
 	}
 
 	if err := s.compactSession(ctx, current, model); errors.Is(err, errNotEnoughHistoryToCompact) {
 		return CompactInfo{}, nil
 	} else {
-		after, _ := contextmgr.AnalyzeWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
+		after := s.contextSnapshot(ctx, current).Info
 		return CompactInfo{
 			Triggered:         true,
+			Reason:            compactReason(before),
 			BeforeTokens:      before.SelectedTokens,
 			AfterTokens:       after.SelectedTokens,
 			NewMessages:       after.CompactedMessages - before.CompactedMessages,
 			CompactedMessages: after.CompactedMessages,
 			SummaryTokens:     after.SummaryTokens,
+			SummaryVersion:    after.SummaryVersion,
+			SummaryHash:       after.SummaryHash,
+			PrefixHash:        after.PrefixHash,
+			CacheableTokens:   after.CacheableTokens,
 		}, err
 	}
 }
@@ -892,7 +1019,7 @@ func (s *ChatService) CurrentContextInfo() ContextInfo {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
 	}
 
-	return contextInfoFromSession(current)
+	return s.contextInfo(context.Background(), current)
 }
 
 func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID string) (ContextInfo, error) {
@@ -904,7 +1031,7 @@ func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID strin
 	if err != nil {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, err
 	}
-	return contextInfoFromSession(current), nil
+	return s.contextInfo(ctx, current), nil
 }
 
 func (s *ChatService) saveSession(ctx context.Context, sessionID string, model string, title string) error {
@@ -1058,13 +1185,11 @@ func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID strin
 	return s.sessions.GetSession(record.ID)
 }
 
-func contextInfoFromSession(current *session.Session) ContextInfo {
-	if current == nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
+func compactReason(info contextmgr.Info) string {
+	if info.Truncated {
+		return "window_limit"
 	}
-
-	info, _ := contextmgr.AnalyzeWithSummary(current.Messages, current.Summary, current.CompactedMessages, current.ContextWindowK)
-	return info
+	return "threshold"
 }
 
 func sessionRecordFromSession(current *session.Session, title string) data.SessionRecord {
@@ -1118,6 +1243,113 @@ func tokenUsageFromRecord(record *data.TokenUsageRecord) llm.TokenUsage {
 		PromptCachedTokens: record.PromptCachedTokens,
 		Available:          record.Available,
 	}
+}
+
+func (s *ChatService) memorySessionMessages(sessionID string) []data.MessageRecord {
+	if s.sessions == nil {
+		return nil
+	}
+
+	current, err := s.sessions.GetSession(sessionID)
+	if err != nil || current == nil {
+		return nil
+	}
+
+	records := make([]data.MessageRecord, 0, len(current.Messages))
+	createdAt := time.Now().Add(-time.Duration(len(current.Messages)) * time.Nanosecond)
+	for index, message := range current.Messages {
+		record, ok := messageContentRecord(current.ID, message, createdAt.Add(time.Duration(index)*time.Nanosecond))
+		if ok {
+			records = append(records, record)
+		}
+	}
+	return records
+}
+
+func messageContentRecord(sessionID string, message llms.MessageContent, createdAt time.Time) (data.MessageRecord, bool) {
+	switch message.Role {
+	case llms.ChatMessageTypeSystem:
+		return data.MessageRecord{}, false
+	case llms.ChatMessageTypeHuman:
+		return data.MessageRecord{
+			ID:        uuid.NewString(),
+			SessionID: sessionID,
+			Role:      data.RoleUser,
+			Content:   rawMessageText(message),
+			CreatedAt: createdAt,
+		}, true
+	case llms.ChatMessageTypeAI:
+		if call, ok := firstToolCall(message); ok {
+			record := data.MessageRecord{
+				ID:         uuid.NewString(),
+				SessionID:  sessionID,
+				Role:       data.RoleToolCall,
+				ToolCallID: call.ID,
+				CreatedAt:  createdAt,
+			}
+			if call.FunctionCall != nil {
+				record.ToolName = call.FunctionCall.Name
+				record.ToolArguments = call.FunctionCall.Arguments
+			}
+			return record, true
+		}
+		return data.MessageRecord{
+			ID:        uuid.NewString(),
+			SessionID: sessionID,
+			Role:      data.RoleAssistant,
+			Content:   rawMessageText(message),
+			CreatedAt: createdAt,
+		}, true
+	case llms.ChatMessageTypeTool:
+		if response, ok := firstToolResponse(message); ok {
+			return data.MessageRecord{
+				ID:         uuid.NewString(),
+				SessionID:  sessionID,
+				Role:       data.RoleTool,
+				Content:    response.Content,
+				ToolCallID: response.ToolCallID,
+				ToolName:   response.Name,
+				CreatedAt:  createdAt,
+			}, true
+		}
+		return data.MessageRecord{
+			ID:        uuid.NewString(),
+			SessionID: sessionID,
+			Role:      data.RoleTool,
+			Content:   rawMessageText(message),
+			CreatedAt: createdAt,
+		}, true
+	default:
+		return data.MessageRecord{}, false
+	}
+}
+
+func rawMessageText(message llms.MessageContent) string {
+	parts := make([]string, 0, len(message.Parts))
+	for _, part := range message.Parts {
+		if text, ok := part.(llms.TextContent); ok {
+			parts = append(parts, text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func firstToolCall(message llms.MessageContent) (llms.ToolCall, bool) {
+	for _, part := range message.Parts {
+		if call, ok := part.(llms.ToolCall); ok {
+			return call, true
+		}
+	}
+	return llms.ToolCall{}, false
+}
+
+func firstToolResponse(message llms.MessageContent) (llms.ToolCallResponse, bool) {
+	for _, part := range message.Parts {
+		if response, ok := part.(llms.ToolCallResponse); ok {
+			return response, true
+		}
+	}
+	return llms.ToolCallResponse{}, false
 }
 
 func (s *ChatService) saveAssistantMessage(ctx context.Context, sessionID string, result llm.ChatResult) error {

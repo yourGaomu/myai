@@ -55,10 +55,13 @@ type Args = {
   requestFiles: (path?: string) => boolean;
   requestHistory: () => boolean;
   requestModels: () => boolean;
+  requestDeletedSessions: () => boolean;
   requestSessions: () => boolean;
   requestSessionMapRef: RefObject<Record<string, string>>;
   sessionIDRef: RefObject<string>;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
+  setSessionCompact: (sessionID: string, compact: NonNullable<AssistantDonePayload["compact"]>) => void;
+  setSessionContext: (sessionID: string, context: NonNullable<AssistantDonePayload["context"]>) => void;
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setSessionID: (sessionID: string) => void;
   setStatus: (status: string) => void;
@@ -94,9 +97,12 @@ export function useRemoteMessageHandler({
   requestFiles,
   requestHistory,
   requestModels,
+  requestDeletedSessions,
   requestSessions,
   requestSessionMapRef,
   sessionIDRef,
+  setSessionCompact,
+  setSessionContext,
   setSessionLastUsage,
   setSessionPendingPermission,
   setSessionID,
@@ -124,10 +130,16 @@ export function useRemoteMessageHandler({
           const streamedAssistantID =
             getSessionChat(targetSessionID).activeAssistantID ||
             (requestSessionID ? getSessionChat(requestSessionID).activeAssistantID : "");
-          stopPending("send");
-          setSessionLastUsage(targetSessionID, ((message.payload || {}) as AssistantDonePayload).usage || null);
+          const payload = (message.payload || {}) as AssistantDonePayload;
+          setSessionLastUsage(targetSessionID, payload.usage || null);
+          if (payload.context) {
+            setSessionContext(targetSessionID, payload.context);
+          }
+          if (payload.compact) {
+            setSessionCompact(targetSessionID, payload.compact);
+          }
           if (!streamedAssistantID) {
-            appendAssistant(targetSessionID, ((message.payload || {}) as AssistantDonePayload).content || "");
+            appendAssistant(targetSessionID, payload.content || "");
           }
           if (message.session_id && (!sessionIDRef.current || sessionIDRef.current === requestSessionID)) {
             setSessionID(message.session_id);
@@ -174,8 +186,11 @@ export function useRemoteMessageHandler({
           applySessionList(message.payload as SessionListResultPayload | undefined);
           break;
         case "session_changed":
+        case "session_delete_result":
+        case "session_restore_result":
           stopPending("sessions");
           applySessionChanged(message.payload as SessionChangedPayload | undefined);
+          requestDeletedSessions();
           break;
         case "session_history_result":
           stopPending("sessions");
@@ -235,7 +250,6 @@ export function useRemoteMessageHandler({
           addErrorMessage(targetSessionID, payload.message || "Remote error");
           setSessionPendingPermission(targetSessionID, null);
           clearSessionPendingRequest(targetSessionID, message.request_id);
-          stopPending("send");
           stopPending("sessions");
           stopPending("models");
           stopPending("files");
@@ -285,9 +299,12 @@ export function useRemoteMessageHandler({
       requestFiles,
       requestHistory,
       requestModels,
+      requestDeletedSessions,
       requestSessions,
       requestSessionMapRef,
       sessionIDRef,
+      setSessionCompact,
+      setSessionContext,
       setSessionLastUsage,
       setSessionPendingPermission,
       setSessionID,

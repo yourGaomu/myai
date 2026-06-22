@@ -61,11 +61,15 @@ export function MobileAppScreen() {
     clearModels,
     clearSessions,
     currentModelID,
+    deletedSessions,
     models,
+    sessionCompacts,
     sessionContexts,
     sessions,
     setCurrentModelID,
+    setDeletedSessions,
     setModels,
+    setSessionCompact,
     setSessionContext,
     setSessions,
   } = useSessionModelState();
@@ -108,9 +112,9 @@ export function MobileAppScreen() {
     addMessage,
     addToolCall,
     appendAssistant,
-    clearMessages,
     clearSessionPendingRequest,
     getSessionChat,
+    hasPendingRequest,
     mergeSessionChats,
     replaceMessages,
     resetActiveAssistant,
@@ -155,6 +159,8 @@ export function MobileAppScreen() {
   const currentChat = getSessionChat(sessionID);
   void sessionChatsVersion;
   const currentUsage = currentChat.lastUsage || null;
+  const currentSessionBusy = Boolean(currentChat.pendingRequestID);
+  const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, chatPanelHeight, topSafePadding } = useMobileLayoutMetrics({ hasUsage: Boolean(currentUsage) });
   const sendEnvelope = useRelaySender({
     activeRequestIDRef,
@@ -172,6 +178,7 @@ export function MobileAppScreen() {
     requestFiles,
     requestHistory,
     requestModels,
+    requestDeletedSessions,
     requestSessionHistory,
     requestSessions,
   } = useRemoteRequests({
@@ -188,7 +195,7 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
-  const { loadSession, newSession, switchModel } = useSessionModelActions({
+  const { deleteSession, loadSession, newSession, restoreSession, switchModel } = useSessionModelActions({
     activeRequestIDRef,
     currentModelID,
     pendingHistorySessionIDRef,
@@ -283,8 +290,6 @@ export function MobileAppScreen() {
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingRequest,
-    startPending,
-    stopPending,
   });
   const {
     applyChangeDiff,
@@ -302,10 +307,9 @@ export function MobileAppScreen() {
     applySessionList,
     applySessionSettings,
   } = useRemoteResultAppliers({
-    activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
-    clearMessages,
     filePath,
+    hasPendingRequest,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
@@ -335,6 +339,7 @@ export function MobileAppScreen() {
     setSessionContext,
     setSessionID,
     setSessionPendingPermission,
+    setDeletedSessions,
     setSessions,
     setViewMode,
   });
@@ -368,9 +373,12 @@ export function MobileAppScreen() {
     requestFiles,
     requestHistory,
     requestModels,
+    requestDeletedSessions,
     requestSessions,
     requestSessionMapRef,
     sessionIDRef,
+    setSessionCompact,
+    setSessionContext,
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionID,
@@ -415,7 +423,7 @@ export function MobileAppScreen() {
           buttonFeedback={buttonFeedback}
           changesActive={changesTabActive}
           connected={connected}
-          isBusy={isBusy}
+          isBusy={uiBusy}
           lastUsage={currentUsage}
           messageInput={messageInput}
           onChangeMessage={setMessageInput}
@@ -438,7 +446,7 @@ export function MobileAppScreen() {
         buttonFeedback={buttonFeedback}
         connected={connected}
         deviceID={deviceID}
-        isBusy={isBusy}
+        isBusy={uiBusy}
         onToggleSettings={toggleSettings}
         status={status}
         userID={userID}
@@ -497,12 +505,17 @@ export function MobileAppScreen() {
           pendingPermission: currentChat.pendingPermission,
         }}
         sessions={{
+          deletedSessions,
+          onDeleteSession: deleteSession,
+          onRefreshDeletedSessions: requestDeletedSessions,
+          onRestoreSession: restoreSession,
           onSelectSession: selectSession,
         }}
         settings={{
           activeModel,
           activeSession,
           bindCode,
+          compact: sessionCompacts[sessionID],
           connected,
           context: sessionContexts[sessionID],
           currentModelID,
@@ -512,6 +525,7 @@ export function MobileAppScreen() {
           onBindCodeChange: setBindCode,
           onCloseSettings: openChat,
           onConnect: connect,
+          onDeleteSession: deleteSession,
           onDeviceIDChange: setDeviceID,
           onLoadSession: loadSession,
           onNewSession: newSession,

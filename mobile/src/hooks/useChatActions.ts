@@ -1,7 +1,7 @@
 import { useCallback, type RefObject } from "react";
 
 import type { FileReadResultPayload, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
-import type { PendingAction, PermissionState } from "../types/app";
+import type { PermissionState } from "../types/app";
 import { userMessageEcho } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
 
@@ -24,8 +24,6 @@ type Args = {
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
-  startPending: (action: PendingAction) => void;
-  stopPending: (action: PendingAction) => void;
 };
 
 export function useChatActions({
@@ -45,8 +43,6 @@ export function useChatActions({
   setSessionLastUsage,
   setSessionPendingPermission,
   setSessionPendingRequest,
-  startPending,
-  stopPending,
 }: Args) {
   const sendUserMessage = useCallback(() => {
     const content = messageInput.trim();
@@ -66,11 +62,9 @@ export function useChatActions({
     setSessionLastUsage(targetSessionID, null);
     setSessionPendingRequest(targetSessionID, requestID);
     addUserMessage(targetSessionID, userMessageEcho(content, attachedFiles));
-    startPending("send");
 
     const sent = sendMessageWithFiles(content, requestID);
     if (!sent) {
-      stopPending("send");
       activeRequestIDRef.current = "";
       delete requestSessionMapRef.current[requestID];
       clearSessionPendingRequest(targetSessionID, requestID);
@@ -89,8 +83,6 @@ export function useChatActions({
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingRequest,
-    startPending,
-    stopPending,
   ]);
 
   const sendPermissionResult = useCallback(

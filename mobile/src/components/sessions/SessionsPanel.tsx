@@ -8,7 +8,11 @@ import { formatDateTime } from "../../utils/format";
 type Props = {
   buttonFeedback: ButtonFeedback;
   clientToken: string;
+  deletedSessions: SessionSummary[];
+  onDeleteSession: (sessionID: string) => void;
   onNewSession: () => void;
+  onRefreshDeletedSessions: () => void;
+  onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
   pendingSessions: boolean;
   sessionID: string;
@@ -18,7 +22,11 @@ type Props = {
 export function SessionsPanel({
   buttonFeedback,
   clientToken,
+  deletedSessions,
+  onDeleteSession,
   onNewSession,
+  onRefreshDeletedSessions,
+  onRestoreSession,
   onSelectSession,
   pendingSessions,
   sessionID,
@@ -51,25 +59,71 @@ export function SessionsPanel({
           <Text style={styles.emptyText}>{clientToken ? "No sessions loaded" : "Pair first"}</Text>
         ) : (
           sessions.map((session) => (
-            <Pressable
+            <View
               key={session.id}
-              disabled={pendingSessions}
-              onPress={() => onSelectSession(session.id)}
-              style={({ pressed }) =>
-                buttonFeedback([styles.sessionListItem, session.id === sessionID && styles.sessionListItemActive, pendingSessions && styles.disabledButton], pressed)
-              }
+              style={[styles.sessionListItem, session.id === sessionID && styles.sessionListItemActive]}
             >
-              <View style={styles.sessionAvatar}>
-                <Text style={styles.sessionAvatarText}>…</Text>
-              </View>
+              <Pressable
+                disabled={pendingSessions}
+                onPress={() => onSelectSession(session.id)}
+                style={({ pressed }) => buttonFeedback([styles.sessionMain, pendingSessions && styles.disabledButton], pressed)}
+              >
+                <View style={styles.sessionAvatar}>
+                  <Text style={styles.sessionAvatarText}>…</Text>
+                </View>
+                <View style={styles.flex}>
+                  <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "New chat"}</Text>
+                  <Text numberOfLines={1} style={styles.sessionListMeta}>
+                    {session.model || "model"} / {session.permission_mode || "permission"}
+                  </Text>
+                </View>
+                <Text numberOfLines={2} style={styles.sessionListTime}>{formatDateTime(session.updated_at || session.created_at)}</Text>
+              </Pressable>
+              <Pressable
+                disabled={pendingSessions}
+                onPress={() => onDeleteSession(session.id)}
+                style={({ pressed }) => buttonFeedback([styles.deleteButton, pendingSessions && styles.disabledButton], pressed)}
+              >
+                <Text style={styles.deleteButtonText}>删除</Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.recycleBox}>
+        <View style={styles.recycleHeader}>
+          <View>
+            <Text style={styles.recycleTitle}>Recycle Bin</Text>
+            <Text style={styles.pathText}>{deletedSessions.length} deleted session(s)</Text>
+          </View>
+          <Pressable
+            disabled={pendingSessions || !clientToken}
+            onPress={onRefreshDeletedSessions}
+            style={({ pressed }) => buttonFeedback([styles.recycleButton, (pendingSessions || !clientToken) && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={pendingSessions} text="Refresh" />
+          </Pressable>
+        </View>
+        {deletedSessions.length === 0 ? (
+          <Text style={styles.emptyText}>{clientToken ? "No deleted sessions" : "Pair first"}</Text>
+        ) : (
+          deletedSessions.map((session) => (
+            <View key={session.id} style={styles.deletedItem}>
               <View style={styles.flex}>
-                <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "New chat"}</Text>
+                <Text numberOfLines={1} style={styles.deletedTitle}>{session.title || "New chat"}</Text>
                 <Text numberOfLines={1} style={styles.sessionListMeta}>
-                  {session.model || "model"} / {session.permission_mode || "permission"}
+                  Deleted {formatDateTime(session.deleted_at || session.updated_at || session.created_at)}
                 </Text>
               </View>
-              <Text numberOfLines={2} style={styles.sessionListTime}>{formatDateTime(session.updated_at || session.created_at)}</Text>
-            </Pressable>
+              <Pressable
+                disabled={pendingSessions}
+                onPress={() => onRestoreSession(session.id)}
+                style={({ pressed }) => buttonFeedback([styles.restoreButton, pendingSessions && styles.disabledButton], pressed)}
+              >
+                <Text style={styles.restoreButtonText}>Restore</Text>
+              </Pressable>
+            </View>
           ))
         )}
       </View>
@@ -150,10 +204,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 8,
   },
   sessionListItemActive: {
     backgroundColor: "#fff4cc",
+  },
+  sessionMain: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+    minWidth: 0,
+    paddingVertical: 6,
   },
   sessionAvatar: {
     alignItems: "center",
@@ -185,6 +247,82 @@ const styles = StyleSheet.create({
     fontSize: 12,
     maxWidth: 92,
     textAlign: "right",
+  },
+  deleteButton: {
+    alignItems: "center",
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: 10,
+  },
+  deleteButtonText: {
+    color: "#a3342f",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  recycleBox: {
+    backgroundColor: "#f5f1e9",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 3,
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+  },
+  recycleHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  recycleTitle: {
+    color: "#12100e",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  recycleButton: {
+    alignItems: "center",
+    backgroundColor: "#f5eefc",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: 10,
+  },
+  deletedItem: {
+    alignItems: "center",
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  deletedTitle: {
+    color: "#12100e",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  restoreButton: {
+    alignItems: "center",
+    backgroundColor: "#b9e9b0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  restoreButtonText: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
   },
   flex: {
     flex: 1,

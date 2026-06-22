@@ -30,10 +30,9 @@ import { shortID } from "../utils/ids";
 import { findSessionUsage, upsertSession } from "../utils/session";
 
 type Args = {
-  activeRequestIDRef: RefObject<string>;
   addEventMessage: (sessionID: string, message: string) => void;
-  clearMessages: (sessionID: string) => void;
   filePath: string;
+  hasPendingRequest: (sessionID: string) => boolean;
   historyDiff: HistoryDiffResultPayload | null;
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
@@ -63,15 +62,15 @@ type Args = {
   setSessionContext: (sessionID: string, context: ContextInfo) => void;
   setSessionID: (sessionID: string) => void;
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
+  setDeletedSessions: (sessions: SessionSummary[]) => void;
   setSessions: (updater: SessionSummary[] | ((current: SessionSummary[]) => SessionSummary[])) => void;
   setViewMode: (mode: ViewMode) => void;
 };
 
 export function useRemoteResultAppliers({
-  activeRequestIDRef,
   addEventMessage,
-  clearMessages,
   filePath,
+  hasPendingRequest,
   historyDiff,
   historySessionIDRef,
   pendingHistorySessionIDRef,
@@ -101,18 +100,24 @@ export function useRemoteResultAppliers({
   setSessionContext,
   setSessionID,
   setSessionPendingPermission,
+  setDeletedSessions,
   setSessions,
   setViewMode,
 }: Args) {
   return useMemo(() => {
     const applySessionList = (payload?: SessionListResultPayload) => {
       const nextSessions = payload?.sessions || [];
+      if (payload?.include_deleted) {
+        setDeletedSessions(nextSessions);
+        return;
+      }
+
       setSessions(nextSessions);
       if (payload?.current_session_id && !sessionIDRef.current) {
         setSessionID(payload.current_session_id);
         sessionIDRef.current = payload.current_session_id;
         setSessionLastUsage(payload.current_session_id, findSessionUsage(nextSessions, payload.current_session_id));
-        if (historySessionIDRef.current !== payload.current_session_id && !activeRequestIDRef.current) {
+        if (historySessionIDRef.current !== payload.current_session_id && !hasPendingRequest(payload.current_session_id)) {
           requestSessionHistory(payload.current_session_id);
         }
       } else if (sessionIDRef.current) {
@@ -127,7 +132,6 @@ export function useRemoteResultAppliers({
         setSessionID(payload.current_session_id);
         sessionIDRef.current = payload.current_session_id;
         setSessionLastUsage(payload.current_session_id, findSessionUsage(nextSessions, payload.current_session_id));
-        clearMessages(payload.current_session_id);
         setSessionPendingPermission(payload.current_session_id, null);
         historySessionIDRef.current = "";
         requestSessionHistory(payload.current_session_id);
@@ -135,7 +139,6 @@ export function useRemoteResultAppliers({
         setSessionID(payload.session.id);
         sessionIDRef.current = payload.session.id;
         setSessionLastUsage(payload.session.id, payload.session.last_usage || null);
-        clearMessages(payload.session.id);
         setSessionPendingPermission(payload.session.id, null);
         historySessionIDRef.current = "";
         requestSessionHistory(payload.session.id);
@@ -176,7 +179,7 @@ export function useRemoteResultAppliers({
       if (payload.session_id && targetSessionID && payload.session_id !== targetSessionID) {
         return;
       }
-      if (activeRequestIDRef.current) {
+      if (payload.session_id && hasPendingRequest(payload.session_id)) {
         return;
       }
 
@@ -309,10 +312,9 @@ export function useRemoteResultAppliers({
       applySessionSettings,
     };
   }, [
-    activeRequestIDRef,
     addEventMessage,
-    clearMessages,
     filePath,
+    hasPendingRequest,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
@@ -342,6 +344,7 @@ export function useRemoteResultAppliers({
     setSessionContext,
     setSessionID,
     setSessionPendingPermission,
+    setDeletedSessions,
     setSessions,
     setViewMode,
   ]);

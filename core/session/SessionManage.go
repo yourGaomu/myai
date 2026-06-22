@@ -176,6 +176,21 @@ func (sm *SessionManage) ClearSession(sessionID string) error {
 	return nil
 }
 
+func (sm *SessionManage) RemoveSession(sessionID string) error {
+	if sessionID == "" {
+		return errors.New("session id is empty")
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	delete(sm.session, sessionID)
+	if sm.currentSessionId == sessionID {
+		sm.currentSessionId = ""
+	}
+	return nil
+}
+
 func (sm *SessionManage) SwitchModel(modelID string) error {
 	if modelID == "" {
 		return errors.New("model id is empty")

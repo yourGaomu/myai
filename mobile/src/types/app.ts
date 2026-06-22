@@ -13,7 +13,6 @@ export type ViewMode = "chat" | "files" | "changes" | "changeDetail" | "sessions
 export type PendingAction =
   | "connect"
   | "pair"
-  | "send"
   | "sessions"
   | "models"
   | "settings"

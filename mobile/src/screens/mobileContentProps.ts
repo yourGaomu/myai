@@ -4,6 +4,7 @@ import type { ScrollView } from "react-native";
 import type {
   ChangeDiffResultPayload,
   ChangeEntry,
+  CompactInfo,
   ContextInfo,
   FileEntry,
   FileReadResultPayload,
@@ -26,6 +27,7 @@ export type MainContentCommonProps = {
 export type SettingsContentProps = {
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  compact?: CompactInfo;
   context?: ContextInfo;
   bindCode: string;
   connected: boolean;
@@ -37,6 +39,7 @@ export type SettingsContentProps = {
   onCloseSettings: () => void;
   onConnect: () => void;
   onDeviceIDChange: (value: string) => void;
+  onDeleteSession: (sessionID: string) => void;
   onLoadSession: (sessionID: string) => void;
   onNewSession: () => void;
   onPair: () => void;
@@ -98,6 +101,10 @@ export type ChangesContentProps = {
 };
 
 export type SessionsContentProps = {
+  deletedSessions: SessionSummary[];
+  onDeleteSession: (sessionID: string) => void;
+  onRefreshDeletedSessions: () => void;
+  onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
 };
 

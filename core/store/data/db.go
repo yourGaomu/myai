@@ -16,6 +16,8 @@ type SessionRecord struct {
 	Title             string            `bson:"title" json:"title"`
 	Usage             *TokenUsageRecord `bson:"usage,omitempty" json:"usage,omitempty"`
 	LastUsage         *TokenUsageRecord `bson:"last_usage,omitempty" json:"last_usage,omitempty"`
+	Deleted           bool              `bson:"deleted,omitempty" json:"deleted,omitempty"`
+	DeletedAt         *time.Time        `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
 	CreatedAt         time.Time         `bson:"created_at" json:"created_at"`
 	UpdatedAt         time.Time         `bson:"updated_at" json:"updated_at"`
 }
@@ -70,10 +72,13 @@ const (
 type Store interface {
 	GetSession(ctx context.Context, sessionID string) (SessionRecord, error)
 	SaveSession(ctx context.Context, session SessionRecord) error
+	MarkSessionDeleted(ctx context.Context, sessionID string, deletedAt time.Time) error
+	MarkSessionRestored(ctx context.Context, sessionID string, restoredAt time.Time) error
 	SaveModelConfig(ctx context.Context, model ModelConfig) error
 	SaveMessage(ctx context.Context, message MessageRecord) error
 	ClearMessages(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context) ([]SessionRecord, error)
+	ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]SessionRecord, error)
 	ListModelConfigs(ctx context.Context) ([]ModelConfig, error)
 	ListMessages(ctx context.Context, sessionID string) ([]MessageRecord, error)
 }

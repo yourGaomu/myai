@@ -3,6 +3,7 @@ package mongoDb
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -34,7 +35,13 @@ func (m *MongoStore) GetSession(ctx context.Context, sessionID string) (data.Ses
 	}
 
 	var session data.SessionRecord
-	err := m.db.Collection(sessionsCollection).FindOne(ctx, bson.M{"_id": sessionID}).Decode(&session)
+	err := m.db.Collection(sessionsCollection).FindOne(ctx, bson.M{
+		"_id": sessionID,
+		"$or": bson.A{
+			bson.M{"deleted": bson.M{"$exists": false}},
+			bson.M{"deleted": false},
+		},
+	}).Decode(&session)
 	if err != nil {
 		return data.SessionRecord{}, err
 	}
@@ -65,10 +72,49 @@ func (m *MongoStore) SaveSession(ctx context.Context, session data.SessionRecord
 			},
 			"$setOnInsert": bson.M{
 				"_id":        session.ID,
+				"deleted":    false,
 				"created_at": session.CreatedAt,
 			},
 		},
 		options.UpdateOne().SetUpsert(true),
+	)
+	return err
+}
+
+func (m *MongoStore) MarkSessionDeleted(ctx context.Context, sessionID string, deletedAt time.Time) error {
+	if err := m.verifyDB(); err != nil {
+		return err
+	}
+
+	_, err := m.db.Collection(sessionsCollection).UpdateOne(
+		ctx,
+		bson.M{"_id": sessionID},
+		bson.M{"$set": bson.M{
+			"deleted":    true,
+			"deleted_at": deletedAt,
+			"updated_at": deletedAt,
+		}},
+	)
+	return err
+}
+
+func (m *MongoStore) MarkSessionRestored(ctx context.Context, sessionID string, restoredAt time.Time) error {
+	if err := m.verifyDB(); err != nil {
+		return err
+	}
+
+	_, err := m.db.Collection(sessionsCollection).UpdateOne(
+		ctx,
+		bson.M{"_id": sessionID, "deleted": true},
+		bson.M{
+			"$set": bson.M{
+				"deleted":    false,
+				"updated_at": restoredAt,
+			},
+			"$unset": bson.M{
+				"deleted_at": "",
+			},
+		},
 	)
 	return err
 }
@@ -121,13 +167,25 @@ func (m *MongoStore) ClearMessages(ctx context.Context, sessionID string) error 
 }
 
 func (m *MongoStore) ListSessions(ctx context.Context) ([]data.SessionRecord, error) {
+	return m.ListSessionsWithDeleted(ctx, false)
+}
+
+func (m *MongoStore) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]data.SessionRecord, error) {
 	if err := m.verifyDB(); err != nil {
 		return nil, err
 	}
 
+	filter := bson.M{"$or": bson.A{
+		bson.M{"deleted": bson.M{"$exists": false}},
+		bson.M{"deleted": false},
+	}}
+	if includeDeleted {
+		filter = bson.M{"deleted": true}
+	}
+
 	cursor, err := m.db.Collection(sessionsCollection).Find(
 		ctx,
-		bson.M{},
+		filter,
 		options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}}),
 	)
 	if err != nil {

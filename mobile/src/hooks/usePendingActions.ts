@@ -5,7 +5,6 @@ import type { PendingAction } from "../types/app";
 const initialPendingActions: Record<PendingAction, boolean> = {
   connect: false,
   pair: false,
-  send: false,
   sessions: false,
   models: false,
   settings: false,
