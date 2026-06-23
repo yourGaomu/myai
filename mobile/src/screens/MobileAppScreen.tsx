@@ -27,6 +27,7 @@ import { useRemoteRequests } from "../hooks/useRemoteRequests";
 import { useSessionModelActions } from "../hooks/useSessionModelActions";
 import { useSessionModelState } from "../hooks/useSessionModelState";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
+import { useSkillState } from "../hooks/useSkillState";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -73,6 +74,15 @@ export function MobileAppScreen() {
     setSessionContext,
     setSessions,
   } = useSessionModelState();
+  const {
+    clearSkills,
+    setSkillMessage,
+    setSkillRoot,
+    setSkills,
+    skillMessage,
+    skillRoot,
+    skills,
+  } = useSkillState();
   const {
     changeDiff,
     changes,
@@ -178,7 +188,9 @@ export function MobileAppScreen() {
     requestFiles,
     requestHistory,
     requestModels,
+    reloadSkills,
     requestDeletedSessions,
+    requestSkills,
     requestSessionHistory,
     requestSessions,
   } = useRemoteRequests({
@@ -186,6 +198,7 @@ export function MobileAppScreen() {
     clearHistory,
     clearModels,
     clearSessions,
+    clearSkills,
     clearWorkspaceChanges,
     clientToken,
     currentFilePath: filePath,
@@ -302,6 +315,7 @@ export function MobileAppScreen() {
     applyHistoryRevert,
     applyModelList,
     applyModelSwitch,
+    applySkillList,
     applySessionChanged,
     applySessionHistory,
     applySessionList,
@@ -335,6 +349,9 @@ export function MobileAppScreen() {
     setHistoryMessage,
     setModels,
     setSelectedChange,
+    setSkillMessage,
+    setSkillRoot,
+    setSkills,
     setSessionLastUsage,
     setSessionContext,
     setSessionID,
@@ -360,6 +377,7 @@ export function MobileAppScreen() {
     applyHistoryRevert,
     applyModelList,
     applyModelSwitch,
+    applySkillList,
     applySessionChanged,
     applySessionHistory,
     applySessionList,
@@ -374,6 +392,7 @@ export function MobileAppScreen() {
     requestHistory,
     requestModels,
     requestDeletedSessions,
+    requestSkills,
     requestSessions,
     requestSessionMapRef,
     sessionIDRef,
@@ -533,6 +552,8 @@ export function MobileAppScreen() {
           onCompactSession: compactSession,
           onRefreshModels: requestModels,
           onRefreshSessions: requestSessions,
+          onRefreshSkills: requestSkills,
+          onReloadSkills: reloadSkills,
           onRelayURLChange: setRelayURL,
           onSetContextWindowK: setContextWindowK,
           onSetPermissionMode: setPermissionMode,
@@ -542,6 +563,9 @@ export function MobileAppScreen() {
           sessionID,
           sessions,
           setupVisible,
+          skillMessage,
+          skillRoot,
+          skills,
           userID,
         }}
       />

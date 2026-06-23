@@ -43,6 +43,8 @@ export function MobileMainContent({
           onCompactSession={settings.onCompactSession}
           onRefreshModels={settings.onRefreshModels}
           onRefreshSessions={settings.onRefreshSessions}
+          onRefreshSkills={settings.onRefreshSkills}
+          onReloadSkills={settings.onReloadSkills}
           onRelayURLChange={settings.onRelayURLChange}
           onSetContextWindowK={settings.onSetContextWindowK}
           onSetPermissionMode={settings.onSetPermissionMode}
@@ -52,6 +54,9 @@ export function MobileMainContent({
           relayURL={settings.relayURL}
           sessionID={settings.sessionID}
           sessions={settings.sessions}
+          skillMessage={settings.skillMessage}
+          skillRoot={settings.skillRoot}
+          skills={settings.skills}
           userID={settings.userID}
         />
       ) : null}

@@ -20,6 +20,7 @@ import type {
   SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
+  SkillListResultPayload,
   TokenUsage,
   ToolCallPayload,
 } from "../protocol";
@@ -46,6 +47,7 @@ type Args = {
   applySessionHistory: (payload?: SessionHistoryResultPayload) => void;
   applySessionList: (payload?: SessionListResultPayload) => void;
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
+  applySkillList: (payload?: SkillListResultPayload) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
   currentFilePath: string;
   getSessionChat: (sessionID: string) => { activeAssistantID: string };
@@ -55,6 +57,7 @@ type Args = {
   requestFiles: (path?: string) => boolean;
   requestHistory: () => boolean;
   requestModels: () => boolean;
+  requestSkills: () => boolean;
   requestDeletedSessions: () => boolean;
   requestSessions: () => boolean;
   requestSessionMapRef: RefObject<Record<string, string>>;
@@ -88,6 +91,7 @@ export function useRemoteMessageHandler({
   applySessionHistory,
   applySessionList,
   applySessionSettings,
+  applySkillList,
   clearSessionPendingRequest,
   currentFilePath,
   getSessionChat,
@@ -97,6 +101,7 @@ export function useRemoteMessageHandler({
   requestFiles,
   requestHistory,
   requestModels,
+  requestSkills,
   requestDeletedSessions,
   requestSessions,
   requestSessionMapRef,
@@ -153,6 +158,7 @@ export function useRemoteMessageHandler({
           }
           requestSessions();
           requestModels();
+          requestSkills();
           requestFiles(currentFilePath);
           requestChanges();
           requestHistory();
@@ -212,6 +218,11 @@ export function useRemoteMessageHandler({
           applyModelSwitch(message.payload as ModelSwitchResultPayload | undefined);
           requestSessions();
           break;
+        case "skill_list_result":
+        case "skill_reload_result":
+          stopPending("skills");
+          applySkillList(message.payload as SkillListResultPayload | undefined);
+          break;
         case "file_list_result":
           stopPending("files");
           applyFileList(message.payload as FileListResultPayload | undefined);
@@ -252,6 +263,7 @@ export function useRemoteMessageHandler({
           clearSessionPendingRequest(targetSessionID, message.request_id);
           stopPending("sessions");
           stopPending("models");
+          stopPending("skills");
           stopPending("files");
           stopPending("changes");
           stopPending("history");
@@ -290,6 +302,7 @@ export function useRemoteMessageHandler({
       applySessionHistory,
       applySessionList,
       applySessionSettings,
+      applySkillList,
       clearSessionPendingRequest,
       currentFilePath,
       getSessionChat,
@@ -299,6 +312,7 @@ export function useRemoteMessageHandler({
       requestFiles,
       requestHistory,
       requestModels,
+      requestSkills,
       requestDeletedSessions,
       requestSessions,
       requestSessionMapRef,

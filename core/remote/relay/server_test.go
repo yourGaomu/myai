@@ -336,6 +336,77 @@ func TestRelayForwardsModelMessages(t *testing.T) {
 	}
 }
 
+func TestRelayForwardsSkillMessages(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSkillList,
+		RequestID:   "skill-list-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedListToAgent := readTestMessage(t, agentConn, protocol.TypeSkillList)
+	if forwardedListToAgent.RequestID != "skill-list-1" {
+		t.Fatalf("expected request id skill-list-1, got %s", forwardedListToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSkillListResult,
+		RequestID: "skill-list-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedListToClient := readTestMessage(t, clientConn, protocol.TypeSkillListResult)
+	if forwardedListToClient.RequestID != "skill-list-1" {
+		t.Fatalf("expected request id skill-list-1, got %s", forwardedListToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSkillReload,
+		RequestID:   "skill-reload-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedReloadToAgent := readTestMessage(t, agentConn, protocol.TypeSkillReload)
+	if forwardedReloadToAgent.RequestID != "skill-reload-1" {
+		t.Fatalf("expected request id skill-reload-1, got %s", forwardedReloadToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSkillReloadResult,
+		RequestID: "skill-reload-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedReloadToClient := readTestMessage(t, clientConn, protocol.TypeSkillReloadResult)
+	if forwardedReloadToClient.RequestID != "skill-reload-1" {
+		t.Fatalf("expected request id skill-reload-1, got %s", forwardedReloadToClient.RequestID)
+	}
+}
+
 func TestRelayForwardsFileMessages(t *testing.T) {
 	server := NewServer("")
 	testServer := httptest.NewServer(server.routes())

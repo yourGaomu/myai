@@ -12,6 +12,7 @@ import (
 
 	"myai/core/llm"
 	"myai/core/service"
+	"myai/core/skill"
 	"myai/core/store/data"
 )
 
@@ -230,6 +231,7 @@ func printChatHelp() {
 	printCommand("/new", "Create and switch to a new session")
 	printCommand("/sessions", "List saved sessions")
 	printCommand("/use <id>", "Switch to a saved session")
+	printCommand("/skills", "Reload and list local skills")
 	printCommand("/permission", "Show session permission mode")
 	printCommand("/permission <mode>", "Set readonly, ask, or full")
 	printCommand("/context", "Show context window usage")
@@ -331,6 +333,42 @@ func printModelsTable(models []llm.ModelInfo, currentID string) {
 			fmt.Println(selectedRowStyle.Render(line))
 			continue
 		}
+		fmt.Println(bodyStyle.Render(line))
+	}
+	fmt.Println()
+}
+
+func printSkillsTable(skills []skill.Skill, root string) {
+	printSectionTitle("Skills")
+	if root != "" {
+		fmt.Println(statusLine("root", root, mutedStyle))
+	}
+	if len(skills) == 0 {
+		printWarning("no skills loaded. create skills/<name>/SKILL.md to add one.")
+		return
+	}
+
+	width := currentUIWidth()
+	nameWidth := clampInt((width-45)/2, 12, 28)
+	descriptionWidth := clampInt(width-nameWidth-35, 18, 42)
+	fmt.Println(tableHeaderStyle.Render(
+		padRight("name", nameWidth+2) +
+			padRight("description", descriptionWidth+2) +
+			padRight("updated", 18) +
+			"path",
+	))
+	for _, item := range skills {
+		updated := "-"
+		if !item.UpdatedAt.IsZero() {
+			updated = item.UpdatedAt.Format("2006-01-02 15:04")
+		}
+		line := fmt.Sprintf(
+			"%s  %s  %s  %s",
+			padRight(truncate(item.Name, nameWidth), nameWidth),
+			padRight(truncate(item.Description, descriptionWidth), descriptionWidth),
+			padRight(updated, 16),
+			truncate(item.Path, maxInt(12, width-nameWidth-descriptionWidth-26)),
+		)
 		fmt.Println(bodyStyle.Render(line))
 	}
 	fmt.Println()

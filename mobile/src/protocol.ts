@@ -27,6 +27,10 @@ export type MessageType =
   | "model_list_result"
   | "model_switch"
   | "model_switch_result"
+  | "skill_list"
+  | "skill_list_result"
+  | "skill_reload"
+  | "skill_reload_result"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -230,6 +234,22 @@ export type ModelSwitchResultPayload = {
   current_model_id?: string;
   models?: ModelSummary[];
   session?: SessionSummary;
+  message?: string;
+};
+
+export type SkillSummary = {
+  name: string;
+  description?: string;
+  path?: string;
+  triggers?: string[];
+  updated_at?: string;
+};
+
+export type SkillListResultPayload = {
+  root?: string;
+  skills?: SkillSummary[];
+  count?: number;
+  reloaded?: boolean;
   message?: string;
 };
 

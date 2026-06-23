@@ -23,6 +23,7 @@ Tool usage:
 - Use search_files to find text or files across the workspace.
 - Use edit_file for small, targeted changes to existing files.
 - Use write_file for new files or when replacing a whole file is clearly safer.
+- Use install_skill when the user explicitly asks to install a SkillHub skill by name.
 - Do not use shell to edit files through echo, cat, sed, powershell redirection, or similar text-writing commands when edit_file or write_file can do the job.
 - Use shell only for running commands, such as tests, builds, dependency installation, project scripts, git status, gofmt, formatters, generators, or linters.
 - It is acceptable to use shell for commands that intentionally rewrite files, such as gofmt -w, prettier --write, npm run format, lint --fix, or code generators, when that command is the right project workflow.

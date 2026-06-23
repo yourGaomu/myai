@@ -8,6 +8,7 @@ import (
 	"myai/core"
 	"myai/core/llm"
 	"myai/core/service"
+	"myai/core/skill"
 	"myai/core/store/data"
 	"os"
 	"strconv"
@@ -72,6 +73,8 @@ func runChat() {
 			printSuccess("current session cleared.")
 		case "/sessions":
 			printSessions(ctx, chatService)
+		case "/skills":
+			printSkills(ctx, chatService)
 		case "/models":
 			printModels(chatService)
 		case "/model":
@@ -239,6 +242,18 @@ func printSessions(ctx context.Context, chatService interface {
 		return
 	}
 	printSessionsTable(sessions, chatService.CurrentSessionID())
+}
+
+func printSkills(ctx context.Context, chatService interface {
+	ListSkills(context.Context) ([]skill.Skill, error)
+	SkillRoot() string
+}) {
+	skills, err := chatService.ListSkills(ctx)
+	if err != nil {
+		printError("skill error:", err)
+		return
+	}
+	printSkillsTable(skills, chatService.SkillRoot())
 }
 
 func printModels(chatService interface {

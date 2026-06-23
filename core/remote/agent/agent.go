@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"myai/core/remote/files"
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	"myai/core/skill"
 	"myai/core/store/data"
 )
 
@@ -236,6 +238,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleModelList(ctx, conn, message)
 	case protocol.TypeModelSwitch:
 		return a.handleModelSwitch(ctx, conn, message)
+	case protocol.TypeSkillList:
+		return a.handleSkillList(ctx, conn, message)
+	case protocol.TypeSkillReload:
+		return a.handleSkillReload(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:
@@ -432,6 +438,30 @@ func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, 
 func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload := a.modelListPayload()
 	return a.writeRemoteMessage(conn, protocol.TypeModelListResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) handleSkillList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.SkillListPayload](message); err != nil {
+		return fmt.Errorf("decode skill list failed: %w", err)
+	}
+
+	payload, err := a.skillListPayload(ctx, false)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSkillListResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) handleSkillReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.SkillReloadPayload](message); err != nil {
+		return fmt.Errorf("decode skill reload failed: %w", err)
+	}
+
+	payload, err := a.skillListPayload(ctx, true)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSkillReloadResult, message.RequestID, message.SessionID, payload)
 }
 
 func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
@@ -790,6 +820,30 @@ func (a *Agent) modelListPayload() protocol.ModelListResultPayload {
 	}
 }
 
+func (a *Agent) skillListPayload(ctx context.Context, reloaded bool) (protocol.SkillListResultPayload, error) {
+	skills, err := a.chatService.ListSkills(ctx)
+	if err != nil {
+		return protocol.SkillListResultPayload{}, err
+	}
+
+	root := a.chatService.SkillRoot()
+	message := ""
+	if reloaded {
+		message = fmt.Sprintf("Reloaded %d local skill(s).", len(skills))
+	}
+	if len(skills) == 0 {
+		message = "No local skills found. Install one with SkillHub or create skills/<name>/SKILL.md."
+	}
+
+	return protocol.SkillListResultPayload{
+		Root:     filepath.ToSlash(root),
+		Skills:   skillSummaries(root, skills),
+		Count:    len(skills),
+		Reloaded: reloaded,
+		Message:  message,
+	}, nil
+}
+
 func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
 	if err != nil {
@@ -952,6 +1006,31 @@ func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
 		})
 	}
 	return summaries
+}
+
+func skillSummaries(root string, skills []skill.Skill) []protocol.SkillSummary {
+	summaries := make([]protocol.SkillSummary, 0, len(skills))
+	for _, item := range skills {
+		summaries = append(summaries, protocol.SkillSummary{
+			Name:        item.Name,
+			Description: item.Description,
+			Path:        skillDisplayPath(root, item.Path),
+			Triggers:    append([]string(nil), item.Triggers...),
+			UpdatedAt:   item.UpdatedAt,
+		})
+	}
+	return summaries
+}
+
+func skillDisplayPath(root string, path string) string {
+	root = strings.TrimSpace(root)
+	path = strings.TrimSpace(path)
+	if root != "" && path != "" {
+		if rel, err := filepath.Rel(root, path); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(path)
 }
 
 func tokenUsagePayload(usage llm.TokenUsage) protocol.TokenUsage {

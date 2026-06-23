@@ -11,6 +11,7 @@ import type {
   HistoryCheckpoint,
   HistoryDiffResultPayload,
   ModelSummary,
+  SkillSummary,
   SessionSummary,
 } from "../protocol";
 import type { PendingAction, PermissionState, SessionPermissionMode, ViewMode } from "../types/app";
@@ -46,6 +47,8 @@ export type SettingsContentProps = {
   onCompactSession: () => void;
   onRefreshModels: () => void;
   onRefreshSessions: () => void;
+  onRefreshSkills: () => void;
+  onReloadSkills: () => void;
   onRelayURLChange: (value: string) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
@@ -54,6 +57,9 @@ export type SettingsContentProps = {
   relayURL: string;
   sessionID: string;
   sessions: SessionSummary[];
+  skillMessage: string;
+  skillRoot: string;
+  skills: SkillSummary[];
   setupVisible: boolean;
   userID: string;
 };

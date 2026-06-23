@@ -190,12 +190,13 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		return ChatResponse{}, fmt.Errorf("model not found: %s", current.Model)
 	}
 
-	compactInfo, err := s.autoCompactIfNeeded(ctx, current, model)
+	skillPrompt := s.skillPrompt(ctx, input)
+	compactInfo, err := s.autoCompactIfNeeded(ctx, current, model, skillPrompt)
 	if err != nil {
 		log.Printf("auto compact failed: %v", err)
 	}
 
-	result, err := s.runAgentLoop(ctx, model, current, stream)
+	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -212,7 +213,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	return ChatResponse{
 		SessionID: current.ID,
 		Result:    result,
-		Context:   s.contextInfo(ctx, current),
+		Context:   s.contextInfoWithSkillPrompt(current, skillPrompt),
 		Compact:   compactInfo,
 	}, nil
 }
@@ -232,12 +233,12 @@ func (s *ChatService) llmToolsForSession(current *session.Session) []llms.Tool {
 	})
 }
 
-func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler) (llm.ChatResult, error) {
+func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string) (llm.ChatResult, error) {
 	var totalUsage llm.TokenUsage
 	reasoningParts := make([]string, 0, maxAgentToolRounds)
 
 	for round := 0; round < maxAgentToolRounds; round++ {
-		result, err := model.ChatWithStreamToolsHandler(s.contextSnapshot(ctx, current).Messages, s.llmToolsForSession(current), stream)
+		result, err := model.ChatWithStreamToolsHandler(s.contextSnapshot(current, skillPrompt).Messages, s.llmToolsForSession(current), stream)
 		if err != nil {
 			return llm.ChatResult{}, err
 		}
@@ -259,7 +260,7 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 		s.persistToolRecordsAsync(toolRecords)
 	}
 
-	result, err := model.ChatWithStreamHandler(s.contextSnapshot(ctx, current).Messages, stream)
+	result, err := model.ChatWithStreamHandler(s.contextSnapshot(current, skillPrompt).Messages, stream)
 	if err != nil {
 		return llm.ChatResult{}, err
 	}
@@ -272,18 +273,18 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 }
 
 func (s *ChatService) contextMessages(current *session.Session) []llms.MessageContent {
-	return s.contextSnapshot(context.Background(), current).Messages
+	return s.contextSnapshot(current, s.skillPrompt(context.Background(), "")).Messages
 }
 
-func (s *ChatService) contextSnapshot(ctx context.Context, current *session.Session) contextmgr.Snapshot {
+func (s *ChatService) contextSnapshot(current *session.Session, skillPrompt string) contextmgr.Snapshot {
 	if current == nil {
 		return contextmgr.Snapshot{}
 	}
-	return contextmgr.BuildSnapshot(s.messagesWithSkills(ctx, current.Messages), current.Summary, current.CompactedMessages, current.ContextWindowK)
+	return contextmgr.BuildSnapshot(s.messagesWithSkills(current.Messages, skillPrompt), current.Summary, current.CompactedMessages, current.ContextWindowK)
 }
 
-func (s *ChatService) messagesWithSkills(ctx context.Context, messages []llms.MessageContent) []llms.MessageContent {
-	prompt := strings.TrimSpace(s.skillPrompt(ctx))
+func (s *ChatService) messagesWithSkills(messages []llms.MessageContent, skillPrompt string) []llms.MessageContent {
+	prompt := strings.TrimSpace(skillPrompt)
 	if prompt == "" {
 		return messages
 	}
@@ -305,18 +306,25 @@ func (s *ChatService) messagesWithSkills(ctx context.Context, messages []llms.Me
 	return withSkills
 }
 
-func (s *ChatService) skillPrompt(ctx context.Context) string {
+func (s *ChatService) skillPrompt(ctx context.Context, input string) string {
 	if s.skills == nil {
 		return ""
 	}
-	return s.skills.Prompt(ctx)
+	return s.skills.PromptForInput(ctx, input)
 }
 
 func (s *ChatService) contextInfo(ctx context.Context, current *session.Session) ContextInfo {
 	if current == nil {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
 	}
-	return s.contextSnapshot(ctx, current).Info
+	return s.contextInfoWithSkillPrompt(current, s.skillPrompt(ctx, ""))
+}
+
+func (s *ChatService) contextInfoWithSkillPrompt(current *session.Session, skillPrompt string) ContextInfo {
+	if current == nil {
+		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
+	}
+	return s.contextSnapshot(current, skillPrompt).Info
 }
 
 func (s *ChatService) summarizeMessages(ctx context.Context, model *llm.Model, existingSummary string, messages []llms.MessageContent) (string, error) {
@@ -721,6 +729,23 @@ func (s *ChatService) ListModels() []llm.ModelInfo {
 	return s.client.ListModels()
 }
 
+func (s *ChatService) ListSkills(ctx context.Context) ([]skill.Skill, error) {
+	if s.skills == nil {
+		return nil, nil
+	}
+	if err := s.skills.Reload(ctx); err != nil {
+		return nil, err
+	}
+	return s.skills.List(), nil
+}
+
+func (s *ChatService) SkillRoot() string {
+	if s.skills == nil {
+		return ""
+	}
+	return s.skills.Root()
+}
+
 func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
 	return s.SwitchModelForSession(ctx, s.CurrentSessionID(), modelID)
 }
@@ -842,12 +867,12 @@ func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (Con
 	return s.contextInfo(ctx, current), nil
 }
 
-func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.Session, model *llm.Model) (CompactInfo, error) {
+func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.Session, model *llm.Model, skillPrompt string) (CompactInfo, error) {
 	if current == nil || model == nil {
 		return CompactInfo{}, nil
 	}
 
-	before := s.contextSnapshot(ctx, current).Info
+	before := s.contextSnapshot(current, skillPrompt).Info
 	if !contextmgr.ShouldCompact(before, contextmgr.DefaultCompactTriggerRatio) {
 		return CompactInfo{}, nil
 	}
@@ -855,7 +880,7 @@ func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.
 	if err := s.compactSession(ctx, current, model); errors.Is(err, errNotEnoughHistoryToCompact) {
 		return CompactInfo{}, nil
 	} else {
-		after := s.contextSnapshot(ctx, current).Info
+		after := s.contextSnapshot(current, skillPrompt).Info
 		return CompactInfo{
 			Triggered:         true,
 			Reason:            compactReason(before),

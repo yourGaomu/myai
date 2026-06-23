@@ -6,13 +6,14 @@ import { newRequestID } from "../utils/ids";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 const remoteStateTimeoutMs = 8000;
-const timeoutActions: PendingAction[] = ["sessions", "models"];
+const timeoutActions: PendingAction[] = ["sessions", "models", "skills"];
 
 type Args = {
   clearFileEntries: () => void;
   clearHistory: () => void;
   clearModels: () => void;
   clearSessions: () => void;
+  clearSkills: () => void;
   clearWorkspaceChanges: () => void;
   clientToken: string;
   currentFilePath: string;
@@ -28,6 +29,7 @@ export function useRemoteRequests({
   clearHistory,
   clearModels,
   clearSessions,
+  clearSkills,
   clearWorkspaceChanges,
   clientToken,
   currentFilePath,
@@ -99,6 +101,34 @@ export function useRemoteRequests({
     }
     return true;
   }, [clearModels, clientToken, sendEnvelope, startPending, stopPending]);
+
+  const requestSkills = useCallback(() => {
+    if (!clientToken) {
+      clearSkills();
+      stopPending("skills");
+      return false;
+    }
+    startPending("skills");
+    if (!sendEnvelope("skill_list", { request_id: newRequestID() })) {
+      stopPending("skills");
+      return false;
+    }
+    return true;
+  }, [clearSkills, clientToken, sendEnvelope, startPending, stopPending]);
+
+  const reloadSkills = useCallback(() => {
+    if (!clientToken) {
+      clearSkills();
+      stopPending("skills");
+      return false;
+    }
+    startPending("skills");
+    if (!sendEnvelope("skill_reload", { request_id: newRequestID() })) {
+      stopPending("skills");
+      return false;
+    }
+    return true;
+  }, [clearSkills, clientToken, sendEnvelope, startPending, stopPending]);
 
   const requestSessionHistory = useCallback(
     (nextSessionID = currentSessionID) => {
@@ -184,15 +214,18 @@ export function useRemoteRequests({
   const refreshRemoteState = useCallback(() => {
     requestSessions();
     requestModels();
+    requestSkills();
     stopRemoteStateLoadingLater();
-  }, [requestModels, requestSessions, stopRemoteStateLoadingLater]);
+  }, [requestModels, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
 
   return {
+    reloadSkills,
     refreshRemoteState,
     requestChanges,
     requestFiles,
     requestHistory,
     requestModels,
+    requestSkills,
     requestDeletedSessions,
     requestSessionHistory,
     requestSessions,

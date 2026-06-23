@@ -15,6 +15,7 @@ export type PendingAction =
   | "pair"
   | "sessions"
   | "models"
+  | "skills"
   | "settings"
   | "files"
   | "changes"

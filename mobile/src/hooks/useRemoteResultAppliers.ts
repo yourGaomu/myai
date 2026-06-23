@@ -20,6 +20,8 @@ import type {
   SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
+  SkillListResultPayload,
+  SkillSummary,
   SessionSummary,
   TokenUsage,
 } from "../protocol";
@@ -58,6 +60,9 @@ type Args = {
   setHistoryMessage: (message: string) => void;
   setModels: (models: ModelSummary[]) => void;
   setSelectedChange: (path: string) => void;
+  setSkillMessage: (message: string) => void;
+  setSkillRoot: (root: string) => void;
+  setSkills: (skills: SkillSummary[]) => void;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
   setSessionContext: (sessionID: string, context: ContextInfo) => void;
   setSessionID: (sessionID: string) => void;
@@ -96,6 +101,9 @@ export function useRemoteResultAppliers({
   setHistoryMessage,
   setModels,
   setSelectedChange,
+  setSkillMessage,
+  setSkillRoot,
+  setSkills,
   setSessionLastUsage,
   setSessionContext,
   setSessionID,
@@ -213,6 +221,16 @@ export function useRemoteResultAppliers({
       addEventMessage(payload?.session?.id || sessionIDRef.current, payload?.message || `Model switched to ${payload?.current_model_id || "selected model"}`);
     };
 
+    const applySkillList = (payload?: SkillListResultPayload) => {
+      const nextSkills = payload?.skills || [];
+      setSkills(nextSkills);
+      setSkillRoot(payload?.root || "");
+      setSkillMessage(payload?.message || (nextSkills.length === 0 ? "No local skills found" : ""));
+      if (payload?.message) {
+        addEventMessage(sessionIDRef.current, payload.message);
+      }
+    };
+
     const applyFileList = (payload?: FileListResultPayload) => {
       setFilePath(payload?.path || ".");
       setFileParent(payload?.parent || "");
@@ -306,6 +324,7 @@ export function useRemoteResultAppliers({
       applyHistoryRevert,
       applyModelList,
       applyModelSwitch,
+      applySkillList,
       applySessionChanged,
       applySessionHistory,
       applySessionList,
@@ -340,6 +359,9 @@ export function useRemoteResultAppliers({
     setHistoryMessage,
     setModels,
     setSelectedChange,
+    setSkillMessage,
+    setSkillRoot,
+    setSkills,
     setSessionLastUsage,
     setSessionContext,
     setSessionID,

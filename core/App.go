@@ -8,6 +8,8 @@ import (
 	"myai/core/tool"
 	"myai/core/tool/local"
 	tooldef "myai/core/tool/tool"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,8 +72,8 @@ func InitApp() {
 		instance.InitClient()
 		instance.InitSessionManage()
 		instance.InitSandbox()
-		instance.InitRegister()
 		instance.InitSkillManager()
+		instance.InitRegister()
 		instance.InitChatService()
 	})
 }
@@ -262,6 +264,7 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewWriteFileToolWithWorkspace(app.workspace),
 		local.NewEditFileToolWithWorkspace(app.workspace),
 		local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
+		local.NewInstallSkillToolWithWorkspaceAndSkills(app.workspace, app.skillRoot(), app.skillManager),
 	}
 	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools
@@ -273,12 +276,23 @@ func (app *Application) GetToolRegister() *tool.RegisterTools {
 }
 
 func (app *Application) InitSkillManager() *skill.Manager {
-	root := app.viper.GetString("skill.root")
+	app.skillManager = skill.NewManager(app.skillRoot())
+	return app.skillManager
+}
+
+func (app *Application) skillRoot() string {
+	root := strings.TrimSpace(app.viper.GetString("skill.root"))
 	if root == "" {
 		root = "skills"
 	}
-	app.skillManager = skill.NewManager(root)
-	return app.skillManager
+	if filepath.IsAbs(root) {
+		return root
+	}
+	workspace := strings.TrimSpace(app.workspace)
+	if workspace == "" {
+		return root
+	}
+	return filepath.Join(workspace, root)
 }
 
 func (app *Application) GetSkillManager() *skill.Manager {

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { ButtonContent } from "../common/ButtonContent";
-import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary } from "../../protocol";
+import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary, SkillSummary } from "../../protocol";
 import type { PendingAction, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { shortID } from "../../utils/ids";
@@ -34,6 +34,8 @@ type Props = {
   onPair: () => void;
   onRefreshModels: () => void;
   onRefreshSessions: () => void;
+  onRefreshSkills: () => void;
+  onReloadSkills: () => void;
   onRelayURLChange: (value: string) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
@@ -43,6 +45,9 @@ type Props = {
   relayURL: string;
   sessionID: string;
   sessions: SessionSummary[];
+  skillMessage: string;
+  skillRoot: string;
+  skills: SkillSummary[];
   userID: string;
 };
 
@@ -52,12 +57,13 @@ const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta:
   { label: "Full", mode: "full", meta: "auto allow" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "session" | "permission" | "context";
+type SettingsSection = "general" | "connection" | "model" | "skill" | "session" | "permission" | "context";
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
   { icon: "G", key: "general", label: "常规", meta: "状态总览" },
   { icon: "WS", key: "connection", label: "连接", meta: "Relay 与配对" },
   { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
+  { icon: "SK", key: "skill", label: "技能", meta: "本地 SkillHub" },
   { icon: "S", key: "session", label: "会话", meta: "新建与切换" },
   { icon: "P", key: "permission", label: "权限", meta: "工具调用策略" },
   { icon: "K", key: "context", label: "上下文", meta: "窗口与压缩" },
@@ -87,6 +93,8 @@ export function SettingsPanel({
   onPair,
   onRefreshModels,
   onRefreshSessions,
+  onRefreshSkills,
+  onReloadSkills,
   onRelayURLChange,
   onSetContextWindowK,
   onSetPermissionMode,
@@ -96,6 +104,9 @@ export function SettingsPanel({
   relayURL,
   sessionID,
   sessions,
+  skillMessage,
+  skillRoot,
+  skills,
   userID,
 }: Props) {
   const { width } = useWindowDimensions();
@@ -235,6 +246,64 @@ export function SettingsPanel({
         </View>
       ) : (
         <EmptyBox text={clientToken ? "还没有加载模型，点击刷新试试" : "先完成配对，再加载模型"} />
+      )}
+    </View>
+  );
+
+  const skillSection = (
+    <View style={styles.sectionStack}>
+      <View style={styles.settingCard}>
+        <IconBox label="SK" />
+        <View style={styles.flex}>
+          <Text style={styles.settingTitle}>技能</Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>
+            {skills.length} loaded{skillRoot ? ` / ${skillRoot}` : ""}
+          </Text>
+        </View>
+        <View style={styles.rowCompact}>
+          <Pressable
+            disabled={pendingActions.skills}
+            onPress={onRefreshSkills}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.skills && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={pendingActions.skills} text={pendingActions.skills ? "加载中" : "刷新"} />
+          </Pressable>
+          <Pressable
+            disabled={pendingActions.skills}
+            onPress={onReloadSkills}
+            style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.skills && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
+          </Pressable>
+        </View>
+      </View>
+
+      {skillMessage ? <EmptyBox text={skillMessage} /> : null}
+
+      {skills.length > 0 ? (
+        <View style={styles.skillList}>
+          {skills.map((item) => (
+            <View key={`${item.name}:${item.path || ""}`} style={styles.skillCard}>
+              <View style={styles.skillHeader}>
+                <View style={styles.flex}>
+                  <Text numberOfLines={1} style={styles.skillName}>{item.name}</Text>
+                  {item.description ? <Text numberOfLines={2} style={styles.skillDescription}>{item.description}</Text> : null}
+                </View>
+                <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text>
+              </View>
+              {item.triggers && item.triggers.length > 0 ? (
+                <View style={styles.triggerRow}>
+                  {item.triggers.slice(0, 6).map((trigger) => (
+                    <Text key={trigger} style={styles.triggerChip}>{trigger}</Text>
+                  ))}
+                </View>
+              ) : null}
+              {item.path ? <Text numberOfLines={1} style={styles.skillPath}>{item.path}</Text> : null}
+            </View>
+          ))}
+        </View>
+      ) : (
+        <EmptyBox text={clientToken ? "还没有本地技能。可以用 SkillHub 安装，或创建 skills/<name>/SKILL.md。" : "先连接 agent，再查看本地技能。"} />
       )}
     </View>
   );
@@ -449,6 +518,7 @@ export function SettingsPanel({
       <View style={styles.summaryGrid}>
         <SummaryTile label="连接" value={connected ? "在线" : clientToken ? "未连接" : "未配对"} tone={connected ? "good" : "warn"} />
         <SummaryTile label="模型" value={activeModel ? modelDisplayName(activeModel) : currentModelID || "未加载"} />
+        <SummaryTile label="技能" value={`${skills.length}`} tone={skills.length > 0 ? "good" : "quiet"} />
         <SummaryTile label="会话" value={activeSession?.title || (sessionID ? shortID(sessionID) : "未选择")} />
         <SummaryTile label="权限" value={activePermission} tone={activePermission === "full" ? "warn" : activePermission === "readonly" ? "quiet" : "normal"} />
         <SummaryTile label="上下文" value={`${currentWindowK}K`} />
@@ -470,6 +540,13 @@ export function SettingsPanel({
           <ButtonContent loading={pendingActions.models} text="刷新模型" />
         </Pressable>
         <Pressable
+          disabled={pendingActions.skills}
+          onPress={onRefreshSkills}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.skills && styles.disabledButton], pressed)}
+        >
+          <ButtonContent loading={pendingActions.skills} text="刷新技能" />
+        </Pressable>
+        <Pressable
           disabled={pendingActions.sessions}
           onPress={onRefreshSessions}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.sessions && styles.disabledButton], pressed)}
@@ -487,6 +564,7 @@ export function SettingsPanel({
     model: modelSection,
     permission: permissionSection,
     session: sessionSection,
+    skill: skillSection,
   };
 
   return (
@@ -634,6 +712,17 @@ function compactReasonLabel(reason?: string) {
     return "阈值触发";
   }
   return reason || "自动";
+}
+
+function formatDate(value?: string) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 const styles = StyleSheet.create({
@@ -912,6 +1001,69 @@ const styles = StyleSheet.create({
     color: "#6c665f",
     fontSize: 12,
     marginTop: 3,
+  },
+  skillList: {
+    gap: 8,
+  },
+  skillCard: {
+    backgroundColor: "#f5eefc",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 3,
+    gap: 8,
+    padding: 10,
+  },
+  skillHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  skillName: {
+    color: "#12100e",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  skillDescription: {
+    color: "#4f4942",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  skillBadge: {
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  triggerRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  triggerChip: {
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  skillPath: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
   },
   controlBlock: {
     backgroundColor: "#fdf7ea",

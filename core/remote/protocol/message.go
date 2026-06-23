@@ -37,6 +37,10 @@ const (
 	TypeModelListResult            MessageType = "model_list_result"
 	TypeModelSwitch                MessageType = "model_switch"
 	TypeModelSwitchResult          MessageType = "model_switch_result"
+	TypeSkillList                  MessageType = "skill_list"
+	TypeSkillListResult            MessageType = "skill_list_result"
+	TypeSkillReload                MessageType = "skill_reload"
+	TypeSkillReloadResult          MessageType = "skill_reload_result"
 	TypeFileList                   MessageType = "file_list"
 	TypeFileListResult             MessageType = "file_list_result"
 	TypeFileRead                   MessageType = "file_read"
@@ -254,6 +258,26 @@ type ModelSwitchResultPayload struct {
 	Models         []ModelSummary `json:"models"`
 	Session        SessionSummary `json:"session"`
 	Message        string         `json:"message,omitempty"`
+}
+
+type SkillListPayload struct{}
+
+type SkillReloadPayload struct{}
+
+type SkillSummary struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Path        string    `json:"path"`
+	Triggers    []string  `json:"triggers,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type SkillListResultPayload struct {
+	Root     string         `json:"root,omitempty"`
+	Skills   []SkillSummary `json:"skills"`
+	Count    int            `json:"count"`
+	Reloaded bool           `json:"reloaded,omitempty"`
+	Message  string         `json:"message,omitempty"`
 }
 
 type FileListPayload struct {
