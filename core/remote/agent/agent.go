@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -66,7 +67,9 @@ func New(config Config, chatService *service.ChatService) *Agent {
 }
 
 type sessionRuntime struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	cancelMu sync.Mutex
+	cancel   context.CancelFunc
 }
 
 type sessionRuntimeManager struct {
@@ -94,6 +97,50 @@ func (m *sessionRuntimeManager) get(sessionID string) *sessionRuntime {
 		m.sessions[sessionID] = runtime
 	}
 	return runtime
+}
+
+func (r *sessionRuntime) start(parent context.Context) (context.Context, context.CancelFunc, bool) {
+	if r == nil {
+		return parent, func() {}, false
+	}
+	ctx, cancel := context.WithCancel(parent)
+
+	r.cancelMu.Lock()
+	if r.cancel != nil {
+		r.cancelMu.Unlock()
+		cancel()
+		return ctx, cancel, false
+	}
+	r.cancel = cancel
+	r.cancelMu.Unlock()
+
+	return ctx, cancel, true
+}
+
+func (r *sessionRuntime) finish(cancel context.CancelFunc) {
+	if r == nil || cancel == nil {
+		return
+	}
+	r.cancelMu.Lock()
+	if r.cancel != nil {
+		r.cancel = nil
+	}
+	r.cancelMu.Unlock()
+	cancel()
+}
+
+func (r *sessionRuntime) pause() bool {
+	if r == nil {
+		return false
+	}
+	r.cancelMu.Lock()
+	cancel := r.cancel
+	r.cancelMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -234,6 +281,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionContextSet(ctx, conn, message)
 	case protocol.TypeSessionCompact:
 		return a.handleSessionCompact(ctx, conn, message)
+	case protocol.TypeSessionPause:
+		return a.handleSessionPause(ctx, conn, message)
 	case protocol.TypeModelList:
 		return a.handleModelList(ctx, conn, message)
 	case protocol.TypeModelSwitch:
@@ -274,7 +323,16 @@ func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, me
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 
-	if err := a.handleUserMessage(ctx, conn, message); err != nil {
+	runCtx, cancel, ok := runtime.start(ctx)
+	if !ok {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: "session is already running"}); writeErr != nil {
+			log.Printf("send remote busy error failed: %v", writeErr)
+		}
+		return
+	}
+	defer runtime.finish(cancel)
+
+	if err := a.handleUserMessage(runCtx, conn, message); err != nil {
 		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
 			log.Printf("send remote user message error failed: %v", writeErr)
 		}
@@ -587,6 +645,28 @@ func (a *Agent) handleSessionCompact(ctx context.Context, conn *websocket.Conn, 
 	return a.writeRemoteMessage(conn, protocol.TypeSessionCompactResult, message.RequestID, sessionID, result)
 }
 
+func (a *Agent) handleSessionPause(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionPausePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session pause failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	paused := a.runtimes.get(sessionID).pause()
+	text := "No running task for this session."
+	if paused {
+		text = "Session task paused."
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionPauseResult, message.RequestID, sessionID, protocol.SessionPauseResultPayload{
+		SessionID: sessionID,
+		Paused:    paused,
+		Message:   text,
+	})
+}
+
 func (a *Agent) handleModelSwitch(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.ModelSwitchPayload](message)
 	if err != nil {
@@ -821,7 +901,13 @@ func (a *Agent) modelListPayload() protocol.ModelListResultPayload {
 }
 
 func (a *Agent) skillListPayload(ctx context.Context, reloaded bool) (protocol.SkillListResultPayload, error) {
-	skills, err := a.chatService.ListSkills(ctx)
+	var skills []skill.Skill
+	var err error
+	if reloaded {
+		skills, err = a.chatService.ReloadSkills(ctx, "remote_reload")
+	} else {
+		skills, err = a.chatService.ListSkills(ctx)
+	}
 	if err != nil {
 		return protocol.SkillListResultPayload{}, err
 	}
@@ -881,12 +967,31 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 				Arguments: arguments,
 			})
 		},
+		OnToolResult: func(name string, arguments string, result string) {
+			if name != "install_skill" || strings.Contains(strings.ToLower(result), "tool error:") {
+				return
+			}
+			payload, err := a.skillListPayload(ctx, false)
+			if err != nil {
+				select {
+				case sendErrCh <- err:
+				default:
+				}
+				return
+			}
+			payload.Reloaded = true
+			payload.Message = fmt.Sprintf("Reloaded %d local skill(s).", payload.Count)
+			send(protocol.TypeSkillReloadResult, payload)
+		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			message.SessionID = sessionID
 			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
 		},
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
+		}
 		return err
 	}
 
@@ -901,6 +1006,20 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		Usage:   tokenUsagePayload(response.Result.Usage),
 		Context: contextInfoPayload(response.Context),
 		Compact: compactInfoPayload(response.Compact),
+	})
+}
+
+func (a *Agent) writePausedAssistantDone(conn *websocket.Conn, requestID string, sessionID string) error {
+	info, err := a.chatService.ContextInfoForSession(context.Background(), sessionID)
+	if err != nil {
+		info = service.ContextInfo{}
+	}
+
+	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, requestID, sessionID, protocol.AssistantDonePayload{
+		Content: "",
+		Context: contextInfoPayload(info),
+		Paused:  true,
+		Message: "Session task paused.",
 	})
 }
 

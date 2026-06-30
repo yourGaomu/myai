@@ -1,0 +1,8 @@
+% Abstract 模板
+% 遵循5部分结构: what → why hard → how → evidence → strongest result
+
+We present [METHOD NAME], a [BRIEF DESCRIPTION — one sentence].
+[BIGGER PROBLEM / WHY HARD — 1-2 sentences].
+Our key idea is [CORE INSIGHT — one sentence].
+We [EVALUATE / PROVE] on [SETTING] and find that [STRONGEST QUANTITATIVE RESULT].
+[OPTIONAL: implication or takeaway].

@@ -135,6 +135,75 @@ func TestManagerParsesTriggersAndSkipsTriggerLineDescription(t *testing.T) {
 	}
 }
 
+func TestManagerParsesSkillHubFrontMatter(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "paper", `---
+name: research-paper-reader
+description: Read and summarize research papers.
+triggers:
+  - paper
+  - arxiv
+---
+
+# Research Paper Reader
+Full instructions.`)
+
+	manager := NewManager(root)
+	if err := manager.Reload(context.Background()); err != nil {
+		t.Fatalf("reload skills: %v", err)
+	}
+
+	skills := manager.List()
+	if len(skills) != 1 {
+		t.Fatalf("expected one skill, got %d", len(skills))
+	}
+	if skills[0].Name != "research-paper-reader" {
+		t.Fatalf("expected front matter name, got %q", skills[0].Name)
+	}
+	if skills[0].Description != "Read and summarize research papers." {
+		t.Fatalf("expected front matter description, got %q", skills[0].Description)
+	}
+	if strings.Contains(skills[0].Content, "---") || strings.Contains(skills[0].Content, "description:") {
+		t.Fatalf("expected content to exclude front matter, got %q", skills[0].Content)
+	}
+	if strings.Join(skills[0].Triggers, "|") != "paper|arxiv" {
+		t.Fatalf("expected front matter triggers, got %v", skills[0].Triggers)
+	}
+}
+
+func TestManagerReadsSkillJSONMetadata(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "json-skill", "# JSON fallback\nFull instructions.")
+	dir := filepath.Join(root, "json-skill")
+	if err := os.WriteFile(filepath.Join(dir, skillJSONName), []byte(`{
+  "name": "json-name",
+  "description": "Description from skill.json",
+  "keywords": ["paper", "research"],
+  "triggers": ["read paper"]
+}`), 0o644); err != nil {
+		t.Fatalf("write skill.json: %v", err)
+	}
+
+	manager := NewManager(root)
+	if err := manager.Reload(context.Background()); err != nil {
+		t.Fatalf("reload skills: %v", err)
+	}
+
+	skills := manager.List()
+	if len(skills) != 1 {
+		t.Fatalf("expected one skill, got %d", len(skills))
+	}
+	if skills[0].Name != "json-name" {
+		t.Fatalf("expected skill.json name, got %q", skills[0].Name)
+	}
+	if skills[0].Description != "Description from skill.json" {
+		t.Fatalf("expected skill.json description, got %q", skills[0].Description)
+	}
+	if strings.Join(skills[0].Triggers, "|") != "read paper|paper|research" {
+		t.Fatalf("expected merged skill.json triggers and keywords, got %v", skills[0].Triggers)
+	}
+}
+
 func writeSkill(t *testing.T, root string, name string, content string) {
 	t.Helper()
 

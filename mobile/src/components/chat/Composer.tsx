@@ -8,20 +8,26 @@ import { formatBytes } from "../../utils/format";
 type Props = {
   attachedFiles: FileReadResultPayload[];
   buttonFeedback: ButtonFeedback;
+  canPause: boolean;
   messageInput: string;
   onChangeMessage: (value: string) => void;
+  onPause: () => void;
   onRemoveAttachedFile: (path: string) => void;
   onSend: () => void;
+  pendingPause: boolean;
   pendingSend: boolean;
 };
 
 export function Composer({
   attachedFiles,
   buttonFeedback,
+  canPause,
   messageInput,
   onChangeMessage,
+  onPause,
   onRemoveAttachedFile,
   onSend,
+  pendingPause,
   pendingSend,
 }: Props) {
   return (
@@ -37,7 +43,10 @@ export function Composer({
                   {file.truncated ? " / truncated" : ""}
                 </Text>
               </View>
-              <Pressable onPress={() => onRemoveAttachedFile(file.path)} style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}>
+              <Pressable
+                onPress={() => onRemoveAttachedFile(file.path)}
+                style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
+              >
                 <Text style={styles.attachmentRemoveText}>Remove</Text>
               </Pressable>
             </View>
@@ -58,8 +67,17 @@ export function Composer({
           onPress={onSend}
           style={({ pressed }) => buttonFeedback([styles.sendButton, pendingSend && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingSend} text={pendingSend ? "发送中" : "Send"} />
+          <ButtonContent loading={pendingSend} text={pendingSend ? "Sending" : "Send"} />
         </Pressable>
+        {canPause ? (
+          <Pressable
+            disabled={pendingPause}
+            onPress={onPause}
+            style={({ pressed }) => buttonFeedback([styles.pauseButton, pendingPause && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={pendingPause} text={pendingPause ? "Pausing" : "Pause"} />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -147,6 +165,17 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 72,
     paddingHorizontal: 14,
+  },
+  pauseButton: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 3,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 78,
+    paddingHorizontal: 12,
   },
   disabledButton: {
     opacity: 0.45,

@@ -14,6 +14,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   history: false,
   diff: false,
   revert: false,
+  pause: false,
 };
 
 export function usePendingActions() {

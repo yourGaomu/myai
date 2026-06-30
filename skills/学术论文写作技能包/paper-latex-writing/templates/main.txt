@@ -1,0 +1,66 @@
+% 学术论文主文件模板 (main.tex)
+% 适配 ICLR / NeurIPS / ICML / CVPR / ACL / AAAI / ACM / IEEE
+%
+% 使用方式: 根据目标 venue 替换第1行 \documentclass
+%   ICLR 2025: \documentclass{article} + \usepackage{iclr2025_conference}
+%   NeurIPS:   \documentclass{neurips_2024}
+%   ICML:      \documentclass{icml2024}
+%   通用:      \documentclass[11pt]{article}
+
+\documentclass[11pt]{article}
+
+% === Packages ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage[sort&compress,numbers]{natbib}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{enumitem}
+
+% === Math Commands ===
+\input{math_commands}
+
+% === Title & Authors ===
+\title{Your Paper Title Here}
+\author{Author One$^{1}$ \and Author Two$^{2}$}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% Abstract
+\input{sections/0_abstract}
+
+% Introduction
+\input{sections/1_introduction}
+
+% Related Work
+\input{sections/2_related_work}
+
+% Method
+\input{sections/3_method}
+
+% Experiments
+\input{sections/4_experiments}
+
+% Conclusion
+\input{sections/5_conclusion}
+
+% References
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% Appendix (optional)
+\appendix
+\input{sections/A_appendix}
+
+\end{document}

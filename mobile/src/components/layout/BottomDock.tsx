@@ -20,10 +20,12 @@ type Props = {
   onChangesPress: () => void;
   onChatPress: () => void;
   onFilesPress: () => void;
+  onPause: () => void;
   onRemoveAttachedFile: (path: string) => void;
   onSend: () => void;
   onSessionsPress: () => void;
   onSettingsPress: () => void;
+  pendingPause: boolean;
   pendingSend: boolean;
   viewMode: ViewMode;
 };
@@ -41,10 +43,12 @@ export function BottomDock({
   onChangesPress,
   onChatPress,
   onFilesPress,
+  onPause,
   onRemoveAttachedFile,
   onSend,
   onSessionsPress,
   onSettingsPress,
+  pendingPause,
   pendingSend,
   viewMode,
 }: Props) {
@@ -73,10 +77,13 @@ export function BottomDock({
         <Composer
           attachedFiles={attachedFiles}
           buttonFeedback={buttonFeedback}
+          canPause={pendingSend}
           messageInput={messageInput}
           onChangeMessage={onChangeMessage}
+          onPause={onPause}
           onRemoveAttachedFile={onRemoveAttachedFile}
           onSend={onSend}
+          pendingPause={pendingPause}
           pendingSend={pendingSend}
         />
       ) : null}

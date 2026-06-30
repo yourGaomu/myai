@@ -23,6 +23,8 @@ export type MessageType =
   | "session_context_set_result"
   | "session_compact"
   | "session_compact_result"
+  | "session_pause"
+  | "session_pause_result"
   | "model_list"
   | "model_list_result"
   | "model_switch"
@@ -74,6 +76,8 @@ export type AssistantDonePayload = {
   usage?: TokenUsage;
   context?: ContextInfo;
   compact?: CompactInfo;
+  paused?: boolean;
+  message?: string;
 };
 
 export type TokenUsage = {
@@ -171,6 +175,16 @@ export type SessionContextSetPayload = {
 
 export type SessionCompactPayload = {
   session_id?: string;
+};
+
+export type SessionPausePayload = {
+  session_id?: string;
+};
+
+export type SessionPauseResultPayload = {
+  session_id: string;
+  paused?: boolean;
+  message?: string;
 };
 
 export type ContextInfo = {

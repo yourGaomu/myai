@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,11 +11,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 const (
 	defaultSkillDir = "skills"
 	skillFileName   = "SKILL.md"
+	skillJSONName   = "skill.json"
 	maxSkillBytes   = 64 * 1024
 )
 
@@ -25,6 +29,13 @@ type Skill struct {
 	Content     string
 	Triggers    []string
 	UpdatedAt   time.Time
+}
+
+type skillMeta struct {
+	Name        string   `json:"name" yaml:"name"`
+	Description string   `json:"description" yaml:"description"`
+	Triggers    []string `json:"triggers" yaml:"triggers"`
+	Keywords    []string `json:"keywords" yaml:"keywords"`
 }
 
 type Manager struct {
@@ -286,14 +297,102 @@ func readSkill(root string, path string) (Skill, error) {
 	}
 
 	text := strings.TrimSpace(string(content))
+	frontMatter, body := splitFrontMatter(text)
+	meta := mergeSkillMeta(parseSkillJSON(filepath.Dir(path)), parseFrontMatter(frontMatter))
+	if strings.TrimSpace(body) == "" {
+		body = text
+	}
+	if meta.Name != "" {
+		name = meta.Name
+	}
+	description := strings.TrimSpace(meta.Description)
+	if description == "" {
+		description = firstHeadingOrLine(body)
+	}
+	triggers := mergeTerms(meta.Triggers, meta.Keywords, parseTriggers(body))
+
 	return Skill{
 		Name:        name,
-		Description: firstHeadingOrLine(text),
+		Description: description,
 		Path:        path,
-		Content:     text,
-		Triggers:    parseTriggers(text),
+		Content:     strings.TrimSpace(body),
+		Triggers:    triggers,
 		UpdatedAt:   info.ModTime(),
 	}, nil
+}
+
+func splitFrontMatter(text string) (string, string) {
+	text = strings.TrimLeft(text, "\ufeff\r\n\t ")
+	if !strings.HasPrefix(text, "---") {
+		return "", text
+	}
+
+	lines := strings.Split(text, "\n")
+	if strings.TrimSpace(lines[0]) != "---" {
+		return "", text
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.Join(lines[1:i], "\n"), strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return "", text
+}
+
+func parseFrontMatter(text string) skillMeta {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return skillMeta{}
+	}
+	var meta skillMeta
+	if err := yaml.Unmarshal([]byte(text), &meta); err != nil {
+		return skillMeta{}
+	}
+	return meta
+}
+
+func parseSkillJSON(dir string) skillMeta {
+	content, err := os.ReadFile(filepath.Join(dir, skillJSONName))
+	if err != nil {
+		return skillMeta{}
+	}
+	var meta skillMeta
+	if err := json.Unmarshal(content, &meta); err != nil {
+		return skillMeta{}
+	}
+	return meta
+}
+
+func mergeSkillMeta(base skillMeta, overlay skillMeta) skillMeta {
+	if overlay.Name != "" {
+		base.Name = overlay.Name
+	}
+	if overlay.Description != "" {
+		base.Description = overlay.Description
+	}
+	base.Triggers = mergeTerms(base.Triggers, overlay.Triggers)
+	base.Keywords = mergeTerms(base.Keywords, overlay.Keywords)
+	return base
+}
+
+func mergeTerms(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	terms := make([]string, 0)
+	for _, group := range groups {
+		for _, term := range group {
+			term = strings.Trim(strings.TrimSpace(term), "`\"'")
+			if !usefulTerm(term) {
+				continue
+			}
+			key := normalizeMatchText(term)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			terms = append(terms, term)
+		}
+	}
+	return terms
 }
 
 func firstHeadingOrLine(text string) string {

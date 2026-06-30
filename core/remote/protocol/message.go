@@ -33,6 +33,8 @@ const (
 	TypeSessionContextSetResult    MessageType = "session_context_set_result"
 	TypeSessionCompact             MessageType = "session_compact"
 	TypeSessionCompactResult       MessageType = "session_compact_result"
+	TypeSessionPause               MessageType = "session_pause"
+	TypeSessionPauseResult         MessageType = "session_pause_result"
 	TypeModelList                  MessageType = "model_list"
 	TypeModelListResult            MessageType = "model_list_result"
 	TypeModelSwitch                MessageType = "model_switch"
@@ -89,6 +91,8 @@ type AssistantDonePayload struct {
 	Usage   TokenUsage  `json:"usage,omitempty"`
 	Context ContextInfo `json:"context,omitempty"`
 	Compact CompactInfo `json:"compact,omitempty"`
+	Paused  bool        `json:"paused,omitempty"`
+	Message string      `json:"message,omitempty"`
 }
 
 type TokenUsage struct {
@@ -192,6 +196,16 @@ type SessionContextSetPayload struct {
 
 type SessionCompactPayload struct {
 	SessionID string `json:"session_id,omitempty"`
+}
+
+type SessionPausePayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SessionPauseResultPayload struct {
+	SessionID string `json:"session_id"`
+	Paused    bool   `json:"paused"`
+	Message   string `json:"message,omitempty"`
 }
 
 type ContextInfo struct {

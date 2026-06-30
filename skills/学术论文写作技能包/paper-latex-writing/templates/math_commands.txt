@@ -1,0 +1,32 @@
+% 共享数学宏模板 (math_commands.tex)
+% 在论文开头 \input{math_commands}
+
+% === 通用符号 ===
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+
+% === 概率 & 统计 ===
+\newcommand{\prob}{\mathbb{P}}
+\newcommand{\indep}{\perp\!\!\!\perp}
+
+% === 优化 ===
+\newcommand{\argmin}{\arg\min}
+\newcommand{\argmax}{\arg\max}
+\newcommand{\loss}{\mathcal{L}}
+
+% === 范数 ===
+\newcommand{\norm}[1]{\left\|#1\right\|}
+\newcommand{\abs}[1]{\left|#1\right|}
+
+% === 特殊字体 ===
+\newcommand{\model}{\mathcal{M}}
+\newcommand{\dataset}{\mathcal{D}}
+\newcommand{\params}{\Theta}
+
+% === 自定义算子 ===
+\DeclareMathOperator*{\softmax}{softmax}
+\DeclareMathOperator*{\diag}{diag}

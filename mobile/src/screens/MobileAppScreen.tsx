@@ -170,6 +170,7 @@ export function MobileAppScreen() {
   void sessionChatsVersion;
   const currentUsage = currentChat.lastUsage || null;
   const currentSessionBusy = Boolean(currentChat.pendingRequestID);
+  const currentPauseBusy = Boolean(pendingActions.pause);
   const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, chatPanelHeight, topSafePadding } = useMobileLayoutMetrics({ hasUsage: Boolean(currentUsage) });
   const sendEnvelope = useRelaySender({
@@ -286,7 +287,7 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
-  const { allowPermission, denyPermission, sendUserMessage } = useChatActions({
+  const { allowPermission, denyPermission, pauseSession, sendUserMessage } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addUserMessage: (targetSessionID, message) => addMessage(targetSessionID, "user", message),
@@ -303,6 +304,8 @@ export function MobileAppScreen() {
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingRequest,
+    startPausePending: () => startPending("pause"),
+    stopPausePending: () => stopPending("pause"),
   });
   const {
     applyChangeDiff,
@@ -449,10 +452,12 @@ export function MobileAppScreen() {
           onChangesPress={openChanges}
           onChatPress={openChat}
           onFilesPress={openFiles}
+          onPause={pauseSession}
           onRemoveAttachedFile={removeAttachedFile}
           onSend={sendUserMessage}
           onSessionsPress={openSessions}
           onSettingsPress={toggleSettings}
+          pendingPause={currentPauseBusy}
           pendingSend={Boolean(currentChat.pendingRequestID)}
           viewMode={viewMode}
         />

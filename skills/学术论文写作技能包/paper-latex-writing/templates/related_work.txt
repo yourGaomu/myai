@@ -1,0 +1,22 @@
+% Related Work 模板
+% 目标: ≥1整页, 按方法论族组织 (不按 paper-by-paper 罗列)
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Category A: [METHOD FAMILY].}
+[2-3 sentences summarizing this direction].
+Key works include \citet{author1}, \citet{author2}, and \citet{author3}.
+However, these methods [LIMITATION — shared weakness].
+Our work differs by [KEY DIFFERENCE].
+
+\paragraph{Category B: [METHOD FAMILY].}
+[2-3 sentences summarizing this direction].
+\citet{author4} proposed [SPECIFIC METHOD], while \citet{author5} extended it to [EXTENSION].
+The main limitation of this line of work is [LIMITATION].
+In contrast, we [KEY DIFFERENCE].
+
+\paragraph{Category C: [METHOD FAMILY].}
+[2-3 sentences summarizing this direction].
+Recent work by \citet{author6} showed [FINDING], and \citet{author7} further [DEVELOPMENT].
+Our approach builds on [INSIGHT FROM THIS LINE] but [HOW WE DIFFER].

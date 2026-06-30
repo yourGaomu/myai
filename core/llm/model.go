@@ -42,10 +42,11 @@ type ChatResult struct {
 }
 
 type ChatStreamHandler struct {
-	OnReasoning func(text string)
-	OnAnswer    func(text string)
-	OnToolCall  func(name string, arguments string)
-	OnToolAsk   func(request ToolPermissionRequest) bool
+	OnReasoning  func(text string)
+	OnAnswer     func(text string)
+	OnToolCall   func(name string, arguments string)
+	OnToolResult func(name string, arguments string, result string)
+	OnToolAsk    func(request ToolPermissionRequest) bool
 }
 
 type ToolPermissionRequest struct {
@@ -56,24 +57,61 @@ type ToolPermissionRequest struct {
 }
 
 func (m *Model) ChatWithStream(mes []llms.MessageContent) (ChatResult, error) {
-	return m.ChatWithStreamHandler(mes, ChatStreamHandler{})
+	return m.ChatWithStreamCtx(context.Background(), mes)
+}
+
+func (m *Model) ChatWithStreamCtx(ctx context.Context, mes []llms.MessageContent) (ChatResult, error) {
+	return m.ChatWithStreamHandlerCtx(ctx, mes, ChatStreamHandler{})
 }
 
 func (m *Model) ChatWithStreamHandler(mes []llms.MessageContent, handler ChatStreamHandler) (ChatResult, error) {
-	return m.ChatWithStreamToolsHandler(mes, nil, handler)
+	return m.ChatWithStreamHandlerCtx(context.Background(), mes, handler)
+}
+
+func (m *Model) ChatWithStreamHandlerCtx(ctx context.Context, mes []llms.MessageContent, handler ChatStreamHandler) (ChatResult, error) {
+	return m.ChatWithStreamToolsHandlerCtx(ctx, mes, nil, handler)
 }
 
 func (m *Model) ChatWithStreamTools(mes []llms.MessageContent, tools []llms.Tool) (ChatResult, error) {
-	return m.ChatWithStreamToolsHandler(mes, tools, ChatStreamHandler{})
+	return m.ChatWithStreamToolsCtx(context.Background(), mes, tools)
+}
+
+func (m *Model) ChatWithStreamToolsCtx(ctx context.Context, mes []llms.MessageContent, tools []llms.Tool) (ChatResult, error) {
+	return m.ChatWithStreamToolsHandlerCtx(ctx, mes, tools, ChatStreamHandler{})
 }
 
 func (m *Model) ChatWithStreamToolsHandler(mes []llms.MessageContent, tools []llms.Tool, handler ChatStreamHandler) (ChatResult, error) {
+	return m.ChatWithStreamToolsHandlerCtx(context.Background(), mes, tools, handler)
+}
+
+func (m *Model) ChatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.MessageContent, tools []llms.Tool, handler ChatStreamHandler) (ChatResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var builder strings.Builder
 	var reasoningBuilder strings.Builder
 	streamed := false
+	streamAnswer := func(ctx context.Context, chunk []byte) error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		if len(tools) > 0 && isToolCallChunk(chunk) {
+			return nil
+		}
+
+		streamed = true
+
+		text := string(chunk)
+		builder.WriteString(text)
+		if handler.OnAnswer != nil {
+			handler.OnAnswer(text)
+		}
+		return nil
+	}
 	callOptions := []llms.CallOption{
 		llms.WithTemperature(0.7),
 		llms.WithMaxTokens(2048),
+		llms.WithStreamingFunc(streamAnswer),
 		llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
 			if len(reasoningChunk) > 0 {
 				streamed = true
@@ -83,20 +121,6 @@ func (m *Model) ChatWithStreamToolsHandler(mes []llms.MessageContent, tools []ll
 					handler.OnReasoning(text)
 				}
 			}
-
-			if len(chunk) > 0 {
-				if len(tools) > 0 && isToolCallChunk(chunk) {
-					return nil
-				}
-
-				streamed = true
-
-				text := string(chunk)
-				builder.WriteString(text)
-				if handler.OnAnswer != nil {
-					handler.OnAnswer(text)
-				}
-			}
 			return nil
 		}),
 	}
@@ -104,7 +128,7 @@ func (m *Model) ChatWithStreamToolsHandler(mes []llms.MessageContent, tools []ll
 		callOptions = append(callOptions, llms.WithTools(tools), llms.WithToolChoice("auto"))
 	}
 
-	resp, err := m.LlmModel.GenerateContent(context.Background(), mes, callOptions...)
+	resp, err := m.LlmModel.GenerateContent(ctx, mes, callOptions...)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -156,8 +180,15 @@ func (m *Model) ChatWithStreamToolsHandler(mes []llms.MessageContent, tools []ll
 }
 
 func (m *Model) Chat(mes []llms.MessageContent) (ChatResult, error) {
+	return m.ChatCtx(context.Background(), mes)
+}
+
+func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	resp, err := m.LlmModel.GenerateContent(
-		context.Background(),
+		ctx,
 		mes,
 		llms.WithTemperature(0.7),
 		llms.WithMaxTokens(2048),

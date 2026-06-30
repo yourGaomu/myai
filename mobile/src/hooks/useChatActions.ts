@@ -23,6 +23,8 @@ type Args = {
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
+  startPausePending: () => void;
+  stopPausePending: () => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
 };
 
@@ -43,6 +45,8 @@ export function useChatActions({
   setSessionLastUsage,
   setSessionPendingPermission,
   setSessionPendingRequest,
+  startPausePending,
+  stopPausePending,
 }: Args) {
   const sendUserMessage = useCallback(() => {
     const content = messageInput.trim();
@@ -109,9 +113,30 @@ export function useChatActions({
   const allowPermission = useCallback(() => sendPermissionResult(true), [sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);
 
+  const pauseSession = useCallback(() => {
+    const targetSessionID = sessionID.trim();
+    if (!targetSessionID) {
+      return;
+    }
+
+    const requestID = newRequestID();
+    requestSessionMapRef.current[requestID] = targetSessionID;
+    startPausePending();
+    const sent = sendEnvelope("session_pause", {
+      request_id: requestID,
+      session_id: targetSessionID,
+      payload: { session_id: targetSessionID },
+    });
+    if (!sent) {
+      delete requestSessionMapRef.current[requestID];
+      stopPausePending();
+    }
+  }, [requestSessionMapRef, sendEnvelope, sessionID, startPausePending, stopPausePending]);
+
   return {
     allowPermission,
     denyPermission,
+    pauseSession,
     sendPermissionResult,
     sendUserMessage,
   };

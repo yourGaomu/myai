@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"myai/core/hook"
 	"myai/core/skill"
 	"myai/core/skillhub"
 	tooldef "myai/core/tool/tool"
@@ -22,16 +23,21 @@ type skillCatalog interface {
 type InstallSkillTool struct {
 	workspace string
 	skillRoot string
+	registry  string
+	hooks     *hook.Manager
 	runner    skillhub.Runner
 	skills    skillCatalog
 }
 
 type installSkillArgs struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Force bool   `json:"force"`
 }
 
 type installSkillResult struct {
 	Skill      string   `json:"skill"`
+	Namespace  string   `json:"namespace,omitempty"`
+	Query      string   `json:"query,omitempty"`
 	SkillRoot  string   `json:"skill_root"`
 	Command    []string `json:"command"`
 	WorkDir    string   `json:"work_dir"`
@@ -39,6 +45,7 @@ type installSkillResult struct {
 	ExitCode   int      `json:"exit_code"`
 	Reloaded   bool     `json:"reloaded"`
 	SkillCount int      `json:"skill_count"`
+	Candidates int      `json:"candidates,omitempty"`
 }
 
 func NewInstallSkillToolWithWorkspace(workspace string, skillRoot string) *InstallSkillTool {
@@ -46,13 +53,23 @@ func NewInstallSkillToolWithWorkspace(workspace string, skillRoot string) *Insta
 }
 
 func NewInstallSkillToolWithWorkspaceAndSkills(workspace string, skillRoot string, skills skillCatalog) *InstallSkillTool {
-	return newInstallSkillTool(workspace, skillRoot, nil, skills)
+	return NewInstallSkillToolWithWorkspaceRegistryAndSkills(workspace, skillRoot, "", skills)
 }
 
-func newInstallSkillTool(workspace string, skillRoot string, runner skillhub.Runner, skills skillCatalog) *InstallSkillTool {
+func NewInstallSkillToolWithWorkspaceRegistryAndSkills(workspace string, skillRoot string, registry string, skills skillCatalog) *InstallSkillTool {
+	return NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(workspace, skillRoot, registry, nil, skills)
+}
+
+func NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(workspace string, skillRoot string, registry string, hooks *hook.Manager, skills skillCatalog) *InstallSkillTool {
+	return newInstallSkillTool(workspace, skillRoot, registry, hooks, nil, skills)
+}
+
+func newInstallSkillTool(workspace string, skillRoot string, registry string, hooks *hook.Manager, runner skillhub.Runner, skills skillCatalog) *InstallSkillTool {
 	return &InstallSkillTool{
 		workspace: workspace,
 		skillRoot: skillRoot,
+		registry:  registry,
+		hooks:     hooks,
 		runner:    runner,
 		skills:    skills,
 	}
@@ -73,6 +90,11 @@ func (t *InstallSkillTool) Schema() any {
 			"name": map[string]any{
 				"type":        "string",
 				"description": "Skill name or slug to install, for example pdf-parser.",
+			},
+			"force": map[string]any{
+				"type":        "boolean",
+				"description": "Overwrite the skill if it is already installed.",
+				"default":     false,
 			},
 		},
 		"required": []string{"name"},
@@ -96,9 +118,14 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 	client := skillhub.NewClient(skillhub.Options{
 		Workspace: workspace,
 		SkillRoot: t.skillRoot,
+		Registry:  t.registry,
 		Runner:    t.runner,
 	})
-	result, err := client.InstallSkill(ctx, skillhub.InstallRequest{Name: input.Name})
+	target, candidates, err := client.ResolveSkill(ctx, input.Name)
+	if err != nil {
+		return "", err
+	}
+	result, err := client.InstallSkill(ctx, skillhub.InstallRequest{Name: target.Slug, Namespace: target.Namespace, Force: input.Force})
 	if err != nil {
 		return "", err
 	}
@@ -116,10 +143,13 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 		}
 		reloaded = true
 		skillCount = len(t.skills.List())
+		t.emitSkillReloaded(ctx, skillCount)
 	}
 
 	output, err := json.MarshalIndent(installSkillResult{
-		Skill:      input.Name,
+		Skill:      target.Slug,
+		Namespace:  target.Namespace,
+		Query:      input.Name,
 		SkillRoot:  filepath.ToSlash(relativePath(workspace, skillRoot)),
 		Command:    result.Command,
 		WorkDir:    filepath.ToSlash(result.WorkDir),
@@ -127,11 +157,23 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 		ExitCode:   result.ExitCode,
 		Reloaded:   reloaded,
 		SkillCount: skillCount,
+		Candidates: len(candidates),
 	}, "", "  ")
 	if err != nil {
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (t *InstallSkillTool) emitSkillReloaded(ctx context.Context, skillCount int) {
+	if t.hooks == nil {
+		return
+	}
+	_ = t.hooks.Emit(ctx, hook.Event{
+		Type:       hook.EventSkillReloaded,
+		Reason:     "install_skill",
+		SkillCount: skillCount,
+	})
 }
 
 func normalizeInstallSkillArgs(args json.RawMessage) (installSkillArgs, error) {

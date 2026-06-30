@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "agently-mail": {
+      "name": "Agently Mail",
+      "zip_url": "https://api.skillhub.cn/api/v1/download?slug=agently-mail",
+      "source": "community",
+      "version": "1.0.8",
+      "installedAt": "2026-06-28T16:04:38Z"
+    }
+  }
+}

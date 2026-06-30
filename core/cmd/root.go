@@ -1,17 +1,12 @@
 package cmd
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 var rootCmd = &cobra.Command{
-	Use:   "myai",
-	Short: "A tiny AI coding CLI",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Hello from myai")
-	},
+	Use:           "myai",
+	Short:         "A tiny AI coding CLI",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func Execute() error {

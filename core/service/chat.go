@@ -14,6 +14,7 @@ import (
 
 	"myai/core/contextmgr"
 	"myai/core/history"
+	"myai/core/hook"
 	"myai/core/llm"
 	"myai/core/session"
 	"myai/core/skill"
@@ -41,6 +42,7 @@ type ChatService struct {
 	pool     *utills.ThreadPool
 	tools    *tool.RegisterTools
 	skills   *skill.Manager
+	hooks    *hook.Manager
 	modelID  string
 	userID   string
 }
@@ -76,6 +78,7 @@ func NewChatService(
 	pool *utills.ThreadPool,
 	tools *tool.RegisterTools,
 	skills *skill.Manager,
+	hooks *hook.Manager,
 	modelID string,
 ) *ChatService {
 	if modelID == "" {
@@ -90,6 +93,7 @@ func NewChatService(
 		pool:     pool,
 		tools:    tools,
 		skills:   skills,
+		hooks:    hooks,
 		modelID:  modelID,
 		userID:   defaultUserID,
 	}
@@ -196,7 +200,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		log.Printf("auto compact failed: %v", err)
 	}
 
-	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt)
+	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, input)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -233,12 +237,12 @@ func (s *ChatService) llmToolsForSession(current *session.Session) []llms.Tool {
 	})
 }
 
-func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string) (llm.ChatResult, error) {
+func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string, latestInput string) (llm.ChatResult, error) {
 	var totalUsage llm.TokenUsage
 	reasoningParts := make([]string, 0, maxAgentToolRounds)
 
 	for round := 0; round < maxAgentToolRounds; round++ {
-		result, err := model.ChatWithStreamToolsHandler(s.contextSnapshot(current, skillPrompt).Messages, s.llmToolsForSession(current), stream)
+		result, err := model.ChatWithStreamToolsHandlerCtx(ctx, s.contextSnapshot(current, skillPrompt).Messages, s.llmToolsForSession(current), stream)
 		if err != nil {
 			return llm.ChatResult{}, err
 		}
@@ -258,9 +262,10 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 		current.Messages = append(current.Messages, assistantToolCallMessage(result.ToolCalls))
 		current.Messages = append(current.Messages, toolMessages...)
 		s.persistToolRecordsAsync(toolRecords)
+		skillPrompt = s.skillPrompt(ctx, latestInput)
 	}
 
-	result, err := model.ChatWithStreamHandler(s.contextSnapshot(current, skillPrompt).Messages, stream)
+	result, err := model.ChatWithStreamHandlerCtx(ctx, s.contextSnapshot(current, skillPrompt).Messages, stream)
 	if err != nil {
 		return llm.ChatResult{}, err
 	}
@@ -351,7 +356,7 @@ Write a concise but useful summary in Chinese unless the source content is mostl
 	}
 	prompt += "\n\nNew history to compact:\n" + text
 
-	result, err := model.ChatWithStreamHandler([]llms.MessageContent{
+	result, err := model.ChatWithStreamHandlerCtx(ctx, []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeSystem, "You are a context compression model for a coding assistant."),
 		llms.TextParts(llms.ChatMessageTypeHuman, prompt),
 	}, llm.ChatStreamHandler{})
@@ -487,6 +492,14 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 		}
 		permission := tooldef.NormalizePermission(registeredTool.Permission())
 
+		callResult, err := s.askPreToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission)
+		if err != nil {
+			return nil, nil, err
+		}
+		if strings.TrimSpace(callResult.Arguments) != "" {
+			call.FunctionCall.Arguments = callResult.Arguments
+		}
+
 		if stream.OnToolCall != nil {
 			stream.OnToolCall(call.FunctionCall.Name, call.FunctionCall.Arguments)
 		}
@@ -501,13 +514,48 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 			CreatedAt:     createdAt.Add(time.Duration(index*2) * time.Nanosecond),
 		})
 
-		result, permissionAllowed := s.allowToolCall(current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, stream)
+		if callResult.Decision == hook.DecisionDeny {
+			err = fmt.Errorf("tool denied by hook: %s", callResult.Message)
+			result := "tool error: " + err.Error()
+			if stream.OnToolResult != nil {
+				stream.OnToolResult(call.FunctionCall.Name, call.FunctionCall.Arguments, result)
+			}
+			s.emitPostToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, result, err)
+			messages = append(messages, llms.MessageContent{
+				Role: llms.ChatMessageTypeTool,
+				Parts: []llms.ContentPart{
+					llms.ToolCallResponse{
+						ToolCallID: call.ID,
+						Name:       call.FunctionCall.Name,
+						Content:    result,
+					},
+				},
+			})
+			records = append(records, data.MessageRecord{
+				ID:            uuid.NewString(),
+				SessionID:     current.ID,
+				Role:          data.RoleTool,
+				Content:       result,
+				ToolCallID:    call.ID,
+				ToolName:      call.FunctionCall.Name,
+				ToolArguments: call.FunctionCall.Arguments,
+				ToolError:     err.Error(),
+				CreatedAt:     createdAt.Add(time.Duration(index*2+1) * time.Nanosecond),
+			})
+			continue
+		}
+
+		result, permissionAllowed := s.allowToolCall(current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, callResult.Decision == hook.DecisionAllow, stream)
 		if permissionAllowed {
 			result, err = registeredTool.Call(ctx, []byte(call.FunctionCall.Arguments))
 		}
 		if err != nil {
 			result = "tool error: " + err.Error()
 		}
+		if stream.OnToolResult != nil {
+			stream.OnToolResult(call.FunctionCall.Name, call.FunctionCall.Arguments, result)
+		}
+		s.emitPostToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, result, err)
 		toolError := ""
 		if err != nil {
 			toolError = err.Error()
@@ -539,8 +587,50 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 	return messages, records, nil
 }
 
-func (s *ChatService) allowToolCall(current *session.Session, name string, arguments string, permission tooldef.Permission, stream llm.ChatStreamHandler) (string, bool) {
-	if permission == tooldef.PermissionRead {
+func (s *ChatService) askPreToolUseHook(ctx context.Context, current *session.Session, name string, arguments string, permission tooldef.Permission) (hook.Result, error) {
+	if s.hooks == nil {
+		return hook.Result{Decision: hook.DecisionContinue}, nil
+	}
+	return s.hooks.PreToolUse(ctx, hook.Event{
+		SessionID:     sessionIDOrEmpty(current),
+		ToolName:      name,
+		ToolArguments: arguments,
+		Permission:    string(permission),
+		Reason:        "tool execution",
+	})
+}
+
+func (s *ChatService) emitPostToolUseHook(ctx context.Context, current *session.Session, name string, arguments string, permission tooldef.Permission, result string, toolErr error) {
+	if s.hooks == nil {
+		return
+	}
+	errText := ""
+	if toolErr != nil {
+		errText = toolErr.Error()
+	}
+	if err := s.hooks.Emit(ctx, hook.Event{
+		Type:          hook.EventPostToolUse,
+		SessionID:     sessionIDOrEmpty(current),
+		ToolName:      name,
+		ToolArguments: arguments,
+		Permission:    string(permission),
+		Result:        result,
+		Error:         errText,
+		Reason:        "tool execution completed",
+	}); err != nil {
+		log.Printf("post tool hook failed: %v", err)
+	}
+}
+
+func sessionIDOrEmpty(current *session.Session) string {
+	if current == nil {
+		return ""
+	}
+	return current.ID
+}
+
+func (s *ChatService) allowToolCall(current *session.Session, name string, arguments string, permission tooldef.Permission, hookAllowed bool, stream llm.ChatStreamHandler) (string, bool) {
+	if hookAllowed || permission == tooldef.PermissionRead {
 		return "", true
 	}
 
@@ -595,7 +685,11 @@ func (s *ChatService) NewSession(ctx context.Context) error {
 	if err := s.saveSession(ctx, current.ID, current.Model, "New chat"); err != nil {
 		return err
 	}
-	return s.saveCurrentSession(ctx, current.ID)
+	if err := s.saveCurrentSession(ctx, current.ID); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "new")
+	return nil
 }
 
 func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
@@ -604,7 +698,11 @@ func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
 		return err
 	}
 
-	return s.saveCurrentSession(ctx, current.ID)
+	if err := s.saveCurrentSession(ctx, current.ID); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "load")
+	return nil
 }
 
 func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
@@ -632,6 +730,7 @@ func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error
 	if err := s.sessions.RemoveSession(sessionID); err != nil {
 		return err
 	}
+	s.emitSessionChangedHook(ctx, sessionID, "delete")
 	if !deletingCurrent {
 		return nil
 	}
@@ -657,7 +756,11 @@ func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) erro
 		return errors.New("store is nil")
 	}
 
-	return s.store.MarkSessionRestored(ctx, sessionID, time.Now())
+	if err := s.store.MarkSessionRestored(ctx, sessionID, time.Now()); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, sessionID, "restore")
+	return nil
 }
 
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
@@ -676,7 +779,11 @@ func (s *ChatService) ClearCurrent(ctx context.Context) error {
 		return err
 	}
 
-	return s.saveSession(ctx, current.ID, current.Model, "New chat")
+	if err := s.saveSession(ctx, current.ID, current.Model, "New chat"); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "clear")
+	return nil
 }
 
 func (s *ChatService) ListSessions(ctx context.Context) ([]data.SessionRecord, error) {
@@ -739,6 +846,15 @@ func (s *ChatService) ListSkills(ctx context.Context) ([]skill.Skill, error) {
 	return s.skills.List(), nil
 }
 
+func (s *ChatService) ReloadSkills(ctx context.Context, reason string) ([]skill.Skill, error) {
+	skills, err := s.ListSkills(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.emitSkillReloadedHook(ctx, len(skills), reason)
+	return skills, nil
+}
+
 func (s *ChatService) SkillRoot() string {
 	if s.skills == nil {
 		return ""
@@ -780,7 +896,11 @@ func (s *ChatService) SwitchModelForSession(ctx context.Context, sessionID strin
 	}
 	current.Model = modelID
 
-	return s.saveSession(ctx, current.ID, current.Model, "")
+	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "model")
+	return nil
 }
 
 func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error {
@@ -807,7 +927,11 @@ func (s *ChatService) SetPermissionModeForSession(ctx context.Context, sessionID
 	}
 	current.PermissionMode = permissionMode
 
-	return s.saveSession(ctx, current.ID, current.Model, "")
+	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "permission")
+	return nil
 }
 
 func (s *ChatService) SetContextWindowK(ctx context.Context, windowK int) error {
@@ -832,7 +956,37 @@ func (s *ChatService) SetContextWindowKForSession(ctx context.Context, sessionID
 	}
 	current.ContextWindowK = contextmgr.NormalizeWindowK(windowK)
 
-	return s.saveSession(ctx, current.ID, current.Model, "")
+	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
+		return err
+	}
+	s.emitSessionChangedHook(ctx, current.ID, "context")
+	return nil
+}
+
+func (s *ChatService) emitSessionChangedHook(ctx context.Context, sessionID string, reason string) {
+	if s.hooks == nil {
+		return
+	}
+	if err := s.hooks.Emit(ctx, hook.Event{
+		Type:      hook.EventSessionChanged,
+		SessionID: sessionID,
+		Reason:    reason,
+	}); err != nil {
+		log.Printf("session changed hook failed: %v", err)
+	}
+}
+
+func (s *ChatService) emitSkillReloadedHook(ctx context.Context, skillCount int, reason string) {
+	if s.hooks == nil {
+		return
+	}
+	if err := s.hooks.Emit(ctx, hook.Event{
+		Type:       hook.EventSkillReloaded,
+		SkillCount: skillCount,
+		Reason:     reason,
+	}); err != nil {
+		log.Printf("skill reloaded hook failed: %v", err)
+	}
 }
 
 func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, error) {

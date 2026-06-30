@@ -1,0 +1,32 @@
+% Introduction 模板
+% 目标: 1-1.5页, 必须包含 hook、gap、method overview、contributions、result preview
+
+\section{Introduction}
+
+% --- Hook (1-2 sentences) ---
+[OPENING — the problem matters because...]
+
+% --- Gap statement ---
+However, existing approaches [LIMITATION — what they can't do / assume / require].
+This gap is critical because [WHY THE LIMITATION HURTS].
+
+% --- Method overview (before the reader gets lost) ---
+In this paper, we propose [METHOD NAME], which [ONE-SENTENCE MECHANISM].
+
+% --- Contributions (2-4, specific and falsifiable) ---
+Our contributions are:
+\begin{enumerate}[label=(\arabic*),leftmargin=*]
+    \item We [CONTRIBUTION 1 — what did you build/prove?].
+    \item We [CONTRIBUTION 2 — what did you show empirically?].
+    \item We [CONTRIBUTION 3 — what did you release?].
+\end{enumerate}
+
+% --- Result preview (strongest numbers) ---
+We evaluate [METHOD] on [DATASETS / SETTINGS] and find that [KEY RESULT PREVIEW].
+
+% --- Roadmap ---
+The rest of this paper is organized as follows.
+Section~\ref{sec:related} reviews related work.
+Section~\ref{sec:method} presents our method.
+Section~\ref{sec:experiments} reports experimental results.
+Section~\ref{sec:conclusion} concludes.

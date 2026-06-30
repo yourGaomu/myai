@@ -1,0 +1,10 @@
+{
+  "output_language": "zh-CN",
+  "detail_level": "comprehensive",
+  "include_references": true,
+  "save_notes": true,
+  "notes_path": "~/.openclaw/workspace/papers/",
+  "arxiv_mirror": "https://arxiv.org",
+  "max_pdf_size_mb": 50,
+  "enable_ocr": false
+}

@@ -1,0 +1,67 @@
+{
+  "name": "research-paper-reader",
+  "version": "2.0.0",
+  "description": "论文研读总结助手。支持PDF、arXiv、DOI等多种格式，提供结构化的论文总结、方法论分析和批判性思考。新增文献库管理、上下文记忆、相关论文推荐功能。",
+  "author": "OpenClaw",
+  "license": "MIT",
+  "keywords": [
+    "paper",
+    "research",
+    "academic",
+    "arxiv",
+    "pdf",
+    "summary",
+    "analysis",
+    "library",
+    "context",
+    "recommendation"
+  ],
+  "triggers": [
+    "读论文",
+    "总结论文",
+    "论文分析",
+    "解读这篇论文",
+    "PDF总结",
+    "学术文献",
+    "arXiv",
+    "论文研读",
+    "文献库",
+    "相关论文",
+    "阅读历史",
+    "研究进展",
+    "paper",
+    "research paper"
+  ],
+  "main": "SKILL.md",
+  "scripts": {
+    "fetch_arxiv": "scripts/fetch_arxiv.py",
+    "parse_pdf": "scripts/parse_pdf.py",
+    "library_manager": "scripts/library_manager.py",
+    "context_manager": "scripts/context_manager.py"
+  },
+  "config": {
+    "output_language": "zh-CN",
+    "detail_level": "comprehensive",
+    "include_references": true,
+    "save_notes": true,
+    "notes_path": "~/.openclaw/workspace/papers/",
+    "auto_index": true,
+    "max_related_papers": 10,
+    "context_days": 30,
+    "enable_recommendations": true
+  },
+  "dependencies": {
+    "python": ">=3.6",
+    "optional": [
+      "PyPDF2",
+      "pdfplumber"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/skills"
+  },
+  "bugs": {
+    "url": "https://github.com/openclaw/skills/issues"
+  }
+}

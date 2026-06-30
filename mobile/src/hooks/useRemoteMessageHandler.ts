@@ -20,6 +20,7 @@ import type {
   SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
+  SessionPauseResultPayload,
   SkillListResultPayload,
   TokenUsage,
   ToolCallPayload,
@@ -150,7 +151,7 @@ export function useRemoteMessageHandler({
             setSessionID(message.session_id);
             historySessionIDRef.current = message.session_id;
           }
-          setStatus("Done");
+          setStatus(payload.paused ? "Paused" : "Done");
           setSessionPendingPermission(targetSessionID, null);
           clearSessionPendingRequest(targetSessionID, message.request_id);
           if (requestSessionID && requestSessionID !== targetSessionID) {
@@ -209,6 +210,17 @@ export function useRemoteMessageHandler({
           applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
           requestSessions();
           break;
+        case "session_pause_result": {
+          stopPending("pause");
+          const payload = (message.payload || {}) as SessionPauseResultPayload;
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          addEventMessage(targetSessionID, payload.message || (payload.paused ? "Session paused." : "No running task to pause."));
+          setStatus(payload.paused ? "Paused" : "Idle");
+          if (message.request_id) {
+            delete requestSessionMapRef.current[message.request_id];
+          }
+          break;
+        }
         case "model_list_result":
           stopPending("models");
           applyModelList(message.payload as ModelListResultPayload | undefined);
@@ -270,6 +282,7 @@ export function useRemoteMessageHandler({
           stopPending("diff");
           stopPending("revert");
           stopPending("settings");
+          stopPending("pause");
           if (!message.request_id || activeRequestIDRef.current === message.request_id) {
             activeRequestIDRef.current = "";
           }

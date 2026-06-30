@@ -21,4 +21,5 @@ export type PendingAction =
   | "changes"
   | "history"
   | "diff"
-  | "revert";
+  | "revert"
+  | "pause";

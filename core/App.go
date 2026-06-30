@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"myai/core/hook"
 	"myai/core/sandbox"
 	"myai/core/skill"
 	"myai/core/tool"
@@ -45,6 +46,7 @@ type Application struct {
 	chatService    *service.ChatService
 	toolRegister   *tool.RegisterTools
 	skillManager   *skill.Manager
+	hookManager    *hook.Manager
 	sandbox        sandbox.Sandbox
 	defaultModelID string
 	workspace      string
@@ -73,6 +75,7 @@ func InitApp() {
 		instance.InitSessionManage()
 		instance.InitSandbox()
 		instance.InitSkillManager()
+		instance.InitHookManager()
 		instance.InitRegister()
 		instance.InitChatService()
 	})
@@ -212,6 +215,7 @@ func (app *Application) InitChatService() {
 		app.threadPool,
 		app.toolRegister,
 		app.skillManager,
+		app.hookManager,
 		app.defaultModelID,
 	)
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
@@ -264,7 +268,7 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewWriteFileToolWithWorkspace(app.workspace),
 		local.NewEditFileToolWithWorkspace(app.workspace),
 		local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
-		local.NewInstallSkillToolWithWorkspaceAndSkills(app.workspace, app.skillRoot(), app.skillManager),
+		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 	}
 	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools
@@ -280,6 +284,16 @@ func (app *Application) InitSkillManager() *skill.Manager {
 	return app.skillManager
 }
 
+func (app *Application) InitHookManager() *hook.Manager {
+	var commandHooks []hook.CommandHookConfig
+	_ = app.viper.UnmarshalKey("hooks.commands", &commandHooks)
+	app.hookManager = hook.NewManager(hook.Config{
+		Workspace:    app.workspace,
+		CommandHooks: commandHooks,
+	})
+	return app.hookManager
+}
+
 func (app *Application) skillRoot() string {
 	root := strings.TrimSpace(app.viper.GetString("skill.root"))
 	if root == "" {
@@ -293,6 +307,10 @@ func (app *Application) skillRoot() string {
 		return root
 	}
 	return filepath.Join(workspace, root)
+}
+
+func (app *Application) skillHubRegistry() string {
+	return strings.TrimSpace(app.viper.GetString("skill.registry"))
 }
 
 func (app *Application) GetSkillManager() *skill.Manager {
