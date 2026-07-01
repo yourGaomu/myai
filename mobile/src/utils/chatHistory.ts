@@ -7,6 +7,7 @@ export function historyMessageToChatItem(message: SessionHistoryMessage): ChatIt
   return {
     id: message.id || newRequestID(),
     role,
+    status: role === "assistant" ? "done" : undefined,
     text: historyMessageText(message),
     reasoning: message.reasoning,
     toolName: message.tool_name,

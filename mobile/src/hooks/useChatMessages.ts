@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { TokenUsage } from "../protocol";
 import type { PermissionState } from "../types/app";
-import type { ChatItem } from "../types/chat";
+import type { ChatItem, ChatMessageStatus } from "../types/chat";
 import { newRequestID } from "../utils/ids";
 
 type SessionChatState = {
@@ -63,13 +63,18 @@ export function useChatMessages() {
   );
 
   const addToolCall = useCallback(
-    (sessionID: string, name: string, argumentsText: string) => {
+    (sessionID: string, name: string, argumentsText: string, requestID?: string) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
         messages: [
-          ...current.messages,
+          ...current.messages.map((item) =>
+            item.role === "assistant" && (item.requestID === requestID || item.id === current.activeAssistantID)
+              ? { ...item, status: "tool_running" as ChatMessageStatus }
+              : item,
+          ),
           {
             id: newRequestID(),
+            requestID,
             role: "tool_call",
             text: "",
             toolName: name,
@@ -81,27 +86,147 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  const addToolResult = useCallback(
+    (sessionID: string, name: string, argumentsText: string, result: string, failed: boolean, requestID?: string) => {
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        messages: [
+          ...current.messages.map((item) =>
+            item.role === "assistant" && (item.requestID === requestID || item.id === current.activeAssistantID)
+              ? { ...item, status: "streaming" as ChatMessageStatus }
+              : item,
+          ),
+          {
+            id: newRequestID(),
+            requestID,
+            role: "tool",
+            text: result,
+            toolName: name,
+            toolArguments: argumentsText,
+            toolError: failed ? result : "",
+          },
+        ],
+      }));
+    },
+    [updateSessionChat],
+  );
+
   const appendAssistant = useCallback(
-    (sessionID: string, text: string) => {
+    (sessionID: string, requestID: string | undefined, text: string) => {
       if (!text) {
         return;
       }
 
       updateSessionChat(sessionID, (current) => {
-        const assistantID = current.activeAssistantID;
+        const assistantID = findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {
           const id = newRequestID();
           return {
             ...current,
             activeAssistantID: id,
-            messages: [...current.messages, { id, role: "assistant", text }],
+            messages: [...current.messages, { id, requestID, role: "assistant", status: "streaming", text }],
           };
         }
 
         return {
           ...current,
+          activeAssistantID: assistantID,
           messages: current.messages.map((item) =>
-            item.id === assistantID ? { ...item, text: item.text + text } : item,
+            item.id === assistantID
+              ? {
+                  ...item,
+                  requestID: item.requestID || requestID,
+                  status: item.status === "paused" || item.status === "error" ? item.status : "streaming",
+                  text: item.text + text,
+                }
+              : item,
+          ),
+        };
+      });
+    },
+    [updateSessionChat],
+  );
+
+  const completeAssistant = useCallback(
+    (sessionID: string, requestID: string | undefined, status: ChatMessageStatus, usage?: TokenUsage | null, content?: string) => {
+      updateSessionChat(sessionID, (current) => {
+        const assistantID = findAssistantID(current, requestID) || current.activeAssistantID;
+        if (!assistantID) {
+          if (!content && status === "done") {
+            return { ...current, activeAssistantID: "" };
+          }
+          const id = newRequestID();
+          return {
+            ...current,
+            activeAssistantID: "",
+            messages: [
+              ...current.messages,
+              {
+                id,
+                requestID,
+                role: "assistant",
+                status,
+                text: content || "",
+                usage: usage || undefined,
+              },
+            ],
+          };
+        }
+
+        return {
+          ...current,
+          activeAssistantID: current.activeAssistantID === assistantID ? "" : current.activeAssistantID,
+          messages: current.messages.map((item) =>
+            item.id === assistantID
+              ? {
+                  ...item,
+                  requestID: item.requestID || requestID,
+                  status,
+                  text: item.text || content || "",
+                  usage: usage || item.usage,
+                }
+              : item,
+          ),
+        };
+      });
+    },
+    [updateSessionChat],
+  );
+
+  const markAssistantError = useCallback(
+    (sessionID: string, requestID: string | undefined, message?: string) => {
+      updateSessionChat(sessionID, (current) => {
+        const assistantID = findAssistantID(current, requestID) || current.activeAssistantID;
+        if (!assistantID) {
+          const id = newRequestID();
+          return {
+            ...current,
+            activeAssistantID: "",
+            messages: [
+              ...current.messages,
+              {
+                id,
+                requestID,
+                role: "assistant",
+                status: "error",
+                text: message || "Request failed.",
+              },
+            ],
+          };
+        }
+
+        return {
+          ...current,
+          activeAssistantID: current.activeAssistantID === assistantID ? "" : current.activeAssistantID,
+          messages: current.messages.map((item) =>
+            item.id === assistantID
+              ? {
+                  ...item,
+                  requestID: item.requestID || requestID,
+                  status: "error",
+                  text: item.text || message || "Request failed.",
+                }
+              : item,
           ),
         };
       });
@@ -206,11 +331,14 @@ export function useChatMessages() {
   return {
     addMessage,
     addToolCall,
+    addToolResult,
     appendAssistant,
     clearMessages,
     clearSessionPendingRequest,
+    completeAssistant,
     getSessionChat,
     hasPendingRequest,
+    markAssistantError,
     mergeSessionChats,
     replaceMessages,
     resetActiveAssistant,
@@ -220,6 +348,20 @@ export function useChatMessages() {
     sessionChats: sessionChatsRef.current,
     sessionChatsVersion,
   };
+}
+
+function findAssistantID(current: SessionChatState, requestID?: string) {
+  if (!requestID) {
+    return "";
+  }
+
+  for (let index = current.messages.length - 1; index >= 0; index -= 1) {
+    const message = current.messages[index];
+    if (message.role === "assistant" && message.requestID === requestID) {
+      return message.id;
+    }
+  }
+  return "";
 }
 
 function mergeMessages(fromMessages: ChatItem[], toMessages: ChatItem[]) {

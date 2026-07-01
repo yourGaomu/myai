@@ -121,6 +121,16 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, requestID s
 				return fmt.Errorf("decode tool call failed: %w", err)
 			}
 			fmt.Printf("\ntool call: %s %s\n", payload.Name, payload.Arguments)
+		case protocol.TypeToolResult:
+			payload, err := protocol.DecodePayload[protocol.ToolResultPayload](message)
+			if err != nil {
+				return fmt.Errorf("decode tool result failed: %w", err)
+			}
+			status := "result"
+			if payload.Error {
+				status = "error"
+			}
+			fmt.Printf("\ntool %s: %s\n%s\n", status, payload.Name, payload.Result)
 		case protocol.TypePermissionAsk:
 			payload, err := protocol.DecodePayload[protocol.PermissionAskPayload](message)
 			if err != nil {

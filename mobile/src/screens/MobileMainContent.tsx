@@ -68,6 +68,7 @@ export function MobileMainContent({
           height={chat.chatPanelHeight}
           loadingHistory={common.pendingActions.sessions && Boolean(chat.pendingHistorySessionID)}
           messages={chat.messages}
+          onRegenerate={chat.onRegenerate}
           showAssistantLoading={Boolean(chat.pendingRequestID) && !chat.activeAssistantID}
         />
       ) : null}

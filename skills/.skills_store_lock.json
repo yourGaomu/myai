@@ -7,6 +7,13 @@
       "source": "community",
       "version": "1.0.8",
       "installedAt": "2026-06-28T16:04:38Z"
+    },
+    "poster": {
+      "name": "海报设计skill",
+      "zip_url": "https://api.skillhub.cn/api/v1/download?slug=poster",
+      "source": "community",
+      "version": "1.0.0",
+      "installedAt": "2026-07-01T05:06:38Z"
     }
   }
 }

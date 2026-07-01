@@ -59,6 +59,63 @@ func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
 	}
 }
 
+func TestRelayKeepsChatRequestOpenForIntermediateSkillReload(t *testing.T) {
+	server := NewServer("")
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeUserMessage,
+		RequestID:   "chat-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedToAgent := readTestMessage(t, agentConn, protocol.TypeUserMessage)
+	if forwardedToAgent.RequestID != "chat-req-1" {
+		t.Fatalf("expected request id chat-req-1, got %s", forwardedToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSkillReloadResult,
+		RequestID: "chat-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedReloadToClient := readTestMessage(t, clientConn, protocol.TypeSkillReloadResult)
+	if forwardedReloadToClient.RequestID != "chat-req-1" {
+		t.Fatalf("expected request id chat-req-1, got %s", forwardedReloadToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeAssistantDone,
+		RequestID: "chat-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedDoneToClient := readTestMessage(t, clientConn, protocol.TypeAssistantDone)
+	if forwardedDoneToClient.RequestID != "chat-req-1" {
+		t.Fatalf("expected request id chat-req-1, got %s", forwardedDoneToClient.RequestID)
+	}
+}
+
 func TestRelayForwardsSessionMessages(t *testing.T) {
 	server := NewServer("")
 	testServer := httptest.NewServer(server.routes())

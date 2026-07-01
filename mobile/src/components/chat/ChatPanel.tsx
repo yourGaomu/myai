@@ -12,6 +12,7 @@ type Props = {
   height: number;
   loadingHistory: boolean;
   messages: ChatItem[];
+  onRegenerate: () => void;
   showAssistantLoading: boolean;
 };
 
@@ -21,6 +22,7 @@ export function ChatPanel({
   height,
   loadingHistory,
   messages,
+  onRegenerate,
   showAssistantLoading,
 }: Props) {
   return (
@@ -46,7 +48,7 @@ export function ChatPanel({
           <Text style={styles.emptyText}>Messages will appear here.</Text>
         ) : (
           messages.map((message) => (
-            <MessageBubble key={message.id} buttonFeedback={buttonFeedback} message={message} />
+            <MessageBubble key={message.id} buttonFeedback={buttonFeedback} message={message} onRegenerate={onRegenerate} />
           ))
         )}
         {showAssistantLoading ? <AssistantLoadingBubble /> : null}

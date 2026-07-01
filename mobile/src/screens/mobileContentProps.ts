@@ -69,6 +69,7 @@ export type ChatContentProps = {
   chatPanelHeight: number;
   chatScrollRef: RefObject<ScrollView | null>;
   messages: ChatItem[];
+  onRegenerate: () => void;
   pendingHistorySessionID: string;
   pendingRequestID: string;
 };

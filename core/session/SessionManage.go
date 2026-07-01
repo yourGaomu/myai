@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -131,6 +132,36 @@ func (sm *SessionManage) AddAssistantMessageTo(sessionID string, content string)
 
 	session.AddAssistantMessage(content)
 	return nil
+}
+
+func (sm *SessionManage) TrimAfterLastUserMessage(sessionID string) (string, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return "", err
+	}
+
+	lastUserIndex := -1
+	for index := len(session.Messages) - 1; index >= 0; index-- {
+		if session.Messages[index].Role == llms.ChatMessageTypeHuman {
+			lastUserIndex = index
+			break
+		}
+	}
+	if lastUserIndex < 0 {
+		return "", errors.New("no user message to regenerate")
+	}
+
+	input := textFromMessage(session.Messages[lastUserIndex])
+	if strings.TrimSpace(input) == "" {
+		return "", errors.New("last user message is empty")
+	}
+
+	session.Messages = append([]llms.MessageContent(nil), session.Messages[:lastUserIndex+1]...)
+	session.LastUsage = llm.TokenUsage{}
+	return input, nil
 }
 
 func (sm *SessionManage) AddUsage(usage llm.TokenUsage) error {
@@ -367,4 +398,14 @@ func (sm *SessionManage) sessionByIDLocked(sessionID string) (*Session, error) {
 		return nil, errors.New("session not found")
 	}
 	return session, nil
+}
+
+func textFromMessage(message llms.MessageContent) string {
+	parts := make([]string, 0, len(message.Parts))
+	for _, part := range message.Parts {
+		if text, ok := part.(llms.TextContent); ok {
+			parts = append(parts, text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"myai/core/remote/protocol"
 )
 
 type peer struct {
@@ -35,6 +37,7 @@ type agentEntry struct {
 
 type clientEntry struct {
 	RequestID   string
+	RequestType protocol.MessageType
 	UserID      string
 	DeviceID    string
 	RemoteAddr  string
@@ -168,7 +171,7 @@ func (s *Server) listAgents() []AgentInfo {
 	return agents
 }
 
-func (s *Server) registerClient(requestID string, p *peer, userID string, deviceID string, remoteAddr string) {
+func (s *Server) registerClient(requestID string, requestType protocol.MessageType, p *peer, userID string, deviceID string, remoteAddr string) {
 	if requestID == "" {
 		return
 	}
@@ -180,6 +183,7 @@ func (s *Server) registerClient(requestID string, p *peer, userID string, device
 
 	s.clients[requestID] = &clientEntry{
 		RequestID:   requestID,
+		RequestType: requestType,
 		UserID:      userID,
 		DeviceID:    deviceID,
 		RemoteAddr:  remoteAddr,

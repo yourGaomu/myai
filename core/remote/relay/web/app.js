@@ -409,6 +409,11 @@ function handleMessage(message) {
       addMessage("event", `Tool call: ${payload.name || ""}\n${payload.arguments || ""}`);
       break;
     }
+    case "tool_result": {
+      const payload = readPayload(message);
+      addMessage(payload.error ? "error" : "event", `Tool ${payload.error ? "error" : "result"}: ${payload.name || ""}\n${payload.result || ""}`);
+      break;
+    }
     case "permission_ask":
       showPermission(message);
       break;

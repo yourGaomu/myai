@@ -261,6 +261,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	switch message.Type {
 	case protocol.TypeUserMessage:
 		go a.processUserMessage(ctx, conn, message)
+	case protocol.TypeSessionRegenerate:
+		go a.processRegenerateMessage(ctx, conn, message)
 	case protocol.TypePermissionResult:
 		return a.handlePermissionResult(message)
 	case protocol.TypeSessionList:
@@ -335,6 +337,43 @@ func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, me
 	if err := a.handleUserMessage(runCtx, conn, message); err != nil {
 		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
 			log.Printf("send remote user message error failed: %v", writeErr)
+		}
+	}
+}
+
+func (a *Agent) processRegenerateMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) {
+	payload, err := protocol.DecodePayload[protocol.SessionRegeneratePayload](message)
+	if err != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: fmt.Sprintf("decode session regenerate failed: %v", err)}); writeErr != nil {
+			log.Printf("send remote regenerate decode error failed: %v", writeErr)
+		}
+		return
+	}
+
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: "session id is empty"}); writeErr != nil {
+			log.Printf("send remote regenerate session error failed: %v", writeErr)
+		}
+		return
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	runCtx, cancel, ok := runtime.start(ctx)
+	if !ok {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: "session is already running"}); writeErr != nil {
+			log.Printf("send remote busy error failed: %v", writeErr)
+		}
+		return
+	}
+	defer runtime.finish(cancel)
+
+	if err := a.handleRegenerateMessage(runCtx, conn, message, sessionID); err != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+			log.Printf("send remote regenerate error failed: %v", writeErr)
 		}
 	}
 }
@@ -947,6 +986,44 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		return fmt.Errorf("session id is empty")
 	}
 
+	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
+		return a.chatService.SendMessageStreamForSession(ctx, sessionID, payload.Content, stream)
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
+		}
+		return err
+	}
+
+	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
+		Content: response.Result.Content,
+		Usage:   tokenUsagePayload(response.Result.Usage),
+		Context: contextInfoPayload(response.Context),
+		Compact: compactInfoPayload(response.Compact),
+	})
+}
+
+func (a *Agent) handleRegenerateMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string) error {
+	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
+		return a.chatService.RegenerateLastMessageStreamForSession(ctx, sessionID, stream)
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
+		}
+		return err
+	}
+
+	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
+		Content: response.Result.Content,
+		Usage:   tokenUsagePayload(response.Result.Usage),
+		Context: contextInfoPayload(response.Context),
+		Compact: compactInfoPayload(response.Compact),
+	})
+}
+
+func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, run func(llm.ChatStreamHandler) (service.ChatResponse, error)) (service.ChatResponse, error) {
 	sendErrCh := make(chan error, 1)
 	send := func(messageType protocol.MessageType, payload any) {
 		if err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload); err != nil {
@@ -957,7 +1034,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		}
 	}
 
-	response, err := a.chatService.SendMessageStreamForSession(ctx, sessionID, payload.Content, llm.ChatStreamHandler{
+	response, err := run(llm.ChatStreamHandler{
 		OnAnswer: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Content: text})
 		},
@@ -968,7 +1045,14 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 			})
 		},
 		OnToolResult: func(name string, arguments string, result string) {
-			if name != "install_skill" || strings.Contains(strings.ToLower(result), "tool error:") {
+			toolFailed := strings.Contains(strings.ToLower(result), "tool error:")
+			send(protocol.TypeToolResult, protocol.ToolResultPayload{
+				Name:      name,
+				Arguments: arguments,
+				Result:    result,
+				Error:     toolFailed,
+			})
+			if name != "install_skill" || toolFailed {
 				return
 			}
 			payload, err := a.skillListPayload(ctx, false)
@@ -989,24 +1073,16 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		},
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
-		}
-		return err
+		return service.ChatResponse{}, err
 	}
 
 	select {
 	case err := <-sendErrCh:
-		return err
+		return service.ChatResponse{}, err
 	default:
 	}
 
-	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content: response.Result.Content,
-		Usage:   tokenUsagePayload(response.Result.Usage),
-		Context: contextInfoPayload(response.Context),
-		Compact: compactInfoPayload(response.Compact),
-	})
+	return response, nil
 }
 
 func (a *Agent) writePausedAssistantDone(conn *websocket.Conn, requestID string, sessionID string) error {

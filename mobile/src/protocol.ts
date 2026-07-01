@@ -4,6 +4,7 @@ export type MessageType =
   | "assistant_delta"
   | "assistant_done"
   | "tool_call"
+  | "tool_result"
   | "permission_ask"
   | "permission_result"
   | "session_list"
@@ -25,6 +26,7 @@ export type MessageType =
   | "session_compact_result"
   | "session_pause"
   | "session_pause_result"
+  | "session_regenerate"
   | "model_list"
   | "model_list_result"
   | "model_switch"
@@ -96,6 +98,13 @@ export type ErrorPayload = {
 export type ToolCallPayload = {
   name?: string;
   arguments?: string;
+};
+
+export type ToolResultPayload = {
+  name?: string;
+  arguments?: string;
+  result?: string;
+  error?: boolean;
 };
 
 export type PermissionAskPayload = {
@@ -185,6 +194,10 @@ export type SessionPauseResultPayload = {
   session_id: string;
   paused?: boolean;
   message?: string;
+};
+
+export type SessionRegeneratePayload = {
+  session_id?: string;
 };
 
 export type ContextInfo = {

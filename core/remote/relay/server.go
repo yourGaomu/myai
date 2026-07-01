@@ -226,7 +226,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	}
 
@@ -235,11 +235,11 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
-	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionPermissionSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionPermissionSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
-		s.registerClient(message.RequestID, p, message.UserID, message.DeviceID, remoteAddr)
+		s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeHeartbeat:
 		s.touchClient(message.RequestID)
@@ -263,10 +263,65 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 		return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 	}
 
-	if message.Type == protocol.TypeAssistantDone || message.Type == protocol.TypeSessionListResult || message.Type == protocol.TypeSessionChanged || message.Type == protocol.TypeSessionDeleteResult || message.Type == protocol.TypeSessionRestoreResult || message.Type == protocol.TypeSessionHistoryResult || message.Type == protocol.TypeSessionPermissionSetResult || message.Type == protocol.TypeSessionContextSetResult || message.Type == protocol.TypeSessionCompactResult || message.Type == protocol.TypeSessionPauseResult || message.Type == protocol.TypeModelListResult || message.Type == protocol.TypeModelSwitchResult || message.Type == protocol.TypeSkillListResult || message.Type == protocol.TypeSkillReloadResult || message.Type == protocol.TypeFileListResult || message.Type == protocol.TypeFileReadResult || message.Type == protocol.TypeChangesListResult || message.Type == protocol.TypeChangeDiffResult || message.Type == protocol.TypeChangeRevertResult || message.Type == protocol.TypeHistoryListResult || message.Type == protocol.TypeHistoryDiffResult || message.Type == protocol.TypeHistoryRevertResult || message.Type == protocol.TypeError {
+	if isTerminalResponseForRequest(client.RequestType, message.Type) {
 		defer s.unregisterClient(message.RequestID)
 	}
 	return client.peer.writeJSON(message)
+}
+
+func isTerminalResponseForRequest(requestType protocol.MessageType, responseType protocol.MessageType) bool {
+	if responseType == protocol.TypeError {
+		return true
+	}
+
+	switch requestType {
+	case protocol.TypeUserMessage, protocol.TypeSessionRegenerate:
+		return responseType == protocol.TypeAssistantDone
+	case protocol.TypeSessionList:
+		return responseType == protocol.TypeSessionListResult
+	case protocol.TypeSessionNew, protocol.TypeSessionLoad:
+		return responseType == protocol.TypeSessionChanged
+	case protocol.TypeSessionDelete:
+		return responseType == protocol.TypeSessionDeleteResult
+	case protocol.TypeSessionRestore:
+		return responseType == protocol.TypeSessionRestoreResult
+	case protocol.TypeSessionHistory:
+		return responseType == protocol.TypeSessionHistoryResult
+	case protocol.TypeSessionPermissionSet:
+		return responseType == protocol.TypeSessionPermissionSetResult
+	case protocol.TypeSessionContextSet:
+		return responseType == protocol.TypeSessionContextSetResult
+	case protocol.TypeSessionCompact:
+		return responseType == protocol.TypeSessionCompactResult
+	case protocol.TypeSessionPause:
+		return responseType == protocol.TypeSessionPauseResult
+	case protocol.TypeModelList:
+		return responseType == protocol.TypeModelListResult
+	case protocol.TypeModelSwitch:
+		return responseType == protocol.TypeModelSwitchResult
+	case protocol.TypeSkillList:
+		return responseType == protocol.TypeSkillListResult
+	case protocol.TypeSkillReload:
+		return responseType == protocol.TypeSkillReloadResult
+	case protocol.TypeFileList:
+		return responseType == protocol.TypeFileListResult
+	case protocol.TypeFileRead:
+		return responseType == protocol.TypeFileReadResult
+	case protocol.TypeChangesList:
+		return responseType == protocol.TypeChangesListResult
+	case protocol.TypeChangeDiff:
+		return responseType == protocol.TypeChangeDiffResult
+	case protocol.TypeChangeRevert:
+		return responseType == protocol.TypeChangeRevertResult
+	case protocol.TypeHistoryList:
+		return responseType == protocol.TypeHistoryListResult
+	case protocol.TypeHistoryDiff:
+		return responseType == protocol.TypeHistoryDiffResult
+	case protocol.TypeHistoryRevert:
+		return responseType == protocol.TypeHistoryRevertResult
+	default:
+		return false
+	}
 }
 
 func writeAck(p *peer, role string, received protocol.Message) error {

@@ -133,10 +133,49 @@ export function useChatActions({
     }
   }, [requestSessionMapRef, sendEnvelope, sessionID, startPausePending, stopPausePending]);
 
+  const regenerateSession = useCallback(() => {
+    const targetSessionID = sessionID.trim();
+    if (!targetSessionID) {
+      return;
+    }
+
+    const requestID = newRequestID();
+    activeRequestIDRef.current = requestID;
+    requestSessionMapRef.current[requestID] = targetSessionID;
+    resetActiveAssistant(targetSessionID);
+    historySessionIDRef.current = targetSessionID;
+    setSessionPendingPermission(targetSessionID, null);
+    setSessionLastUsage(targetSessionID, null);
+    setSessionPendingRequest(targetSessionID, requestID);
+
+    const sent = sendEnvelope("session_regenerate", {
+      request_id: requestID,
+      session_id: targetSessionID,
+      payload: { session_id: targetSessionID },
+    });
+    if (!sent) {
+      activeRequestIDRef.current = "";
+      delete requestSessionMapRef.current[requestID];
+      clearSessionPendingRequest(targetSessionID, requestID);
+    }
+  }, [
+    activeRequestIDRef,
+    clearSessionPendingRequest,
+    historySessionIDRef,
+    requestSessionMapRef,
+    resetActiveAssistant,
+    sendEnvelope,
+    sessionID,
+    setSessionLastUsage,
+    setSessionPendingPermission,
+    setSessionPendingRequest,
+  ]);
+
   return {
     allowPermission,
     denyPermission,
     pauseSession,
+    regenerateSession,
     sendPermissionResult,
     sendUserMessage,
   };

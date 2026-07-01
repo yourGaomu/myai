@@ -155,6 +155,12 @@ func newChatStreamHandler(reader *bufio.Scanner) llm.ChatStreamHandler {
 			printToolCall(name, arguments)
 			toolStarted = true
 		},
+		OnToolResult: func(name string, arguments string, result string) {
+			reasoningPrinter.Finish()
+			answerPrinter.Finish()
+			printToolResult(name, result)
+			toolStarted = true
+		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			reasoningPrinter.Finish()
 			answerPrinter.Finish()
@@ -187,6 +193,19 @@ func printToolCall(name string, arguments string) {
 	arguments = compactLine(arguments)
 	if arguments != "" {
 		printWrappedText(truncate(arguments, currentContentWidth()), mutedStyle)
+	}
+}
+
+func printToolResult(name string, result string) {
+	label := "Tool result"
+	if strings.Contains(strings.ToLower(result), "tool error:") {
+		label = "Tool error"
+	}
+	fmt.Println(toolStyle.Render(label) + " " + commandStyle.Render(name))
+
+	result = strings.TrimSpace(result)
+	if result != "" {
+		printWrappedText(truncate(result, currentContentWidth()), mutedStyle)
 	}
 }
 

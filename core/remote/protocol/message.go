@@ -14,6 +14,7 @@ const (
 	TypeAssistantDelta             MessageType = "assistant_delta"
 	TypeAssistantDone              MessageType = "assistant_done"
 	TypeToolCall                   MessageType = "tool_call"
+	TypeToolResult                 MessageType = "tool_result"
 	TypePermissionAsk              MessageType = "permission_ask"
 	TypePermissionResult           MessageType = "permission_result"
 	TypeSessionList                MessageType = "session_list"
@@ -35,6 +36,7 @@ const (
 	TypeSessionCompactResult       MessageType = "session_compact_result"
 	TypeSessionPause               MessageType = "session_pause"
 	TypeSessionPauseResult         MessageType = "session_pause_result"
+	TypeSessionRegenerate          MessageType = "session_regenerate"
 	TypeModelList                  MessageType = "model_list"
 	TypeModelListResult            MessageType = "model_list_result"
 	TypeModelSwitch                MessageType = "model_switch"
@@ -107,6 +109,13 @@ type TokenUsage struct {
 type ToolCallPayload struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type ToolResultPayload struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments,omitempty"`
+	Result    string `json:"result"`
+	Error     bool   `json:"error,omitempty"`
 }
 
 type PermissionAskPayload struct {
@@ -206,6 +215,10 @@ type SessionPauseResultPayload struct {
 	SessionID string `json:"session_id"`
 	Paused    bool   `json:"paused"`
 	Message   string `json:"message,omitempty"`
+}
+
+type SessionRegeneratePayload struct {
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type ContextInfo struct {

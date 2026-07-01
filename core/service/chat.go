@@ -172,10 +172,51 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		title = titleFromInput(input)
 	}
 	s.persistUserMessageAsync(current.ID, current.Model, title, input)
+
+	return s.generateAssistantForSession(ctx, current, input, title, "user request", stream)
+}
+
+func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	if s.client == nil {
+		return ChatResponse{}, errors.New("llm client is nil")
+	}
+	if s.sessions == nil {
+		return ChatResponse{}, errors.New("session manager is nil")
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return ChatResponse{}, errors.New("session id is empty")
+	}
+
+	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	input, err := s.sessions.TrimAfterLastUserMessage(current.ID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	current, err = s.sessions.GetSession(current.ID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+
+	return s.generateAssistantForSession(ctx, current, input, "", "regenerate response", stream)
+}
+
+func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	if current == nil {
+		return ChatResponse{}, errors.New("session is nil")
+	}
+
 	requestID := uuid.NewString()
 	taskRecorder := history.NewTaskRecorder(history.RecordOptions{
 		Title:     title,
-		Reason:    "user request",
+		Reason:    reason,
 		SessionID: current.ID,
 		RequestID: requestID,
 	})
@@ -194,13 +235,13 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		return ChatResponse{}, fmt.Errorf("model not found: %s", current.Model)
 	}
 
-	skillPrompt := s.skillPrompt(ctx, input)
+	skillPrompt := s.skillPrompt(ctx, latestInput)
 	compactInfo, err := s.autoCompactIfNeeded(ctx, current, model, skillPrompt)
 	if err != nil {
 		log.Printf("auto compact failed: %v", err)
 	}
 
-	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, input)
+	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, latestInput)
 	if err != nil {
 		return ChatResponse{}, err
 	}

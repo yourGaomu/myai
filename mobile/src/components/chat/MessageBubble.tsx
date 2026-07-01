@@ -9,10 +9,13 @@ import { styles } from "./styles";
 type Props = {
   message: ChatItem;
   buttonFeedback: (style: StyleProp<ViewStyle>, active?: boolean) => StyleProp<ViewStyle>;
+  onRegenerate: () => void;
 };
 
-export function MessageBubble({ message, buttonFeedback }: Props) {
+export function MessageBubble({ message, buttonFeedback, onRegenerate }: Props) {
   const [expanded, setExpanded] = useState(message.role !== "tool_call" && message.role !== "tool");
+  const canRegenerate = message.role === "assistant" && (message.status === "paused" || message.status === "error");
+  const statusText = assistantStatusText(message);
 
   if (message.role === "tool_call" || message.role === "tool") {
     return (
@@ -54,9 +57,34 @@ export function MessageBubble({ message, buttonFeedback }: Props) {
         </View>
       ) : null}
       <MarkdownText text={message.text} />
+      {message.role === "assistant" && (statusText || canRegenerate) ? (
+        <View style={styles.messageStatusRow}>
+          {statusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}
+          {canRegenerate ? (
+            <Pressable onPress={onRegenerate} style={({ pressed }) => buttonFeedback(styles.regenerateButton, pressed)}>
+              <Text style={styles.regenerateButtonText}>Regenerate</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       {message.usage && usageHasValues(message.usage) ? (
         <Text style={styles.messageMeta}>{usageSummary(message.usage)}</Text>
       ) : null}
     </View>
   );
+}
+
+function assistantStatusText(message: ChatItem) {
+  switch (message.status) {
+    case "streaming":
+      return "Generating";
+    case "tool_running":
+      return "Using tool";
+    case "paused":
+      return "Paused";
+    case "error":
+      return "Failed";
+    default:
+      return "";
+  }
 }

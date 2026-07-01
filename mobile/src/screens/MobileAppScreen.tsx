@@ -121,10 +121,13 @@ export function MobileAppScreen() {
   const {
     addMessage,
     addToolCall,
+    addToolResult,
     appendAssistant,
     clearSessionPendingRequest,
+    completeAssistant,
     getSessionChat,
     hasPendingRequest,
+    markAssistantError,
     mergeSessionChats,
     replaceMessages,
     resetActiveAssistant,
@@ -287,7 +290,7 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
-  const { allowPermission, denyPermission, pauseSession, sendUserMessage } = useChatActions({
+  const { allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addUserMessage: (targetSessionID, message) => addMessage(targetSessionID, "user", message),
@@ -369,6 +372,7 @@ export function MobileAppScreen() {
     addErrorMessage: (targetSessionID, message) => addMessage(targetSessionID, "error", message),
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addToolCall,
+    addToolResult,
     appendAssistant,
     applyChangeDiff,
     applyChangeRevert,
@@ -386,9 +390,11 @@ export function MobileAppScreen() {
     applySessionList,
     applySessionSettings,
     clearSessionPendingRequest,
+    completeAssistant,
     currentFilePath: filePath,
     getSessionChat,
     historySessionIDRef,
+    markAssistantError,
     mergeSessionChats,
     requestChanges,
     requestFiles,
@@ -503,6 +509,7 @@ export function MobileAppScreen() {
           chatPanelHeight,
           chatScrollRef,
           messages: currentChat.messages,
+          onRegenerate: regenerateSession,
           pendingHistorySessionID: pendingHistorySessionIDRef.current,
           pendingRequestID: currentChat.pendingRequestID,
         }}

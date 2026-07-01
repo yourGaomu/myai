@@ -24,6 +24,7 @@ import type {
   SkillListResultPayload,
   TokenUsage,
   ToolCallPayload,
+  ToolResultPayload,
 } from "../protocol";
 import type { PendingAction, PermissionState } from "../types/app";
 import { shortID } from "../utils/ids";
@@ -32,8 +33,9 @@ type Args = {
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (sessionID: string, message: string) => void;
   addEventMessage: (sessionID: string, message: string) => void;
-  addToolCall: (sessionID: string, name: string, argumentsText: string) => void;
-  appendAssistant: (sessionID: string, text: string) => void;
+  addToolCall: (sessionID: string, name: string, argumentsText: string, requestID?: string) => void;
+  addToolResult: (sessionID: string, name: string, argumentsText: string, result: string, failed: boolean, requestID?: string) => void;
+  appendAssistant: (sessionID: string, requestID: string | undefined, text: string) => void;
   applyChangeDiff: (payload?: ChangeDiffResultPayload) => void;
   applyChangeRevert: (payload?: ChangeRevertResultPayload) => void;
   applyChangesList: (payload?: ChangesListResultPayload) => void;
@@ -50,9 +52,11 @@ type Args = {
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
+  completeAssistant: (sessionID: string, requestID: string | undefined, status: "done" | "paused", usage?: TokenUsage | null, content?: string) => void;
   currentFilePath: string;
-  getSessionChat: (sessionID: string) => { activeAssistantID: string };
+  getSessionChat: (sessionID: string) => { activeAssistantID: string; pendingRequestID: string };
   historySessionIDRef: RefObject<string>;
+  markAssistantError: (sessionID: string, requestID: string | undefined, message?: string) => void;
   mergeSessionChats: (fromSessionID: string, toSessionID: string) => void;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
@@ -77,6 +81,7 @@ export function useRemoteMessageHandler({
   addErrorMessage,
   addEventMessage,
   addToolCall,
+  addToolResult,
   appendAssistant,
   applyChangeDiff,
   applyChangeRevert,
@@ -94,9 +99,11 @@ export function useRemoteMessageHandler({
   applySessionSettings,
   applySkillList,
   clearSessionPendingRequest,
+  completeAssistant,
   currentFilePath,
   getSessionChat,
   historySessionIDRef,
+  markAssistantError,
   mergeSessionChats,
   requestChanges,
   requestFiles,
@@ -122,7 +129,11 @@ export function useRemoteMessageHandler({
           setStatus(message.request_id ? `Ack ${shortID(message.request_id)}` : "Connected");
           break;
         case "assistant_delta":
-          appendAssistant(resolveChatSessionID(message, requestSessionMapRef, sessionIDRef), (message.payload as AssistantDeltaPayload | undefined)?.content || "");
+          appendAssistant(
+            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+            message.request_id,
+            (message.payload as AssistantDeltaPayload | undefined)?.content || "",
+          );
           break;
         case "assistant_done": {
           const requestSessionID = message.request_id ? requestSessionMapRef.current[message.request_id] || "" : "";
@@ -133,9 +144,6 @@ export function useRemoteMessageHandler({
               requestSessionMapRef.current[message.request_id] = message.session_id;
             }
           }
-          const streamedAssistantID =
-            getSessionChat(targetSessionID).activeAssistantID ||
-            (requestSessionID ? getSessionChat(requestSessionID).activeAssistantID : "");
           const payload = (message.payload || {}) as AssistantDonePayload;
           setSessionLastUsage(targetSessionID, payload.usage || null);
           if (payload.context) {
@@ -144,9 +152,13 @@ export function useRemoteMessageHandler({
           if (payload.compact) {
             setSessionCompact(targetSessionID, payload.compact);
           }
-          if (!streamedAssistantID) {
-            appendAssistant(targetSessionID, payload.content || "");
-          }
+          completeAssistant(
+            targetSessionID,
+            message.request_id,
+            payload.paused ? "paused" : "done",
+            payload.usage || null,
+            payload.content || payload.message || (payload.paused ? "Session task paused." : ""),
+          );
           if (message.session_id && (!sessionIDRef.current || sessionIDRef.current === requestSessionID)) {
             setSessionID(message.session_id);
             historySessionIDRef.current = message.session_id;
@@ -173,7 +185,19 @@ export function useRemoteMessageHandler({
         }
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
-          addToolCall(resolveChatSessionID(message, requestSessionMapRef, sessionIDRef), payload.name || "tool", payload.arguments || "");
+          addToolCall(resolveChatSessionID(message, requestSessionMapRef, sessionIDRef), payload.name || "tool", payload.arguments || "", message.request_id);
+          break;
+        }
+        case "tool_result": {
+          const payload = (message.payload || {}) as ToolResultPayload;
+          addToolResult(
+            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+            payload.name || "tool",
+            payload.arguments || "",
+            payload.result || "",
+            Boolean(payload.error),
+            message.request_id,
+          );
           break;
         }
         case "permission_ask": {
@@ -216,6 +240,12 @@ export function useRemoteMessageHandler({
           const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
           addEventMessage(targetSessionID, payload.message || (payload.paused ? "Session paused." : "No running task to pause."));
           setStatus(payload.paused ? "Paused" : "Idle");
+          if (!payload.paused) {
+            clearSessionPendingRequest(targetSessionID);
+            if (!message.request_id || activeRequestIDRef.current === message.request_id) {
+              activeRequestIDRef.current = "";
+            }
+          }
           if (message.request_id) {
             delete requestSessionMapRef.current[message.request_id];
           }
@@ -270,6 +300,9 @@ export function useRemoteMessageHandler({
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
           const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          if (isChatRequestError(getSessionChat(targetSessionID), message.request_id)) {
+            markAssistantError(targetSessionID, message.request_id, payload.message || "Remote error");
+          }
           addErrorMessage(targetSessionID, payload.message || "Remote error");
           setSessionPendingPermission(targetSessionID, null);
           clearSessionPendingRequest(targetSessionID, message.request_id);
@@ -300,6 +333,7 @@ export function useRemoteMessageHandler({
       addErrorMessage,
       addEventMessage,
       addToolCall,
+      addToolResult,
       appendAssistant,
       applyChangeDiff,
       applyChangeRevert,
@@ -317,9 +351,11 @@ export function useRemoteMessageHandler({
       applySessionSettings,
       applySkillList,
       clearSessionPendingRequest,
+      completeAssistant,
       currentFilePath,
       getSessionChat,
       historySessionIDRef,
+      markAssistantError,
       mergeSessionChats,
       requestChanges,
       requestFiles,
@@ -347,4 +383,11 @@ function resolveChatSessionID(
   sessionIDRef: RefObject<string>,
 ) {
   return (message.session_id || (message.request_id ? requestSessionMapRef.current[message.request_id] : "") || sessionIDRef.current || "").trim();
+}
+
+function isChatRequestError(chat: { activeAssistantID: string; pendingRequestID: string }, requestID?: string) {
+  if (!requestID) {
+    return false;
+  }
+  return chat.pendingRequestID === requestID;
 }
