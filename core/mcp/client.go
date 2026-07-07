@@ -28,7 +28,9 @@ type Client struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 
-	writeMu sync.Mutex
+	writeMu  sync.Mutex
+	stderrMu sync.Mutex
+	stderr   []string
 
 	nextID    atomic.Int64
 	pendingMu sync.Mutex
@@ -271,13 +273,13 @@ func (c *Client) request(ctx context.Context, method string, params any, out any
 		return nil
 	case <-ctx.Done():
 		c.removePending(id)
-		return fmt.Errorf("mcp request %s failed: %w", method, ctx.Err())
+		return c.withStderr(fmt.Errorf("mcp request %s failed: %w", method, ctx.Err()))
 	case <-c.closed:
 		c.removePending(id)
 		if c.closeErr != nil {
-			return c.closeErr
+			return c.withStderr(c.closeErr)
 		}
-		return errors.New("mcp client closed")
+		return c.withStderr(errors.New("mcp client closed"))
 	}
 }
 
@@ -366,8 +368,41 @@ func (c *Client) logStderr(stderr io.Reader) {
 		if line == "" {
 			continue
 		}
+		c.appendStderr(line)
 		log.Printf("mcp %s stderr: %s", c.config.Name, truncateLogLine(line, 1200))
 	}
+}
+
+func (c *Client) appendStderr(line string) {
+	c.stderrMu.Lock()
+	defer c.stderrMu.Unlock()
+
+	const maxLines = 20
+	c.stderr = append(c.stderr, line)
+	if len(c.stderr) > maxLines {
+		c.stderr = c.stderr[len(c.stderr)-maxLines:]
+	}
+}
+
+func (c *Client) stderrTail() string {
+	c.stderrMu.Lock()
+	defer c.stderrMu.Unlock()
+
+	if len(c.stderr) == 0 {
+		return ""
+	}
+	return strings.Join(c.stderr, "\n")
+}
+
+func (c *Client) withStderr(err error) error {
+	if err == nil {
+		return nil
+	}
+	tail := strings.TrimSpace(c.stderrTail())
+	if tail == "" {
+		return err
+	}
+	return fmt.Errorf("%w\nmcp stderr:\n%s", err, tail)
 }
 
 func (c *Client) markClosed(err error) {

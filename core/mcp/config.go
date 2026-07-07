@@ -29,6 +29,7 @@ type ServerConfig struct {
 	TimeoutSeconds  int               `mapstructure:"timeout_seconds"`
 	ProtocolVersion string            `mapstructure:"protocol_version"`
 	Disabled        bool              `mapstructure:"disabled"`
+	Required        bool              `mapstructure:"required"`
 }
 
 func LoadConfig(v *viper.Viper, workspace string) (Config, error) {

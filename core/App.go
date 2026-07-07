@@ -331,7 +331,7 @@ func (app *Application) InitMCP() *mcp.Manager {
 	}
 
 	if err := app.mcpManager.RegisterAll(context.Background(), app.toolRegister); err != nil {
-		panic(err)
+		panic(fmt.Errorf("init mcp failed: %w", err))
 	}
 	return app.mcpManager
 }

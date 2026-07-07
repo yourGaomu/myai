@@ -23,4 +23,12 @@ asset:
   max_visits: 0
 
 mcp:
-  servers: []
+  servers:
+    - name: filesystem
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-filesystem"
+        - "."
+      permission: write
+      timeout_seconds: 120

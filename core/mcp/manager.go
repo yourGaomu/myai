@@ -41,13 +41,23 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 
 		client := NewClient(server)
 		if err := client.Start(ctx); err != nil {
-			return fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
+			err = fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
+			if server.Required {
+				return err
+			}
+			log.Printf("warning: %v", err)
+			continue
 		}
 
 		infos, err := client.ListTools(ctx)
 		if err != nil {
 			_ = client.Close()
-			return fmt.Errorf("list mcp tools for %s failed: %w", server.Name, err)
+			err = fmt.Errorf("list mcp tools for %s failed: %w", server.Name, err)
+			if server.Required {
+				return err
+			}
+			log.Printf("warning: %v", err)
+			continue
 		}
 
 		wrapped := make([]tooldef.Tool, 0, len(infos))
