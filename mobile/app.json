@@ -39,7 +39,8 @@
           "style": "dark",
           "enforceContrast": false
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {

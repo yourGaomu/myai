@@ -1,0 +1,26 @@
+myai:
+  base_url: https://mikasa,icu/v1
+  api_key: "***REDACTED***"
+  model: gpt-5.5
+
+mongo:
+  uri: "mongodb://***REDACTED***@170.106.115.187:27017/"
+  database: myai
+
+redis:
+  addr: 170.106.115.187:6379
+  password: "***REDACTED***"
+  db: 0
+
+thread:
+  core: 5
+  queueSize: 10
+
+asset:
+  shortener_base_url: http://localhost:18081
+  upload_timeout_seconds: 60
+  ttl_seconds: 604800
+  max_visits: 0
+
+mcp:
+  servers: []

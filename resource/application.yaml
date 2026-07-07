@@ -15,3 +15,12 @@ redis:
 thread:
   core: 5
   queueSize: 10
+
+asset:
+  shortener_base_url: http://localhost:18081
+  upload_timeout_seconds: 60
+  ttl_seconds: 604800
+  max_visits: 0
+
+mcp:
+  servers: []

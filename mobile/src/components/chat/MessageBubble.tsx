@@ -2,8 +2,10 @@ import { useState } from "react";
 import { Pressable, Text, type StyleProp, View, type ViewStyle } from "react-native";
 
 import type { ChatItem } from "../../types/chat";
+import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { MarkdownText } from "./MarkdownText";
+import { SharedAssetCard } from "./SharedAssetCard";
 import { styles } from "./styles";
 
 type Props = {
@@ -13,7 +15,8 @@ type Props = {
 };
 
 export function MessageBubble({ message, buttonFeedback, onRegenerate }: Props) {
-  const [expanded, setExpanded] = useState(message.role !== "tool_call" && message.role !== "tool");
+  const sharedAsset = parseSharedAsset(message.toolName, message.text);
+  const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || Boolean(sharedAsset)));
   const canRegenerate = message.role === "assistant" && (message.status === "paused" || message.status === "error");
   const statusText = assistantStatusText(message);
 
@@ -39,7 +42,11 @@ export function MessageBubble({ message, buttonFeedback, onRegenerate }: Props) 
             {message.text ? (
               <View style={styles.toolSection}>
                 <Text style={styles.toolSectionTitle}>{message.toolError ? "Error" : "Result"}</Text>
-                <Text style={[styles.toolCode, message.toolError && styles.toolErrorText]}>{message.text}</Text>
+                {sharedAsset && !message.toolError ? (
+                  <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+                ) : (
+                  <Text style={[styles.toolCode, message.toolError && styles.toolErrorText]}>{message.text}</Text>
+                )}
               </View>
             ) : null}
           </View>

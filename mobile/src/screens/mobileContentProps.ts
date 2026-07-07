@@ -6,6 +6,7 @@ import type {
   ChangeEntry,
   CompactInfo,
   ContextInfo,
+  AssetSummary,
   FileEntry,
   FileReadResultPayload,
   HistoryCheckpoint,
@@ -28,6 +29,7 @@ export type MainContentCommonProps = {
 export type SettingsContentProps = {
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  assetBaseURL: string;
   compact?: CompactInfo;
   context?: ContextInfo;
   bindCode: string;
@@ -49,6 +51,7 @@ export type SettingsContentProps = {
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
+  onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
@@ -75,6 +78,7 @@ export type ChatContentProps = {
 };
 
 export type FilesContentProps = {
+  assets: AssetSummary[];
   fileEntries: FileEntry[];
   fileParent: string;
   filePath: string;
@@ -83,6 +87,7 @@ export type FilesContentProps = {
   onAttachFilePreview: () => void;
   onGoToParent: () => void;
   onOpenFileEntry: (entry: FileEntry) => void;
+  onRefreshAssets: () => void;
   onRefreshFiles: () => void;
 };
 

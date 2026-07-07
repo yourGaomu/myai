@@ -62,6 +62,32 @@ type MessageRecord struct {
 	CreatedAt          time.Time `bson:"created_at" json:"created_at"`
 }
 
+type MessageHistoryMeta struct {
+	SessionID            string     `json:"session_id"`
+	MessageCount         int64      `json:"message_count"`
+	LastMessageID        string     `json:"last_message_id,omitempty"`
+	LastMessageCreatedAt *time.Time `json:"last_message_created_at,omitempty"`
+	HistoryVersion       int64      `json:"history_version"`
+}
+
+type AssetRecord struct {
+	ID          string     `bson:"_id" json:"id"`
+	SessionID   string     `bson:"session_id" json:"session_id"`
+	RequestID   string     `bson:"request_id,omitempty" json:"request_id,omitempty"`
+	ToolCallID  string     `bson:"tool_call_id,omitempty" json:"tool_call_id,omitempty"`
+	ToolName    string     `bson:"tool_name,omitempty" json:"tool_name,omitempty"`
+	LocalPath   string     `bson:"local_path,omitempty" json:"path,omitempty"`
+	FileName    string     `bson:"file_name,omitempty" json:"file_name,omitempty"`
+	ContentType string     `bson:"content_type,omitempty" json:"content_type,omitempty"`
+	Size        int64      `bson:"size,omitempty" json:"size,omitempty"`
+	ShortURL    string     `bson:"short_url" json:"short_url"`
+	ShortCode   string     `bson:"short_code,omitempty" json:"code,omitempty"`
+	ExpiresAt   *time.Time `bson:"expires_at,omitempty" json:"expires_at,omitempty"`
+	Deleted     bool       `bson:"deleted,omitempty" json:"deleted,omitempty"`
+	DeletedAt   *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `bson:"created_at" json:"created_at"`
+}
+
 const (
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
@@ -76,9 +102,13 @@ type Store interface {
 	MarkSessionRestored(ctx context.Context, sessionID string, restoredAt time.Time) error
 	SaveModelConfig(ctx context.Context, model ModelConfig) error
 	SaveMessage(ctx context.Context, message MessageRecord) error
+	SaveAsset(ctx context.Context, asset AssetRecord) error
 	ClearMessages(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context) ([]SessionRecord, error)
 	ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]SessionRecord, error)
 	ListModelConfigs(ctx context.Context) ([]ModelConfig, error)
 	ListMessages(ctx context.Context, sessionID string) ([]MessageRecord, error)
+	GetMessageHistoryMeta(ctx context.Context, sessionID string) (MessageHistoryMeta, error)
+	ListMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]MessageRecord, bool, error)
+	ListAssets(ctx context.Context, sessionID string, limit int) ([]AssetRecord, error)
 }

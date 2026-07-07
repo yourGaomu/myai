@@ -49,7 +49,7 @@ func init() {
 	rootCmd.AddCommand(relayCmd)
 
 	relayCmd.Flags().StringVar(&relayAddr, "addr", ":8080", "relay server listen address")
-	relayCmd.Flags().StringVar(&relayConfigFile, "config", "./resource/application.yaml", "config file for relay persistence")
+	relayCmd.Flags().StringVar(&relayConfigFile, "urlConfig", "./resource/application.yaml", "urlConfig file for relay persistence")
 }
 
 func configureRelayAuthStore(ctx context.Context, server *relay.Server) (*mongo.Client, error) {

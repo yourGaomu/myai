@@ -277,6 +277,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionRestore(ctx, conn, message)
 	case protocol.TypeSessionHistory:
 		return a.handleSessionHistory(ctx, conn, message)
+	case protocol.TypeSessionHistoryMeta:
+		return a.handleSessionHistoryMeta(ctx, conn, message)
+	case protocol.TypeSessionHistoryDelta:
+		return a.handleSessionHistoryDelta(ctx, conn, message)
 	case protocol.TypeSessionPermissionSet:
 		return a.handleSessionPermissionSet(ctx, conn, message)
 	case protocol.TypeSessionContextSet:
@@ -293,6 +297,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSkillList(ctx, conn, message)
 	case protocol.TypeSkillReload:
 		return a.handleSkillReload(ctx, conn, message)
+	case protocol.TypeAssetList:
+		return a.handleAssetList(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:
@@ -532,6 +538,58 @@ func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, 
 	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryResult, message.RequestID, sessionID, payloadResult)
 }
 
+func (a *Agent) handleSessionHistoryMeta(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionHistoryMetaPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session history meta failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	meta, err := a.chatService.SessionHistoryMeta(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	upToDate := localHistoryUpToDate(payload, meta)
+	result := protocol.SessionHistoryMetaResultPayload{
+		SessionID:            sessionID,
+		MessageCount:         meta.MessageCount,
+		LastMessageID:        meta.LastMessageID,
+		LastMessageCreatedAt: meta.LastMessageCreatedAt,
+		HistoryVersion:       meta.HistoryVersion,
+		UpToDate:             upToDate,
+		CanDelta:             !upToDate && strings.TrimSpace(payload.LocalLastMessageID) != "" && int64(payload.LocalMessageCount) <= meta.MessageCount,
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryMetaResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionHistoryDelta(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionHistoryDeltaPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session history delta failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	records, fullSyncRequired, err := a.chatService.ListSessionMessagesAfter(ctx, sessionID, payload.AfterMessageID, payload.Limit)
+	if err != nil {
+		return err
+	}
+
+	result := protocol.SessionHistoryDeltaResultPayload{
+		SessionID:        sessionID,
+		Messages:         sessionHistoryMessages(records),
+		Count:            len(records),
+		FullSyncRequired: fullSyncRequired,
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryDeltaResult, message.RequestID, sessionID, result)
+}
+
 func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload := a.modelListPayload()
 	return a.writeRemoteMessage(conn, protocol.TypeModelListResult, message.RequestID, message.SessionID, payload)
@@ -559,6 +617,28 @@ func (a *Agent) handleSkillReload(ctx context.Context, conn *websocket.Conn, mes
 		return err
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSkillReloadResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) handleAssetList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.AssetListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode asset list failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	records, err := a.chatService.ListAssets(ctx, sessionID, payload.Limit)
+	if err != nil {
+		return err
+	}
+	result := protocol.AssetListResultPayload{
+		SessionID: sessionID,
+		Assets:    assetSummaries(records),
+		Count:     len(records),
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeAssetListResult, message.RequestID, sessionID, result)
 }
 
 func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
@@ -997,10 +1077,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	}
 
 	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content: response.Result.Content,
-		Usage:   tokenUsagePayload(response.Result.Usage),
-		Context: contextInfoPayload(response.Context),
-		Compact: compactInfoPayload(response.Compact),
+		Content:   response.Result.Content,
+		Reasoning: response.Result.Reasoning,
+		Usage:     tokenUsagePayload(response.Result.Usage),
+		Context:   contextInfoPayload(response.Context),
+		Compact:   compactInfoPayload(response.Compact),
 	})
 }
 
@@ -1035,6 +1116,9 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 	}
 
 	response, err := run(llm.ChatStreamHandler{
+		OnReasoning: func(text string) {
+			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Reasoning: text})
+		},
 		OnAnswer: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Content: text})
 		},
@@ -1138,6 +1222,19 @@ func sessionHistoryMessages(records []data.MessageRecord) []protocol.SessionHist
 	return messages
 }
 
+func localHistoryUpToDate(local protocol.SessionHistoryMetaPayload, remote data.MessageHistoryMeta) bool {
+	if int64(local.LocalMessageCount) != remote.MessageCount {
+		return false
+	}
+	if strings.TrimSpace(local.LocalLastMessageID) != strings.TrimSpace(remote.LastMessageID) {
+		return false
+	}
+	if local.LocalHistoryVersion != 0 && local.LocalHistoryVersion != remote.HistoryVersion {
+		return false
+	}
+	return true
+}
+
 func tokenUsageRecordFromMessage(record data.MessageRecord) protocol.TokenUsage {
 	return protocol.TokenUsage{
 		PromptTokens:       record.PromptTokens,
@@ -1212,6 +1309,28 @@ func skillSummaries(root string, skills []skill.Skill) []protocol.SkillSummary {
 			Path:        skillDisplayPath(root, item.Path),
 			Triggers:    append([]string(nil), item.Triggers...),
 			UpdatedAt:   item.UpdatedAt,
+		})
+	}
+	return summaries
+}
+
+func assetSummaries(assets []data.AssetRecord) []protocol.AssetSummary {
+	summaries := make([]protocol.AssetSummary, 0, len(assets))
+	for _, asset := range assets {
+		summaries = append(summaries, protocol.AssetSummary{
+			ID:          asset.ID,
+			SessionID:   asset.SessionID,
+			RequestID:   asset.RequestID,
+			ToolCallID:  asset.ToolCallID,
+			ToolName:    asset.ToolName,
+			Path:        asset.LocalPath,
+			FileName:    asset.FileName,
+			ContentType: asset.ContentType,
+			Size:        asset.Size,
+			ShortURL:    asset.ShortURL,
+			Code:        asset.ShortCode,
+			ExpiresAt:   asset.ExpiresAt,
+			CreatedAt:   asset.CreatedAt,
 		})
 	}
 	return summaries

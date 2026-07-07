@@ -1,0 +1,40 @@
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: myai-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-myaiadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-myaiadmin123456}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://localhost:9000}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: myai-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-myaiadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-myaiadmin123456}
+      MINIO_BUCKET: ${MINIO_BUCKET:-myai-assets}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myai http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
+      mc mb --ignore-existing myai/$$MINIO_BUCKET;
+      mc anonymous set none myai/$$MINIO_BUCKET;
+      echo MinIO bucket ready: $$MINIO_BUCKET;
+      "
+    restart: "no"

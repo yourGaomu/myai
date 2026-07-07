@@ -1,21 +1,23 @@
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { ButtonContent } from "../common/ButtonContent";
-import type { FileReadResultPayload } from "../../protocol";
+import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { formatBytes } from "../../utils/format";
+import { attachmentKey, attachmentMeta, attachmentTitle, isUploadedAssetAttachment } from "../../utils/attachments";
 
 type Props = {
-  attachedFiles: FileReadResultPayload[];
+  attachedFiles: ChatAttachment[];
   buttonFeedback: ButtonFeedback;
   canPause: boolean;
   messageInput: string;
   onChangeMessage: (value: string) => void;
   onPause: () => void;
-  onRemoveAttachedFile: (path: string) => void;
+  onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
+  onUploadFile: () => void;
   pendingPause: boolean;
   pendingSend: boolean;
+  pendingUpload: boolean;
 };
 
 export function Composer({
@@ -27,24 +29,23 @@ export function Composer({
   onPause,
   onRemoveAttachedFile,
   onSend,
+  onUploadFile,
   pendingPause,
   pendingSend,
+  pendingUpload,
 }: Props) {
   return (
     <View style={styles.composer}>
       {attachedFiles.length > 0 ? (
         <View style={styles.attachmentTray}>
           {attachedFiles.map((file) => (
-            <View key={file.path} style={styles.attachmentChip}>
+            <View key={attachmentKey(file)} style={[styles.attachmentChip, isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip]}>
               <View style={styles.flex}>
-                <Text style={styles.attachmentTitle}>{file.name}</Text>
-                <Text style={styles.attachmentMeta}>
-                  {file.path} / {formatBytes(file.size)}
-                  {file.truncated ? " / truncated" : ""}
-                </Text>
+                <Text style={styles.attachmentTitle}>{attachmentTitle(file)}</Text>
+                <Text numberOfLines={2} style={styles.attachmentMeta}>{attachmentMeta(file)}</Text>
               </View>
               <Pressable
-                onPress={() => onRemoveAttachedFile(file.path)}
+                onPress={() => onRemoveAttachedFile(attachmentKey(file))}
                 style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
               >
                 <Text style={styles.attachmentRemoveText}>Remove</Text>
@@ -62,6 +63,13 @@ export function Composer({
           style={styles.messageInput}
           value={messageInput}
         />
+        <Pressable
+          disabled={pendingUpload}
+          onPress={onUploadFile}
+          style={({ pressed }) => buttonFeedback([styles.uploadButton, pendingUpload && styles.disabledButton], pressed)}
+        >
+          <ButtonContent loading={pendingUpload} text={pendingUpload ? "Uploading" : "File"} />
+        </Pressable>
         <Pressable
           disabled={pendingSend}
           onPress={onSend}
@@ -110,6 +118,9 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  uploadedAttachmentChip: {
+    backgroundColor: "#b9e9b0",
   },
   attachmentTitle: {
     color: "#12100e",
@@ -165,6 +176,17 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 72,
     paddingHorizontal: 14,
+  },
+  uploadButton: {
+    alignItems: "center",
+    backgroundColor: "#b9e9b0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 3,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 68,
+    paddingHorizontal: 12,
   },
   pauseButton: {
     alignItems: "center",

@@ -1,0 +1,35 @@
+server:
+  addr: ":18081"
+  base_url: "http://localhost:18081"
+  default_ttl_seconds: 86400
+
+store:
+  type: "mongo"
+
+mongo:
+  uri: "mongodb://mikasa:mikasa@170.106.115.187:27017/"
+  database: "myai"
+  collection: "short_links"
+
+redis:
+  enabled: true
+  addr: "170.106.115.187:6379"
+  password: "mikasa"
+  db: 0
+  prefix: "myai:url-shortener"
+  cache_ttl_seconds: 600
+  lock_ttl_seconds: 3
+  lock_wait_ms: 120
+  visit_sync_interval_ms: 1000
+  visit_sync_queue_size: 4096
+
+minio:
+  endpoint: "170.106.115.187:9000"
+  access_key: "iuHFrCkC8aBqVQawrLRb"
+  secret_key: "9bIMLOW6rzAnF7CTlB1Nk3Y5AG3yShOq6IaOAWxe"
+  bucket: "myai-assets"
+  use_ssl: false
+  ensure_bucket: true
+
+object:
+  url_ttl_seconds: 3600

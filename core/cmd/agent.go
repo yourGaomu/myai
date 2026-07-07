@@ -26,6 +26,7 @@ var agentCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		core.SetWorkspace(agentWorkspace)
 		core.InitApp()
+		defer func() { _ = core.GetApp().Close() }()
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()

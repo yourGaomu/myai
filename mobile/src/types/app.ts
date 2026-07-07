@@ -17,9 +17,11 @@ export type PendingAction =
   | "models"
   | "skills"
   | "settings"
+  | "assets"
   | "files"
   | "changes"
   | "history"
   | "diff"
   | "revert"
+  | "upload"
   | "pause";

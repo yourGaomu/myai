@@ -6,6 +6,7 @@ type Args = {
   fileEntriesCount: number;
   filePath: string;
   loadSession: (sessionID: string) => void;
+  requestAssets: () => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
   requestSessions: () => boolean;
@@ -16,6 +17,7 @@ export function useNavigationActions({
   fileEntriesCount,
   filePath,
   loadSession,
+  requestAssets,
   requestChanges,
   requestFiles,
   requestSessions,
@@ -28,10 +30,11 @@ export function useNavigationActions({
   }, [requestChanges, setViewMode]);
   const openFiles = useCallback(() => {
     setViewMode("files");
+    requestAssets();
     if (fileEntriesCount === 0) {
       requestFiles(filePath);
     }
-  }, [fileEntriesCount, filePath, requestFiles, setViewMode]);
+  }, [fileEntriesCount, filePath, requestAssets, requestFiles, setViewMode]);
   const openSessions = useCallback(() => {
     setViewMode("sessions");
     requestSessions();

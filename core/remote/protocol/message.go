@@ -28,6 +28,10 @@ const (
 	TypeSessionChanged             MessageType = "session_changed"
 	TypeSessionHistory             MessageType = "session_history"
 	TypeSessionHistoryResult       MessageType = "session_history_result"
+	TypeSessionHistoryMeta         MessageType = "session_history_meta"
+	TypeSessionHistoryMetaResult   MessageType = "session_history_meta_result"
+	TypeSessionHistoryDelta        MessageType = "session_history_delta"
+	TypeSessionHistoryDeltaResult  MessageType = "session_history_delta_result"
 	TypeSessionPermissionSet       MessageType = "session_permission_set"
 	TypeSessionPermissionSetResult MessageType = "session_permission_set_result"
 	TypeSessionContextSet          MessageType = "session_context_set"
@@ -45,6 +49,8 @@ const (
 	TypeSkillListResult            MessageType = "skill_list_result"
 	TypeSkillReload                MessageType = "skill_reload"
 	TypeSkillReloadResult          MessageType = "skill_reload_result"
+	TypeAssetList                  MessageType = "asset_list"
+	TypeAssetListResult            MessageType = "asset_list_result"
 	TypeFileList                   MessageType = "file_list"
 	TypeFileListResult             MessageType = "file_list_result"
 	TypeFileRead                   MessageType = "file_read"
@@ -85,16 +91,18 @@ type UserMessagePayload struct {
 }
 
 type AssistantDeltaPayload struct {
-	Content string `json:"content"`
+	Content   string `json:"content,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 type AssistantDonePayload struct {
-	Content string      `json:"content"`
-	Usage   TokenUsage  `json:"usage,omitempty"`
-	Context ContextInfo `json:"context,omitempty"`
-	Compact CompactInfo `json:"compact,omitempty"`
-	Paused  bool        `json:"paused,omitempty"`
-	Message string      `json:"message,omitempty"`
+	Content   string      `json:"content"`
+	Reasoning string      `json:"reasoning,omitempty"`
+	Usage     TokenUsage  `json:"usage,omitempty"`
+	Context   ContextInfo `json:"context,omitempty"`
+	Compact   CompactInfo `json:"compact,omitempty"`
+	Paused    bool        `json:"paused,omitempty"`
+	Message   string      `json:"message,omitempty"`
 }
 
 type TokenUsage struct {
@@ -191,6 +199,37 @@ type SessionHistoryResultPayload struct {
 	SessionID string                  `json:"session_id"`
 	Messages  []SessionHistoryMessage `json:"messages"`
 	Count     int                     `json:"count"`
+}
+
+type SessionHistoryMetaPayload struct {
+	SessionID                 string `json:"session_id,omitempty"`
+	LocalMessageCount         int    `json:"local_message_count,omitempty"`
+	LocalLastMessageID        string `json:"local_last_message_id,omitempty"`
+	LocalLastMessageCreatedAt string `json:"local_last_message_created_at,omitempty"`
+	LocalHistoryVersion       int64  `json:"local_history_version,omitempty"`
+}
+
+type SessionHistoryMetaResultPayload struct {
+	SessionID            string     `json:"session_id"`
+	MessageCount         int64      `json:"message_count"`
+	LastMessageID        string     `json:"last_message_id,omitempty"`
+	LastMessageCreatedAt *time.Time `json:"last_message_created_at,omitempty"`
+	HistoryVersion       int64      `json:"history_version"`
+	UpToDate             bool       `json:"up_to_date"`
+	CanDelta             bool       `json:"can_delta"`
+}
+
+type SessionHistoryDeltaPayload struct {
+	SessionID      string `json:"session_id,omitempty"`
+	AfterMessageID string `json:"after_message_id,omitempty"`
+	Limit          int    `json:"limit,omitempty"`
+}
+
+type SessionHistoryDeltaResultPayload struct {
+	SessionID        string                  `json:"session_id"`
+	Messages         []SessionHistoryMessage `json:"messages"`
+	Count            int                     `json:"count"`
+	FullSyncRequired bool                    `json:"full_sync_required,omitempty"`
 }
 
 type SessionPermissionSetPayload struct {
@@ -305,6 +344,33 @@ type SkillListResultPayload struct {
 	Count    int            `json:"count"`
 	Reloaded bool           `json:"reloaded,omitempty"`
 	Message  string         `json:"message,omitempty"`
+}
+
+type AssetListPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type AssetSummary struct {
+	ID          string     `json:"id"`
+	SessionID   string     `json:"session_id"`
+	RequestID   string     `json:"request_id,omitempty"`
+	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	ToolName    string     `json:"tool_name,omitempty"`
+	Path        string     `json:"path,omitempty"`
+	FileName    string     `json:"file_name,omitempty"`
+	ContentType string     `json:"content_type,omitempty"`
+	Size        int64      `json:"size,omitempty"`
+	ShortURL    string     `json:"short_url"`
+	Code        string     `json:"code,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type AssetListResultPayload struct {
+	SessionID string         `json:"session_id"`
+	Assets    []AssetSummary `json:"assets"`
+	Count     int            `json:"count"`
 }
 
 type FileListPayload struct {

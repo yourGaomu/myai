@@ -13,6 +13,7 @@ import { modelDisplayName } from "../../utils/session";
 type Props = {
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  assetBaseURL: string;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
   clientToken: string;
@@ -36,6 +37,7 @@ type Props = {
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
+  onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
@@ -72,6 +74,7 @@ const settingSections: Array<{ icon: string; key: SettingsSection; label: string
 export function SettingsPanel({
   activeModel,
   activeSession,
+  assetBaseURL,
   bindCode,
   buttonFeedback,
   clientToken,
@@ -95,6 +98,7 @@ export function SettingsPanel({
   onRefreshSessions,
   onRefreshSkills,
   onReloadSkills,
+  onAssetBaseURLChange,
   onRelayURLChange,
   onSetContextWindowK,
   onSetPermissionMode,
@@ -165,6 +169,15 @@ export function SettingsPanel({
         placeholderTextColor="#776f66"
         style={styles.input}
         value={relayURL}
+      />
+      <TextInput
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={onAssetBaseURLChange}
+        placeholder="Asset service http://server:18081"
+        placeholderTextColor="#776f66"
+        style={styles.input}
+        value={assetBaseURL}
       />
       <View style={styles.row}>
         <TextInput

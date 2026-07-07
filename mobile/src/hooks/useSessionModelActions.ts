@@ -1,4 +1,4 @@
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 import { useCallback, type RefObject } from "react";
 
 import type { RelayMessage, SessionSummary, TokenUsage } from "../protocol";
@@ -88,21 +88,30 @@ export function useSessionModelActions({
         return;
       }
 
+      const runDelete = () => {
+        startPending("sessions");
+        if (!sendEnvelope("session_delete", {
+          request_id: newRequestID(),
+          session_id: nextSessionID,
+          payload: { session_id: nextSessionID },
+        })) {
+          stopPending("sessions");
+        }
+      };
+
+      if (Platform.OS === "web") {
+        if (typeof window !== "undefined" && window.confirm("Delete session? This session will move to the recycle bin and can be restored later.")) {
+          runDelete();
+        }
+        return;
+      }
+
       Alert.alert("Delete session?", "This session will move to the recycle bin and can be restored later.", [
         { style: "cancel", text: "Cancel" },
         {
           style: "destructive",
           text: "Delete",
-          onPress: () => {
-            startPending("sessions");
-            if (!sendEnvelope("session_delete", {
-              request_id: newRequestID(),
-              session_id: nextSessionID,
-              payload: { session_id: nextSessionID },
-            })) {
-              stopPending("sessions");
-            }
-          },
+          onPress: runDelete,
         },
       ]);
     },

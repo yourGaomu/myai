@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bfe8ff"/>
+      <stop offset="0.55" stop-color="#eaf8ff"/>
+      <stop offset="0.56" stop-color="#a8dc72"/>
+      <stop offset="1" stop-color="#4f9a3f"/>
+    </linearGradient>
+    <radialGradient id="fur" cx="45%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#ffd995"/>
+      <stop offset="0.65" stop-color="#d89543"/>
+      <stop offset="1" stop-color="#9f6127"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#24501f" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <circle cx="160" cy="110" r="60" fill="#fff4a8" opacity="0.95"/>
+  <g opacity="0.28" fill="#ffffff">
+    <ellipse cx="850" cy="115" rx="95" ry="32"/>
+    <ellipse cx="920" cy="130" rx="120" ry="38"/>
+    <ellipse cx="260" cy="180" rx="100" ry="34"/>
+  </g>
+  <g fill="#2f7f32" opacity="0.45">
+    <ellipse cx="170" cy="720" rx="120" ry="24"/>
+    <ellipse cx="1000" cy="740" rx="150" ry="32"/>
+    <ellipse cx="600" cy="790" rx="320" ry="50"/>
+  </g>
+  <g filter="url(#shadow)">
+    <ellipse cx="600" cy="690" rx="235" ry="160" fill="url(#fur)"/>
+    <ellipse cx="430" cy="715" rx="70" ry="155" fill="#c9853d"/>
+    <ellipse cx="770" cy="715" rx="70" ry="155" fill="#c9853d"/>
+    <ellipse cx="600" cy="415" rx="230" ry="215" fill="url(#fur)"/>
+    <ellipse cx="390" cy="420" rx="95" ry="180" fill="#b56f32" transform="rotate(18 390 420)"/>
+    <ellipse cx="810" cy="420" rx="95" ry="180" fill="#b56f32" transform="rotate(-18 810 420)"/>
+    <ellipse cx="505" cy="400" rx="42" ry="52" fill="#221a17"/>
+    <ellipse cx="695" cy="400" rx="42" ry="52" fill="#221a17"/>
+    <circle cx="490" cy="382" r="13" fill="#ffffff" opacity="0.9"/>
+    <circle cx="680" cy="382" r="13" fill="#ffffff" opacity="0.9"/>
+    <ellipse cx="600" cy="500" rx="125" ry="92" fill="#f3bd76" opacity="0.9"/>
+    <ellipse cx="600" cy="470" rx="45" ry="30" fill="#211815"/>
+    <path d="M600 492 C575 525 535 525 515 503" fill="none" stroke="#3a2118" stroke-width="10" stroke-linecap="round"/>
+    <path d="M600 492 C625 525 665 525 685 503" fill="none" stroke="#3a2118" stroke-width="10" stroke-linecap="round"/>
+    <path d="M552 545 C575 610 625 610 648 545 C625 565 575 565 552 545Z" fill="#ef6f7e"/>
+    <path d="M470 315 C515 280 560 270 600 275 C645 270 690 280 735 315" fill="none" stroke="#f4c47d" stroke-width="18" stroke-linecap="round" opacity="0.65"/>
+    <ellipse cx="600" cy="620" rx="70" ry="105" fill="#ffe0ac" opacity="0.75"/>
+    <path d="M505 610 C475 660 480 735 510 790" fill="none" stroke="#8d5728" stroke-width="8" opacity="0.35"/>
+    <path d="M695 610 C725 660 720 735 690 790" fill="none" stroke="#8d5728" stroke-width="8" opacity="0.35"/>
+  </g>
+  <g stroke="#2f7f32" stroke-width="5" stroke-linecap="round" opacity="0.65">
+    <path d="M100 855 L120 795"/><path d="M155 860 L170 815"/><path d="M255 850 L285 790"/>
+    <path d="M910 860 L935 800"/><path d="M990 850 L1015 780"/><path d="M1080 855 L1100 805"/>
+  </g>
+  <text x="600" y="845" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#ffffff" opacity="0.9">Cute Puppy</text>
+</svg>

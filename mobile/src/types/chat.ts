@@ -1,4 +1,15 @@
-import type { TokenUsage } from "../protocol";
+import type { FileReadResultPayload, TokenUsage, UploadedAssetPayload } from "../protocol";
+
+export type WorkspaceFileAttachment = FileReadResultPayload & {
+  kind: "workspace_file";
+};
+
+export type UploadedAssetAttachment = UploadedAssetPayload & {
+  kind: "uploaded_asset";
+  local_uri?: string;
+};
+
+export type ChatAttachment = WorkspaceFileAttachment | UploadedAssetAttachment;
 
 export type ChatMessageStatus = "streaming" | "done" | "paused" | "error" | "tool_running";
 

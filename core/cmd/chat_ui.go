@@ -258,7 +258,7 @@ func printChatHelp() {
 	printCommand("/compact", "Summarize older context")
 	printCommand("/models", "List available models")
 	printCommand("/model", "Show current model")
-	printCommand("/model add", "Add a model config")
+	printCommand("/model add", "Add a model urlConfig")
 	printCommand("/model <id>", "Switch current session model")
 	printCommand("/clear", "Clear current session messages")
 	printCommand("/exit", "Leave chat")

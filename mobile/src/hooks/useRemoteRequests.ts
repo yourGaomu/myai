@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
-import type { RelayMessage } from "../protocol";
+import type { RelayMessage, SessionHistoryMessage, SessionHistoryMetaPayload } from "../protocol";
 import type { PendingAction } from "../types/app";
+import { loadCachedSessionHistory } from "../storage/sessionHistoryCache";
 import { newRequestID } from "../utils/ids";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 const remoteStateTimeoutMs = 8000;
-const timeoutActions: PendingAction[] = ["sessions", "models", "skills"];
+const timeoutActions: PendingAction[] = ["sessions", "models", "skills", "assets"];
 
 type Args = {
+  clearAssets: () => void;
   clearFileEntries: () => void;
   clearHistory: () => void;
   clearModels: () => void;
@@ -19,12 +21,14 @@ type Args = {
   currentFilePath: string;
   currentSessionID: string;
   pendingHistorySessionIDRef: RefObject<string>;
+  replaceHistoryMessages: (sessionID: string, messages: SessionHistoryMessage[]) => void;
   sendEnvelope: SendEnvelope;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
 };
 
 export function useRemoteRequests({
+  clearAssets,
   clearFileEntries,
   clearHistory,
   clearModels,
@@ -35,6 +39,7 @@ export function useRemoteRequests({
   currentFilePath,
   currentSessionID,
   pendingHistorySessionIDRef,
+  replaceHistoryMessages,
   sendEnvelope,
   startPending,
   stopPending,
@@ -130,7 +135,7 @@ export function useRemoteRequests({
     return true;
   }, [clearSkills, clientToken, sendEnvelope, startPending, stopPending]);
 
-  const requestSessionHistory = useCallback(
+  const requestSessionHistoryFull = useCallback(
     (nextSessionID = currentSessionID) => {
       const targetSessionID = nextSessionID.trim();
       if (!clientToken || !targetSessionID) {
@@ -153,6 +158,113 @@ export function useRemoteRequests({
       return true;
     },
     [clientToken, currentSessionID, pendingHistorySessionIDRef, sendEnvelope, startPending, stopPending],
+  );
+
+  const requestSessionHistoryDelta = useCallback(
+    (nextSessionID = currentSessionID) => {
+      const targetSessionID = nextSessionID.trim();
+      if (!clientToken || !targetSessionID) {
+        pendingHistorySessionIDRef.current = "";
+        stopPending("sessions");
+        return false;
+      }
+
+      startPending("sessions");
+      pendingHistorySessionIDRef.current = targetSessionID;
+      void loadCachedSessionHistory(targetSessionID)
+        .then(({ meta }) => {
+          if (!sendEnvelope("session_history_delta", {
+            request_id: newRequestID(),
+            session_id: targetSessionID,
+            payload: {
+              after_message_id: meta.local_last_message_id || "",
+              limit: 100,
+              session_id: targetSessionID,
+            },
+          })) {
+            pendingHistorySessionIDRef.current = "";
+            stopPending("sessions");
+          }
+        })
+        .catch(() => {
+          requestSessionHistoryFull(targetSessionID);
+        });
+      return true;
+    },
+    [clientToken, currentSessionID, pendingHistorySessionIDRef, requestSessionHistoryFull, sendEnvelope, startPending, stopPending],
+  );
+
+  const sendHistoryMeta = useCallback(
+    (sessionID: string, meta: SessionHistoryMetaPayload) => {
+      const payload: SessionHistoryMetaPayload = {
+        ...meta,
+        session_id: sessionID,
+      };
+      if (!payload.local_last_message_created_at) {
+        delete payload.local_last_message_created_at;
+      }
+      return sendEnvelope("session_history_meta", {
+        request_id: newRequestID(),
+        session_id: sessionID,
+        payload,
+      });
+    },
+    [sendEnvelope],
+  );
+
+  const requestSessionHistory = useCallback(
+    (nextSessionID = currentSessionID) => {
+      const targetSessionID = nextSessionID.trim();
+      if (!clientToken || !targetSessionID) {
+        pendingHistorySessionIDRef.current = "";
+        stopPending("sessions");
+        return false;
+      }
+
+      startPending("sessions");
+      pendingHistorySessionIDRef.current = targetSessionID;
+      void loadCachedSessionHistory(targetSessionID)
+        .then(({ messages, meta }) => {
+          if (messages.length > 0) {
+            replaceHistoryMessages(targetSessionID, messages);
+          }
+          if (!sendHistoryMeta(targetSessionID, meta)) {
+            pendingHistorySessionIDRef.current = "";
+            stopPending("sessions");
+          }
+        })
+        .catch(() => {
+          if (!sendHistoryMeta(targetSessionID, emptyHistoryMeta(targetSessionID))) {
+            pendingHistorySessionIDRef.current = "";
+            stopPending("sessions");
+          }
+        });
+      return true;
+    },
+    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, sendHistoryMeta, startPending, stopPending],
+  );
+
+  const requestAssets = useCallback(
+    (nextSessionID = currentSessionID) => {
+      const targetSessionID = nextSessionID.trim();
+      if (!clientToken || !targetSessionID) {
+        clearAssets();
+        stopPending("assets");
+        return false;
+      }
+
+      startPending("assets");
+      if (!sendEnvelope("asset_list", {
+        request_id: newRequestID(),
+        session_id: targetSessionID,
+        payload: { session_id: targetSessionID, limit: 100 },
+      })) {
+        stopPending("assets");
+        return false;
+      }
+      return true;
+    },
+    [clearAssets, clientToken, currentSessionID, sendEnvelope, startPending, stopPending],
   );
 
   const requestFiles = useCallback(
@@ -215,19 +327,32 @@ export function useRemoteRequests({
     requestSessions();
     requestModels();
     requestSkills();
+    requestAssets();
     stopRemoteStateLoadingLater();
-  }, [requestModels, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
+  }, [requestAssets, requestModels, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
 
   return {
     reloadSkills,
     refreshRemoteState,
+    requestAssets,
     requestChanges,
     requestFiles,
     requestHistory,
     requestModels,
     requestSkills,
     requestDeletedSessions,
+    requestSessionHistoryDelta,
+    requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,
+  };
+}
+
+function emptyHistoryMeta(sessionID: string): SessionHistoryMetaPayload {
+  return {
+    session_id: sessionID,
+    local_message_count: 0,
+    local_last_message_id: "",
+    local_history_version: 0,
   };
 }

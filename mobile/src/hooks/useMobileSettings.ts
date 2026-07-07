@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { defaultRelayURL, mobileSettingsKey } from "../constants/app";
+import { defaultAssetBaseURL, defaultRelayURL, mobileSettingsKey } from "../constants/app";
 
 type MobileSettings = {
+  assetBaseURL: string;
   clientToken: string;
   deviceID: string;
   relayURL: string;
@@ -16,6 +17,7 @@ type UseMobileSettingsOptions = {
 
 export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions = {}) {
   const [relayURL, setRelayURL] = useState(defaultRelayURL);
+  const [assetBaseURL, setAssetBaseURL] = useState(defaultAssetBaseURL);
   const [userID, setUserID] = useState("local");
   const [deviceID, setDeviceID] = useState("pc-local");
   const [clientToken, setClientToken] = useState("");
@@ -31,6 +33,9 @@ export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions 
         const settings = JSON.parse(raw) as Partial<MobileSettings>;
         if (settings.relayURL) {
           setRelayURL(settings.relayURL);
+        }
+        if (settings.assetBaseURL) {
+          setAssetBaseURL(settings.assetBaseURL);
         }
         if (settings.userID) {
           setUserID(settings.userID);
@@ -59,18 +64,21 @@ export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions 
       return;
     }
     const settings: MobileSettings = {
+      assetBaseURL,
       relayURL,
       userID,
       deviceID,
       clientToken,
     };
     AsyncStorage.setItem(mobileSettingsKey, JSON.stringify(settings)).catch(() => undefined);
-  }, [clientToken, deviceID, relayURL, settingsLoaded, userID]);
+  }, [assetBaseURL, clientToken, deviceID, relayURL, settingsLoaded, userID]);
 
   return {
+    assetBaseURL,
     clientToken,
     deviceID,
     relayURL,
+    setAssetBaseURL,
     setClientToken,
     setDeviceID,
     setRelayURL,

@@ -4,6 +4,7 @@ import type { ScrollView } from "react-native";
 import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
 import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
+import { useAssetState } from "../hooks/useAssetState";
 import { useChangeHistoryActions } from "../hooks/useChangeHistoryActions";
 import { useChangeHistoryState } from "../hooks/useChangeHistoryState";
 import { useChatActions } from "../hooks/useChatActions";
@@ -31,6 +32,7 @@ import { useSkillState } from "../hooks/useSkillState";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
+import { historyMessageToChatItem } from "../utils/chatHistory";
 
 export function MobileAppScreen() {
   useAndroidNavigationBar();
@@ -49,9 +51,11 @@ export function MobileAppScreen() {
   } = useMobileUiState();
   const handleTokenRestored = useCallback(() => setStatus("Paired"), [setStatus]);
   const {
+    assetBaseURL,
     clientToken,
     deviceID,
     relayURL,
+    setAssetBaseURL,
     setClientToken,
     setDeviceID,
     setRelayURL,
@@ -83,6 +87,11 @@ export function MobileAppScreen() {
     skillRoot,
     skills,
   } = useSkillState();
+  const {
+    assets,
+    clearAssets,
+    setAssets,
+  } = useAssetState();
   const {
     changeDiff,
     changes,
@@ -122,6 +131,7 @@ export function MobileAppScreen() {
     addMessage,
     addToolCall,
     addToolResult,
+    appendMessages,
     appendAssistant,
     clearSessionPendingRequest,
     completeAssistant,
@@ -188,6 +198,7 @@ export function MobileAppScreen() {
 
   const {
     refreshRemoteState,
+    requestAssets,
     requestChanges,
     requestFiles,
     requestHistory,
@@ -195,9 +206,12 @@ export function MobileAppScreen() {
     reloadSkills,
     requestDeletedSessions,
     requestSkills,
+    requestSessionHistoryDelta,
+    requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,
   } = useRemoteRequests({
+    clearAssets,
     clearFileEntries,
     clearHistory,
     clearModels,
@@ -208,6 +222,7 @@ export function MobileAppScreen() {
     currentFilePath: filePath,
     currentSessionID: sessionID,
     pendingHistorySessionIDRef,
+    replaceHistoryMessages: (targetSessionID, messages) => replaceMessages(targetSessionID, messages.map(historyMessageToChatItem)),
     sendEnvelope,
     startPending,
     stopPending,
@@ -244,8 +259,10 @@ export function MobileAppScreen() {
     refreshCurrentFiles,
     removeAttachedFile,
     sendMessageWithFiles,
+    uploadLocalFile,
   } = useFileActions({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
+    assetBaseURL,
     attachedFiles,
     changeDiffPath: changeDiff?.path,
     fileParent,
@@ -253,6 +270,7 @@ export function MobileAppScreen() {
     requestFiles,
     selectedChange,
     sendEnvelope,
+    sessionID,
     setAttachedFiles,
     setFilePreview,
     setMessageInput,
@@ -311,6 +329,7 @@ export function MobileAppScreen() {
     stopPausePending: () => stopPending("pause"),
   });
   const {
+    applyAssetList,
     applyChangeDiff,
     applyChangeRevert,
     applyChangesList,
@@ -323,25 +342,32 @@ export function MobileAppScreen() {
     applyModelSwitch,
     applySkillList,
     applySessionChanged,
+    applySessionHistoryDelta,
+    applySessionHistoryMeta,
     applySessionHistory,
     applySessionList,
     applySessionSettings,
   } = useRemoteResultAppliers({
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
+    appendMessages,
     filePath,
     hasPendingRequest,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
     replaceMessages,
+    requestAssets,
     requestChanges,
     requestFiles,
     requestHistory,
+    requestSessionHistoryDelta,
+    requestSessionHistoryFull,
     requestSessionHistory,
     resetActiveAssistant,
     selectedChange,
     sessionIDRef,
     setChangeDiff,
+    setAssets,
     setChanges,
     setChangesClean,
     setChangesMessage,
@@ -374,6 +400,7 @@ export function MobileAppScreen() {
     addToolCall,
     addToolResult,
     appendAssistant,
+    applyAssetList,
     applyChangeDiff,
     applyChangeRevert,
     applyChangesList,
@@ -386,6 +413,8 @@ export function MobileAppScreen() {
     applyModelSwitch,
     applySkillList,
     applySessionChanged,
+    applySessionHistoryDelta,
+    applySessionHistoryMeta,
     applySessionHistory,
     applySessionList,
     applySessionSettings,
@@ -397,6 +426,7 @@ export function MobileAppScreen() {
     markAssistantError,
     mergeSessionChats,
     requestChanges,
+    requestAssets,
     requestFiles,
     requestHistory,
     requestModels,
@@ -437,6 +467,7 @@ export function MobileAppScreen() {
     fileEntriesCount: fileEntries.length,
     filePath,
     loadSession,
+    requestAssets,
     requestChanges,
     requestFiles,
     requestSessions,
@@ -463,8 +494,10 @@ export function MobileAppScreen() {
           onSend={sendUserMessage}
           onSessionsPress={openSessions}
           onSettingsPress={toggleSettings}
+          onUploadFile={uploadLocalFile}
           pendingPause={currentPauseBusy}
           pendingSend={Boolean(currentChat.pendingRequestID)}
+          pendingUpload={pendingActions.upload}
           viewMode={viewMode}
         />
       }
@@ -520,6 +553,7 @@ export function MobileAppScreen() {
           viewMode,
         }}
         files={{
+          assets,
           fileEntries,
           fileParent,
           filePath,
@@ -528,6 +562,7 @@ export function MobileAppScreen() {
           onAttachFilePreview: attachFilePreview,
           onGoToParent: goToParent,
           onOpenFileEntry: openFileEntry,
+          onRefreshAssets: () => requestAssets(),
           onRefreshFiles: refreshCurrentFiles,
         }}
         permission={{
@@ -545,6 +580,7 @@ export function MobileAppScreen() {
         settings={{
           activeModel,
           activeSession,
+          assetBaseURL,
           bindCode,
           compact: sessionCompacts[sessionID],
           connected,
@@ -566,6 +602,7 @@ export function MobileAppScreen() {
           onRefreshSessions: requestSessions,
           onRefreshSkills: requestSkills,
           onReloadSkills: reloadSkills,
+          onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,
           onSetContextWindowK: setContextWindowK,
           onSetPermissionMode: setPermissionMode,

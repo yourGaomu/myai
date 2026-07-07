@@ -1,6 +1,8 @@
 import { useMemo, type RefObject } from "react";
 
 import type {
+  AssetListResultPayload,
+  AssetSummary,
   ChangeDiffResultPayload,
   ChangeEntry,
   ChangeRevertResultPayload,
@@ -17,6 +19,8 @@ import type {
   ModelSummary,
   ModelSwitchResultPayload,
   SessionChangedPayload,
+  SessionHistoryDeltaResultPayload,
+  SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
@@ -27,26 +31,32 @@ import type {
 } from "../protocol";
 import type { PermissionState, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
+import { appendCachedSessionHistory, replaceCachedSessionHistory } from "../storage/sessionHistoryCache";
 import { historyMessageToChatItem } from "../utils/chatHistory";
 import { shortID } from "../utils/ids";
 import { findSessionUsage, upsertSession } from "../utils/session";
 
 type Args = {
   addEventMessage: (sessionID: string, message: string) => void;
+  appendMessages: (sessionID: string, messages: ChatItem[]) => void;
   filePath: string;
   hasPendingRequest: (sessionID: string) => boolean;
   historyDiff: HistoryDiffResultPayload | null;
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
   replaceMessages: (sessionID: string, messages: ChatItem[]) => void;
+  requestAssets: (sessionID?: string) => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
   requestHistory: () => boolean;
+  requestSessionHistoryDelta: (sessionID?: string) => boolean;
+  requestSessionHistoryFull: (sessionID?: string) => boolean;
   requestSessionHistory: (sessionID?: string) => boolean;
   resetActiveAssistant: (sessionID: string) => void;
   selectedChange: string;
   sessionIDRef: RefObject<string>;
   setChangeDiff: (diff: ChangeDiffResultPayload | null) => void;
+  setAssets: (assets: AssetSummary[]) => void;
   setChanges: (changes: ChangeEntry[]) => void;
   setChangesClean: (clean: boolean) => void;
   setChangesMessage: (message: string) => void;
@@ -74,20 +84,25 @@ type Args = {
 
 export function useRemoteResultAppliers({
   addEventMessage,
+  appendMessages,
   filePath,
   hasPendingRequest,
   historyDiff,
   historySessionIDRef,
   pendingHistorySessionIDRef,
   replaceMessages,
+  requestAssets,
   requestChanges,
   requestFiles,
   requestHistory,
+  requestSessionHistoryDelta,
+  requestSessionHistoryFull,
   requestSessionHistory,
   resetActiveAssistant,
   selectedChange,
   sessionIDRef,
   setChangeDiff,
+  setAssets,
   setChanges,
   setChangesClean,
   setChangesMessage,
@@ -121,15 +136,23 @@ export function useRemoteResultAppliers({
       }
 
       setSessions(nextSessions);
-      if (payload?.current_session_id && !sessionIDRef.current) {
-        setSessionID(payload.current_session_id);
-        sessionIDRef.current = payload.current_session_id;
-        setSessionLastUsage(payload.current_session_id, findSessionUsage(nextSessions, payload.current_session_id));
-        if (historySessionIDRef.current !== payload.current_session_id && !hasPendingRequest(payload.current_session_id)) {
-          requestSessionHistory(payload.current_session_id);
-        }
-      } else if (sessionIDRef.current) {
-        setSessionLastUsage(sessionIDRef.current, findSessionUsage(nextSessions, sessionIDRef.current));
+      const currentSessionID = (payload?.current_session_id || sessionIDRef.current || "").trim();
+      if (!currentSessionID) {
+        return;
+      }
+
+      if (sessionIDRef.current !== currentSessionID) {
+        setSessionID(currentSessionID);
+        sessionIDRef.current = currentSessionID;
+        requestAssets(currentSessionID);
+      }
+      setSessionLastUsage(currentSessionID, findSessionUsage(nextSessions, currentSessionID));
+      if (
+        historySessionIDRef.current !== currentSessionID &&
+        pendingHistorySessionIDRef.current !== currentSessionID &&
+        !hasPendingRequest(currentSessionID)
+      ) {
+        requestSessionHistory(currentSessionID);
       }
     };
 
@@ -143,6 +166,7 @@ export function useRemoteResultAppliers({
         setSessionPendingPermission(payload.current_session_id, null);
         historySessionIDRef.current = "";
         requestSessionHistory(payload.current_session_id);
+        requestAssets(payload.current_session_id);
       } else if (payload?.session?.id) {
         setSessionID(payload.session.id);
         sessionIDRef.current = payload.session.id;
@@ -150,6 +174,7 @@ export function useRemoteResultAppliers({
         setSessionPendingPermission(payload.session.id, null);
         historySessionIDRef.current = "";
         requestSessionHistory(payload.session.id);
+        requestAssets(payload.session.id);
       }
     };
 
@@ -197,8 +222,51 @@ export function useRemoteResultAppliers({
       if (payload.session_id) {
         setSessionID(payload.session_id);
         sessionIDRef.current = payload.session_id;
+        requestAssets(payload.session_id);
       }
-      replaceMessages(payload.session_id, (payload.messages || []).map(historyMessageToChatItem));
+      const messages = payload.messages || [];
+      void replaceCachedSessionHistory(payload.session_id, messages);
+      replaceMessages(payload.session_id, messages.map(historyMessageToChatItem));
+    };
+
+    const applySessionHistoryMeta = (payload?: SessionHistoryMetaResultPayload) => {
+      if (!payload?.session_id) {
+        return;
+      }
+      if (payload.up_to_date) {
+        pendingHistorySessionIDRef.current = "";
+        historySessionIDRef.current = payload.session_id;
+        setSessionID(payload.session_id);
+        sessionIDRef.current = payload.session_id;
+        requestAssets(payload.session_id);
+        return;
+      }
+      if (payload.can_delta) {
+        requestSessionHistoryDelta(payload.session_id);
+        return;
+      }
+      requestSessionHistoryFull(payload.session_id);
+    };
+
+    const applySessionHistoryDelta = (payload?: SessionHistoryDeltaResultPayload) => {
+      if (!payload?.session_id) {
+        return;
+      }
+      if (payload.full_sync_required) {
+        requestSessionHistoryFull(payload.session_id);
+        return;
+      }
+
+      const messages = payload.messages || [];
+      pendingHistorySessionIDRef.current = "";
+      historySessionIDRef.current = payload.session_id;
+      setSessionID(payload.session_id);
+      sessionIDRef.current = payload.session_id;
+      requestAssets(payload.session_id);
+      if (messages.length > 0) {
+        void appendCachedSessionHistory(payload.session_id, messages);
+        appendMessages(payload.session_id, messages.map(historyMessageToChatItem));
+      }
     };
 
     const applyModelList = (payload?: ModelListResultPayload) => {
@@ -229,6 +297,14 @@ export function useRemoteResultAppliers({
       if (payload?.message) {
         addEventMessage(sessionIDRef.current, payload.message);
       }
+    };
+
+    const applyAssetList = (payload?: AssetListResultPayload) => {
+      if (!payload) {
+        setAssets([]);
+        return;
+      }
+      setAssets(payload.assets || []);
     };
 
     const applyFileList = (payload?: FileListResultPayload) => {
@@ -315,6 +391,7 @@ export function useRemoteResultAppliers({
 
     return {
       applyChangeDiff,
+      applyAssetList,
       applyChangeRevert,
       applyChangesList,
       applyFileList,
@@ -327,25 +404,32 @@ export function useRemoteResultAppliers({
       applySkillList,
       applySessionChanged,
       applySessionHistory,
+      applySessionHistoryDelta,
+      applySessionHistoryMeta,
       applySessionList,
       applySessionSettings,
     };
   }, [
     addEventMessage,
+    appendMessages,
     filePath,
     hasPendingRequest,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
     replaceMessages,
+    requestAssets,
     requestChanges,
     requestFiles,
     requestHistory,
+    requestSessionHistoryDelta,
+    requestSessionHistoryFull,
     requestSessionHistory,
     resetActiveAssistant,
     selectedChange,
     sessionIDRef,
     setChangeDiff,
+    setAssets,
     setChanges,
     setChangesClean,
     setChangesMessage,

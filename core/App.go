@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"myai/core/asset"
 	"myai/core/hook"
+	"myai/core/mcp"
 	"myai/core/sandbox"
 	"myai/core/skill"
 	"myai/core/tool"
@@ -43,10 +45,12 @@ type Application struct {
 	redisDb        *redis.Client
 	store          data.Store
 	cache          cache.Cache
+	assetClient    *asset.Client
 	chatService    *service.ChatService
 	toolRegister   *tool.RegisterTools
 	skillManager   *skill.Manager
 	hookManager    *hook.Manager
+	mcpManager     *mcp.Manager
 	sandbox        sandbox.Sandbox
 	defaultModelID string
 	workspace      string
@@ -66,6 +70,7 @@ func InitApp() {
 	once.Do(func() {
 		instance = &Application{workspace: configuredWorkspace}
 		instance.InitViper()
+		instance.InitAssetClient()
 		instance.InitMongoDb()
 		instance.InitRedisDb()
 		instance.InitStore()
@@ -77,6 +82,7 @@ func InitApp() {
 		instance.InitSkillManager()
 		instance.InitHookManager()
 		instance.InitRegister()
+		instance.InitMCP()
 		instance.InitChatService()
 	})
 }
@@ -147,6 +153,25 @@ func (app *Application) InitCache() {
 	app.cache = redisCache.New(app.redisDb)
 }
 
+func (app *Application) InitAssetClient() {
+	baseURL := strings.TrimSpace(app.viper.GetString("asset.shortener_base_url"))
+	if baseURL == "" {
+		return
+	}
+
+	timeout := time.Duration(app.viper.GetInt("asset.upload_timeout_seconds")) * time.Second
+	client, err := asset.NewClient(asset.Config{
+		BaseURL:           baseURL,
+		Timeout:           timeout,
+		DefaultTTLSeconds: app.viper.GetInt64("asset.ttl_seconds"),
+		DefaultMaxVisits:  app.viper.GetInt64("asset.max_visits"),
+	})
+	if err != nil {
+		panic(fmt.Errorf("init asset client failed: %w", err))
+	}
+	app.assetClient = client
+}
+
 func (app *Application) InitThreadPool() {
 	app.threadPool = utills.NewThreadPool(
 		app.viper.GetInt(configThreadCoreKey),
@@ -190,7 +215,7 @@ func (app *Application) InitClient() {
 	}
 
 	if len(app.client.ListModels()) == 0 {
-		panic("no enabled model config")
+		panic("no enabled model urlConfig")
 	}
 }
 
@@ -221,6 +246,13 @@ func (app *Application) InitChatService() {
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
 	}
+}
+
+func (app *Application) Close() error {
+	if app == nil || app.mcpManager == nil {
+		return nil
+	}
+	return app.mcpManager.Close()
 }
 
 func (app *Application) GetThreadPool() *utills.ThreadPool {
@@ -255,6 +287,10 @@ func (app *Application) GetCache() cache.Cache {
 	return app.cache
 }
 
+func (app *Application) GetAssetClient() *asset.Client {
+	return app.assetClient
+}
+
 func (app *Application) GetChatService() *service.ChatService {
 	return app.chatService
 }
@@ -270,6 +306,10 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 	}
+	if app.assetClient != nil {
+		localTools = append(localTools, local.NewReadAssetToolWithDownloader(app.assetClient))
+		localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndUploader(app.workspace, app.assetClient))
+	}
 	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools
 	return tools
@@ -277,6 +317,27 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 
 func (app *Application) GetToolRegister() *tool.RegisterTools {
 	return app.toolRegister
+}
+
+func (app *Application) InitMCP() *mcp.Manager {
+	config, err := mcp.LoadConfig(app.viper, app.workspace)
+	if err != nil {
+		panic(fmt.Errorf("load mcp config failed: %w", err))
+	}
+
+	app.mcpManager = mcp.NewManager(config)
+	if len(config.Servers) == 0 {
+		return app.mcpManager
+	}
+
+	if err := app.mcpManager.RegisterAll(context.Background(), app.toolRegister); err != nil {
+		panic(err)
+	}
+	return app.mcpManager
+}
+
+func (app *Application) GetMCPManager() *mcp.Manager {
+	return app.mcpManager
 }
 
 func (app *Application) InitSkillManager() *skill.Manager {
@@ -338,7 +399,7 @@ func (app *Application) loadModelConfigs(ctx context.Context) ([]data.ModelConfi
 
 	seed := app.modelConfigFromViper()
 	if seed.ID == "" {
-		return nil, fmt.Errorf("model config is empty")
+		return nil, fmt.Errorf("model urlConfig is empty")
 	}
 	return []data.ModelConfig{seed}, nil
 }

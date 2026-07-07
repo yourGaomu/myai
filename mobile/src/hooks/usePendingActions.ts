@@ -9,11 +9,13 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   models: false,
   skills: false,
   settings: false,
+  assets: false,
   files: false,
   changes: false,
   history: false,
   diff: false,
   revert: false,
+  upload: false,
   pause: false,
 };
 

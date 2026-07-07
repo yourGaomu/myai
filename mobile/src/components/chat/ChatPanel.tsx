@@ -1,10 +1,13 @@
-import type { RefObject } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
+import { groupToolActivity } from "../../utils/chatRenderItems";
 import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
+import { ChatJumpNav, type ChatJumpAnchor } from "./ChatJumpNav";
 import { MessageBubble } from "./MessageBubble";
+import { ToolActivityGroup } from "./ToolActivityGroup";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -25,6 +28,24 @@ export function ChatPanel({
   onRegenerate,
   showAssistantLoading,
 }: Props) {
+  const renderItems = useMemo(() => groupToolActivity(messages), [messages]);
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const itemOffsetsRef = useRef<Record<string, number>>({});
+  const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
+
+  const rememberItemOffset = useCallback((id: string, event: LayoutChangeEvent) => {
+    itemOffsetsRef.current[id] = event.nativeEvent.layout.y;
+  }, []);
+
+  const jumpToMessage = useCallback(
+    (id: string) => {
+      const y = itemOffsetsRef.current[id] ?? 0;
+      chatScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+      setJumpOpen(false);
+    },
+    [chatScrollRef],
+  );
+
   return (
     <View style={[styles.panel, styles.chatPanel, { height }]}>
       <View style={styles.panelHeader}>
@@ -47,14 +68,54 @@ export function ChatPanel({
         ) : messages.length === 0 ? (
           <Text style={styles.emptyText}>Messages will appear here.</Text>
         ) : (
-          messages.map((message) => (
-            <MessageBubble key={message.id} buttonFeedback={buttonFeedback} message={message} onRegenerate={onRegenerate} />
-          ))
+          renderItems.map((item) =>
+            item.type === "tool_group" ? (
+              <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
+                <ToolActivityGroup buttonFeedback={buttonFeedback} group={item.group} />
+              </View>
+            ) : (
+              <View key={item.id} onLayout={(event) => rememberItemOffset(item.message.id, event)}>
+                <MessageBubble buttonFeedback={buttonFeedback} message={item.message} onRegenerate={onRegenerate} />
+              </View>
+            ),
+          )
         )}
         {showAssistantLoading ? <AssistantLoadingBubble /> : null}
       </ScrollView>
+      <ChatJumpNav
+        anchors={jumpAnchors}
+        buttonFeedback={buttonFeedback}
+        onJump={jumpToMessage}
+        onToggle={() => setJumpOpen((value) => !value)}
+        open={jumpOpen}
+      />
     </View>
   );
+}
+
+function userMessageAnchors(messages: ChatItem[]): ChatJumpAnchor[] {
+  let userIndex = 0;
+  return messages.reduce<ChatJumpAnchor[]>((anchors, message) => {
+    if (message.role !== "user") {
+      return anchors;
+    }
+
+    userIndex += 1;
+    anchors.push({
+      id: message.id,
+      index: userIndex,
+      title: messageTitle(message.text),
+    });
+    return anchors;
+  }, []);
+}
+
+function messageTitle(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "Empty message";
+  }
+  return normalized.length > 64 ? `${normalized.slice(0, 64)}...` : normalized;
 }
 
 const styles = StyleSheet.create({

@@ -1,6 +1,7 @@
 import { useCallback, type RefObject } from "react";
 
 import type {
+  AssetListResultPayload,
   AssistantDeltaPayload,
   AssistantDonePayload,
   ChangeDiffResultPayload,
@@ -17,6 +18,8 @@ import type {
   PermissionAskPayload,
   RelayMessage,
   SessionChangedPayload,
+  SessionHistoryDeltaResultPayload,
+  SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
@@ -35,7 +38,8 @@ type Args = {
   addEventMessage: (sessionID: string, message: string) => void;
   addToolCall: (sessionID: string, name: string, argumentsText: string, requestID?: string) => void;
   addToolResult: (sessionID: string, name: string, argumentsText: string, result: string, failed: boolean, requestID?: string) => void;
-  appendAssistant: (sessionID: string, requestID: string | undefined, text: string) => void;
+  appendAssistant: (sessionID: string, requestID: string | undefined, text: string, reasoning?: string) => void;
+  applyAssetList: (payload?: AssetListResultPayload) => void;
   applyChangeDiff: (payload?: ChangeDiffResultPayload) => void;
   applyChangeRevert: (payload?: ChangeRevertResultPayload) => void;
   applyChangesList: (payload?: ChangesListResultPayload) => void;
@@ -47,18 +51,21 @@ type Args = {
   applyModelList: (payload?: ModelListResultPayload) => void;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
   applySessionChanged: (payload?: SessionChangedPayload) => void;
+  applySessionHistoryDelta: (payload?: SessionHistoryDeltaResultPayload) => void;
+  applySessionHistoryMeta: (payload?: SessionHistoryMetaResultPayload) => void;
   applySessionHistory: (payload?: SessionHistoryResultPayload) => void;
   applySessionList: (payload?: SessionListResultPayload) => void;
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
-  completeAssistant: (sessionID: string, requestID: string | undefined, status: "done" | "paused", usage?: TokenUsage | null, content?: string) => void;
+  completeAssistant: (sessionID: string, requestID: string | undefined, status: "done" | "paused", usage?: TokenUsage | null, content?: string, reasoning?: string) => void;
   currentFilePath: string;
   getSessionChat: (sessionID: string) => { activeAssistantID: string; pendingRequestID: string };
   historySessionIDRef: RefObject<string>;
   markAssistantError: (sessionID: string, requestID: string | undefined, message?: string) => void;
   mergeSessionChats: (fromSessionID: string, toSessionID: string) => void;
   requestChanges: () => boolean;
+  requestAssets: (sessionID?: string) => boolean;
   requestFiles: (path?: string) => boolean;
   requestHistory: () => boolean;
   requestModels: () => boolean;
@@ -83,6 +90,7 @@ export function useRemoteMessageHandler({
   addToolCall,
   addToolResult,
   appendAssistant,
+  applyAssetList,
   applyChangeDiff,
   applyChangeRevert,
   applyChangesList,
@@ -94,6 +102,8 @@ export function useRemoteMessageHandler({
   applyModelList,
   applyModelSwitch,
   applySessionChanged,
+  applySessionHistoryDelta,
+  applySessionHistoryMeta,
   applySessionHistory,
   applySessionList,
   applySessionSettings,
@@ -106,6 +116,7 @@ export function useRemoteMessageHandler({
   markAssistantError,
   mergeSessionChats,
   requestChanges,
+  requestAssets,
   requestFiles,
   requestHistory,
   requestModels,
@@ -129,11 +140,15 @@ export function useRemoteMessageHandler({
           setStatus(message.request_id ? `Ack ${shortID(message.request_id)}` : "Connected");
           break;
         case "assistant_delta":
-          appendAssistant(
-            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
-            message.request_id,
-            (message.payload as AssistantDeltaPayload | undefined)?.content || "",
-          );
+          {
+            const payload = (message.payload || {}) as AssistantDeltaPayload;
+            appendAssistant(
+              resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+              message.request_id,
+              payload.content || "",
+              payload.reasoning || "",
+            );
+          }
           break;
         case "assistant_done": {
           const requestSessionID = message.request_id ? requestSessionMapRef.current[message.request_id] || "" : "";
@@ -158,6 +173,7 @@ export function useRemoteMessageHandler({
             payload.paused ? "paused" : "done",
             payload.usage || null,
             payload.content || payload.message || (payload.paused ? "Session task paused." : ""),
+            payload.reasoning || "",
           );
           if (message.session_id && (!sessionIDRef.current || sessionIDRef.current === requestSessionID)) {
             setSessionID(message.session_id);
@@ -172,6 +188,7 @@ export function useRemoteMessageHandler({
           requestSessions();
           requestModels();
           requestSkills();
+          requestAssets(targetSessionID);
           requestFiles(currentFilePath);
           requestChanges();
           requestHistory();
@@ -227,6 +244,22 @@ export function useRemoteMessageHandler({
           stopPending("sessions");
           applySessionHistory(message.payload as SessionHistoryResultPayload | undefined);
           break;
+        case "session_history_meta_result": {
+          const payload = message.payload as SessionHistoryMetaResultPayload | undefined;
+          if (payload?.up_to_date) {
+            stopPending("sessions");
+          }
+          applySessionHistoryMeta(payload);
+          break;
+        }
+        case "session_history_delta_result": {
+          const payload = message.payload as SessionHistoryDeltaResultPayload | undefined;
+          if (!payload?.full_sync_required) {
+            stopPending("sessions");
+          }
+          applySessionHistoryDelta(payload);
+          break;
+        }
         case "session_permission_set_result":
         case "session_context_set_result":
         case "session_compact_result":
@@ -264,6 +297,10 @@ export function useRemoteMessageHandler({
         case "skill_reload_result":
           stopPending("skills");
           applySkillList(message.payload as SkillListResultPayload | undefined);
+          break;
+        case "asset_list_result":
+          stopPending("assets");
+          applyAssetList(message.payload as AssetListResultPayload | undefined);
           break;
         case "file_list_result":
           stopPending("files");
@@ -309,6 +346,7 @@ export function useRemoteMessageHandler({
           stopPending("sessions");
           stopPending("models");
           stopPending("skills");
+          stopPending("assets");
           stopPending("files");
           stopPending("changes");
           stopPending("history");
@@ -335,6 +373,7 @@ export function useRemoteMessageHandler({
       addToolCall,
       addToolResult,
       appendAssistant,
+      applyAssetList,
       applyChangeDiff,
       applyChangeRevert,
       applyChangesList,
@@ -346,6 +385,8 @@ export function useRemoteMessageHandler({
       applyModelList,
       applyModelSwitch,
       applySessionChanged,
+      applySessionHistoryDelta,
+      applySessionHistoryMeta,
       applySessionHistory,
       applySessionList,
       applySessionSettings,
@@ -358,6 +399,7 @@ export function useRemoteMessageHandler({
       markAssistantError,
       mergeSessionChats,
       requestChanges,
+      requestAssets,
       requestFiles,
       requestHistory,
       requestModels,

@@ -3557,3 +3557,5 @@
 /.gocache/README
 /.gocache/trim.txt
 /.gocache/
+deploy/minio/data/
+deploy/kafka/data/

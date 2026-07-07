@@ -33,6 +33,7 @@ func init() {
 
 func runChat() {
 	core.InitApp()
+	defer func() { _ = core.GetApp().Close() }()
 
 	reader := bufio.NewScanner(os.Stdin)
 	chatService := core.GetApp().GetChatService()

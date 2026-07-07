@@ -18,6 +18,10 @@ export type MessageType =
   | "session_changed"
   | "session_history"
   | "session_history_result"
+  | "session_history_meta"
+  | "session_history_meta_result"
+  | "session_history_delta"
+  | "session_history_delta_result"
   | "session_permission_set"
   | "session_permission_set_result"
   | "session_context_set"
@@ -35,6 +39,8 @@ export type MessageType =
   | "skill_list_result"
   | "skill_reload"
   | "skill_reload_result"
+  | "asset_list"
+  | "asset_list_result"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -71,10 +77,12 @@ export type PairResponse = {
 
 export type AssistantDeltaPayload = {
   content?: string;
+  reasoning?: string;
 };
 
 export type AssistantDonePayload = {
   content?: string;
+  reasoning?: string;
   usage?: TokenUsage;
   context?: ContextInfo;
   compact?: CompactInfo;
@@ -170,6 +178,37 @@ export type SessionHistoryResultPayload = {
   session_id: string;
   messages?: SessionHistoryMessage[];
   count?: number;
+};
+
+export type SessionHistoryMetaPayload = {
+  session_id?: string;
+  local_message_count?: number;
+  local_last_message_id?: string;
+  local_last_message_created_at?: string;
+  local_history_version?: number;
+};
+
+export type SessionHistoryMetaResultPayload = {
+  session_id: string;
+  message_count?: number;
+  last_message_id?: string;
+  last_message_created_at?: string;
+  history_version?: number;
+  up_to_date?: boolean;
+  can_delta?: boolean;
+};
+
+export type SessionHistoryDeltaPayload = {
+  session_id?: string;
+  after_message_id?: string;
+  limit?: number;
+};
+
+export type SessionHistoryDeltaResultPayload = {
+  session_id: string;
+  messages?: SessionHistoryMessage[];
+  count?: number;
+  full_sync_required?: boolean;
 };
 
 export type SessionPermissionSetPayload = {
@@ -278,6 +317,44 @@ export type SkillListResultPayload = {
   count?: number;
   reloaded?: boolean;
   message?: string;
+};
+
+export type AssetListPayload = {
+  session_id?: string;
+  limit?: number;
+};
+
+export type AssetSummary = {
+  id: string;
+  session_id?: string;
+  request_id?: string;
+  tool_call_id?: string;
+  tool_name?: string;
+  path?: string;
+  file_name?: string;
+  content_type?: string;
+  size?: number;
+  short_url: string;
+  code?: string;
+  expires_at?: string;
+  created_at?: string;
+};
+
+export type UploadedAssetPayload = {
+  code: string;
+  short_url: string;
+  bucket?: string;
+  object_key?: string;
+  file_name: string;
+  content_type?: string;
+  size?: number;
+  expires_at?: string;
+};
+
+export type AssetListResultPayload = {
+  session_id: string;
+  assets?: AssetSummary[];
+  count?: number;
 };
 
 export type FileListPayload = {

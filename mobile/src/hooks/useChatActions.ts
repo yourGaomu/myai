@@ -1,7 +1,8 @@
 import { useCallback, type RefObject } from "react";
 
-import type { FileReadResultPayload, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
 import type { PermissionState } from "../types/app";
+import type { ChatAttachment } from "../types/chat";
+import type { PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
 import { userMessageEcho } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
 
@@ -11,7 +12,7 @@ type Args = {
   activeRequestIDRef: RefObject<string>;
   addEventMessage: (sessionID: string, message: string) => void;
   addUserMessage: (sessionID: string, message: string) => void;
-  attachedFiles: FileReadResultPayload[];
+  attachedFiles: ChatAttachment[];
   historySessionIDRef: RefObject<string>;
   messageInput: string;
   pendingPermission: PermissionState | null;

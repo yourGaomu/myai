@@ -16,6 +16,7 @@ const (
 	sessionsCollection     = "sessions"
 	messagesCollection     = "messages"
 	modelConfigsCollection = "model_configs"
+	assetsCollection       = "assets"
 )
 
 type MongoStore struct {
@@ -157,6 +158,15 @@ func (m *MongoStore) SaveMessage(ctx context.Context, message data.MessageRecord
 	return err
 }
 
+func (m *MongoStore) SaveAsset(ctx context.Context, asset data.AssetRecord) error {
+	if err := m.verifyDB(); err != nil {
+		return err
+	}
+
+	_, err := m.db.Collection(assetsCollection).InsertOne(ctx, asset)
+	return err
+}
+
 func (m *MongoStore) ClearMessages(ctx context.Context, sessionID string) error {
 	if err := m.verifyDB(); err != nil {
 		return err
@@ -248,6 +258,115 @@ func (m *MongoStore) ListMessages(ctx context.Context, sessionID string) ([]data
 	}
 
 	return messages, nil
+}
+
+func (m *MongoStore) GetMessageHistoryMeta(ctx context.Context, sessionID string) (data.MessageHistoryMeta, error) {
+	if err := m.verifyDB(); err != nil {
+		return data.MessageHistoryMeta{}, err
+	}
+
+	filter := bson.M{"session_id": sessionID}
+	count, err := m.db.Collection(messagesCollection).CountDocuments(ctx, filter)
+	if err != nil {
+		return data.MessageHistoryMeta{}, err
+	}
+
+	meta := data.MessageHistoryMeta{
+		SessionID:      sessionID,
+		MessageCount:   count,
+		HistoryVersion: count,
+	}
+	if count == 0 {
+		return meta, nil
+	}
+
+	var last data.MessageRecord
+	err = m.db.Collection(messagesCollection).FindOne(
+		ctx,
+		filter,
+		options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}}),
+	).Decode(&last)
+	if err != nil {
+		return data.MessageHistoryMeta{}, err
+	}
+
+	meta.LastMessageID = last.ID
+	meta.LastMessageCreatedAt = &last.CreatedAt
+	return meta, nil
+}
+
+func (m *MongoStore) ListMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]data.MessageRecord, bool, error) {
+	messages, err := m.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if limit <= 0 || limit > 300 {
+		limit = 100
+	}
+	if afterMessageID == "" {
+		if len(messages) <= limit {
+			return messages, false, nil
+		}
+		return messages[:limit], false, nil
+	}
+
+	start := -1
+	for index, message := range messages {
+		if message.ID == afterMessageID {
+			start = index + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil, true, nil
+	}
+	if start >= len(messages) {
+		return nil, false, nil
+	}
+
+	end := start + limit
+	if end > len(messages) {
+		end = len(messages)
+	}
+	return messages[start:end], false, nil
+}
+
+func (m *MongoStore) ListAssets(ctx context.Context, sessionID string, limit int) ([]data.AssetRecord, error) {
+	if err := m.verifyDB(); err != nil {
+		return nil, err
+	}
+
+	filter := bson.M{
+		"$or": bson.A{
+			bson.M{"deleted": bson.M{"$exists": false}},
+			bson.M{"deleted": false},
+		},
+	}
+	if sessionID != "" {
+		filter["session_id"] = sessionID
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+
+	cursor, err := m.db.Collection(assetsCollection).Find(
+		ctx,
+		filter,
+		options.Find().
+			SetSort(bson.D{{Key: "created_at", Value: -1}}).
+			SetLimit(int64(limit)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var assets []data.AssetRecord
+	if err := cursor.All(ctx, &assets); err != nil {
+		return nil, err
+	}
+
+	return assets, nil
 }
 
 func (m *MongoStore) verifyDB() error {

@@ -112,8 +112,8 @@ export function useChatMessages() {
   );
 
   const appendAssistant = useCallback(
-    (sessionID: string, requestID: string | undefined, text: string) => {
-      if (!text) {
+    (sessionID: string, requestID: string | undefined, text: string, reasoning = "") => {
+      if (!text && !reasoning) {
         return;
       }
 
@@ -124,7 +124,7 @@ export function useChatMessages() {
           return {
             ...current,
             activeAssistantID: id,
-            messages: [...current.messages, { id, requestID, role: "assistant", status: "streaming", text }],
+            messages: [...current.messages, { id, requestID, role: "assistant", reasoning, status: "streaming", text }],
           };
         }
 
@@ -137,7 +137,8 @@ export function useChatMessages() {
                   ...item,
                   requestID: item.requestID || requestID,
                   status: item.status === "paused" || item.status === "error" ? item.status : "streaming",
-                  text: item.text + text,
+                  reasoning: appendText(item.reasoning || "", reasoning),
+                  text: appendText(item.text, text),
                 }
               : item,
           ),
@@ -148,11 +149,11 @@ export function useChatMessages() {
   );
 
   const completeAssistant = useCallback(
-    (sessionID: string, requestID: string | undefined, status: ChatMessageStatus, usage?: TokenUsage | null, content?: string) => {
+    (sessionID: string, requestID: string | undefined, status: ChatMessageStatus, usage?: TokenUsage | null, content?: string, reasoning?: string) => {
       updateSessionChat(sessionID, (current) => {
         const assistantID = findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {
-          if (!content && status === "done") {
+          if (!content && !reasoning && status === "done") {
             return { ...current, activeAssistantID: "" };
           }
           const id = newRequestID();
@@ -165,6 +166,7 @@ export function useChatMessages() {
                 id,
                 requestID,
                 role: "assistant",
+                reasoning: reasoning || undefined,
                 status,
                 text: content || "",
                 usage: usage || undefined,
@@ -181,6 +183,7 @@ export function useChatMessages() {
               ? {
                   ...item,
                   requestID: item.requestID || requestID,
+                  reasoning: reasoning || item.reasoning,
                   status,
                   text: item.text || content || "",
                   usage: usage || item.usage,
@@ -263,6 +266,19 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  const appendMessages = useCallback(
+    (sessionID: string, nextMessages: ChatItem[]) => {
+      if (nextMessages.length === 0) {
+        return;
+      }
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        messages: mergeMessages(current.messages, nextMessages),
+      }));
+    },
+    [updateSessionChat],
+  );
+
   const setSessionLastUsage = useCallback(
     (sessionID: string, usage: TokenUsage | null) => {
       updateSessionChat(sessionID, (current) => ({ ...current, lastUsage: usage }));
@@ -332,6 +348,7 @@ export function useChatMessages() {
     addMessage,
     addToolCall,
     addToolResult,
+    appendMessages,
     appendAssistant,
     clearMessages,
     clearSessionPendingRequest,
@@ -348,6 +365,13 @@ export function useChatMessages() {
     sessionChats: sessionChatsRef.current,
     sessionChatsVersion,
   };
+}
+
+function appendText(current: string, next: string) {
+  if (!next) {
+    return current;
+  }
+  return current + next;
 }
 
 function findAssistantID(current: SessionChatState, requestID?: string) {

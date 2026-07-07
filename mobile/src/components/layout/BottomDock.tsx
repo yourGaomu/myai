@@ -1,14 +1,15 @@
 import { StyleSheet, View } from "react-native";
 
-import type { TokenUsage, FileReadResultPayload } from "../../protocol";
 import type { ViewMode } from "../../types/app";
+import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
+import type { TokenUsage } from "../../protocol";
 import { Composer } from "../chat/Composer";
 import { BottomTabs } from "../navigation/BottomTabs";
 import { TokenDock } from "../status/TokenDock";
 
 type Props = {
-  attachedFiles: FileReadResultPayload[];
+  attachedFiles: ChatAttachment[];
   bottomPadding: number;
   buttonFeedback: ButtonFeedback;
   changesActive: boolean;
@@ -21,12 +22,14 @@ type Props = {
   onChatPress: () => void;
   onFilesPress: () => void;
   onPause: () => void;
-  onRemoveAttachedFile: (path: string) => void;
+  onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
   onSessionsPress: () => void;
   onSettingsPress: () => void;
+  onUploadFile: () => void;
   pendingPause: boolean;
   pendingSend: boolean;
+  pendingUpload: boolean;
   viewMode: ViewMode;
 };
 
@@ -48,8 +51,10 @@ export function BottomDock({
   onSend,
   onSessionsPress,
   onSettingsPress,
+  onUploadFile,
   pendingPause,
   pendingSend,
+  pendingUpload,
   viewMode,
 }: Props) {
   return (
@@ -83,8 +88,10 @@ export function BottomDock({
           onPause={onPause}
           onRemoveAttachedFile={onRemoveAttachedFile}
           onSend={onSend}
+          onUploadFile={onUploadFile}
           pendingPause={pendingPause}
           pendingSend={pendingSend}
+          pendingUpload={pendingUpload}
         />
       ) : null}
     </View>

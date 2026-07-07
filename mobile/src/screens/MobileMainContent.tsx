@@ -22,6 +22,7 @@ export function MobileMainContent({
         <SettingsPanel
           activeModel={settings.activeModel}
           activeSession={settings.activeSession}
+          assetBaseURL={settings.assetBaseURL}
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
           clientToken={common.clientToken}
@@ -45,6 +46,7 @@ export function MobileMainContent({
           onRefreshSessions={settings.onRefreshSessions}
           onRefreshSkills={settings.onRefreshSkills}
           onReloadSkills={settings.onReloadSkills}
+          onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}
           onSetContextWindowK={settings.onSetContextWindowK}
           onSetPermissionMode={settings.onSetPermissionMode}
@@ -76,6 +78,7 @@ export function MobileMainContent({
       {common.viewMode === "files" ? (
         <FilesPanel
           buttonFeedback={common.buttonFeedback}
+          assets={files.assets}
           clientToken={common.clientToken}
           fileEntries={files.fileEntries}
           fileParent={files.fileParent}
@@ -85,7 +88,9 @@ export function MobileMainContent({
           onAttachFilePreview={files.onAttachFilePreview}
           onGoToParent={files.onGoToParent}
           onOpenFileEntry={files.onOpenFileEntry}
+          onRefreshAssets={files.onRefreshAssets}
           onRefresh={files.onRefreshFiles}
+          pendingAssets={common.pendingActions.assets}
           pendingFiles={common.pendingActions.files}
         />
       ) : null}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -33,6 +34,16 @@ const (
 )
 
 var errNotEnoughHistoryToCompact = errors.New("not enough new history to compact")
+
+type sharedAssetToolResult struct {
+	Path        string `json:"path"`
+	ShortURL    string `json:"short_url"`
+	Code        string `json:"code"`
+	FileName    string `json:"file_name"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	ExpiresAt   string `json:"expires_at"`
+}
 
 type ChatService struct {
 	client   *llm.Client
@@ -241,7 +252,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		log.Printf("auto compact failed: %v", err)
 	}
 
-	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, latestInput)
+	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, latestInput, requestID)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -278,7 +289,7 @@ func (s *ChatService) llmToolsForSession(current *session.Session) []llms.Tool {
 	})
 }
 
-func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string, latestInput string) (llm.ChatResult, error) {
+func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string, latestInput string, requestID string) (llm.ChatResult, error) {
 	var totalUsage llm.TokenUsage
 	reasoningParts := make([]string, 0, maxAgentToolRounds)
 
@@ -296,13 +307,14 @@ func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, curren
 			return result, nil
 		}
 
-		toolMessages, toolRecords, err := s.callTools(ctx, current, result.ToolCalls, stream)
+		toolMessages, toolRecords, assetRecords, err := s.callTools(ctx, current, result.ToolCalls, stream, requestID)
 		if err != nil {
 			return llm.ChatResult{}, err
 		}
 		current.Messages = append(current.Messages, assistantToolCallMessage(result.ToolCalls))
 		current.Messages = append(current.Messages, toolMessages...)
 		s.persistToolRecordsAsync(toolRecords)
+		s.persistAssetRecordsAsync(assetRecords)
 		skillPrompt = s.skillPrompt(ctx, latestInput)
 	}
 
@@ -510,16 +522,17 @@ func truncateForSummary(text string, maxLength int) string {
 	return string(runes[:maxLength]) + "\n[truncated]"
 }
 
-func (s *ChatService) callTools(ctx context.Context, current *session.Session, calls []llms.ToolCall, stream llm.ChatStreamHandler) ([]llms.MessageContent, []data.MessageRecord, error) {
+func (s *ChatService) callTools(ctx context.Context, current *session.Session, calls []llms.ToolCall, stream llm.ChatStreamHandler, requestID string) ([]llms.MessageContent, []data.MessageRecord, []data.AssetRecord, error) {
 	if s.tools == nil {
-		return nil, nil, errors.New("tool registry is nil")
+		return nil, nil, nil, errors.New("tool registry is nil")
 	}
 	if current == nil {
-		return nil, nil, errors.New("session is nil")
+		return nil, nil, nil, errors.New("session is nil")
 	}
 
 	messages := make([]llms.MessageContent, 0, len(calls))
 	records := make([]data.MessageRecord, 0, len(calls)*2)
+	assets := make([]data.AssetRecord, 0)
 	createdAt := time.Now()
 
 	for index, call := range calls {
@@ -529,13 +542,13 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 
 		registeredTool, err := s.tools.GetTool(call.FunctionCall.Name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		permission := tooldef.NormalizePermission(registeredTool.Permission())
 
 		callResult, err := s.askPreToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if strings.TrimSpace(callResult.Arguments) != "" {
 			call.FunctionCall.Arguments = callResult.Arguments
@@ -601,6 +614,11 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 		if err != nil {
 			toolError = err.Error()
 		}
+		if toolError == "" {
+			if assetRecord, ok := assetRecordFromToolResult(current.ID, requestID, call.ID, call.FunctionCall.Name, result, createdAt.Add(time.Duration(index*2+1)*time.Nanosecond)); ok {
+				assets = append(assets, assetRecord)
+			}
+		}
 
 		messages = append(messages, llms.MessageContent{
 			Role: llms.ChatMessageTypeTool,
@@ -625,7 +643,45 @@ func (s *ChatService) callTools(ctx context.Context, current *session.Session, c
 		})
 	}
 
-	return messages, records, nil
+	return messages, records, assets, nil
+}
+
+func assetRecordFromToolResult(sessionID string, requestID string, toolCallID string, toolName string, result string, createdAt time.Time) (data.AssetRecord, bool) {
+	if toolName != "share_file" || strings.TrimSpace(result) == "" {
+		return data.AssetRecord{}, false
+	}
+
+	var parsed sharedAssetToolResult
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		return data.AssetRecord{}, false
+	}
+	parsed.ShortURL = strings.TrimSpace(parsed.ShortURL)
+	if parsed.ShortURL == "" {
+		return data.AssetRecord{}, false
+	}
+
+	var expiresAt *time.Time
+	if value := strings.TrimSpace(parsed.ExpiresAt); value != "" {
+		if parsedTime, err := time.Parse(time.RFC3339, value); err == nil {
+			expiresAt = &parsedTime
+		}
+	}
+
+	return data.AssetRecord{
+		ID:          uuid.NewString(),
+		SessionID:   sessionID,
+		RequestID:   requestID,
+		ToolCallID:  toolCallID,
+		ToolName:    toolName,
+		LocalPath:   strings.TrimSpace(parsed.Path),
+		FileName:    strings.TrimSpace(parsed.FileName),
+		ContentType: strings.TrimSpace(parsed.ContentType),
+		Size:        parsed.Size,
+		ShortURL:    parsed.ShortURL,
+		ShortCode:   strings.TrimSpace(parsed.Code),
+		ExpiresAt:   expiresAt,
+		CreatedAt:   createdAt,
+	}, true
 }
 
 func (s *ChatService) askPreToolUseHook(ctx context.Context, current *session.Session, name string, arguments string, permission tooldef.Permission) (hook.Result, error) {
@@ -867,6 +923,58 @@ func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string)
 	}
 
 	return s.memorySessionMessages(sessionID), nil
+}
+
+func (s *ChatService) SessionHistoryMeta(ctx context.Context, sessionID string) (data.MessageHistoryMeta, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return data.MessageHistoryMeta{}, errors.New("session id is empty")
+	}
+	if s.store == nil {
+		records := s.memorySessionMessages(sessionID)
+		return messageHistoryMetaFromRecords(sessionID, records), nil
+	}
+	if _, err := s.getSession(ctx, sessionID); err != nil {
+		return data.MessageHistoryMeta{}, err
+	}
+
+	return s.store.GetMessageHistoryMeta(ctx, sessionID)
+}
+
+func (s *ChatService) ListSessionMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]data.MessageRecord, bool, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return nil, false, errors.New("session id is empty")
+	}
+	if s.store == nil {
+		return messagesAfterID(s.memorySessionMessages(sessionID), afterMessageID, limit)
+	}
+	if _, err := s.getSession(ctx, sessionID); err != nil {
+		return nil, false, err
+	}
+
+	return s.store.ListMessagesAfter(ctx, sessionID, strings.TrimSpace(afterMessageID), limit)
+}
+
+func (s *ChatService) ListAssets(ctx context.Context, sessionID string, limit int) ([]data.AssetRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return nil, errors.New("session id is empty")
+	}
+	if s.store == nil {
+		return nil, nil
+	}
+
+	return s.store.ListAssets(ctx, sessionID, limit)
 }
 
 func (s *ChatService) ListModels() []llm.ModelInfo {
@@ -1486,6 +1594,55 @@ func (s *ChatService) memorySessionMessages(sessionID string) []data.MessageReco
 	return records
 }
 
+func messageHistoryMetaFromRecords(sessionID string, records []data.MessageRecord) data.MessageHistoryMeta {
+	meta := data.MessageHistoryMeta{
+		SessionID:      sessionID,
+		MessageCount:   int64(len(records)),
+		HistoryVersion: int64(len(records)),
+	}
+	if len(records) == 0 {
+		return meta
+	}
+
+	last := records[len(records)-1]
+	meta.LastMessageID = last.ID
+	meta.LastMessageCreatedAt = &last.CreatedAt
+	return meta
+}
+
+func messagesAfterID(records []data.MessageRecord, afterMessageID string, limit int) ([]data.MessageRecord, bool, error) {
+	if limit <= 0 || limit > 300 {
+		limit = 100
+	}
+	afterMessageID = strings.TrimSpace(afterMessageID)
+	if afterMessageID == "" {
+		if len(records) <= limit {
+			return records, false, nil
+		}
+		return records[:limit], false, nil
+	}
+
+	start := -1
+	for index, record := range records {
+		if record.ID == afterMessageID {
+			start = index + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil, true, nil
+	}
+	if start >= len(records) {
+		return nil, false, nil
+	}
+
+	end := start + limit
+	if end > len(records) {
+		end = len(records)
+	}
+	return records[start:end], false, nil
+}
+
 func messageContentRecord(sessionID string, message llms.MessageContent, createdAt time.Time) (data.MessageRecord, bool) {
 	switch message.Role {
 	case llms.ChatMessageTypeSystem:
@@ -1641,6 +1798,23 @@ func (s *ChatService) persistToolRecordsAsync(records []data.MessageRecord) {
 	})
 }
 
+func (s *ChatService) persistAssetRecordsAsync(records []data.AssetRecord) {
+	if len(records) == 0 {
+		return
+	}
+
+	s.runAsync(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		for _, record := range records {
+			if err := s.saveAsset(ctx, record); err != nil {
+				log.Printf("save asset record failed: %v", err)
+			}
+		}
+	})
+}
+
 func (s *ChatService) persistCurrentSessionAsync(sessionID string) {
 	s.runAsync(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1671,6 +1845,14 @@ func (s *ChatService) saveMessage(ctx context.Context, message data.MessageRecor
 	}
 
 	return s.store.SaveMessage(ctx, message)
+}
+
+func (s *ChatService) saveAsset(ctx context.Context, asset data.AssetRecord) error {
+	if s.store == nil {
+		return nil
+	}
+
+	return s.store.SaveAsset(ctx, asset)
 }
 
 func (s *ChatService) getSession(ctx context.Context, sessionID string) (data.SessionRecord, error) {

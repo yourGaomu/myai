@@ -8,9 +8,11 @@ import type {
   SessionSummary,
 } from "../protocol";
 import type { ViewMode } from "../types/app";
+import type { ChatAttachment } from "../types/chat";
+import { isWorkspaceFileAttachment } from "../utils/attachments";
 
 type Args = {
-  attachedFiles: FileReadResultPayload[];
+  attachedFiles: ChatAttachment[];
   changeDiff: ChangeDiffResultPayload | null;
   changes: ChangeEntry[];
   currentModelID: string;
@@ -53,7 +55,9 @@ export function useMobileDerivedState({
     canOpenSelectedChangeFile: Boolean(selectedChange) && !selectedChangeEntry?.deleted,
     canRevertSelectedChange: Boolean(changeDiff?.restorable || selectedChangeEntry?.restorable),
     changesTabActive: viewMode === "changes" || viewMode === "changeDetail",
-    filePreviewAttached: Boolean(filePreview && attachedFiles.some((file) => file.path === filePreview.path)),
+    filePreviewAttached: Boolean(
+      filePreview && attachedFiles.some((file) => isWorkspaceFileAttachment(file) && file.path === filePreview.path),
+    ),
     selectedChangeEntry,
     setupVisible: viewMode === "settings",
   };
