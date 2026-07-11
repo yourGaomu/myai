@@ -34,6 +34,11 @@ const (
 	TypeSessionHistoryDeltaResult  MessageType = "session_history_delta_result"
 	TypeSessionPermissionSet       MessageType = "session_permission_set"
 	TypeSessionPermissionSetResult MessageType = "session_permission_set_result"
+	TypeSessionModeSet             MessageType = "session_mode_set"
+	TypeSessionModeSetResult       MessageType = "session_mode_set_result"
+	TypeSessionPlanExecute         MessageType = "session_plan_execute"
+	TypeSessionPlanExecuteUpdate   MessageType = "session_plan_update"
+	TypeSessionPlanExecuteResult   MessageType = "session_plan_execute_result"
 	TypeSessionContextSet          MessageType = "session_context_set"
 	TypeSessionContextSetResult    MessageType = "session_context_set_result"
 	TypeSessionCompact             MessageType = "session_compact"
@@ -101,6 +106,7 @@ type AssistantDonePayload struct {
 	Usage     TokenUsage  `json:"usage,omitempty"`
 	Context   ContextInfo `json:"context,omitempty"`
 	Compact   CompactInfo `json:"compact,omitempty"`
+	Plan      *Plan       `json:"plan,omitempty"`
 	Paused    bool        `json:"paused,omitempty"`
 	Message   string      `json:"message,omitempty"`
 }
@@ -156,14 +162,35 @@ type SessionSummary struct {
 	ID             string      `json:"id"`
 	Title          string      `json:"title"`
 	Model          string      `json:"model"`
+	AgentMode      string      `json:"agent_mode,omitempty"`
 	PermissionMode string      `json:"permission_mode"`
 	ContextWindowK int         `json:"context_window_k"`
 	Usage          *TokenUsage `json:"usage,omitempty"`
 	LastUsage      *TokenUsage `json:"last_usage,omitempty"`
+	CurrentPlan    *Plan       `json:"current_plan,omitempty"`
 	Deleted        bool        `json:"deleted,omitempty"`
 	DeletedAt      *time.Time  `json:"deleted_at,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
+}
+
+type Plan struct {
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id"`
+	Goal       string     `json:"goal,omitempty"`
+	Status     string     `json:"status"`
+	RawContent string     `json:"raw_content,omitempty"`
+	Steps      []PlanStep `json:"steps,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+type PlanStep struct {
+	ID          string `json:"id"`
+	Order       int    `json:"order"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
 }
 
 type SessionListResultPayload struct {
@@ -235,6 +262,21 @@ type SessionHistoryDeltaResultPayload struct {
 type SessionPermissionSetPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 	Mode      string `json:"mode"`
+}
+
+type SessionModeSetPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Mode      string `json:"mode"`
+}
+
+type SessionPlanExecutePayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SessionPlanExecuteUpdatePayload struct {
+	SessionID string `json:"session_id"`
+	Plan      *Plan  `json:"plan,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type SessionContextSetPayload struct {

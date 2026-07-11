@@ -5,16 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"myai/core"
-	"myai/core/llm"
-	"myai/core/service"
-	"myai/core/skill"
-	"myai/core/store/data"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"myai/core"
+	modelcommand "myai/core/application/model/command"
+	sessionresult "myai/core/application/session/result"
+	"myai/core/llm"
+	"myai/core/service"
+	"myai/core/skill"
 )
 
 var errModelAddCanceled = errors.New("model add canceled")
@@ -32,6 +34,7 @@ func init() {
 }
 
 func runChat() {
+	// CLI 与手机 Agent 共用同一个 ChatService，只是输入输出适配器不同。
 	core.InitApp()
 	defer func() { _ = core.GetApp().Close() }()
 
@@ -54,6 +57,7 @@ func runChat() {
 			continue
 		}
 
+		// 斜杠命令直接调用会话管理能力，其余输入进入正常的流式生成链路。
 		switch input {
 		case "/exit", "exit", "quit":
 			printSuccess("bye.")
@@ -82,6 +86,8 @@ func runChat() {
 			printSuccess("current model: " + chatService.CurrentModelID())
 		case "/permission":
 			printPermissionMode(chatService.CurrentPermissionMode())
+		case "/mode":
+			printSuccess("current mode: " + string(chatService.CurrentAgentMode()))
 		case "/context":
 			printContextInfo(chatService.CurrentContextInfo())
 		case "/compact":
@@ -111,6 +117,16 @@ func runChat() {
 					continue
 				}
 				printPermissionMode(chatService.CurrentPermissionMode())
+				continue
+			}
+
+			if strings.HasPrefix(input, "/mode ") {
+				mode := strings.TrimSpace(strings.TrimPrefix(input, "/mode "))
+				if err := chatService.SetAgentMode(ctx, mode); err != nil {
+					printError("mode error:", err)
+					continue
+				}
+				printSuccess("current mode: " + string(chatService.CurrentAgentMode()))
 				continue
 			}
 
@@ -165,7 +181,7 @@ func runChat() {
 }
 
 func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService interface {
-	AddModelConfig(context.Context, data.ModelConfig) error
+	AddModelConfig(context.Context, modelcommand.AddConfig) error
 }) error {
 	printModelAddHeader()
 
@@ -194,14 +210,13 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 		return err
 	}
 
-	config := data.ModelConfig{
+	config := modelcommand.AddConfig{
 		ID:        id,
 		Name:      name,
 		Provider:  provider,
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
 		ModelName: modelName,
-		Enabled:   true,
 	}
 	if err := chatService.AddModelConfig(ctx, config); err != nil {
 		return err
@@ -234,7 +249,7 @@ func readModelField(reader *bufio.Scanner, label string, defaultValue string, re
 }
 
 func printSessions(ctx context.Context, chatService interface {
-	ListSessions(context.Context) ([]data.SessionRecord, error)
+	ListSessions(context.Context) ([]sessionresult.SessionListItem, error)
 	CurrentSessionID() string
 }) {
 	sessions, err := chatService.ListSessions(ctx)

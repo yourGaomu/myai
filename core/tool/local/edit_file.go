@@ -107,6 +107,7 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 	}
 	defer closeRecorder()
 
+	// 写入前先保存快照；成功后记录 before/after，手机才能按检查点恢复。
 	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
 		return "", err
@@ -147,7 +148,7 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 		Replacements: replacementCount(replacements, input.ReplaceAll),
 		Bytes:        len([]byte(nextContent)),
 	}
-	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordOptions{
+	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordCommand{
 		Title:  "edit_file " + result.Path,
 		Reason: "replace text",
 	})

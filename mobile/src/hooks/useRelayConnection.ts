@@ -20,6 +20,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 管理手机到 Relay 的单条 WebSocket 连接；配对 token、消息分发和断线清理由这里统一处理。
 export function useRelayConnection({
   addErrorMessage,
   clientToken,
@@ -83,6 +84,7 @@ export function useRelayConnection({
     setStatus("Connecting");
 
     socket.onopen = () => {
+      // 连接成功后立即刷新远程状态，避免界面继续展示断线前缓存的 Session。
       clearConnectTimeout();
       if (socketRef.current !== socket) {
         return;
@@ -113,6 +115,7 @@ export function useRelayConnection({
       addErrorMessage("WebSocket connection error");
     };
     socket.onmessage = (event) => {
+      // 此处只完成 JSON 解码，具体消息类型由 useRemoteMessageHandler 统一归并到各状态仓库。
       try {
         onMessage(JSON.parse(event.data) as RelayMessage);
       } catch (error) {

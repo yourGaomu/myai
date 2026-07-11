@@ -1,3 +1,4 @@
+// MessageType 必须与 Go 的 core/remote/protocol 保持同步；请求、流式事件和终态响应共用同一信封。
 export type MessageType =
   | "heartbeat"
   | "user_message"
@@ -24,6 +25,11 @@ export type MessageType =
   | "session_history_delta_result"
   | "session_permission_set"
   | "session_permission_set_result"
+  | "session_mode_set"
+  | "session_mode_set_result"
+  | "session_plan_execute"
+  | "session_plan_update"
+  | "session_plan_execute_result"
   | "session_context_set"
   | "session_context_set_result"
   | "session_compact"
@@ -59,6 +65,7 @@ export type MessageType =
   | "history_revert_result"
   | "error";
 
+// RelayMessage 负责跨端路由，具体业务字段放在 payload DTO 中，避免不同消息重复定义公共字段。
 export type RelayMessage<TPayload = unknown> = {
   type: MessageType;
   request_id?: string;
@@ -86,6 +93,7 @@ export type AssistantDonePayload = {
   usage?: TokenUsage;
   context?: ContextInfo;
   compact?: CompactInfo;
+  plan?: Plan;
   paused?: boolean;
   message?: string;
 };
@@ -129,14 +137,35 @@ export type SessionSummary = {
   id: string;
   title?: string;
   model?: string;
+  agent_mode?: string;
   permission_mode?: string;
   context_window_k?: number;
   usage?: TokenUsage;
   last_usage?: TokenUsage;
+  current_plan?: Plan;
   deleted?: boolean;
   deleted_at?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+export type Plan = {
+  id: string;
+  session_id: string;
+  goal?: string;
+  status: string;
+  raw_content?: string;
+  steps?: PlanStep[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type PlanStep = {
+  id: string;
+  order: number;
+  title: string;
+  description?: string;
+  status: string;
 };
 
 export type SessionListResultPayload = {
@@ -214,6 +243,21 @@ export type SessionHistoryDeltaResultPayload = {
 export type SessionPermissionSetPayload = {
   session_id?: string;
   mode: string;
+};
+
+export type SessionModeSetPayload = {
+  session_id?: string;
+  mode: string;
+};
+
+export type SessionPlanExecutePayload = {
+  session_id?: string;
+};
+
+export type SessionPlanExecuteUpdatePayload = {
+  session_id: string;
+  plan?: Plan;
+  message?: string;
 };
 
 export type SessionContextSetPayload = {

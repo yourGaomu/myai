@@ -13,6 +13,7 @@ type Args = {
   socketRef: RefObject<WebSocket | null>;
 };
 
+// 统一构造跨端消息信封，确保所有请求都携带 user/device/session/token 路由信息。
 export function useRelaySender({
   activeRequestIDRef,
   addErrorMessage,
@@ -30,6 +31,7 @@ export function useRelaySender({
         return false;
       }
 
+      // overrides 用于为一次请求指定 request_id 或目标 session，其余字段使用当前连接状态兜底。
       const envelope: RelayMessage = {
         type,
         request_id:

@@ -4,7 +4,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
+
+	domainauthorization "myai/core/domain/authorization"
 )
+
+type AuthorizationInfo struct {
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	DeviceID   string     `json:"device_id"`
+	ClientName string     `json:"client_name"`
+	RemoteAddr string     `json:"remote_addr"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastSeenAt time.Time  `json:"last_seen_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	Current    bool       `json:"current"`
+}
 
 type authorizationsResponse struct {
 	Authorizations []AuthorizationInfo `json:"authorizations"`
@@ -15,6 +31,21 @@ type revokeAuthorizationRequest struct {
 	UserID      string `json:"user_id"`
 	DeviceID    string `json:"device_id"`
 	ClientToken string `json:"client_token"`
+}
+
+func authorizationInfoFromDomain(authorization domainauthorization.ClientAuthorization, currentID string) AuthorizationInfo {
+	return AuthorizationInfo{
+		ID:         authorization.ID,
+		UserID:     authorization.UserID,
+		DeviceID:   authorization.DeviceID,
+		ClientName: authorization.ClientName,
+		RemoteAddr: authorization.RemoteAddr,
+		CreatedAt:  authorization.CreatedAt,
+		LastSeenAt: authorization.LastSeenAt,
+		ExpiresAt:  authorization.ExpiresAt,
+		RevokedAt:  authorization.RevokedAt,
+		Current:    authorization.ID == currentID,
+	}
 }
 
 func (s *Server) handleAuthorizations(w http.ResponseWriter, r *http.Request) {

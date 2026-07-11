@@ -1,12 +1,13 @@
 package session
 
 import (
-	"github.com/tmc/langchaingo/llms"
-
 	"myai/core/contextmgr"
+	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
+	agentplan "myai/core/plan"
 )
 
+// systemPrompt 是所有会话共享的稳定前缀。Chat/Plan 切换不会修改它，动态规则由 runtime 层按轮注入。
 const systemPrompt = `You are myai, a local AI coding assistant.
 
 Work carefully inside the user's current workspace.
@@ -43,35 +44,44 @@ Final response:
 - Keep the response focused and easy to scan.`
 
 type PermissionMode string
+type AgentMode string
 
 const (
 	PermissionModeReadonly PermissionMode = "readonly"
 	PermissionModeAsk      PermissionMode = "ask"
 	PermissionModeFull     PermissionMode = "full"
+
+	AgentModeChat AgentMode = "chat"
+	AgentModePlan AgentMode = "plan"
 )
 
 type Session struct {
+	// Session 是聊天聚合根：消息、模式、上下文摘要、用量和当前 Plan 必须作为一致状态更新。
 	ID                string
 	Model             string
+	AgentMode         AgentMode
 	PermissionMode    PermissionMode
 	ContextWindowK    int
 	Summary           string
 	CompactedMessages int
 	Usage             llm.TokenUsage
 	LastUsage         llm.TokenUsage
-	Messages          []llms.MessageContent
+	CurrentPlan       *agentplan.Plan
+	Messages          []domainmessage.Message
 }
 
-func newSession(id, model string, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []llms.MessageContent) *Session {
+func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) *Session {
 	if len(messages) == 0 {
 		messages = defaultMessages()
 	}
+	agentMode = NormalizeAgentMode(agentMode)
 	permissionMode = NormalizePermissionMode(permissionMode)
 	contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
 
 	return &Session{
 		ID:                id,
 		Model:             model,
+		AgentMode:         agentMode,
 		PermissionMode:    permissionMode,
 		ContextWindowK:    contextWindowK,
 		Summary:           summary,
@@ -84,13 +94,13 @@ func newSession(id, model string, permissionMode PermissionMode, contextWindowK 
 
 func (s *Session) AddUserMessage(content string) {
 	s.Messages = append(s.Messages,
-		llms.TextParts(llms.ChatMessageTypeHuman, content),
+		domainmessage.Text(domainmessage.RoleUser, content),
 	)
 }
 
 func (s *Session) AddAssistantMessage(content string) {
 	s.Messages = append(s.Messages,
-		llms.TextParts(llms.ChatMessageTypeAI, content),
+		domainmessage.Text(domainmessage.RoleAssistant, content),
 	)
 }
 
@@ -100,16 +110,18 @@ func (s *Session) AddUsage(usage llm.TokenUsage) {
 }
 
 func (s *Session) Clear() {
+	// 清空会话时恢复固定 system 消息，同时移除摘要、用量和未完成计划。
 	s.Messages = defaultMessages()
 	s.Summary = ""
 	s.CompactedMessages = 0
 	s.Usage = llm.TokenUsage{}
 	s.LastUsage = llm.TokenUsage{}
+	s.CurrentPlan = nil
 }
 
-func defaultMessages() []llms.MessageContent {
-	return []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
+func defaultMessages() []domainmessage.Message {
+	return []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, systemPrompt),
 	}
 }
 
@@ -129,6 +141,24 @@ func NormalizePermissionMode(mode PermissionMode) PermissionMode {
 func IsPermissionMode(mode PermissionMode) bool {
 	switch mode {
 	case PermissionModeReadonly, PermissionModeAsk, PermissionModeFull:
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeAgentMode(mode AgentMode) AgentMode {
+	switch mode {
+	case AgentModePlan:
+		return mode
+	default:
+		return AgentModeChat
+	}
+}
+
+func IsAgentMode(mode AgentMode) bool {
+	switch mode {
+	case AgentModeChat, AgentModePlan:
 		return true
 	default:
 		return false

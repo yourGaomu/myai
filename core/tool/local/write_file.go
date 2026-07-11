@@ -111,6 +111,7 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 	}
 	defer closeRecorder()
 
+	// 与 edit_file 使用相同历史协议：先取 before，写入成功后再记录最终文件状态。
 	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
 		return "", err
@@ -150,7 +151,7 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 		Bytes:     len([]byte(input.Content)),
 		Operation: operation,
 	}
-	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordOptions{
+	checkpointID, err := recorder.RecordFileChange(ctx, input.Path, before, history.RecordCommand{
 		Title:  "write_file " + result.Path,
 		Reason: operation,
 	})

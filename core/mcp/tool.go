@@ -13,6 +13,7 @@ import (
 var unsupportedToolNameChars = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
 type Tool struct {
+	// Tool 把 MCP ToolInfo 适配为项目通用 Tool，并继承服务器配置的权限等级。
 	client       *Client
 	serverName   string
 	exposedName  string

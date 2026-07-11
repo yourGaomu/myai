@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 	"myai/core/sandbox"
 	tooldef "myai/core/tool/tool"
@@ -79,6 +80,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 		return "", err
 	}
 
+	// Shell 可能修改任意数量文件，因此执行前后扫描 workspace 并归入同一个任务检查点。
 	recorder, before, historyErr := t.snapshotBeforeShell(ctx)
 	result, err := t.sandbox.Run(ctx, sandbox.RunRequest{
 		Command:        input.Command,
@@ -90,7 +92,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 		return "", err
 	}
 	if recorder != nil && before != nil {
-		if _, recordErr := recorder.RecordWorkspaceChanges(ctx, before, history.RecordOptions{
+		if _, recordErr := recorder.RecordWorkspaceChanges(ctx, before, history.RecordCommand{
 			Title:  "shell " + input.Command,
 			Reason: "shell command",
 		}); recordErr != nil && historyErr == nil {
@@ -108,7 +110,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 	return string(output), nil
 }
 
-func (t *ShellTool) snapshotBeforeShell(ctx context.Context) (*history.TaskWorkspaceRecorder, map[string]history.FileSnapshot, error) {
+func (t *ShellTool) snapshotBeforeShell(ctx context.Context) (*history.TaskWorkspaceRecorder, map[string]domainhistory.FileSnapshot, error) {
 	task := history.TaskRecorderFromContext(ctx)
 	if task == nil {
 		return nil, nil, nil

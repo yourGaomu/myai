@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/tmc/langchaingo/llms"
+	domainmessage "myai/core/domain/message"
 )
 
 const (
@@ -36,9 +36,10 @@ type Info struct {
 }
 
 type Snapshot struct {
+	// Prefix 是稳定的 system + summary 前缀，用于计算缓存哈希；Messages 是实际发送给模型的完整快照。
 	Info     Info
-	Messages []llms.MessageContent
-	Prefix   []llms.MessageContent
+	Messages []domainmessage.Message
+	Prefix   []domainmessage.Message
 }
 
 func NormalizeWindowK(windowK int) int {
@@ -55,11 +56,11 @@ func ValidateWindowK(windowK int) error {
 	return nil
 }
 
-func Build(messages []llms.MessageContent, windowK int) []llms.MessageContent {
+func Build(messages []domainmessage.Message, windowK int) []domainmessage.Message {
 	return BuildWithSummary(messages, "", 0, windowK)
 }
 
-func BuildWithSummary(messages []llms.MessageContent, summary string, compactedMessages int, windowK int) []llms.MessageContent {
+func BuildWithSummary(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) []domainmessage.Message {
 	info, selected := AnalyzeWithSummary(messages, summary, compactedMessages, windowK)
 	if info.Truncated {
 		return selected
@@ -67,16 +68,17 @@ func BuildWithSummary(messages []llms.MessageContent, summary string, compactedM
 	return selected
 }
 
-func Analyze(messages []llms.MessageContent, windowK int) (Info, []llms.MessageContent) {
+func Analyze(messages []domainmessage.Message, windowK int) (Info, []domainmessage.Message) {
 	return AnalyzeWithSummary(messages, "", 0, windowK)
 }
 
-func AnalyzeWithSummary(messages []llms.MessageContent, summary string, compactedMessages int, windowK int) (Info, []llms.MessageContent) {
+func AnalyzeWithSummary(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) (Info, []domainmessage.Message) {
 	snapshot := BuildSnapshot(messages, summary, compactedMessages, windowK)
 	return snapshot.Info, snapshot.Messages
 }
 
-func BuildSnapshot(messages []llms.MessageContent, summary string, compactedMessages int, windowK int) Snapshot {
+func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) Snapshot {
+	// base 始终放固定 system 和可选摘要，recent 再按 token 预算从新到旧选择完整消息块。
 	summary = strings.TrimSpace(summary)
 	base, recent := buildBaseAndRecent(messages, summary, compactedMessages)
 	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
@@ -107,7 +109,7 @@ func ShouldCompact(info Info, triggerRatio float64) bool {
 	return info.Truncated || float64(info.SelectedTokens) >= float64(budget)*triggerRatio
 }
 
-func CompactSplit(messages []llms.MessageContent, compactedMessages int, keepChunks int) ([]llms.MessageContent, []llms.MessageContent, int) {
+func CompactSplit(messages []domainmessage.Message, compactedMessages int, keepChunks int) ([]domainmessage.Message, []domainmessage.Message, int) {
 	if keepChunks <= 0 {
 		keepChunks = 8
 	}
@@ -116,6 +118,7 @@ func CompactSplit(messages []llms.MessageContent, compactedMessages int, keepChu
 		return nil, nil, start
 	}
 
+	// 按“一次用户请求及其回答/工具结果”分块，避免摘要时切断 tool call 与 tool result。
 	chunks := messageChunks(messages[start:])
 	if len(chunks) <= keepChunks {
 		return nil, messages[start:], start
@@ -131,7 +134,7 @@ func CompactSplit(messages []llms.MessageContent, compactedMessages int, keepChu
 	return messages[start:cutoff], messages[cutoff:], cutoff
 }
 
-func NormalizeCompactedMessages(messages []llms.MessageContent, compactedMessages int) int {
+func NormalizeCompactedMessages(messages []domainmessage.Message, compactedMessages int) int {
 	if len(messages) == 0 {
 		return 0
 	}
@@ -144,14 +147,14 @@ func NormalizeCompactedMessages(messages []llms.MessageContent, compactedMessage
 	return compactedMessages
 }
 
-func buildBaseAndRecent(messages []llms.MessageContent, summary string, compactedMessages int) ([]llms.MessageContent, []llms.MessageContent) {
+func buildBaseAndRecent(messages []domainmessage.Message, summary string, compactedMessages int) ([]domainmessage.Message, []domainmessage.Message) {
 	system, rest := splitSystemMessage(messages)
-	base := make([]llms.MessageContent, 0, len(system)+1)
+	base := make([]domainmessage.Message, 0, len(system)+1)
 	base = append(base, system...)
 
 	summary = strings.TrimSpace(summary)
 	if summary != "" {
-		base = append(base, llms.TextParts(llms.ChatMessageTypeSystem, "Previous conversation summary:\n"+summary))
+		base = append(base, domainmessage.Text(domainmessage.RoleSystem, "Previous conversation summary:\n"+summary))
 	}
 
 	start := NormalizeCompactedMessages(messages, compactedMessages)
@@ -161,7 +164,7 @@ func buildBaseAndRecent(messages []llms.MessageContent, summary string, compacte
 	return base, rest
 }
 
-func analyzePrepared(base []llms.MessageContent, recent []llms.MessageContent, fullMessages []llms.MessageContent, windowK int, hasSummary bool, summaryTokens int, compactedMessages int) (Info, []llms.MessageContent) {
+func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Message, fullMessages []domainmessage.Message, windowK int, hasSummary bool, summaryTokens int, compactedMessages int) (Info, []domainmessage.Message) {
 	windowK = NormalizeWindowK(windowK)
 	if len(base) == 0 && len(recent) == 0 {
 		return Info{WindowK: windowK, SummaryTokens: summaryTokens, CompactedMessages: compactedMessages, HasSummary: hasSummary}, nil
@@ -172,7 +175,7 @@ func analyzePrepared(base []llms.MessageContent, recent []llms.MessageContent, f
 	baseTokens := EstimateMessagesTokens(base)
 
 	chunks := messageChunks(recent)
-	selectedChunks := make([][]llms.MessageContent, 0, len(chunks))
+	selectedChunks := make([][]domainmessage.Message, 0, len(chunks))
 	selectedTokens := baseTokens
 
 	for i := len(chunks) - 1; i >= 0; i-- {
@@ -190,7 +193,7 @@ func analyzePrepared(base []llms.MessageContent, recent []llms.MessageContent, f
 		selectedTokens += chunkTokens
 	}
 
-	selected := make([]llms.MessageContent, 0, len(base)+len(recent))
+	selected := make([]domainmessage.Message, 0, len(base)+len(recent))
 	selected = append(selected, base...)
 	for i := len(selectedChunks) - 1; i >= 0; i-- {
 		selected = append(selected, selectedChunks[i]...)
@@ -210,9 +213,9 @@ func analyzePrepared(base []llms.MessageContent, recent []llms.MessageContent, f
 	}, selected
 }
 
-func displayCompactedMessages(messages []llms.MessageContent, compactedMessages int) int {
+func displayCompactedMessages(messages []domainmessage.Message, compactedMessages int) int {
 	count := NormalizeCompactedMessages(messages, compactedMessages)
-	if len(messages) > 0 && messages[0].Role == llms.ChatMessageTypeSystem {
+	if len(messages) > 0 && messages[0].Role == domainmessage.RoleSystem {
 		count--
 	}
 	if count < 0 {
@@ -221,7 +224,7 @@ func displayCompactedMessages(messages []llms.MessageContent, compactedMessages 
 	return count
 }
 
-func LegacyBuild(messages []llms.MessageContent, windowK int) []llms.MessageContent {
+func LegacyBuild(messages []domainmessage.Message, windowK int) []domainmessage.Message {
 	info, selected := Analyze(messages, windowK)
 	if info.Truncated {
 		return selected
@@ -229,7 +232,7 @@ func LegacyBuild(messages []llms.MessageContent, windowK int) []llms.MessageCont
 	return messages
 }
 
-func LegacyAnalyze(messages []llms.MessageContent, windowK int) (Info, []llms.MessageContent) {
+func LegacyAnalyze(messages []domainmessage.Message, windowK int) (Info, []domainmessage.Message) {
 	windowK = NormalizeWindowK(windowK)
 	if len(messages) == 0 {
 		return Info{WindowK: windowK}, nil
@@ -241,7 +244,7 @@ func LegacyAnalyze(messages []llms.MessageContent, windowK int) (Info, []llms.Me
 	systemTokens := EstimateMessagesTokens(system)
 
 	chunks := messageChunks(rest)
-	selectedChunks := make([][]llms.MessageContent, 0, len(chunks))
+	selectedChunks := make([][]domainmessage.Message, 0, len(chunks))
 	selectedTokens := systemTokens
 
 	for i := len(chunks) - 1; i >= 0; i-- {
@@ -259,7 +262,7 @@ func LegacyAnalyze(messages []llms.MessageContent, windowK int) (Info, []llms.Me
 		selectedTokens += chunkTokens
 	}
 
-	selected := make([]llms.MessageContent, 0, len(messages))
+	selected := make([]domainmessage.Message, 0, len(messages))
 	selected = append(selected, system...)
 	for i := len(selectedChunks) - 1; i >= 0; i-- {
 		selected = append(selected, selectedChunks[i]...)
@@ -275,7 +278,7 @@ func LegacyAnalyze(messages []llms.MessageContent, windowK int) (Info, []llms.Me
 	}, selected
 }
 
-func EstimateMessagesTokens(messages []llms.MessageContent) int {
+func EstimateMessagesTokens(messages []domainmessage.Message) int {
 	total := 0
 	for _, message := range messages {
 		total += 4
@@ -286,7 +289,7 @@ func EstimateMessagesTokens(messages []llms.MessageContent) int {
 	return total
 }
 
-func StableMessagesHash(messages []llms.MessageContent) string {
+func StableMessagesHash(messages []domainmessage.Message) string {
 	var builder strings.Builder
 	for _, message := range messages {
 		builder.WriteString(string(message.Role))
@@ -309,20 +312,20 @@ func StableTextHash(text string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func splitSystemMessage(messages []llms.MessageContent) ([]llms.MessageContent, []llms.MessageContent) {
-	if len(messages) == 0 || messages[0].Role != llms.ChatMessageTypeSystem {
+func splitSystemMessage(messages []domainmessage.Message) ([]domainmessage.Message, []domainmessage.Message) {
+	if len(messages) == 0 || messages[0].Role != domainmessage.RoleSystem {
 		return nil, messages
 	}
 	return messages[:1], messages[1:]
 }
 
-func messageChunks(messages []llms.MessageContent) [][]llms.MessageContent {
-	chunks := make([][]llms.MessageContent, 0, len(messages))
+func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
+	chunks := make([][]domainmessage.Message, 0, len(messages))
 	for i := 0; i < len(messages); i++ {
 		message := messages[i]
-		chunk := []llms.MessageContent{message}
-		if message.Role == llms.ChatMessageTypeAI && hasToolCall(message) {
-			for i+1 < len(messages) && messages[i+1].Role == llms.ChatMessageTypeTool {
+		chunk := []domainmessage.Message{message}
+		if message.Role == domainmessage.RoleAssistant && message.HasToolCall() {
+			for i+1 < len(messages) && messages[i+1].Role == domainmessage.RoleTool {
 				i++
 				chunk = append(chunk, messages[i])
 			}
@@ -332,57 +335,55 @@ func messageChunks(messages []llms.MessageContent) [][]llms.MessageContent {
 	return chunks
 }
 
-func hasToolCall(message llms.MessageContent) bool {
-	for _, part := range message.Parts {
-		if _, ok := part.(llms.ToolCall); ok {
-			return true
+func estimatePartTokens(part domainmessage.Part) int {
+	switch part.Type {
+	case domainmessage.PartText:
+		return EstimateTextTokens(part.Text)
+	case domainmessage.PartToolCall:
+		if part.ToolCall == nil {
+			return 0
 		}
-	}
-	return false
-}
-
-func estimatePartTokens(part llms.ContentPart) int {
-	switch value := part.(type) {
-	case llms.TextContent:
-		return EstimateTextTokens(value.Text)
-	case llms.ToolCall:
-		text := value.ID + " " + value.Type
-		if value.FunctionCall != nil {
-			text += " " + value.FunctionCall.Name + " " + value.FunctionCall.Arguments
-		}
+		text := part.ToolCall.ID + " " + part.ToolCall.Type + " " + part.ToolCall.Name + " " + part.ToolCall.Arguments
 		return EstimateTextTokens(text)
-	case llms.ToolCallResponse:
-		return EstimateTextTokens(value.ToolCallID + " " + value.Name + " " + value.Content)
+	case domainmessage.PartToolResult:
+		if part.ToolResult == nil {
+			return 0
+		}
+		return EstimateTextTokens(part.ToolResult.ToolCallID + " " + part.ToolResult.Name + " " + part.ToolResult.Content)
 	default:
-		return EstimateTextTokens(fmt.Sprint(value))
+		return EstimateTextTokens(fmt.Sprint(part))
 	}
 }
 
-func writeStablePart(builder *strings.Builder, part llms.ContentPart) {
-	switch value := part.(type) {
-	case llms.TextContent:
+func writeStablePart(builder *strings.Builder, part domainmessage.Part) {
+	switch part.Type {
+	case domainmessage.PartText:
 		builder.WriteString("text:")
-		builder.WriteString(value.Text)
-	case llms.ToolCall:
-		builder.WriteString("tool_call:")
-		builder.WriteString(value.ID)
-		builder.WriteString(":")
-		builder.WriteString(value.Type)
-		if value.FunctionCall != nil {
-			builder.WriteString(":")
-			builder.WriteString(value.FunctionCall.Name)
-			builder.WriteString(":")
-			builder.WriteString(value.FunctionCall.Arguments)
+		builder.WriteString(part.Text)
+	case domainmessage.PartToolCall:
+		if part.ToolCall == nil {
+			return
 		}
-	case llms.ToolCallResponse:
+		builder.WriteString("tool_call:")
+		builder.WriteString(part.ToolCall.ID)
+		builder.WriteString(":")
+		builder.WriteString(part.ToolCall.Type)
+		builder.WriteString(":")
+		builder.WriteString(part.ToolCall.Name)
+		builder.WriteString(":")
+		builder.WriteString(part.ToolCall.Arguments)
+	case domainmessage.PartToolResult:
+		if part.ToolResult == nil {
+			return
+		}
 		builder.WriteString("tool_result:")
-		builder.WriteString(value.ToolCallID)
+		builder.WriteString(part.ToolResult.ToolCallID)
 		builder.WriteString(":")
-		builder.WriteString(value.Name)
+		builder.WriteString(part.ToolResult.Name)
 		builder.WriteString(":")
-		builder.WriteString(value.Content)
+		builder.WriteString(part.ToolResult.Content)
 	default:
-		builder.WriteString(fmt.Sprint(value))
+		builder.WriteString(fmt.Sprint(part))
 	}
 }
 

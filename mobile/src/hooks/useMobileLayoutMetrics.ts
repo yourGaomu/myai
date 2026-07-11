@@ -7,6 +7,7 @@ type Args = {
   hasUsage: boolean;
 };
 
+// 根据安全区、窗口高度和 Token 栏状态计算稳定布局尺寸，避免键盘与底栏遮挡内容。
 export function useMobileLayoutMetrics({ hasUsage }: Args) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();

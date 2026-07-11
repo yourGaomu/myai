@@ -1,29 +1,28 @@
 package llm
 
-import "sort"
+import (
+	"sort"
 
-type ModelInfo struct {
-	ID        string
-	Name      string
-	Provider  string
-	ModelName string
-	Enabled   bool
-	IsDefault bool
-}
+	modelport "myai/core/port/model"
+)
+
+type ModelInfo = modelport.ModelInfo
 
 type Client struct {
-	models map[string]*Model
+	models map[string]modelport.ChatModelPort
 	infos  map[string]ModelInfo
 }
 
+var _ modelport.MutableRegistry = (*Client)(nil)
+
 func NewClient() *Client {
 	return &Client{
-		models: make(map[string]*Model),
+		models: make(map[string]modelport.ChatModelPort),
 		infos:  make(map[string]ModelInfo),
 	}
 }
 
-func (c *Client) SetModel(modelName string, model *Model) {
+func (c *Client) SetModel(modelName string, model modelport.ChatModelPort) {
 	c.SetModelInfo(modelName, model, ModelInfo{
 		ID:        modelName,
 		Name:      modelName,
@@ -32,9 +31,9 @@ func (c *Client) SetModel(modelName string, model *Model) {
 	})
 }
 
-func (c *Client) SetModelInfo(modelName string, model *Model, info ModelInfo) {
+func (c *Client) SetModelInfo(modelName string, model modelport.ChatModelPort, info ModelInfo) {
 	if c.models == nil {
-		c.models = map[string]*Model{}
+		c.models = map[string]modelport.ChatModelPort{}
 	}
 	if c.infos == nil {
 		c.infos = map[string]ModelInfo{}
@@ -54,7 +53,7 @@ func (c *Client) SetModelInfo(modelName string, model *Model, info ModelInfo) {
 	c.infos[modelName] = info
 }
 
-func (c *Client) GetModel(name string) *Model {
+func (c *Client) GetModel(name string) modelport.ChatModelPort {
 	if c.models == nil {
 		return nil
 	}

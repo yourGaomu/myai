@@ -27,6 +27,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 集中定义所有只读远程请求，并统一处理 pending、超时和会话历史缓存协商。
 export function useRemoteRequests({
   clearAssets,
   clearFileEntries,
@@ -171,6 +172,7 @@ export function useRemoteRequests({
 
       startPending("sessions");
       pendingHistorySessionIDRef.current = targetSessionID;
+      // 先显示手机缓存，再发送 meta 判断是否需要增量或全量同步，减少长会话等待时间。
       void loadCachedSessionHistory(targetSessionID)
         .then(({ meta }) => {
           if (!sendEnvelope("session_history_delta", {

@@ -78,7 +78,7 @@ export function BottomDock({
           onSettingsPress={onSettingsPress}
         />
       ) : null}
-      {viewMode !== "settings" && viewMode !== "changeDetail" ? (
+      {viewMode !== "settings" && viewMode !== "changeDetail" && viewMode !== "plan" ? (
         <Composer
           attachedFiles={attachedFiles}
           buttonFeedback={buttonFeedback}

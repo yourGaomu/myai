@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import type { SkillSummary } from "../protocol";
 
+// 保存 Skill 列表、根目录和最近一次 reload 提示。
 export function useSkillState() {
   const [skillRoot, setSkillRoot] = useState("");
   const [skillMessage, setSkillMessage] = useState("");
@@ -23,4 +24,3 @@ export function useSkillState() {
     skills,
   };
 }
-

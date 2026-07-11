@@ -82,6 +82,7 @@ type Args = {
   setViewMode: (mode: ViewMode) => void;
 };
 
+// 将协议 DTO 归并到各页面状态；这里是远程数据到本地视图模型的统一映射入口。
 export function useRemoteResultAppliers({
   addEventMessage,
   appendMessages,

@@ -23,6 +23,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 会话和模型命令只发送请求，不直接改最终状态；结果统一由远程响应回填。
 export function useSessionModelActions({
   activeRequestIDRef,
   currentModelID,

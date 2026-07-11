@@ -12,11 +12,16 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	memoryauthorization "myai/core/adapter/authorization/memory"
 	"myai/core/remote/protocol"
 )
 
+func newTestServer() *Server {
+	return NewServer("", memoryauthorization.NewStore())
+}
+
 func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -60,7 +65,7 @@ func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
 }
 
 func TestRelayKeepsChatRequestOpenForIntermediateSkillReload(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -117,7 +122,7 @@ func TestRelayKeepsChatRequestOpenForIntermediateSkillReload(t *testing.T) {
 }
 
 func TestRelayForwardsSessionMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -211,6 +216,33 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 	forwardedPermissionToClient := readTestMessage(t, clientConn, protocol.TypeSessionPermissionSetResult)
 	if forwardedPermissionToClient.RequestID != "session-permission-1" {
 		t.Fatalf("expected request id session-permission-1, got %s", forwardedPermissionToClient.RequestID)
+	}
+
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionModeSet,
+		RequestID:   "session-mode-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+
+	forwardedModeToAgent := readTestMessage(t, agentConn, protocol.TypeSessionModeSet)
+	if forwardedModeToAgent.RequestID != "session-mode-1" {
+		t.Fatalf("expected request id session-mode-1, got %s", forwardedModeToAgent.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionModeSetResult,
+		RequestID: "session-mode-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	forwardedModeToClient := readTestMessage(t, clientConn, protocol.TypeSessionModeSetResult)
+	if forwardedModeToClient.RequestID != "session-mode-1" {
+		t.Fatalf("expected request id session-mode-1, got %s", forwardedModeToClient.RequestID)
 	}
 
 	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
@@ -323,7 +355,7 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 }
 
 func TestRelayForwardsModelMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -394,7 +426,7 @@ func TestRelayForwardsModelMessages(t *testing.T) {
 }
 
 func TestRelayForwardsSkillMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -465,7 +497,7 @@ func TestRelayForwardsSkillMessages(t *testing.T) {
 }
 
 func TestRelayForwardsFileMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -509,7 +541,7 @@ func TestRelayForwardsFileMessages(t *testing.T) {
 }
 
 func TestRelayForwardsChangeMessages(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -661,7 +693,7 @@ func TestRelayForwardsChangeMessages(t *testing.T) {
 }
 
 func TestRelayRejectsClientWithoutToken(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -694,7 +726,7 @@ func TestRelayRejectsClientWithoutToken(t *testing.T) {
 }
 
 func TestRelayPairsAgentByBindCode(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -716,7 +748,7 @@ func TestRelayPairsAgentByBindCode(t *testing.T) {
 }
 
 func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -746,7 +778,7 @@ func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
 }
 
 func TestRelayListsAndRevokesAuthorizations(t *testing.T) {
-	server := NewServer("")
+	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 

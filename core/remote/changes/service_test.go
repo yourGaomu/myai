@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 	"myai/core/remote/protocol"
 )
@@ -69,6 +71,10 @@ func TestListDiffAndRevertSnapshotChanges(t *testing.T) {
 	if string(content) != "package main\n" {
 		t.Fatalf("expected original content, got %q", string(content))
 	}
+}
+
+func newTestServiceWithHistoryPath(root string, historyPath string) (*Service, error) {
+	return NewWithStoreFactory(root, historyPath, sqlitehistory.Factory{})
 }
 
 func TestDiffNewFileDoesNotRequireGit(t *testing.T) {
@@ -136,7 +142,7 @@ func TestSQLiteBaselineSurvivesServiceRestart(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "history.db")
 	writeTestFile(t, root, "main.go", "package main\n")
 
-	service, err := NewWithHistoryPath(root, dbPath)
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
 	if err != nil {
 		t.Fatalf("new changes service failed: %v", err)
 	}
@@ -146,7 +152,7 @@ func TestSQLiteBaselineSurvivesServiceRestart(t *testing.T) {
 
 	writeTestFile(t, root, "main.go", "package main\n\nfunc main() {}\n")
 
-	restarted, err := NewWithHistoryPath(root, dbPath)
+	restarted, err := newTestServiceWithHistoryPath(root, dbPath)
 	if err != nil {
 		t.Fatalf("restart changes service failed: %v", err)
 	}
@@ -181,7 +187,7 @@ func TestHistoryListAndRevertCheckpoint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "history.db")
 	writeTestFile(t, root, "main.go", "package main\n")
 
-	service, err := NewWithHistoryPath(root, dbPath)
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
 	if err != nil {
 		t.Fatalf("new changes service failed: %v", err)
 	}
@@ -196,11 +202,11 @@ func TestHistoryListAndRevertCheckpoint(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("snapshot after failed: exists=%v err=%v", exists, err)
 	}
-	checkpointID, err := service.store.SaveCheckpoint(context.Background(), history.Checkpoint{
+	checkpointID, err := service.store.SaveCheckpoint(context.Background(), domainhistory.Checkpoint{
 		Workspace: service.root,
 		Title:     "edit_file main.go",
 		Reason:    "test",
-	}, []history.FileChange{{
+	}, []domainhistory.FileChange{{
 		Path:       "main.go",
 		ChangeType: "modified",
 		Before:     &before,
@@ -239,7 +245,7 @@ func TestHistoryDiffCheckpoint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "history.db")
 	writeTestFile(t, root, "main.go", "package main\n")
 
-	service, err := NewWithHistoryPath(root, dbPath)
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
 	if err != nil {
 		t.Fatalf("new changes service failed: %v", err)
 	}
@@ -254,11 +260,11 @@ func TestHistoryDiffCheckpoint(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("snapshot after failed: exists=%v err=%v", exists, err)
 	}
-	checkpointID, err := service.store.SaveCheckpoint(context.Background(), history.Checkpoint{
+	checkpointID, err := service.store.SaveCheckpoint(context.Background(), domainhistory.Checkpoint{
 		Workspace: service.root,
 		Title:     "edit_file main.go",
 		Reason:    "test",
-	}, []history.FileChange{{
+	}, []domainhistory.FileChange{{
 		Path:       "main.go",
 		ChangeType: "modified",
 		Before:     &before,
@@ -300,7 +306,7 @@ func TestDiffRejectsUnsafePath(t *testing.T) {
 func newTestService(t *testing.T, root string) *Service {
 	t.Helper()
 
-	service, err := NewWithHistoryPath(root, filepath.Join(t.TempDir(), "history.db"))
+	service, err := newTestServiceWithHistoryPath(root, filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
 		t.Fatalf("new changes service failed: %v", err)
 	}

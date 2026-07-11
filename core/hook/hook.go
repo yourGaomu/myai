@@ -68,6 +68,7 @@ type CommandHookConfig struct {
 }
 
 type Manager struct {
+	// Manager 允许多个 Hook 依次处理同一事件；读取时复制 handler 列表以缩短锁范围。
 	mu       sync.RWMutex
 	handlers []Handler
 }
@@ -135,6 +136,7 @@ func (m *Manager) handle(ctx context.Context, event Event) ([]Result, error) {
 }
 
 func aggregatePreToolUse(results []Result) Result {
+	// 决策优先级为 Deny > Ask > Allow > Continue，参数和消息采用最后一个非空结果。
 	final := Result{Decision: DecisionContinue}
 	for _, result := range results {
 		if strings.TrimSpace(result.Arguments) != "" {
@@ -214,6 +216,7 @@ func (h *CommandHook) HandleHook(ctx context.Context, event Event) (Result, erro
 		defer cancel()
 	}
 
+	// 事件 JSON 通过 stdin 传给外部命令；命令可用 JSON stdout 返回决策和重写参数。
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return Result{}, err

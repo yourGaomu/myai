@@ -3,15 +3,15 @@ package contextmgr
 import (
 	"testing"
 
-	"github.com/tmc/langchaingo/llms"
+	domainmessage "myai/core/domain/message"
 )
 
 func TestBuildSnapshotKeepsStableSummaryPrefix(t *testing.T) {
-	messages := []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeSystem, "system prompt"),
-		llms.TextParts(llms.ChatMessageTypeHuman, "old user message"),
-		llms.TextParts(llms.ChatMessageTypeAI, "old assistant message"),
-		llms.TextParts(llms.ChatMessageTypeHuman, "recent user message"),
+	messages := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system prompt"),
+		domainmessage.Text(domainmessage.RoleUser, "old user message"),
+		domainmessage.Text(domainmessage.RoleAssistant, "old assistant message"),
+		domainmessage.Text(domainmessage.RoleUser, "recent user message"),
 	}
 
 	first := BuildSnapshot(messages, "stable summary", 3, 16)

@@ -31,6 +31,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 统一处理远程 workspace 文件与手机本地上传文件，两者最终都转换成聊天附件。
 export function useFileActions({
   addErrorMessage,
   assetBaseURL,
@@ -123,6 +124,7 @@ export function useFileActions({
   }, [addErrorMessage, filePreview, setAttachedFiles, setViewMode]);
 
   const uploadLocalFile = useCallback(async () => {
+    // 手机文件先上传 Asset 服务，聊天消息只携带短链接元数据，避免大文件经过 WebSocket。
     startPending("upload");
     try {
       const result = await DocumentPicker.getDocumentAsync({

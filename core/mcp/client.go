@@ -21,6 +21,7 @@ import (
 const maxStdioMessageSize = 16 * 1024 * 1024
 
 type Client struct {
+	// Client 通过子进程 stdin/stdout 实现 JSON-RPC；pending 用请求 ID 关联并发响应。
 	config          ServerConfig
 	timeout         time.Duration
 	protocolVersion string
@@ -117,6 +118,7 @@ func NewClient(config ServerConfig) *Client {
 }
 
 func (c *Client) Start(ctx context.Context) error {
+	// 启动后必须先完成 MCP initialize 握手，成功后才能 list/call tools。
 	if c.config.Command == "" {
 		return errors.New("mcp command is empty")
 	}
@@ -236,6 +238,7 @@ func (c *Client) initialize(ctx context.Context) error {
 }
 
 func (c *Client) request(ctx context.Context, method string, params any, out any) error {
+	// 每个请求注册一次性响应通道；超时、进程退出和正常响应都会清理 pending。
 	ctx, cancel := c.contextWithTimeout(ctx)
 	defer cancel()
 

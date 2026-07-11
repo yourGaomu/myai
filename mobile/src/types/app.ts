@@ -7,8 +7,9 @@ export type PermissionState = {
 };
 
 export type SessionPermissionMode = "readonly" | "ask" | "full";
+export type SessionAgentMode = "chat" | "plan";
 
-export type ViewMode = "chat" | "files" | "changes" | "changeDetail" | "sessions" | "settings";
+export type ViewMode = "chat" | "files" | "changes" | "changeDetail" | "sessions" | "settings" | "plan";
 
 export type PendingAction =
   | "connect"
@@ -17,6 +18,7 @@ export type PendingAction =
   | "models"
   | "skills"
   | "settings"
+  | "plan"
   | "assets"
   | "files"
   | "changes"

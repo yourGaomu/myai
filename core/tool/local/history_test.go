@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 	"myai/core/sandbox"
 )
@@ -74,7 +76,7 @@ func TestTaskRecorderGroupsMultipleFileChanges(t *testing.T) {
 	}
 
 	store := newTestHistoryStore(t)
-	task := history.NewTaskRecorderWithStore(history.RecordOptions{
+	task := history.NewTaskRecorderWithStore(history.RecordCommand{
 		Title:     "implement feature",
 		Reason:    "user request",
 		SessionID: "session-1",
@@ -125,7 +127,7 @@ func TestTaskRecorderMergesRepeatedFileChanges(t *testing.T) {
 	root := t.TempDir()
 
 	store := newTestHistoryStore(t)
-	task := history.NewTaskRecorderWithStore(history.RecordOptions{
+	task := history.NewTaskRecorderWithStore(history.RecordCommand{
 		Title: "repeat file",
 	}, store)
 	defer task.Close()
@@ -189,7 +191,7 @@ func main() {
 	}
 
 	store := newTestHistoryStore(t)
-	task := history.NewTaskRecorderWithStore(history.RecordOptions{
+	task := history.NewTaskRecorderWithStore(history.RecordCommand{
 		Title: "run generator",
 	}, store)
 	defer task.Close()
@@ -231,10 +233,10 @@ func main() {
 	}
 }
 
-func newTestHistoryStore(t *testing.T) *history.SQLiteStore {
+func newTestHistoryStore(t *testing.T) *sqlitehistory.Store {
 	t.Helper()
 
-	store, err := history.OpenSQLite(filepath.Join(t.TempDir(), "history.db"))
+	store, err := sqlitehistory.Open(filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
 		t.Fatalf("open history store failed: %v", err)
 	}
@@ -246,7 +248,7 @@ func newTestHistoryStore(t *testing.T) *history.SQLiteStore {
 	return store
 }
 
-func newTestRecorder(t *testing.T, root string, store *history.SQLiteStore) *history.Recorder {
+func newTestRecorder(t *testing.T, root string, store *sqlitehistory.Store) *history.Recorder {
 	t.Helper()
 
 	recorder, err := history.NewRecorderWithStore(root, store)
@@ -256,12 +258,12 @@ func newTestRecorder(t *testing.T, root string, store *history.SQLiteStore) *his
 	return recorder
 }
 
-func assertCheckpointCount(t *testing.T, store *history.SQLiteStore, workspace string, expected int) {
+func assertCheckpointCount(t *testing.T, store *sqlitehistory.Store, workspace string, expected int) {
 	t.Helper()
 	assertCheckpointCountWithChanges(t, store, workspace, expected, 1)
 }
 
-func assertCheckpointCountWithChanges(t *testing.T, store *history.SQLiteStore, workspace string, expected int, expectedChanges int) {
+func assertCheckpointCountWithChanges(t *testing.T, store *sqlitehistory.Store, workspace string, expected int, expectedChanges int) {
 	t.Helper()
 
 	checkpoints, err := store.ListCheckpoints(context.Background(), absPath(t, workspace), 20)
@@ -286,7 +288,7 @@ func absPath(t *testing.T, path string) string {
 	return abs
 }
 
-func hasStoredChange(changes []history.StoredFileChange, path string, changeType string) bool {
+func hasStoredChange(changes []domainhistory.StoredFileChange, path string, changeType string) bool {
 	for _, change := range changes {
 		if change.Path == path && change.ChangeType == changeType {
 			return true

@@ -29,6 +29,7 @@ function chatSessionKey(sessionID: string) {
   return sessionID.trim() || localSessionID;
 }
 
+// 按 Session 隔离聊天运行态；Ref 保存大量消息，version 只负责通知 React 重新渲染。
 export function useChatMessages() {
   const sessionChatsRef = useRef<Record<string, SessionChatState>>({});
   const [sessionChatsVersion, setSessionChatsVersion] = useState(0);
@@ -117,6 +118,7 @@ export function useChatMessages() {
         return;
       }
 
+      // 同一 request 的多个 delta 复用一个 assistant 条目，避免流式输出产生大量消息气泡。
       updateSessionChat(sessionID, (current) => {
         const assistantID = findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {

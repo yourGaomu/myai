@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions
 
 import { ButtonContent } from "../common/ButtonContent";
 import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary, SkillSummary } from "../../protocol";
-import type { PendingAction, SessionPermissionMode } from "../../types/app";
+import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
@@ -30,8 +30,10 @@ type Props = {
   onConnect: () => void;
   onDeleteSession: (sessionID: string) => void;
   onDeviceIDChange: (value: string) => void;
+  onExecutePlan: () => void;
   onLoadSession: (sessionID: string) => void;
   onNewSession: () => void;
+  onOpenPlan: () => void;
   onPair: () => void;
   onRefreshModels: () => void;
   onRefreshSessions: () => void;
@@ -39,6 +41,7 @@ type Props = {
   onReloadSkills: () => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
+  onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
@@ -57,6 +60,10 @@ const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta:
   { label: "Read", mode: "readonly", meta: "no write/run" },
   { label: "Ask", mode: "ask", meta: "confirm tools" },
   { label: "Full", mode: "full", meta: "auto allow" },
+];
+const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }> = [
+  { label: "Chat", mode: "chat", meta: "normal execution" },
+  { label: "Plan", mode: "plan", meta: "read-only planning" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
 type SettingsSection = "general" | "connection" | "model" | "skill" | "session" | "permission" | "context";
@@ -91,8 +98,10 @@ export function SettingsPanel({
   onConnect,
   onDeleteSession,
   onDeviceIDChange,
+  onExecutePlan,
   onLoadSession,
   onNewSession,
+  onOpenPlan,
   onPair,
   onRefreshModels,
   onRefreshSessions,
@@ -100,6 +109,7 @@ export function SettingsPanel({
   onReloadSkills,
   onAssetBaseURLChange,
   onRelayURLChange,
+  onSetAgentMode,
   onSetContextWindowK,
   onSetPermissionMode,
   onSwitchModel,
@@ -115,6 +125,8 @@ export function SettingsPanel({
 }: Props) {
   const { width } = useWindowDimensions();
   const activePermission = normalizePermissionMode(activeSession?.permission_mode);
+  const activeAgentMode = normalizeAgentMode(activeSession?.agent_mode);
+  const activePlan = activeSession?.current_plan;
   const currentWindowK = context?.window_k || activeSession?.context_window_k || 16;
   const [windowInput, setWindowInput] = useState(String(currentWindowK));
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
@@ -124,6 +136,7 @@ export function SettingsPanel({
   }, [currentWindowK]);
 
   const settingsBusy = pendingActions.settings;
+  const planBusy = pendingActions.plan;
   const canUseSessionSettings = Boolean(clientToken && sessionID);
   const wideLayout = width >= 760;
   const activeSectionMeta = settingSections.find((section) => section.key === activeSection);
@@ -355,7 +368,7 @@ export function SettingsPanel({
             <View style={styles.flex}>
               <Text style={styles.currentSessionText}>{shortID(sessionID)}</Text>
               <Text style={styles.currentSessionMeta}>
-                {activeSession?.model || "model"} / {activePermission} / {activeSession?.context_window_k || currentWindowK}K
+                {activeSession?.model || "model"} / {activeAgentMode} / {activePermission} / {activeSession?.context_window_k || currentWindowK}K
                 {activeSession?.usage?.total_tokens !== undefined ? ` / ${activeSession.usage.total_tokens} tokens` : ""}
               </Text>
             </View>
@@ -367,6 +380,64 @@ export function SettingsPanel({
               <Text style={styles.deleteButtonText}>删除</Text>
             </Pressable>
           </View>
+          <View style={styles.modeRow}>
+            {agentModes.map((item) => {
+              const selected = activeAgentMode === item.mode;
+              return (
+                <Pressable
+                  disabled={!canUseSessionSettings || settingsBusy || selected}
+                  key={item.mode}
+                  onPress={() => onSetAgentMode(item.mode)}
+                  style={({ pressed }) =>
+                    buttonFeedback([styles.modeChip, selected && styles.modeChipActive, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)
+                  }
+                >
+                  <Text style={styles.modeChipTitle}>{item.label}</Text>
+                  <Text style={styles.modeChipMeta}>{item.meta}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {settingsBusy ? (
+            <View style={styles.sessionBusyRow}>
+              <ButtonContent loading text="正在切换会话模式" />
+            </View>
+          ) : null}
+          {activePlan ? (
+            <View style={styles.planSummaryBox}>
+              <View style={styles.planSummaryHeader}>
+                <View style={styles.flex}>
+                  <Text numberOfLines={1} style={styles.planSummaryTitle}>
+                    Plan / {activePlan.status || "draft"} / {activePlan.steps?.length || 0} steps
+                  </Text>
+                  <Text numberOfLines={2} style={styles.planSummaryMeta}>
+                    {activePlan.goal || activePlan.steps?.[0]?.title || "Structured plan is ready"}
+                  </Text>
+                </View>
+                <View style={styles.planActionRow}>
+                  <Pressable
+                    disabled={!canUseSessionSettings}
+                    onPress={onOpenPlan}
+                    style={({ pressed }) => buttonFeedback([styles.planSmallButton, !canUseSessionSettings && styles.disabledButton], pressed)}
+                  >
+                    <Text style={styles.planSmallButtonText}>View</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={!canUseSessionSettings || planBusy || settingsBusy || activePlan.status === "done"}
+                    onPress={onExecutePlan}
+                    style={({ pressed }) =>
+                      buttonFeedback(
+                        [styles.planExecuteButton, (!canUseSessionSettings || planBusy || settingsBusy || activePlan.status === "done") && styles.disabledButton],
+                        pressed,
+                      )
+                    }
+                  >
+                    <ButtonContent loading={planBusy} text={activePlan.status === "running" ? "执行中" : "执行"} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -386,7 +457,7 @@ export function SettingsPanel({
               >
                 <Text numberOfLines={1} style={styles.sessionTitle}>{session.title || "New chat"}</Text>
                 <Text numberOfLines={1} style={styles.sessionMeta}>
-                  {shortID(session.id)} / {session.permission_mode || "ask"} / {session.context_window_k || 16}K
+                  {shortID(session.id)} / {session.agent_mode || "chat"} / {session.permission_mode || "ask"} / {session.context_window_k || 16}K
                 </Text>
               </Pressable>
               <Pressable
@@ -698,6 +769,13 @@ function normalizePermissionMode(mode?: string): SessionPermissionMode {
     return mode;
   }
   return "ask";
+}
+
+function normalizeAgentMode(mode?: string): SessionAgentMode {
+  if (mode === "plan") {
+    return "plan";
+  }
+  return "chat";
 }
 
 function permissionHelp(mode: SessionPermissionMode) {
@@ -1292,6 +1370,90 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     justifyContent: "space-between",
+  },
+  modeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  modeChip: {
+    backgroundColor: "#f5eefc",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    flexGrow: 1,
+    minWidth: 120,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  modeChipActive: {
+    backgroundColor: "#ffd84f",
+  },
+  modeChipTitle: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  modeChipMeta: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  planSummaryBox: {
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  planSummaryHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  planSummaryTitle: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  planSummaryMeta: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  planActionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  planSmallButton: {
+    backgroundColor: "#f5eefc",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    minWidth: 56,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  planSmallButtonText: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  planExecuteButton: {
+    minWidth: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  sessionBusyRow: {
+    marginTop: 8,
   },
   currentSessionText: {
     color: "#12100e",

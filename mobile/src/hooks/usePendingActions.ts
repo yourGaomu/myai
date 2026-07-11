@@ -9,6 +9,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   models: false,
   skills: false,
   settings: false,
+  plan: false,
   assets: false,
   files: false,
   changes: false,
@@ -19,6 +20,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   pause: false,
 };
 
+// 各功能独立维护 pending，避免一个慢请求错误地锁住所有无关页面操作。
 export function usePendingActions() {
   const [pendingActions, setPendingActions] = useState<Record<PendingAction, boolean>>(initialPendingActions);
 

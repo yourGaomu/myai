@@ -5,8 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/tmc/langchaingo/llms"
-
+	modelport "myai/core/port/model"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -168,13 +167,13 @@ func sortedSourceNames(sources map[string]map[string]tooldef.Tool, excluded map[
 	return sourceNames
 }
 
-func (rt *RegisterTools) LLMTools() []llms.Tool {
+func (rt *RegisterTools) LLMTools() []modelport.Tool {
 	return rt.LLMToolsByPermission(nil)
 }
 
-func (rt *RegisterTools) LLMToolsByPermission(allow func(tooldef.Permission) bool) []llms.Tool {
+func (rt *RegisterTools) LLMToolsByPermission(allow func(tooldef.Permission) bool) []modelport.Tool {
 	registered := rt.List()
-	tools := make([]llms.Tool, 0, len(registered))
+	tools := make([]modelport.Tool, 0, len(registered))
 
 	for _, t := range registered {
 		permission := tooldef.NormalizePermission(t.Permission())
@@ -187,10 +186,10 @@ func (rt *RegisterTools) LLMToolsByPermission(allow func(tooldef.Permission) boo
 	return tools
 }
 
-func llmToolFromRegistered(t tooldef.Tool) llms.Tool {
-	return llms.Tool{
+func llmToolFromRegistered(t tooldef.Tool) modelport.Tool {
+	return modelport.Tool{
 		Type: "function",
-		Function: &llms.FunctionDefinition{
+		Function: &modelport.FunctionDefinition{
 			Name:        t.Name(),
 			Description: t.Description(),
 			Parameters:  t.Schema(),

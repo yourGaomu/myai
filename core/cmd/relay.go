@@ -2,16 +2,17 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	memoryauthorization "myai/core/adapter/authorization/memory"
+	mongoauthorization "myai/core/adapter/persistence/mongo/authorization"
+	appconfig "myai/core/config"
 	"myai/core/infra"
 	"myai/core/remote/relay"
 )
@@ -28,7 +29,8 @@ var relayCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
-		server := relay.NewServer(relayAddr)
+		// Relay 默认使用内存授权；配置 Mongo 后替换为持久化授权仓库。
+		server := relay.NewServer(relayAddr, memoryauthorization.NewStore())
 		mongoClient, err := configureRelayAuthStore(ctx, server)
 		if err != nil {
 			return err
@@ -53,18 +55,16 @@ func init() {
 }
 
 func configureRelayAuthStore(ctx context.Context, server *relay.Server) (*mongo.Client, error) {
-	config := viper.New()
-	config.SetConfigFile(relayConfigFile)
-	if err := config.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if errors.As(err, &notFound) || os.IsNotExist(err) {
-			return nil, nil
-		}
+	properties, found, err := (appconfig.ViperLoader{ConfigFile: relayConfigFile}).LoadOptional("")
+	if err != nil {
 		return nil, err
 	}
+	if !found {
+		return nil, nil
+	}
 
-	uri := config.GetString("mongo.uri")
-	database := config.GetString("mongo.database")
+	uri := properties.Mongo.URI
+	database := properties.Mongo.Database
 	if uri == "" || database == "" {
 		return nil, nil
 	}
@@ -77,6 +77,6 @@ func configureRelayAuthStore(ctx context.Context, server *relay.Server) (*mongo.
 		return nil, err
 	}
 
-	server.SetAuthStore(relay.NewMongoAuthStore(client, database))
+	server.SetAuthStore(mongoauthorization.New(client, database))
 	return client, nil
 }

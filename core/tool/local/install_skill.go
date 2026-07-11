@@ -121,6 +121,7 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 		Registry:  t.registry,
 		Runner:    t.runner,
 	})
+	// 先解析唯一 Skill 候选再安装，安装完成后立即 reload，使下一轮 Prompt 可以匹配新 Skill。
 	target, candidates, err := client.ResolveSkill(ctx, input.Name)
 	if err != nil {
 		return "", err

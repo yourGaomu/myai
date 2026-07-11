@@ -83,6 +83,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 所有服务端协议消息都在这里收口：先按 request_id 找到目标 Session，再更新对应领域状态。
 export function useRemoteMessageHandler({
   activeRequestIDRef,
   addErrorMessage,
@@ -135,6 +136,7 @@ export function useRemoteMessageHandler({
 }: Args) {
   return useCallback(
     (message: RelayMessage) => {
+      // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
       switch (message.type) {
         case "heartbeat":
           setStatus(message.request_id ? `Ack ${shortID(message.request_id)}` : "Connected");
@@ -261,9 +263,21 @@ export function useRemoteMessageHandler({
           break;
         }
         case "session_permission_set_result":
+        case "session_mode_set_result":
         case "session_context_set_result":
         case "session_compact_result":
+          // 设置以服务端返回的 Session 为准，并重新拉取列表，避免本地乐观状态与持久层不一致。
           stopPending("settings");
+          applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
+          requestSessions();
+          break;
+        case "session_plan_update":
+          // Plan 执行中间态只更新当前 Session，不结束 pending，后续还会继续收到步骤状态。
+          applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
+          break;
+        case "session_plan_execute_result":
+          // 只有 execute_result 才表示整个计划结束，可以释放 Plan 按钮和会话运行状态。
+          stopPending("plan");
           applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
           requestSessions();
           break;
@@ -353,6 +367,7 @@ export function useRemoteMessageHandler({
           stopPending("diff");
           stopPending("revert");
           stopPending("settings");
+          stopPending("plan");
           stopPending("pause");
           if (!message.request_id || activeRequestIDRef.current === message.request_id) {
             activeRequestIDRef.current = "";

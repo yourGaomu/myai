@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary } from "../protocol";
 
+// 统一保存 Session、模型、上下文和压缩结果，服务端 SessionSummary 是主要数据来源。
 export function useSessionModelState() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);

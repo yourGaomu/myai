@@ -87,6 +87,7 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (string,
 		return "", err
 	}
 
+	// 下载与内容解析分离：Asset Client 处理短链接，parser 根据文件类型提取可供模型阅读的文本。
 	download, err := t.downloader.DownloadAsset(ctx, asset.DownloadAssetRequest{
 		URL:      input.URL,
 		Code:     input.Code,

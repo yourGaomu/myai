@@ -3,6 +3,7 @@ import { ChangesPanel } from "../components/changes/ChangesPanel";
 import { ChatPanel } from "../components/chat/ChatPanel";
 import { FilesPanel } from "../components/files/FilesPanel";
 import { PermissionPrompt } from "../components/permissions/PermissionPrompt";
+import { PlanPanel } from "../components/plan/PlanPanel";
 import { SettingsPanel } from "../components/settings/SettingsPanel";
 import { SessionsPanel } from "../components/sessions/SessionsPanel";
 import type { MobileMainContentProps } from "./mobileContentProps";
@@ -13,6 +14,7 @@ export function MobileMainContent({
   common,
   files,
   permission,
+  plan,
   sessions,
   settings,
 }: MobileMainContentProps) {
@@ -42,12 +44,15 @@ export function MobileMainContent({
           onNewSession={settings.onNewSession}
           onPair={settings.onPair}
           onCompactSession={settings.onCompactSession}
+          onExecutePlan={settings.onExecutePlan}
+          onOpenPlan={settings.onOpenPlan}
           onRefreshModels={settings.onRefreshModels}
           onRefreshSessions={settings.onRefreshSessions}
           onRefreshSkills={settings.onRefreshSkills}
           onReloadSkills={settings.onReloadSkills}
           onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}
+          onSetAgentMode={settings.onSetAgentMode}
           onSetContextWindowK={settings.onSetContextWindowK}
           onSetPermissionMode={settings.onSetPermissionMode}
           onSwitchModel={settings.onSwitchModel}
@@ -72,6 +77,18 @@ export function MobileMainContent({
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
           showAssistantLoading={Boolean(chat.pendingRequestID) && !chat.activeAssistantID}
+        />
+      ) : null}
+
+      {common.viewMode === "plan" ? (
+        <PlanPanel
+          activeSession={plan.activeSession}
+          buttonFeedback={common.buttonFeedback}
+          clientToken={common.clientToken}
+          onExecutePlan={plan.onExecutePlan}
+          onOpenChat={plan.onOpenChat}
+          pendingPlan={common.pendingActions.plan}
+          sessionID={plan.sessionID}
         />
       ) : null}
 

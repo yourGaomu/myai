@@ -28,6 +28,7 @@ const webHistoryCachePrefix = "myai:session_history:";
 let dbPromise: Promise<SQLiteDatabase> | null = null;
 let sqlitePromise: Promise<SQLiteModule> | null = null;
 
+// 原生端使用 SQLite，Web 端退化为 AsyncStorage；两端对上层提供相同缓存语义。
 export async function loadCachedSessionHistory(sessionID: string) {
   const id = sessionID.trim();
   if (!id) {
@@ -138,6 +139,7 @@ async function database() {
   if (useWebStorageCache()) {
     throw new Error("SQLite history cache is disabled on web");
   }
+  // 数据库 Promise 单例化，多个会话同时加载时只执行一次建表和 WAL 初始化。
   if (!dbPromise) {
     dbPromise = loadSQLite().then(async (SQLite) => {
       const db = await SQLite.openDatabaseAsync("myai_session_history.db");

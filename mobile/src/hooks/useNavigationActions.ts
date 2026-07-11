@@ -13,6 +13,7 @@ type Args = {
   setViewMode: (updater: ViewMode | ((current: ViewMode) => ViewMode)) => void;
 };
 
+// 导航动作在切换页面前触发对应远程刷新，保证进入页面时数据已开始加载。
 export function useNavigationActions({
   fileEntriesCount,
   filePath,
@@ -39,6 +40,7 @@ export function useNavigationActions({
     setViewMode("sessions");
     requestSessions();
   }, [requestSessions, setViewMode]);
+  const openPlan = useCallback(() => setViewMode("plan"), [setViewMode]);
   const toggleSettings = useCallback(() => {
     setViewMode((value) => (value === "settings" ? "chat" : "settings"));
   }, [setViewMode]);
@@ -54,6 +56,7 @@ export function useNavigationActions({
     openChanges,
     openChat,
     openFiles,
+    openPlan,
     openSessions,
     selectSession,
     toggleSettings,

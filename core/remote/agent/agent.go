@@ -7,51 +7,32 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
-	"myai/core/llm"
-	"myai/core/remote/changes"
-	"myai/core/remote/files"
 	"myai/core/remote/protocol"
-	"myai/core/service"
-	"myai/core/skill"
-	"myai/core/store/data"
 )
 
-type Config struct {
-	ServerURL   string
-	UserID      string
-	DeviceID    string
-	BindingCode string
-	Workspace   string
-}
-
 type Agent struct {
+	// Agent 是手机请求在电脑端的传输适配器，业务能力通过窄 Facade 接口注入。
 	config            Config
-	chatService       *service.ChatService
-	fileService       *files.Service
-	changeService     *changes.Service
+	chatService       ChatFacade
+	fileService       WorkspaceFileFacade
+	changeService     WorkspaceChangeFacade
 	runtimes          *sessionRuntimeManager
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
-	permissionMu      sync.Mutex
-	permissions       map[string]chan bool
+	permissionWaiters *permissionWaiterRegistry
 	permissionTimeout time.Duration
-	fileServiceErr    error
-	changeServiceErr  error
 }
 
-func New(config Config, chatService *service.ChatService) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
-	fileService, err := files.New(config.Workspace)
-	changeService, changeErr := changes.New(config.Workspace)
 
 	return &Agent{
 		config:            config,
@@ -59,88 +40,9 @@ func New(config Config, chatService *service.ChatService) *Agent {
 		fileService:       fileService,
 		changeService:     changeService,
 		runtimes:          newSessionRuntimeManager(),
-		permissions:       make(map[string]chan bool),
+		permissionWaiters: newPermissionWaiterRegistry(),
 		permissionTimeout: 60 * time.Second,
-		fileServiceErr:    err,
-		changeServiceErr:  changeErr,
 	}
-}
-
-type sessionRuntime struct {
-	mu       sync.Mutex
-	cancelMu sync.Mutex
-	cancel   context.CancelFunc
-}
-
-type sessionRuntimeManager struct {
-	mu       sync.Mutex
-	sessions map[string]*sessionRuntime
-}
-
-func newSessionRuntimeManager() *sessionRuntimeManager {
-	return &sessionRuntimeManager{
-		sessions: make(map[string]*sessionRuntime),
-	}
-}
-
-func (m *sessionRuntimeManager) get(sessionID string) *sessionRuntime {
-	if sessionID == "" {
-		sessionID = "__default__"
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	runtime := m.sessions[sessionID]
-	if runtime == nil {
-		runtime = &sessionRuntime{}
-		m.sessions[sessionID] = runtime
-	}
-	return runtime
-}
-
-func (r *sessionRuntime) start(parent context.Context) (context.Context, context.CancelFunc, bool) {
-	if r == nil {
-		return parent, func() {}, false
-	}
-	ctx, cancel := context.WithCancel(parent)
-
-	r.cancelMu.Lock()
-	if r.cancel != nil {
-		r.cancelMu.Unlock()
-		cancel()
-		return ctx, cancel, false
-	}
-	r.cancel = cancel
-	r.cancelMu.Unlock()
-
-	return ctx, cancel, true
-}
-
-func (r *sessionRuntime) finish(cancel context.CancelFunc) {
-	if r == nil || cancel == nil {
-		return
-	}
-	r.cancelMu.Lock()
-	if r.cancel != nil {
-		r.cancel = nil
-	}
-	r.cancelMu.Unlock()
-	cancel()
-}
-
-func (r *sessionRuntime) pause() bool {
-	if r == nil {
-		return false
-	}
-	r.cancelMu.Lock()
-	cancel := r.cancel
-	r.cancelMu.Unlock()
-	if cancel == nil {
-		return false
-	}
-	cancel()
-	return true
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -156,11 +58,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.chatService == nil {
 		return fmt.Errorf("chat service is nil")
 	}
-	if a.fileServiceErr != nil {
-		return fmt.Errorf("file workspace is invalid: %w", a.fileServiceErr)
+	if a.fileService == nil {
+		return fmt.Errorf("file service is nil")
 	}
-	if a.changeServiceErr != nil {
-		return fmt.Errorf("change workspace is invalid: %w", a.changeServiceErr)
+	if a.changeService == nil {
+		return fmt.Errorf("change service is nil")
 	}
 	defer a.changeService.Close()
 
@@ -171,6 +73,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	fmt.Println("binding code:", a.config.BindingCode)
 	fmt.Println("workspace:", a.fileService.Root())
 
+	// Agent 主动连接 Relay，适合电脑位于 NAT 或内网中的场景。
 	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, nil)
 	if err != nil {
 		if response != nil {
@@ -258,6 +161,7 @@ func (a *Agent) writeRemoteMessage(conn *websocket.Conn, messageType protocol.Me
 }
 
 func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	// 这里只做协议分发；handler 负责 DTO 映射，真正业务继续委托给 ChatFacade。
 	switch message.Type {
 	case protocol.TypeUserMessage:
 		go a.processUserMessage(ctx, conn, message)
@@ -283,6 +187,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionHistoryDelta(ctx, conn, message)
 	case protocol.TypeSessionPermissionSet:
 		return a.handleSessionPermissionSet(ctx, conn, message)
+	case protocol.TypeSessionModeSet:
+		return a.handleSessionModeSet(ctx, conn, message)
+	case protocol.TypeSessionPlanExecute:
+		go a.processPlanExecuteMessage(ctx, conn, message)
 	case protocol.TypeSessionContextSet:
 		return a.handleSessionContextSet(ctx, conn, message)
 	case protocol.TypeSessionCompact:
@@ -327,6 +235,7 @@ func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, me
 	if sessionID == "" {
 		sessionID = a.chatService.CurrentSessionID()
 	}
+	// 同一 Session 串行执行，避免两次生成同时追加消息或覆盖 Plan；不同 Session 可并行。
 	runtime := a.runtimes.get(sessionID)
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
@@ -384,1043 +293,52 @@ func (a *Agent) processRegenerateMessage(ctx context.Context, conn *websocket.Co
 	}
 }
 
-func (a *Agent) handlePermissionResult(message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.PermissionResultPayload](message)
+func (a *Agent) processPlanExecuteMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) {
+	payload, err := protocol.DecodePayload[protocol.SessionPlanExecutePayload](message)
 	if err != nil {
-		return fmt.Errorf("decode permission result failed: %w", err)
-	}
-
-	a.permissionMu.Lock()
-	ch := a.permissions[message.RequestID]
-	a.permissionMu.Unlock()
-	if ch == nil {
-		return nil
-	}
-
-	select {
-	case ch <- payload.Allowed:
-	default:
-	}
-	return nil
-}
-
-func (a *Agent) handleSessionList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	request, err := protocol.DecodePayload[protocol.SessionListPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session list failed: %w", err)
-	}
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	payload, err := a.sessionListPayload(ctx, request.IncludeDeleted)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionListResult, message.RequestID, payload.CurrentSessionID, payload)
-}
-
-func (a *Agent) handleSessionNew(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.NewSession(ctx); err != nil {
-		return err
-	}
-	return a.writeSessionChanged(ctx, conn, message.RequestID)
-}
-
-func (a *Agent) handleSessionLoad(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionLoadPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session load failed: %w", err)
-	}
-	sessionID := payload.SessionID
-	if sessionID == "" {
-		sessionID = message.SessionID
-	}
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.LoadSession(ctx, sessionID); err != nil {
-		return err
-	}
-	return a.writeSessionChanged(ctx, conn, message.RequestID)
-}
-
-func (a *Agent) handleSessionDelete(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionDeletePayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session delete failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.DeleteSession(ctx, sessionID); err != nil {
-		return err
-	}
-	payloadResult, err := a.sessionChangedPayload(ctx)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionDeleteResult, message.RequestID, payloadResult.CurrentSessionID, payloadResult)
-}
-
-func (a *Agent) handleSessionRestore(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionRestorePayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session restore failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, "")
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.RestoreSession(ctx, sessionID); err != nil {
-		return err
-	}
-	payloadResult, err := a.sessionChangedPayload(ctx)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionRestoreResult, message.RequestID, payloadResult.CurrentSessionID, payloadResult)
-}
-
-func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionHistoryPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session history failed: %w", err)
-	}
-	sessionID := payload.SessionID
-	if sessionID == "" {
-		sessionID = message.SessionID
-	}
-	if sessionID == "" {
-		sessionID = a.chatService.CurrentSessionID()
-	}
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	records, err := a.chatService.ListSessionMessages(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	payloadResult := protocol.SessionHistoryResultPayload{
-		SessionID: sessionID,
-		Messages:  sessionHistoryMessages(records),
-		Count:     len(records),
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryResult, message.RequestID, sessionID, payloadResult)
-}
-
-func (a *Agent) handleSessionHistoryMeta(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionHistoryMetaPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session history meta failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	meta, err := a.chatService.SessionHistoryMeta(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	upToDate := localHistoryUpToDate(payload, meta)
-	result := protocol.SessionHistoryMetaResultPayload{
-		SessionID:            sessionID,
-		MessageCount:         meta.MessageCount,
-		LastMessageID:        meta.LastMessageID,
-		LastMessageCreatedAt: meta.LastMessageCreatedAt,
-		HistoryVersion:       meta.HistoryVersion,
-		UpToDate:             upToDate,
-		CanDelta:             !upToDate && strings.TrimSpace(payload.LocalLastMessageID) != "" && int64(payload.LocalMessageCount) <= meta.MessageCount,
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryMetaResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) handleSessionHistoryDelta(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionHistoryDeltaPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session history delta failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	records, fullSyncRequired, err := a.chatService.ListSessionMessagesAfter(ctx, sessionID, payload.AfterMessageID, payload.Limit)
-	if err != nil {
-		return err
-	}
-
-	result := protocol.SessionHistoryDeltaResultPayload{
-		SessionID:        sessionID,
-		Messages:         sessionHistoryMessages(records),
-		Count:            len(records),
-		FullSyncRequired: fullSyncRequired,
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryDeltaResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload := a.modelListPayload()
-	return a.writeRemoteMessage(conn, protocol.TypeModelListResult, message.RequestID, message.SessionID, payload)
-}
-
-func (a *Agent) handleSkillList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	if _, err := protocol.DecodePayload[protocol.SkillListPayload](message); err != nil {
-		return fmt.Errorf("decode skill list failed: %w", err)
-	}
-
-	payload, err := a.skillListPayload(ctx, false)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSkillListResult, message.RequestID, message.SessionID, payload)
-}
-
-func (a *Agent) handleSkillReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	if _, err := protocol.DecodePayload[protocol.SkillReloadPayload](message); err != nil {
-		return fmt.Errorf("decode skill reload failed: %w", err)
-	}
-
-	payload, err := a.skillListPayload(ctx, true)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSkillReloadResult, message.RequestID, message.SessionID, payload)
-}
-
-func (a *Agent) handleAssetList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.AssetListPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode asset list failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	records, err := a.chatService.ListAssets(ctx, sessionID, payload.Limit)
-	if err != nil {
-		return err
-	}
-	result := protocol.AssetListResultPayload{
-		SessionID: sessionID,
-		Assets:    assetSummaries(records),
-		Count:     len(records),
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeAssetListResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
-	list, err := a.sessionListPayload(ctx, false)
-	if err != nil {
-		return protocol.SessionSettingsResultPayload{}, err
-	}
-
-	current := findSessionSummary(list.Sessions, sessionID)
-	if current.ID == "" {
-		current = protocol.SessionSummary{
-			ID:             sessionID,
-			Model:          a.chatService.CurrentModelID(),
-			PermissionMode: string(a.chatService.CurrentPermissionMode()),
-			ContextWindowK: a.chatService.CurrentContextWindowK(),
-			Usage:          tokenUsagePayloadPtr(a.chatService.CurrentUsage()),
-			LastUsage:      tokenUsagePayloadPtr(a.chatService.CurrentLastUsage()),
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: fmt.Sprintf("decode session plan execute failed: %v", err)}); writeErr != nil {
+			log.Printf("send remote plan execute decode error failed: %v", writeErr)
 		}
+		return
 	}
 
-	if current.ID != "" {
-		if session, err := a.chatService.ContextInfoForSession(ctx, current.ID); err == nil {
-			info = session
-		}
-	}
-
-	return protocol.SessionSettingsResultPayload{
-		CurrentSessionID: list.CurrentSessionID,
-		Session:          current,
-		Sessions:         list.Sessions,
-		Context:          contextInfoPayload(info),
-		Message:          message,
-	}, nil
-}
-
-func (a *Agent) handleSessionPermissionSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionPermissionSetPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session permission set failed: %w", err)
-	}
 	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
 	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: "session id is empty"}); writeErr != nil {
+			log.Printf("send remote plan execute session error failed: %v", writeErr)
+		}
+		return
 	}
 
+	// Plan 执行复用同一运行时锁与取消上下文，因此手机“暂停”可以中断当前步骤。
 	runtime := a.runtimes.get(sessionID)
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.SetPermissionModeForSession(ctx, sessionID, payload.Mode); err != nil {
-		return err
-	}
-	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	result, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Permission mode set to %s.", payload.Mode))
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionPermissionSetResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) handleSessionContextSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionContextSetPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session context set failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.SetContextWindowKForSession(ctx, sessionID, payload.WindowK); err != nil {
-		return err
-	}
-	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	result, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Context window set to %dK.", payload.WindowK))
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionContextSetResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) handleSessionCompact(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionCompactPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session compact failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	info, err := a.chatService.CompactSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	result, err := a.sessionSettingsPayload(ctx, sessionID, info, "Context compacted.")
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionCompactResult, message.RequestID, sessionID, result)
-}
-
-func (a *Agent) handleSessionPause(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.SessionPausePayload](message)
-	if err != nil {
-		return fmt.Errorf("decode session pause failed: %w", err)
-	}
-	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	paused := a.runtimes.get(sessionID).pause()
-	text := "No running task for this session."
-	if paused {
-		text = "Session task paused."
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionPauseResult, message.RequestID, sessionID, protocol.SessionPauseResultPayload{
-		SessionID: sessionID,
-		Paused:    paused,
-		Message:   text,
-	})
-}
-
-func (a *Agent) handleModelSwitch(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.ModelSwitchPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode model switch failed: %w", err)
-	}
-	sessionID := resolveSessionID("", message.SessionID, a.chatService.CurrentSessionID())
-	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
-
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
-
-	if err := a.chatService.SwitchModelForSession(ctx, sessionID, payload.ModelID); err != nil {
-		return err
-	}
-
-	info, _ := a.chatService.ContextInfoForSession(ctx, sessionID)
-	sessionPayload, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("Switched model to %s.", payload.ModelID))
-	if err != nil {
-		return err
-	}
-	result := protocol.ModelSwitchResultPayload{
-		CurrentModelID: payload.ModelID,
-		Models:         modelSummaries(a.chatService.ListModels()),
-		Session:        sessionPayload.Session,
-		Message:        sessionPayload.Message,
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeModelSwitchResult, message.RequestID, sessionID, result)
-}
-
-func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
-	return protocol.ContextInfo{
-		WindowK:           info.WindowK,
-		FullTokens:        info.FullTokens,
-		SelectedTokens:    info.SelectedTokens,
-		SummaryTokens:     info.SummaryTokens,
-		PrefixTokens:      info.PrefixTokens,
-		CacheableTokens:   info.CacheableTokens,
-		FullMessages:      info.FullMessages,
-		SelectedMessages:  info.SelectedMessages,
-		CompactedMessages: info.CompactedMessages,
-		HasSummary:        info.HasSummary,
-		Truncated:         info.Truncated,
-		SummaryVersion:    info.SummaryVersion,
-		SummaryHash:       info.SummaryHash,
-		PrefixHash:        info.PrefixHash,
-	}
-}
-
-func compactInfoPayload(info service.CompactInfo) protocol.CompactInfo {
-	return protocol.CompactInfo{
-		Triggered:         info.Triggered,
-		Reason:            info.Reason,
-		BeforeTokens:      info.BeforeTokens,
-		AfterTokens:       info.AfterTokens,
-		NewMessages:       info.NewMessages,
-		CompactedMessages: info.CompactedMessages,
-		SummaryTokens:     info.SummaryTokens,
-		SummaryVersion:    info.SummaryVersion,
-		SummaryHash:       info.SummaryHash,
-		PrefixHash:        info.PrefixHash,
-		CacheableTokens:   info.CacheableTokens,
-	}
-}
-
-func resolveSessionID(payloadSessionID string, messageSessionID string, currentSessionID string) string {
-	sessionID := strings.TrimSpace(payloadSessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(messageSessionID)
-	}
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(currentSessionID)
-	}
-	return sessionID
-}
-
-func (a *Agent) handleFileList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.FileListPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode file list failed: %w", err)
-	}
-
-	result, err := a.fileService.List(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeFileListResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleFileRead(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.FileReadPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode file read failed: %w", err)
-	}
-
-	result, err := a.fileService.Read(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeFileReadResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleChangesList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.ChangesListPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode changes list failed: %w", err)
-	}
-
-	result, err := a.changeService.List(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeChangesListResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleChangeDiff(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.ChangeDiffPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode change diff failed: %w", err)
-	}
-
-	result, err := a.changeService.Diff(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeChangeDiffResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleChangeRevert(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.ChangeRevertPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode change revert failed: %w", err)
-	}
-
-	result, err := a.changeService.Revert(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeChangeRevertResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleHistoryList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.HistoryListPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode history list failed: %w", err)
-	}
-
-	result, err := a.changeService.History(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeHistoryListResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleHistoryDiff(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.HistoryDiffPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode history diff failed: %w", err)
-	}
-
-	result, err := a.changeService.HistoryDiff(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeHistoryDiffResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) handleHistoryRevert(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.HistoryRevertPayload](message)
-	if err != nil {
-		return fmt.Errorf("decode history revert failed: %w", err)
-	}
-
-	result, err := a.changeService.RevertCheckpoint(ctx, payload)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeHistoryRevertResult, message.RequestID, message.SessionID, result)
-}
-
-func (a *Agent) writeSessionChanged(ctx context.Context, conn *websocket.Conn, requestID string) error {
-	payload, err := a.sessionChangedPayload(ctx)
-	if err != nil {
-		return err
-	}
-	return a.writeRemoteMessage(conn, protocol.TypeSessionChanged, requestID, payload.CurrentSessionID, payload)
-}
-
-func (a *Agent) sessionListPayload(ctx context.Context, includeDeleted bool) (protocol.SessionListResultPayload, error) {
-	sessions, err := a.chatService.ListSessionsWithDeleted(ctx, includeDeleted)
-	if err != nil {
-		return protocol.SessionListResultPayload{}, err
-	}
-	return protocol.SessionListResultPayload{
-		CurrentSessionID: a.chatService.CurrentSessionID(),
-		Sessions:         sessionSummaries(sessions),
-		IncludeDeleted:   includeDeleted,
-	}, nil
-}
-
-func (a *Agent) sessionChangedPayload(ctx context.Context) (protocol.SessionChangedPayload, error) {
-	list, err := a.sessionListPayload(ctx, false)
-	if err != nil {
-		return protocol.SessionChangedPayload{}, err
-	}
-
-	current := findSessionSummary(list.Sessions, list.CurrentSessionID)
-	if current.ID == "" {
-		current = protocol.SessionSummary{
-			ID:             list.CurrentSessionID,
-			Model:          a.chatService.CurrentModelID(),
-			PermissionMode: string(a.chatService.CurrentPermissionMode()),
-			ContextWindowK: a.chatService.CurrentContextWindowK(),
-			Usage:          tokenUsagePayloadPtr(a.chatService.CurrentUsage()),
-			LastUsage:      tokenUsagePayloadPtr(a.chatService.CurrentLastUsage()),
+	runCtx, cancel, ok := runtime.start(ctx)
+	if !ok {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: "session is already running"}); writeErr != nil {
+			log.Printf("send remote busy error failed: %v", writeErr)
 		}
+		return
 	}
+	defer runtime.finish(cancel)
 
-	return protocol.SessionChangedPayload{
-		CurrentSessionID: list.CurrentSessionID,
-		Session:          current,
-		Sessions:         list.Sessions,
-	}, nil
-}
-
-func (a *Agent) modelListPayload() protocol.ModelListResultPayload {
-	return protocol.ModelListResultPayload{
-		CurrentModelID: a.chatService.CurrentModelID(),
-		Models:         modelSummaries(a.chatService.ListModels()),
-	}
-}
-
-func (a *Agent) skillListPayload(ctx context.Context, reloaded bool) (protocol.SkillListResultPayload, error) {
-	var skills []skill.Skill
-	var err error
-	if reloaded {
-		skills, err = a.chatService.ReloadSkills(ctx, "remote_reload")
-	} else {
-		skills, err = a.chatService.ListSkills(ctx)
-	}
-	if err != nil {
-		return protocol.SkillListResultPayload{}, err
-	}
-
-	root := a.chatService.SkillRoot()
-	message := ""
-	if reloaded {
-		message = fmt.Sprintf("Reloaded %d local skill(s).", len(skills))
-	}
-	if len(skills) == 0 {
-		message = "No local skills found. Install one with SkillHub or create skills/<name>/SKILL.md."
-	}
-
-	return protocol.SkillListResultPayload{
-		Root:     filepath.ToSlash(root),
-		Skills:   skillSummaries(root, skills),
-		Count:    len(skills),
-		Reloaded: reloaded,
-		Message:  message,
-	}, nil
-}
-
-func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
-	payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
-	if err != nil {
-		return fmt.Errorf("decode user message failed: %w", err)
-	}
-	if payload.Content == "" {
-		return fmt.Errorf("user message content is empty")
-	}
-
-	sessionID := strings.TrimSpace(message.SessionID)
-	if sessionID == "" {
-		sessionID = a.chatService.CurrentSessionID()
-	}
-	if sessionID == "" {
-		return fmt.Errorf("session id is empty")
-	}
-
-	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
-		return a.chatService.SendMessageStreamForSession(ctx, sessionID, payload.Content, stream)
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
-		}
-		return err
-	}
-
-	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content:   response.Result.Content,
-		Reasoning: response.Result.Reasoning,
-		Usage:     tokenUsagePayload(response.Result.Usage),
-		Context:   contextInfoPayload(response.Context),
-		Compact:   compactInfoPayload(response.Compact),
-	})
-}
-
-func (a *Agent) handleRegenerateMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string) error {
-	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
-		return a.chatService.RegenerateLastMessageStreamForSession(ctx, sessionID, stream)
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return a.writePausedAssistantDone(conn, message.RequestID, sessionID)
-		}
-		return err
-	}
-
-	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content: response.Result.Content,
-		Usage:   tokenUsagePayload(response.Result.Usage),
-		Context: contextInfoPayload(response.Context),
-		Compact: compactInfoPayload(response.Compact),
-	})
-}
-
-func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, run func(llm.ChatStreamHandler) (service.ChatResponse, error)) (service.ChatResponse, error) {
-	sendErrCh := make(chan error, 1)
-	send := func(messageType protocol.MessageType, payload any) {
-		if err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload); err != nil {
-			select {
-			case sendErrCh <- err:
-			default:
+	if err := a.handleSessionPlanExecute(runCtx, conn, message, sessionID); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
+			if writeErr := a.writePausedAssistantDone(conn, message.RequestID, sessionID); writeErr != nil {
+				log.Printf("send remote plan execute paused failed: %v", writeErr)
 			}
+			return
 		}
-	}
-
-	response, err := run(llm.ChatStreamHandler{
-		OnReasoning: func(text string) {
-			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Reasoning: text})
-		},
-		OnAnswer: func(text string) {
-			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Content: text})
-		},
-		OnToolCall: func(name string, arguments string) {
-			send(protocol.TypeToolCall, protocol.ToolCallPayload{
-				Name:      name,
-				Arguments: arguments,
-			})
-		},
-		OnToolResult: func(name string, arguments string, result string) {
-			toolFailed := strings.Contains(strings.ToLower(result), "tool error:")
-			send(protocol.TypeToolResult, protocol.ToolResultPayload{
-				Name:      name,
-				Arguments: arguments,
-				Result:    result,
-				Error:     toolFailed,
-			})
-			if name != "install_skill" || toolFailed {
-				return
-			}
-			payload, err := a.skillListPayload(ctx, false)
-			if err != nil {
-				select {
-				case sendErrCh <- err:
-				default:
-				}
-				return
-			}
-			payload.Reloaded = true
-			payload.Message = fmt.Sprintf("Reloaded %d local skill(s).", payload.Count)
-			send(protocol.TypeSkillReloadResult, payload)
-		},
-		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
-			message.SessionID = sessionID
-			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
-		},
-	})
-	if err != nil {
-		return service.ChatResponse{}, err
-	}
-
-	select {
-	case err := <-sendErrCh:
-		return service.ChatResponse{}, err
-	default:
-	}
-
-	return response, nil
-}
-
-func (a *Agent) writePausedAssistantDone(conn *websocket.Conn, requestID string, sessionID string) error {
-	info, err := a.chatService.ContextInfoForSession(context.Background(), sessionID)
-	if err != nil {
-		info = service.ContextInfo{}
-	}
-
-	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, requestID, sessionID, protocol.AssistantDonePayload{
-		Content: "",
-		Context: contextInfoPayload(info),
-		Paused:  true,
-		Message: "Session task paused.",
-	})
-}
-
-func sessionSummaries(sessions []data.SessionRecord) []protocol.SessionSummary {
-	summaries := make([]protocol.SessionSummary, 0, len(sessions))
-	for _, session := range sessions {
-		summaries = append(summaries, protocol.SessionSummary{
-			ID:             session.ID,
-			Title:          session.Title,
-			Model:          session.Model,
-			PermissionMode: session.PermissionMode,
-			ContextWindowK: session.ContextWindowK,
-			Usage:          tokenUsageRecordToPayload(session.Usage),
-			LastUsage:      tokenUsageRecordToPayload(session.LastUsage),
-			Deleted:        session.Deleted,
-			DeletedAt:      session.DeletedAt,
-			CreatedAt:      session.CreatedAt,
-			UpdatedAt:      session.UpdatedAt,
-		})
-	}
-	return summaries
-}
-
-func sessionHistoryMessages(records []data.MessageRecord) []protocol.SessionHistoryMessage {
-	messages := make([]protocol.SessionHistoryMessage, 0, len(records))
-	for _, record := range records {
-		messages = append(messages, protocol.SessionHistoryMessage{
-			ID:            record.ID,
-			Role:          record.Role,
-			Content:       record.Content,
-			Reasoning:     record.Reasoning,
-			ToolCallID:    record.ToolCallID,
-			ToolName:      record.ToolName,
-			ToolArguments: record.ToolArguments,
-			ToolError:     record.ToolError,
-			Usage:         tokenUsageRecordFromMessage(record),
-			CreatedAt:     record.CreatedAt,
-		})
-	}
-	return messages
-}
-
-func localHistoryUpToDate(local protocol.SessionHistoryMetaPayload, remote data.MessageHistoryMeta) bool {
-	if int64(local.LocalMessageCount) != remote.MessageCount {
-		return false
-	}
-	if strings.TrimSpace(local.LocalLastMessageID) != strings.TrimSpace(remote.LastMessageID) {
-		return false
-	}
-	if local.LocalHistoryVersion != 0 && local.LocalHistoryVersion != remote.HistoryVersion {
-		return false
-	}
-	return true
-}
-
-func tokenUsageRecordFromMessage(record data.MessageRecord) protocol.TokenUsage {
-	return protocol.TokenUsage{
-		PromptTokens:       record.PromptTokens,
-		CompletionTokens:   record.CompletionTokens,
-		TotalTokens:        record.TotalTokens,
-		ReasoningTokens:    record.ReasoningTokens,
-		PromptCachedTokens: record.PromptCachedTokens,
-		Available: record.PromptTokens > 0 ||
-			record.CompletionTokens > 0 ||
-			record.TotalTokens > 0 ||
-			record.ReasoningTokens > 0 ||
-			record.PromptCachedTokens > 0,
-	}
-}
-
-func tokenUsageRecordToPayload(usage *data.TokenUsageRecord) *protocol.TokenUsage {
-	if usage == nil {
-		return nil
-	}
-	payload := protocol.TokenUsage{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
-	}
-	if tokenUsagePayloadIsZero(payload) {
-		return nil
-	}
-	return &payload
-}
-
-func tokenUsagePayloadPtr(usage llm.TokenUsage) *protocol.TokenUsage {
-	payload := tokenUsagePayload(usage)
-	if tokenUsagePayloadIsZero(payload) {
-		return nil
-	}
-	return &payload
-}
-
-func tokenUsagePayloadIsZero(usage protocol.TokenUsage) bool {
-	return !usage.Available &&
-		usage.PromptTokens == 0 &&
-		usage.CompletionTokens == 0 &&
-		usage.TotalTokens == 0 &&
-		usage.ReasoningTokens == 0 &&
-		usage.PromptCachedTokens == 0
-}
-
-func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
-	summaries := make([]protocol.ModelSummary, 0, len(models))
-	for _, model := range models {
-		summaries = append(summaries, protocol.ModelSummary{
-			ID:        model.ID,
-			Name:      model.Name,
-			Provider:  model.Provider,
-			ModelName: model.ModelName,
-			Enabled:   model.Enabled,
-			IsDefault: model.IsDefault,
-		})
-	}
-	return summaries
-}
-
-func skillSummaries(root string, skills []skill.Skill) []protocol.SkillSummary {
-	summaries := make([]protocol.SkillSummary, 0, len(skills))
-	for _, item := range skills {
-		summaries = append(summaries, protocol.SkillSummary{
-			Name:        item.Name,
-			Description: item.Description,
-			Path:        skillDisplayPath(root, item.Path),
-			Triggers:    append([]string(nil), item.Triggers...),
-			UpdatedAt:   item.UpdatedAt,
-		})
-	}
-	return summaries
-}
-
-func assetSummaries(assets []data.AssetRecord) []protocol.AssetSummary {
-	summaries := make([]protocol.AssetSummary, 0, len(assets))
-	for _, asset := range assets {
-		summaries = append(summaries, protocol.AssetSummary{
-			ID:          asset.ID,
-			SessionID:   asset.SessionID,
-			RequestID:   asset.RequestID,
-			ToolCallID:  asset.ToolCallID,
-			ToolName:    asset.ToolName,
-			Path:        asset.LocalPath,
-			FileName:    asset.FileName,
-			ContentType: asset.ContentType,
-			Size:        asset.Size,
-			ShortURL:    asset.ShortURL,
-			Code:        asset.ShortCode,
-			ExpiresAt:   asset.ExpiresAt,
-			CreatedAt:   asset.CreatedAt,
-		})
-	}
-	return summaries
-}
-
-func skillDisplayPath(root string, path string) string {
-	root = strings.TrimSpace(root)
-	path = strings.TrimSpace(path)
-	if root != "" && path != "" {
-		if rel, err := filepath.Rel(root, path); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-			return filepath.ToSlash(rel)
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+			log.Printf("send remote plan execute error failed: %v", writeErr)
 		}
-	}
-	return filepath.ToSlash(path)
-}
-
-func tokenUsagePayload(usage llm.TokenUsage) protocol.TokenUsage {
-	return protocol.TokenUsage{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
-	}
-}
-
-func findSessionSummary(sessions []protocol.SessionSummary, sessionID string) protocol.SessionSummary {
-	for _, session := range sessions {
-		if session.ID == sessionID {
-			return session
-		}
-	}
-	return protocol.SessionSummary{}
-}
-
-func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, message protocol.Message, request llm.ToolPermissionRequest, sendErrCh chan<- error) bool {
-	if message.RequestID == "" {
-		return false
-	}
-
-	ch := a.registerPermissionWaiter(message.RequestID)
-	defer a.unregisterPermissionWaiter(message.RequestID, ch)
-
-	if err := a.writeRemoteMessage(conn, protocol.TypePermissionAsk, message.RequestID, message.SessionID, protocol.PermissionAskPayload{
-		Name:       request.Name,
-		Arguments:  request.Arguments,
-		Permission: string(request.Permission),
-	}); err != nil {
-		select {
-		case sendErrCh <- err:
-		default:
-		}
-		return false
-	}
-
-	timer := time.NewTimer(a.permissionTimeout)
-	defer timer.Stop()
-
-	select {
-	case allowed := <-ch:
-		return allowed
-	case <-timer.C:
-		log.Printf("tool permission timed out: request=%s tool=%s", message.RequestID, request.Name)
-		return false
-	case <-ctx.Done():
-		return false
-	}
-}
-
-func (a *Agent) registerPermissionWaiter(requestID string) chan bool {
-	ch := make(chan bool, 1)
-
-	a.permissionMu.Lock()
-	defer a.permissionMu.Unlock()
-
-	a.permissions[requestID] = ch
-	return ch
-}
-
-func (a *Agent) unregisterPermissionWaiter(requestID string, ch chan bool) {
-	a.permissionMu.Lock()
-	defer a.permissionMu.Unlock()
-
-	if a.permissions[requestID] == ch {
-		delete(a.permissions, requestID)
 	}
 }
 
 func (a *Agent) writeJSON(conn *websocket.Conn, value any) error {
+	// reasoning、answer、tool event 可能由不同回调触发，WebSocket 写操作必须串行化。
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
 	return conn.WriteJSON(value)

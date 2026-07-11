@@ -10,10 +10,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	sessionresult "myai/core/application/session/result"
 	"myai/core/llm"
 	"myai/core/service"
 	"myai/core/skill"
-	"myai/core/store/data"
 )
 
 const (
@@ -253,6 +253,8 @@ func printChatHelp() {
 	printCommand("/skills", "Reload and list local skills")
 	printCommand("/permission", "Show session permission mode")
 	printCommand("/permission <mode>", "Set readonly, ask, or full")
+	printCommand("/mode", "Show current agent mode")
+	printCommand("/mode <mode>", "Set chat or plan")
 	printCommand("/context", "Show context window usage")
 	printCommand("/context <K>", "Set session context window")
 	printCommand("/compact", "Summarize older context")
@@ -273,7 +275,7 @@ func printTokenUsage(usage llm.TokenUsage) {
 	fmt.Println(statusLine("usage", tokenSummary(usage), tokenStyle))
 }
 
-func printSessionsTable(sessions []data.SessionRecord, currentID string) {
+func printSessionsTable(sessions []sessionresult.SessionListItem, currentID string) {
 	if len(sessions) == 0 {
 		printWarning("no saved sessions.")
 		return

@@ -21,6 +21,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 文件恢复是破坏性操作，必须先弹确认框，再发送 baseline 或 checkpoint 恢复命令。
 export function useChangeHistoryActions({
   canRevertSelectedChange,
   changeDiff,

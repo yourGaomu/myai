@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/viper"
-
 	tooldef "myai/core/tool/tool"
 )
 
@@ -16,36 +14,30 @@ const (
 )
 
 type Config struct {
-	Servers []ServerConfig `mapstructure:"servers"`
+	Servers []ServerConfig
 }
 
 type ServerConfig struct {
-	Name            string            `mapstructure:"name"`
-	Command         string            `mapstructure:"command"`
-	Args            []string          `mapstructure:"args"`
-	Env             map[string]string `mapstructure:"env"`
-	WorkingDir      string            `mapstructure:"working_dir"`
-	Permission      string            `mapstructure:"permission"`
-	TimeoutSeconds  int               `mapstructure:"timeout_seconds"`
-	ProtocolVersion string            `mapstructure:"protocol_version"`
-	Disabled        bool              `mapstructure:"disabled"`
-	Required        bool              `mapstructure:"required"`
+	Name            string
+	Command         string
+	Args            []string
+	Env             map[string]string
+	WorkingDir      string
+	Permission      string
+	TimeoutSeconds  int
+	ProtocolVersion string
+	Disabled        bool
+	Required        bool
 }
 
-func LoadConfig(v *viper.Viper, workspace string) (Config, error) {
-	var cfg Config
-	if v == nil || !v.IsSet("mcp") {
-		return cfg, nil
+func NormalizeConfig(config Config, workspace string) Config {
+	normalized := Config{Servers: append([]ServerConfig(nil), config.Servers...)}
+	for index := range normalized.Servers {
+		normalized.Servers[index].Args = append([]string(nil), normalized.Servers[index].Args...)
+		normalized.Servers[index].Env = cloneEnvironment(normalized.Servers[index].Env)
+		normalizeServerConfig(&normalized.Servers[index], workspace)
 	}
-
-	if err := v.UnmarshalKey("mcp", &cfg); err != nil {
-		return Config{}, err
-	}
-
-	for index := range cfg.Servers {
-		normalizeServerConfig(&cfg.Servers[index], workspace)
-	}
-	return cfg, nil
+	return normalized
 }
 
 func normalizeServerConfig(config *ServerConfig, workspace string) {
@@ -82,4 +74,15 @@ func (config ServerConfig) timeout() time.Duration {
 
 func (config ServerConfig) toolPermission() tooldef.Permission {
 	return tooldef.NormalizePermission(tooldef.Permission(strings.ToLower(strings.TrimSpace(config.Permission))))
+}
+
+func cloneEnvironment(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }

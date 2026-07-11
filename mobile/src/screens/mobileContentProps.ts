@@ -15,7 +15,7 @@ import type {
   SkillSummary,
   SessionSummary,
 } from "../protocol";
-import type { PendingAction, PermissionState, SessionPermissionMode, ViewMode } from "../types/app";
+import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
 import type { ButtonFeedback } from "../types/ui";
 
@@ -47,12 +47,15 @@ export type SettingsContentProps = {
   onNewSession: () => void;
   onPair: () => void;
   onCompactSession: () => void;
+  onExecutePlan: () => void;
+  onOpenPlan: () => void;
   onRefreshModels: () => void;
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
+  onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
@@ -65,6 +68,13 @@ export type SettingsContentProps = {
   skills: SkillSummary[];
   setupVisible: boolean;
   userID: string;
+};
+
+export type PlanContentProps = {
+  activeSession?: SessionSummary;
+  onExecutePlan: () => void;
+  onOpenChat: () => void;
+  sessionID: string;
 };
 
 export type ChatContentProps = {
@@ -132,6 +142,7 @@ export type MobileMainContentProps = {
   common: MainContentCommonProps;
   files: FilesContentProps;
   permission: PermissionContentProps;
+  plan: PlanContentProps;
   sessions: SessionsContentProps;
   settings: SettingsContentProps;
 };

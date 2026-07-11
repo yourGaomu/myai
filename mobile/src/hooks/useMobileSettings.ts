@@ -15,6 +15,7 @@ type UseMobileSettingsOptions = {
   onTokenRestored?: () => void;
 };
 
+// Relay 地址、设备标识和配对 token 持久化在手机；首次加载完成前不反向覆盖存储。
 export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions = {}) {
   const [relayURL, setRelayURL] = useState(defaultRelayURL);
   const [assetBaseURL, setAssetBaseURL] = useState(defaultAssetBaseURL);

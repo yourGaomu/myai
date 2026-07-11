@@ -37,6 +37,7 @@ import { historyMessageToChatItem } from "../utils/chatHistory";
 export function MobileAppScreen() {
   useAndroidNavigationBar();
 
+  // 页面本身只充当 composition root：状态、协议和业务动作分别由专用 Hook 管理。
   const {
     bindCode,
     connected,
@@ -149,6 +150,7 @@ export function MobileAppScreen() {
   const { isBusy, pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
+  // 远程运行时引用不触发重渲染，用来关联 WebSocket 请求、当前 Session 和流式回答。
   const {
     activeRequestIDRef,
     historySessionIDRef,
@@ -186,6 +188,7 @@ export function MobileAppScreen() {
   const currentPauseBusy = Boolean(pendingActions.pause);
   const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, chatPanelHeight, topSafePadding } = useMobileLayoutMetrics({ hasUsage: Boolean(currentUsage) });
+  // 从这里开始组装传输能力：Sender 只发送，Requests/Actions 表达命令，Handler 消费响应。
   const sendEnvelope = useRelaySender({
     activeRequestIDRef,
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
@@ -243,11 +246,21 @@ export function MobileAppScreen() {
   });
   const {
     compactSession,
+    executePlan,
+    setAgentMode,
     setContextWindowK,
     setPermissionMode,
   } = useSessionSettingsActions({
+    activeRequestIDRef,
+    clearSessionPendingRequest,
+    historySessionIDRef,
+    requestSessionMapRef,
+    resetActiveAssistant,
     sendEnvelope,
     sessionID,
+    setSessionLastUsage,
+    setSessionPendingPermission,
+    setSessionPendingRequest,
     startPending,
     stopPending,
   });
@@ -460,6 +473,7 @@ export function MobileAppScreen() {
     openChanges,
     openChat,
     openFiles,
+    openPlan,
     openSessions,
     selectSession,
     toggleSettings,
@@ -570,6 +584,12 @@ export function MobileAppScreen() {
           onDenyPermission: denyPermission,
           pendingPermission: currentChat.pendingPermission,
         }}
+        plan={{
+          activeSession,
+          onExecutePlan: executePlan,
+          onOpenChat: openChat,
+          sessionID,
+        }}
         sessions={{
           deletedSessions,
           onDeleteSession: deleteSession,
@@ -598,12 +618,15 @@ export function MobileAppScreen() {
           onNewSession: newSession,
           onPair: pairDevice,
           onCompactSession: compactSession,
+          onExecutePlan: executePlan,
+          onOpenPlan: openPlan,
           onRefreshModels: requestModels,
           onRefreshSessions: requestSessions,
           onRefreshSkills: requestSkills,
           onReloadSkills: reloadSkills,
           onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,
+          onSetAgentMode: setAgentMode,
           onSetContextWindowK: setContextWindowK,
           onSetPermissionMode: setPermissionMode,
           onSwitchModel: switchModel,

@@ -5,12 +5,14 @@ import (
 	"os"
 	"strings"
 
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 )
 
 type historyRecorder interface {
-	SnapshotPath(path string) (*history.FileSnapshot, error)
-	RecordFileChange(ctx context.Context, path string, before *history.FileSnapshot, options history.RecordOptions) (string, error)
+	SnapshotPath(path string) (*domainhistory.FileSnapshot, error)
+	RecordFileChange(ctx context.Context, path string, before *domainhistory.FileSnapshot, options history.RecordCommand) (string, error)
 }
 
 func openHistoryRecorder(ctx context.Context, configured historyRecorder, workspace string) (historyRecorder, func(), error) {
@@ -35,7 +37,7 @@ func openHistoryRecorder(ctx context.Context, configured historyRecorder, worksp
 		return recorder, func() {}, nil
 	}
 
-	recorder, err := history.NewRecorder(workspace)
+	recorder, err := history.NewRecorder(workspace, sqlitehistory.Factory{})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -7,53 +7,29 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	tooldef "myai/core/tool/tool"
+	llmmapper "myai/core/adapter/llm/langchaingo"
+	modelport "myai/core/port/model"
 )
 
 type Model struct {
 	LlmModel llms.Model
 }
 
-type TokenUsage struct {
-	PromptTokens       int
-	CompletionTokens   int
-	TotalTokens        int
-	ReasoningTokens    int
-	Available          bool
-	PromptCachedTokens int
-}
+var _ modelport.ChatModelPort = (*Model)(nil)
 
-func (u TokenUsage) Add(next TokenUsage) TokenUsage {
-	return TokenUsage{
-		PromptTokens:       u.PromptTokens + next.PromptTokens,
-		CompletionTokens:   u.CompletionTokens + next.CompletionTokens,
-		TotalTokens:        u.TotalTokens + next.TotalTokens,
-		ReasoningTokens:    u.ReasoningTokens + next.ReasoningTokens,
-		Available:          u.Available || next.Available,
-		PromptCachedTokens: u.PromptCachedTokens + next.PromptCachedTokens,
-	}
-}
+type TokenUsage = modelport.TokenUsage
+type ChatResult = modelport.ChatResult
+type ChatStreamHandler = modelport.ChatStreamHandler
+type ToolPermissionRequest = modelport.ToolPermissionRequest
+type GenerateRequest = modelport.GenerateRequest
 
-type ChatResult struct {
-	Content   string
-	Reasoning string
-	Usage     TokenUsage
-	ToolCalls []llms.ToolCall
-}
-
-type ChatStreamHandler struct {
-	OnReasoning  func(text string)
-	OnAnswer     func(text string)
-	OnToolCall   func(name string, arguments string)
-	OnToolResult func(name string, arguments string, result string)
-	OnToolAsk    func(request ToolPermissionRequest) bool
-}
-
-type ToolPermissionRequest struct {
-	Name       string
-	Arguments  string
-	Permission tooldef.Permission
-	Mode       string
+func (m *Model) Generate(ctx context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
+	return m.ChatWithStreamToolsHandlerCtx(
+		ctx,
+		llmmapper.ToLLMS(request.Messages),
+		llmmapper.ToLLMTools(request.Tools),
+		request.Stream,
+	)
 }
 
 func (m *Model) ChatWithStream(mes []llms.MessageContent) (ChatResult, error) {
@@ -250,12 +226,12 @@ func tokenUsageFromResponse(resp *llms.ContentResponse) TokenUsage {
 	return usage
 }
 
-func toolCallsFromResponse(resp *llms.ContentResponse) []llms.ToolCall {
+func toolCallsFromResponse(resp *llms.ContentResponse) []modelport.ToolCall {
 	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
 		return nil
 	}
 
-	return resp.Choices[0].ToolCalls
+	return llmmapper.FromLLMToolCalls(resp.Choices[0].ToolCalls)
 }
 
 func isToolCallChunk(chunk []byte) bool {

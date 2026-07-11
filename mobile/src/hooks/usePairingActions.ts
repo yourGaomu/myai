@@ -18,6 +18,7 @@ type Args = {
   stopPending: (action: PendingAction) => void;
 };
 
+// 配对通过 HTTP 换取 client_token；后续 WebSocket 请求都使用该 token 鉴权。
 export function usePairingActions({
   addErrorMessage,
   bindCode,

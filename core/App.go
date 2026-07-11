@@ -2,49 +2,48 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
+
+	redis "github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	adapterthreadpool "myai/core/adapter/async/threadpool"
+	adapterredis "myai/core/adapter/cache/redis"
+	adaptermodel "myai/core/adapter/model/langchaingo"
+	adaptermongo "myai/core/adapter/persistence/mongo"
+	memorysession "myai/core/adapter/session/memory"
+	modelcommand "myai/core/application/model/command"
+	modelservice "myai/core/application/model/service"
 	"myai/core/asset"
+	chatcomposition "myai/core/composition/chat"
+	appconfig "myai/core/config"
 	"myai/core/hook"
+	"myai/core/infra"
+	"myai/core/llm"
 	"myai/core/mcp"
+	cacheport "myai/core/port/cache"
+	persistenceport "myai/core/port/persistence"
 	"myai/core/sandbox"
+	"myai/core/service"
 	"myai/core/skill"
 	"myai/core/tool"
 	"myai/core/tool/local"
 	tooldef "myai/core/tool/tool"
-	"path/filepath"
-	"strings"
-	"sync"
-	"time"
-
-	redis "github.com/redis/go-redis/v9"
-	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-
-	"myai/core/infra"
-	"myai/core/llm"
-	"myai/core/service"
-	"myai/core/session"
-	"myai/core/store/cache"
-	"myai/core/store/cache/redisCache"
-	"myai/core/store/data"
-	"myai/core/store/data/mongoDb"
-	"myai/utills"
-)
-
-const (
-	configThreadCoreKey  = "thread.core"
-	configThreadQueueKey = "thread.queueSize"
 )
 
 type Application struct {
-	threadPool     *utills.ThreadPool
-	viper          *viper.Viper
+	// Application 是进程级资源容器，作用类似 Spring Boot 的 ApplicationContext。
+	// 它只负责创建和持有基础设施，不承载聊天、Plan 等业务规则。
+	threadPool     *adapterthreadpool.Pool
+	properties     appconfig.Properties
 	client         *llm.Client
-	sessionManage  *session.SessionManage
+	sessionMemory  *memorysession.Store
 	mongoDb        *mongo.Client
 	redisDb        *redis.Client
-	store          data.Store
-	cache          cache.Cache
+	store          persistenceport.Store
+	cache          cacheport.CurrentSessionCache
 	assetClient    *asset.Client
 	chatService    *service.ChatService
 	toolRegister   *tool.RegisterTools
@@ -69,7 +68,8 @@ func SetWorkspace(workspace string) {
 func InitApp() {
 	once.Do(func() {
 		instance = &Application{workspace: configuredWorkspace}
-		instance.InitViper()
+		// 初始化顺序存在依赖关系：配置和基础设施必须先于工具注册与应用服务装配。
+		instance.InitConfig()
 		instance.InitAssetClient()
 		instance.InitMongoDb()
 		instance.InitRedisDb()
@@ -77,7 +77,7 @@ func InitApp() {
 		instance.InitCache()
 		instance.InitThreadPool()
 		instance.InitClient()
-		instance.InitSessionManage()
+		instance.InitSessionMemory()
 		instance.InitSandbox()
 		instance.InitSkillManager()
 		instance.InitHookManager()
@@ -94,17 +94,16 @@ func GetApp() *Application {
 	return instance
 }
 
-func (app *Application) InitViper() {
-	app.viper = viper.New()
-	app.viper.SetConfigFile("./resource/application.yaml")
-	err := app.viper.ReadInConfig()
+func (app *Application) InitConfig() {
+	properties, err := (appconfig.ViperLoader{}).Load(app.workspace)
 	if err != nil {
 		panic(err)
 	}
+	app.properties = properties
 }
 
 func (app *Application) InitMongoDb() {
-	uri := app.viper.GetString("mongo.uri")
+	uri := app.properties.Mongo.URI
 	if uri == "" {
 		return
 	}
@@ -118,7 +117,8 @@ func (app *Application) InitMongoDb() {
 }
 
 func (app *Application) InitRedisDb() {
-	addr := app.viper.GetString("redis.addr")
+	properties := app.properties.Redis
+	addr := properties.Address
 	if addr == "" {
 		return
 	}
@@ -126,8 +126,8 @@ func (app *Application) InitRedisDb() {
 	client, err := infra.NewRedisClient(
 		context.Background(),
 		addr,
-		app.viper.GetString("redis.password"),
-		app.viper.GetInt("redis.db"),
+		properties.Password,
+		properties.DB,
 	)
 	if err != nil {
 		panic(err)
@@ -138,34 +138,30 @@ func (app *Application) InitRedisDb() {
 
 func (app *Application) InitStore() {
 	if app.mongoDb == nil {
+		// Mongo 未配置时允许以内存模式启动，持久化相关适配器会保持为空。
 		return
 	}
 
-	database := app.viper.GetString("mongo.database")
-	app.store = mongoDb.New(app.mongoDb, database)
+	database := app.properties.Mongo.Database
+	app.store = adaptermongo.New(app.mongoDb, database)
 }
 
 func (app *Application) InitCache() {
 	if app.redisDb == nil {
+		// Redis 只保存“用户当前会话”等短期状态，不影响核心聊天流程启动。
 		return
 	}
 
-	app.cache = redisCache.New(app.redisDb)
+	app.cache = adapterredis.NewCurrentSessionCache(app.redisDb)
 }
 
 func (app *Application) InitAssetClient() {
-	baseURL := strings.TrimSpace(app.viper.GetString("asset.shortener_base_url"))
-	if baseURL == "" {
+	properties := app.properties.Asset
+	if properties.BaseURL == "" {
 		return
 	}
 
-	timeout := time.Duration(app.viper.GetInt("asset.upload_timeout_seconds")) * time.Second
-	client, err := asset.NewClient(asset.Config{
-		BaseURL:           baseURL,
-		Timeout:           timeout,
-		DefaultTTLSeconds: app.viper.GetInt64("asset.ttl_seconds"),
-		DefaultMaxVisits:  app.viper.GetInt64("asset.max_visits"),
-	})
+	client, err := asset.NewClient((appconfig.Mapper{}).AssetConfig(properties))
 	if err != nil {
 		panic(fmt.Errorf("init asset client failed: %w", err))
 	}
@@ -173,54 +169,34 @@ func (app *Application) InitAssetClient() {
 }
 
 func (app *Application) InitThreadPool() {
-	app.threadPool = utills.NewThreadPool(
-		app.viper.GetInt(configThreadCoreKey),
-		app.viper.GetInt(configThreadQueueKey),
+	properties := app.properties.Thread
+	app.threadPool = adapterthreadpool.New(
+		properties.Core,
+		properties.QueueSize,
 	)
 }
 
 func (app *Application) InitClient() {
 	app.client = llm.NewClient()
 
-	models, err := app.loadModelConfigs(context.Background())
+	// 启动时先从配置和持久层加载模型，再把具体模型注册进运行时 Registry。
+	result, err := (modelservice.BootstrapService{
+		Repository: app.store,
+		Registry:   app.client,
+		Factory:    adaptermodel.Factory{},
+	}).Bootstrap(context.Background(), modelcommand.Bootstrap{
+		Seed:            (appconfig.Mapper{}).ModelConfig(app.properties.Model),
+		FallbackModelID: app.properties.Model.ID,
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	app.defaultModelID = defaultModelID(models, app.viper.GetString("myai.model"))
-	for _, config := range models {
-		if !config.Enabled {
-			continue
-		}
-
-		modelID := config.ID
-		modelName := config.ModelName
-		if modelName == "" {
-			modelName = modelID
-		}
-
-		model, err := utills.CreateLLM(config.APIKey, config.BaseURL, modelName)
-		if err != nil {
-			panic(fmt.Errorf("create model %s failed: %w", modelID, err))
-		}
-
-		app.client.SetModelInfo(modelID, model, llm.ModelInfo{
-			ID:        modelID,
-			Name:      config.Name,
-			Provider:  config.Provider,
-			ModelName: modelName,
-			Enabled:   config.Enabled,
-			IsDefault: config.IsDefault || modelID == app.defaultModelID,
-		})
-	}
-
-	if len(app.client.ListModels()) == 0 {
-		panic("no enabled model urlConfig")
-	}
+	app.defaultModelID = result.DefaultModelID
 }
 
-func (app *Application) InitSessionManage() {
-	app.sessionManage = session.NewSessionManage(app.defaultModelID)
+func (app *Application) InitSessionMemory() {
+	app.sessionMemory = memorysession.NewStore(app.defaultModelID)
 }
 
 func (app *Application) InitSandbox() {
@@ -232,43 +208,44 @@ func (app *Application) InitSandbox() {
 }
 
 func (app *Application) InitChatService() {
-	app.chatService = service.NewChatService(
-		app.client,
-		app.sessionManage,
-		app.store,
-		app.cache,
-		app.threadPool,
-		app.toolRegister,
-		app.skillManager,
-		app.hookManager,
-		app.defaultModelID,
-	)
+	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
+	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
+		Models:       app.client,
+		ModelFactory: adaptermodel.Factory{},
+		Sessions:     app.sessionMemory,
+		Store:        app.store,
+		Cache:        app.cache,
+		Async:        adapterthreadpool.Executor{Pool: app.threadPool},
+		Tools:        app.toolRegister,
+		Skills:       app.skillManager,
+		Hooks:        app.hookManager,
+		DefaultModel: app.defaultModelID,
+	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
 	}
 }
 
 func (app *Application) Close() error {
-	if app == nil || app.mcpManager == nil {
+	if app == nil {
 		return nil
 	}
-	return app.mcpManager.Close()
-}
-
-func (app *Application) GetThreadPool() *utills.ThreadPool {
-	return app.threadPool
-}
-
-func (app *Application) GetViper() *viper.Viper {
-	return app.viper
+	var errs []error
+	if app.mcpManager != nil {
+		errs = append(errs, app.mcpManager.Close())
+	}
+	if app.threadPool != nil {
+		app.threadPool.Shutdown()
+	}
+	return errors.Join(errs...)
 }
 
 func (app *Application) GetClient() *llm.Client {
 	return app.client
 }
 
-func (app *Application) GetSessionManage() *session.SessionManage {
-	return app.sessionManage
+func (app *Application) GetSessionMemory() *memorysession.Store {
+	return app.sessionMemory
 }
 
 func (app *Application) GetMongoDb() *mongo.Client {
@@ -279,11 +256,11 @@ func (app *Application) GetRedisDb() *redis.Client {
 	return app.redisDb
 }
 
-func (app *Application) GetStore() data.Store {
+func (app *Application) GetStore() persistenceport.Store {
 	return app.store
 }
 
-func (app *Application) GetCache() cache.Cache {
+func (app *Application) GetCache() cacheport.CurrentSessionCache {
 	return app.cache
 }
 
@@ -297,6 +274,7 @@ func (app *Application) GetChatService() *service.ChatService {
 
 func (app *Application) InitRegister() *tool.RegisterTools {
 	tools := tool.NewRegisterTools()
+	// 所有本地工具都在这里集中注册；业务层只通过 ToolCatalog/ToolExecutor 接口使用它们。
 	localTools := []tooldef.Tool{
 		local.NewListFilesToolWithWorkspace(app.workspace),
 		local.NewReadFileToolWithWorkspace(app.workspace),
@@ -320,16 +298,13 @@ func (app *Application) GetToolRegister() *tool.RegisterTools {
 }
 
 func (app *Application) InitMCP() *mcp.Manager {
-	config, err := mcp.LoadConfig(app.viper, app.workspace)
-	if err != nil {
-		panic(fmt.Errorf("load mcp config failed: %w", err))
-	}
-
+	config := (appconfig.Mapper{}).MCPConfig(app.workspace, app.properties.MCP)
 	app.mcpManager = mcp.NewManager(config)
 	if len(config.Servers) == 0 {
 		return app.mcpManager
 	}
 
+	// MCP 工具最终进入同一个工具注册表，因此权限、Hook 和执行记录可复用本地工具链路。
 	if err := app.mcpManager.RegisterAll(context.Background(), app.toolRegister); err != nil {
 		panic(fmt.Errorf("init mcp failed: %w", err))
 	}
@@ -346,105 +321,18 @@ func (app *Application) InitSkillManager() *skill.Manager {
 }
 
 func (app *Application) InitHookManager() *hook.Manager {
-	var commandHooks []hook.CommandHookConfig
-	_ = app.viper.UnmarshalKey("hooks.commands", &commandHooks)
-	app.hookManager = hook.NewManager(hook.Config{
-		Workspace:    app.workspace,
-		CommandHooks: commandHooks,
-	})
+	app.hookManager = hook.NewManager((appconfig.Mapper{}).HookConfig(app.workspace, app.properties.Hooks))
 	return app.hookManager
 }
 
 func (app *Application) skillRoot() string {
-	root := strings.TrimSpace(app.viper.GetString("skill.root"))
-	if root == "" {
-		root = "skills"
-	}
-	if filepath.IsAbs(root) {
-		return root
-	}
-	workspace := strings.TrimSpace(app.workspace)
-	if workspace == "" {
-		return root
-	}
-	return filepath.Join(workspace, root)
+	return app.properties.Skill.Root
 }
 
 func (app *Application) skillHubRegistry() string {
-	return strings.TrimSpace(app.viper.GetString("skill.registry"))
+	return app.properties.Skill.Registry
 }
 
 func (app *Application) GetSkillManager() *skill.Manager {
 	return app.skillManager
-}
-
-func (app *Application) loadModelConfigs(ctx context.Context) ([]data.ModelConfig, error) {
-	if app.store != nil {
-		configs, err := app.store.ListModelConfigs(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(configs) > 0 {
-			return configs, nil
-		}
-
-		seed := app.modelConfigFromViper()
-		if seed.ID != "" {
-			if err := app.store.SaveModelConfig(ctx, seed); err != nil {
-				return nil, err
-			}
-			return []data.ModelConfig{seed}, nil
-		}
-	}
-
-	seed := app.modelConfigFromViper()
-	if seed.ID == "" {
-		return nil, fmt.Errorf("model urlConfig is empty")
-	}
-	return []data.ModelConfig{seed}, nil
-}
-
-func (app *Application) modelConfigFromViper() data.ModelConfig {
-	modelID := app.viper.GetString("myai.model")
-	if modelID == "" {
-		modelID = "gpt-5.5"
-	}
-
-	now := time.Now()
-	return data.ModelConfig{
-		ID:        modelID,
-		Name:      modelID,
-		Provider:  "openai",
-		BaseURL:   app.viper.GetString("myai.base_url"),
-		APIKey:    app.viper.GetString("myai.api_key"),
-		ModelName: modelID,
-		Enabled:   true,
-		IsDefault: true,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-}
-
-func defaultModelID(models []data.ModelConfig, fallback string) string {
-	for _, model := range models {
-		if model.Enabled && model.IsDefault && model.ID != "" {
-			return model.ID
-		}
-	}
-
-	if fallback != "" {
-		for _, model := range models {
-			if model.Enabled && model.ID == fallback {
-				return fallback
-			}
-		}
-	}
-
-	for _, model := range models {
-		if model.Enabled && model.ID != "" {
-			return model.ID
-		}
-	}
-
-	return fallback
 }

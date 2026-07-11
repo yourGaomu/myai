@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import type { ChangeDiffResultPayload, ChangeEntry, HistoryCheckpoint, HistoryDiffResultPayload } from "../protocol";
 
+// 集中保存 Changes、Diff 和历史检查点状态，避免多个页面维护重复副本。
 export function useChangeHistoryState() {
   const [changes, setChanges] = useState<ChangeEntry[]>([]);
   const [changesMessage, setChangesMessage] = useState("");

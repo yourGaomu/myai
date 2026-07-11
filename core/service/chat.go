@@ -2,142 +2,67 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
-	"github.com/tmc/langchaingo/llms"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-
+	compactioncommand "myai/core/application/chat/compaction/command"
+	compactionresult "myai/core/application/chat/compaction/result"
+	generationcommand "myai/core/application/chat/generation/command"
+	plancommand "myai/core/application/chat/plan/command"
+	planport "myai/core/application/chat/plan/port"
+	modelcommand "myai/core/application/model/command"
+	bootstrapcommand "myai/core/application/session/bootstrap/command"
+	bootstrapresult "myai/core/application/session/bootstrap/result"
+	lifecyclecommand "myai/core/application/session/lifecycle/command"
+	loadcommand "myai/core/application/session/load/command"
+	messagecommand "myai/core/application/session/message/command"
+	querycommand "myai/core/application/session/query/command"
+	sessionresult "myai/core/application/session/result"
+	settingscommand "myai/core/application/session/settings/command"
+	skillquery "myai/core/application/skill/query"
 	"myai/core/contextmgr"
-	"myai/core/history"
-	"myai/core/hook"
 	"myai/core/llm"
+	agentplan "myai/core/plan"
 	"myai/core/session"
 	"myai/core/skill"
-	"myai/core/store/cache"
-	"myai/core/store/data"
-	"myai/core/tool"
-	tooldef "myai/core/tool/tool"
-	"myai/utills"
 )
-
-const (
-	defaultUserID      = "local"
-	currentSessionTTL  = 24 * time.Hour
-	maxAgentToolRounds = 6
-	compactKeepChunks  = 8
-)
-
-var errNotEnoughHistoryToCompact = errors.New("not enough new history to compact")
-
-type sharedAssetToolResult struct {
-	Path        string `json:"path"`
-	ShortURL    string `json:"short_url"`
-	Code        string `json:"code"`
-	FileName    string `json:"file_name"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
-	ExpiresAt   string `json:"expires_at"`
-}
 
 type ChatService struct {
-	client   *llm.Client
-	sessions *session.SessionManage
-	store    data.Store
-	cache    cache.Cache
-	pool     *utills.ThreadPool
-	tools    *tool.RegisterTools
-	skills   *skill.Manager
-	hooks    *hook.Manager
-	modelID  string
-	userID   string
+	// ChatService 是 CLI 与远程 Agent 共用的 Facade；业务实现由 dependencies 中的应用用例完成。
+	dependencies ChatDependencies
 }
 
 type ContextInfo = contextmgr.Info
 
-type CompactInfo struct {
-	Triggered         bool
-	Reason            string
-	BeforeTokens      int
-	AfterTokens       int
-	NewMessages       int
-	CompactedMessages int
-	SummaryTokens     int
-	SummaryVersion    int
-	SummaryHash       string
-	PrefixHash        string
-	CacheableTokens   int
-}
+type CompactInfo = compactionresult.CompactInfo
 
 type ChatResponse struct {
 	SessionID string
 	Result    llm.ChatResult
 	Context   ContextInfo
 	Compact   CompactInfo
+	Plan      *agentplan.Plan
 }
 
-func NewChatService(
-	client *llm.Client,
-	sessions *session.SessionManage,
-	store data.Store,
-	cache cache.Cache,
-	pool *utills.ThreadPool,
-	tools *tool.RegisterTools,
-	skills *skill.Manager,
-	hooks *hook.Manager,
-	modelID string,
-) *ChatService {
-	if modelID == "" {
-		modelID = "gpt-5.5"
-	}
-
-	return &ChatService{
-		client:   client,
-		sessions: sessions,
-		store:    store,
-		cache:    cache,
-		pool:     pool,
-		tools:    tools,
-		skills:   skills,
-		hooks:    hooks,
-		modelID:  modelID,
-		userID:   defaultUserID,
-	}
+func NewChatService(dependencies ChatDependencies) *ChatService {
+	return &ChatService{dependencies: dependencies}
 }
 
 func (s *ChatService) Bootstrap(ctx context.Context) error {
-	if s.sessions == nil {
-		return errors.New("session manager is nil")
-	}
-
-	sessionID, err := s.cachedCurrentSession(ctx)
+	// 进程启动时优先恢复上次当前会话；没有可恢复会话时再创建新会话。
+	result, err := s.dependencies.SessionBootstrap.Bootstrap(ctx, bootstrapcommand.Bootstrap{
+		NewSessionTitle: "New chat",
+	})
 	if err != nil {
 		return err
 	}
-	if sessionID != "" {
-		if err := s.LoadSession(ctx, sessionID); err == nil {
-			return nil
-		}
-		if !errors.Is(err, mongo.ErrNoDocuments) {
-			return err
-		}
+	switch result.Action {
+	case bootstrapresult.ActionLoaded:
+		s.emitSessionChangedHook(ctx, result.Session.ID, "load")
+	case bootstrapresult.ActionCreated:
+		s.emitSessionChangedHook(ctx, result.Session.ID, "new")
 	}
-
-	if s.sessions.CurrentSessionId() == "" {
-		return s.NewSession(ctx)
-	}
-
-	current, err := s.sessions.Current()
-	if err != nil {
-		return s.NewSession(ctx)
-	}
-
-	return s.saveSession(ctx, current.ID, current.Model, "New chat")
+	return nil
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, input string) (ChatResponse, error) {
@@ -149,14 +74,8 @@ func (s *ChatService) SendMessageStream(ctx context.Context, input string, strea
 }
 
 func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler) (ChatResponse, error) {
-	if strings.TrimSpace(input) == "" {
-		return ChatResponse{}, errors.New("input is empty")
-	}
-	if s.client == nil {
+	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
-	}
-	if s.sessions == nil {
-		return ChatResponse{}, errors.New("session manager is nil")
 	}
 
 	sessionID = strings.TrimSpace(sessionID)
@@ -170,736 +89,146 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		sessionID = s.CurrentSessionID()
 	}
 
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
+	// 用户消息必须先进入内存 Session，后续上下文快照才能包含本轮输入。
+	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
+		SessionID: sessionID,
+		Input:     input,
+	})
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	if err := s.sessions.AddUserMessageTo(current.ID, input); err != nil {
-		return ChatResponse{}, err
-	}
+	current := prepared.Session
 
 	title := "New chat"
 	if len(current.Messages) <= 2 {
 		title = titleFromInput(input)
 	}
-	s.persistUserMessageAsync(current.ID, current.Model, title, input)
+	// 持久化与主生成流程解耦；落库失败由适配器上报，不阻断已经开始的模型请求。
+	if s.dependencies.UserMessages != nil {
+		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+			SessionID: current.ID,
+			Model:     current.Model,
+			Title:     title,
+			Input:     input,
+		})
+	}
 
 	return s.generateAssistantForSession(ctx, current, input, title, "user request", stream)
 }
 
 func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
-	if s.client == nil {
+	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
 	}
-	if s.sessions == nil {
-		return ChatResponse{}, errors.New("session manager is nil")
+
+	prepared, err := s.dependencies.MessageCommands.PrepareRegeneration(ctx, messagecommand.PrepareRegeneration{
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return ChatResponse{}, err
 	}
 
+	return s.generateAssistantForSession(ctx, prepared.Session, prepared.Input, "", "regenerate response", stream)
+}
+
+func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, onPlanUpdate func(*agentplan.Plan)) (ChatResponse, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
 	}
-	if sessionID == "" {
-		return ChatResponse{}, errors.New("session id is empty")
-	}
 
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
+	// UpdateSink 把步骤 running/done/failed 状态实时桥接到远程协议层。
+	var updates planport.UpdateSink
+	if onPlanUpdate != nil {
+		updates = planUpdateSinkFunc(onPlanUpdate)
+	}
+	result, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
+		SessionID: sessionID,
+		Stream:    stream,
+	}, updates)
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	input, err := s.sessions.TrimAfterLastUserMessage(current.ID)
-	if err != nil {
-		return ChatResponse{}, err
-	}
-	current, err = s.sessions.GetSession(current.ID)
-	if err != nil {
-		return ChatResponse{}, err
-	}
-
-	return s.generateAssistantForSession(ctx, current, input, "", "regenerate response", stream)
-}
-
-func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, stream llm.ChatStreamHandler) (ChatResponse, error) {
-	if current == nil {
-		return ChatResponse{}, errors.New("session is nil")
-	}
-
-	requestID := uuid.NewString()
-	taskRecorder := history.NewTaskRecorder(history.RecordOptions{
-		Title:     title,
-		Reason:    reason,
-		SessionID: current.ID,
-		RequestID: requestID,
-	})
-	defer func() {
-		if _, err := taskRecorder.Save(context.Background()); err != nil {
-			log.Printf("save task history checkpoint failed: %v", err)
-		}
-		if err := taskRecorder.Close(); err != nil {
-			log.Printf("close task history recorder failed: %v", err)
-		}
-	}()
-	ctx = history.WithTaskRecorder(ctx, taskRecorder)
-
-	model := s.client.GetModel(current.Model)
-	if model == nil {
-		return ChatResponse{}, fmt.Errorf("model not found: %s", current.Model)
-	}
-
-	skillPrompt := s.skillPrompt(ctx, latestInput)
-	compactInfo, err := s.autoCompactIfNeeded(ctx, current, model, skillPrompt)
-	if err != nil {
-		log.Printf("auto compact failed: %v", err)
-	}
-
-	result, err := s.runAgentLoop(ctx, model, current, stream, skillPrompt, latestInput, requestID)
-	if err != nil {
-		return ChatResponse{}, err
-	}
-
-	if err := s.sessions.AddAssistantMessageTo(current.ID, result.Content); err != nil {
-		return ChatResponse{}, err
-	}
-	if err := s.sessions.AddUsageTo(current.ID, result.Usage); err != nil {
-		return ChatResponse{}, err
-	}
-	s.persistAssistantMessageAsync(sessionRecordFromSession(current, ""), result)
-	s.persistCurrentSessionAsync(current.ID)
-
 	return ChatResponse{
-		SessionID: current.ID,
-		Result:    result,
-		Context:   s.contextInfoWithSkillPrompt(current, skillPrompt),
-		Compact:   compactInfo,
+		SessionID: result.SessionID,
+		Result:    result.Result,
+		Context:   result.Context,
+		Compact:   result.Compact,
+		Plan:      result.Plan,
 	}, nil
 }
 
-func (s *ChatService) llmToolsForSession(current *session.Session) []llms.Tool {
-	if s.tools == nil {
-		return nil
-	}
+type planUpdateSinkFunc func(currentPlan *agentplan.Plan)
 
-	mode := session.PermissionModeAsk
-	if current != nil {
-		mode = session.NormalizePermissionMode(current.PermissionMode)
-	}
+func (f planUpdateSinkFunc) PlanUpdated(currentPlan *agentplan.Plan) {
+	f(currentPlan)
+}
 
-	return s.tools.LLMToolsByPermission(func(permission tooldef.Permission) bool {
-		return exposeToolForPermissionMode(permission, mode)
+func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	// CapturePlan 始终开启，但只有当前会话处于 Plan 模式时，ResponseCommitService 才会解析计划。
+	response, err := s.dependencies.GenerationTasks.Generate(ctx, generationcommand.GenerationTask{
+		Session:     current,
+		LatestInput: latestInput,
+		Title:       title,
+		Reason:      reason,
+		Stream:      stream,
+		CapturePlan: true,
 	})
-}
-
-func (s *ChatService) runAgentLoop(ctx context.Context, model *llm.Model, current *session.Session, stream llm.ChatStreamHandler, skillPrompt string, latestInput string, requestID string) (llm.ChatResult, error) {
-	var totalUsage llm.TokenUsage
-	reasoningParts := make([]string, 0, maxAgentToolRounds)
-
-	for round := 0; round < maxAgentToolRounds; round++ {
-		result, err := model.ChatWithStreamToolsHandlerCtx(ctx, s.contextSnapshot(current, skillPrompt).Messages, s.llmToolsForSession(current), stream)
-		if err != nil {
-			return llm.ChatResult{}, err
-		}
-
-		totalUsage = totalUsage.Add(result.Usage)
-		reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
-		if len(result.ToolCalls) == 0 {
-			result.Usage = totalUsage
-			result.Reasoning = strings.Join(reasoningParts, "\n")
-			return result, nil
-		}
-
-		toolMessages, toolRecords, assetRecords, err := s.callTools(ctx, current, result.ToolCalls, stream, requestID)
-		if err != nil {
-			return llm.ChatResult{}, err
-		}
-		current.Messages = append(current.Messages, assistantToolCallMessage(result.ToolCalls))
-		current.Messages = append(current.Messages, toolMessages...)
-		s.persistToolRecordsAsync(toolRecords)
-		s.persistAssetRecordsAsync(assetRecords)
-		skillPrompt = s.skillPrompt(ctx, latestInput)
-	}
-
-	result, err := model.ChatWithStreamHandlerCtx(ctx, s.contextSnapshot(current, skillPrompt).Messages, stream)
 	if err != nil {
-		return llm.ChatResult{}, err
-	}
-	totalUsage = totalUsage.Add(result.Usage)
-	reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
-	result.Usage = totalUsage
-	result.Reasoning = strings.Join(reasoningParts, "\n")
-
-	return result, nil
-}
-
-func (s *ChatService) contextMessages(current *session.Session) []llms.MessageContent {
-	return s.contextSnapshot(current, s.skillPrompt(context.Background(), "")).Messages
-}
-
-func (s *ChatService) contextSnapshot(current *session.Session, skillPrompt string) contextmgr.Snapshot {
-	if current == nil {
-		return contextmgr.Snapshot{}
-	}
-	return contextmgr.BuildSnapshot(s.messagesWithSkills(current.Messages, skillPrompt), current.Summary, current.CompactedMessages, current.ContextWindowK)
-}
-
-func (s *ChatService) messagesWithSkills(messages []llms.MessageContent, skillPrompt string) []llms.MessageContent {
-	prompt := strings.TrimSpace(skillPrompt)
-	if prompt == "" {
-		return messages
+		return ChatResponse{}, err
 	}
 
-	withSkills := make([]llms.MessageContent, 0, len(messages))
-	if len(messages) > 0 && messages[0].Role == llms.ChatMessageTypeSystem {
-		basePrompt := strings.TrimSpace(rawMessageText(messages[0]))
-		if basePrompt == "" {
-			withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, prompt))
-		} else {
-			withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, basePrompt+"\n\n"+prompt))
-		}
-		withSkills = append(withSkills, messages[1:]...)
-		return withSkills
-	}
-
-	withSkills = append(withSkills, llms.TextParts(llms.ChatMessageTypeSystem, prompt))
-	withSkills = append(withSkills, messages...)
-	return withSkills
-}
-
-func (s *ChatService) skillPrompt(ctx context.Context, input string) string {
-	if s.skills == nil {
-		return ""
-	}
-	return s.skills.PromptForInput(ctx, input)
+	return ChatResponse{
+		SessionID: response.SessionID,
+		Result:    response.Result,
+		Context:   response.Context,
+		Compact:   response.Compact,
+		Plan:      response.Plan,
+	}, nil
 }
 
 func (s *ChatService) contextInfo(ctx context.Context, current *session.Session) ContextInfo {
-	if current == nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
-	}
-	return s.contextInfoWithSkillPrompt(current, s.skillPrompt(ctx, ""))
-}
-
-func (s *ChatService) contextInfoWithSkillPrompt(current *session.Session, skillPrompt string) ContextInfo {
-	if current == nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
-	}
-	return s.contextSnapshot(current, skillPrompt).Info
-}
-
-func (s *ChatService) summarizeMessages(ctx context.Context, model *llm.Model, existingSummary string, messages []llms.MessageContent) (string, error) {
-	text := messagesForSummary(messages)
-	if strings.TrimSpace(text) == "" {
-		return "", errors.New("no messages to compact")
-	}
-
-	prompt := `Compress the conversation history for a local coding agent.
-
-Keep durable information only:
-- User goals and preferences.
-- Architecture and implementation decisions.
-- Important files, tools, permissions, and configuration.
-- Completed work and verification results.
-- Open tasks, blockers, and next steps.
-- Any safety constraints or user instructions.
-
-Do not include secrets, API keys, or credentials.
-Write a concise but useful summary in Chinese unless the source content is mostly English.`
-
-	if strings.TrimSpace(existingSummary) != "" {
-		prompt += "\n\nExisting summary:\n" + existingSummary
-	}
-	prompt += "\n\nNew history to compact:\n" + text
-
-	result, err := model.ChatWithStreamHandlerCtx(ctx, []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeSystem, "You are a context compression model for a coding assistant."),
-		llms.TextParts(llms.ChatMessageTypeHuman, prompt),
-	}, llm.ChatStreamHandler{})
-	if err != nil {
-		return "", err
-	}
-
-	summary := strings.TrimSpace(result.Content)
-	if summary == "" {
-		return "", errors.New("compact summary is empty")
-	}
-	return summary, nil
-}
-
-func exposeToolForPermissionMode(permission tooldef.Permission, mode session.PermissionMode) bool {
-	permission = tooldef.NormalizePermission(permission)
-	mode = session.NormalizePermissionMode(mode)
-
-	switch mode {
-	case session.PermissionModeReadonly:
-		return permission == tooldef.PermissionRead
-	case session.PermissionModeFull:
-		return true
-	default:
-		return true
-	}
-}
-
-func appendReasoningPart(parts []string, reasoning string) []string {
-	reasoning = strings.TrimSpace(reasoning)
-	if reasoning == "" {
-		return parts
-	}
-
-	return append(parts, reasoning)
-}
-
-func messagesForSummary(messages []llms.MessageContent) string {
-	var builder strings.Builder
-	for _, message := range messages {
-		switch message.Role {
-		case llms.ChatMessageTypeSystem:
-			continue
-		case llms.ChatMessageTypeHuman:
-			writeSummaryLine(&builder, "User", messageText(message, 4000))
-		case llms.ChatMessageTypeAI:
-			if hasToolCallMessage(message) {
-				writeSummaryLine(&builder, "Assistant tool call", messageText(message, 2000))
-				continue
-			}
-			writeSummaryLine(&builder, "Assistant", messageText(message, 4000))
-		case llms.ChatMessageTypeTool:
-			writeSummaryLine(&builder, "Tool result", messageText(message, 2000))
-		}
-	}
-	return builder.String()
-}
-
-func writeSummaryLine(builder *strings.Builder, role string, text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-
-	builder.WriteString(role)
-	builder.WriteString(":\n")
-	builder.WriteString(text)
-	builder.WriteString("\n\n")
-}
-
-func messageText(message llms.MessageContent, maxLength int) string {
-	parts := make([]string, 0, len(message.Parts))
-	for _, part := range message.Parts {
-		switch value := part.(type) {
-		case llms.TextContent:
-			parts = append(parts, value.Text)
-		case llms.ToolCall:
-			if value.FunctionCall == nil {
-				parts = append(parts, fmt.Sprintf("tool_call id=%s", value.ID))
-				continue
-			}
-			parts = append(parts, fmt.Sprintf("tool_call id=%s name=%s args=%s", value.ID, value.FunctionCall.Name, value.FunctionCall.Arguments))
-		case llms.ToolCallResponse:
-			parts = append(parts, fmt.Sprintf("tool_result id=%s name=%s content=%s", value.ToolCallID, value.Name, value.Content))
-		default:
-			parts = append(parts, fmt.Sprint(value))
-		}
-	}
-
-	return truncateForSummary(strings.Join(parts, "\n"), maxLength)
-}
-
-func hasToolCallMessage(message llms.MessageContent) bool {
-	for _, part := range message.Parts {
-		if _, ok := part.(llms.ToolCall); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func truncateForSummary(text string, maxLength int) string {
-	if maxLength <= 0 {
-		return ""
-	}
-	runes := []rune(strings.TrimSpace(text))
-	if len(runes) <= maxLength {
-		return string(runes)
-	}
-	return string(runes[:maxLength]) + "\n[truncated]"
-}
-
-func (s *ChatService) callTools(ctx context.Context, current *session.Session, calls []llms.ToolCall, stream llm.ChatStreamHandler, requestID string) ([]llms.MessageContent, []data.MessageRecord, []data.AssetRecord, error) {
-	if s.tools == nil {
-		return nil, nil, nil, errors.New("tool registry is nil")
-	}
-	if current == nil {
-		return nil, nil, nil, errors.New("session is nil")
-	}
-
-	messages := make([]llms.MessageContent, 0, len(calls))
-	records := make([]data.MessageRecord, 0, len(calls)*2)
-	assets := make([]data.AssetRecord, 0)
-	createdAt := time.Now()
-
-	for index, call := range calls {
-		if call.FunctionCall == nil {
-			continue
-		}
-
-		registeredTool, err := s.tools.GetTool(call.FunctionCall.Name)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		permission := tooldef.NormalizePermission(registeredTool.Permission())
-
-		callResult, err := s.askPreToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if strings.TrimSpace(callResult.Arguments) != "" {
-			call.FunctionCall.Arguments = callResult.Arguments
-		}
-
-		if stream.OnToolCall != nil {
-			stream.OnToolCall(call.FunctionCall.Name, call.FunctionCall.Arguments)
-		}
-
-		records = append(records, data.MessageRecord{
-			ID:            uuid.NewString(),
-			SessionID:     current.ID,
-			Role:          data.RoleToolCall,
-			ToolCallID:    call.ID,
-			ToolName:      call.FunctionCall.Name,
-			ToolArguments: call.FunctionCall.Arguments,
-			CreatedAt:     createdAt.Add(time.Duration(index*2) * time.Nanosecond),
-		})
-
-		if callResult.Decision == hook.DecisionDeny {
-			err = fmt.Errorf("tool denied by hook: %s", callResult.Message)
-			result := "tool error: " + err.Error()
-			if stream.OnToolResult != nil {
-				stream.OnToolResult(call.FunctionCall.Name, call.FunctionCall.Arguments, result)
-			}
-			s.emitPostToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, result, err)
-			messages = append(messages, llms.MessageContent{
-				Role: llms.ChatMessageTypeTool,
-				Parts: []llms.ContentPart{
-					llms.ToolCallResponse{
-						ToolCallID: call.ID,
-						Name:       call.FunctionCall.Name,
-						Content:    result,
-					},
-				},
-			})
-			records = append(records, data.MessageRecord{
-				ID:            uuid.NewString(),
-				SessionID:     current.ID,
-				Role:          data.RoleTool,
-				Content:       result,
-				ToolCallID:    call.ID,
-				ToolName:      call.FunctionCall.Name,
-				ToolArguments: call.FunctionCall.Arguments,
-				ToolError:     err.Error(),
-				CreatedAt:     createdAt.Add(time.Duration(index*2+1) * time.Nanosecond),
-			})
-			continue
-		}
-
-		result, permissionAllowed := s.allowToolCall(current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, callResult.Decision == hook.DecisionAllow, stream)
-		if permissionAllowed {
-			result, err = registeredTool.Call(ctx, []byte(call.FunctionCall.Arguments))
-		}
-		if err != nil {
-			result = "tool error: " + err.Error()
-		}
-		if stream.OnToolResult != nil {
-			stream.OnToolResult(call.FunctionCall.Name, call.FunctionCall.Arguments, result)
-		}
-		s.emitPostToolUseHook(ctx, current, call.FunctionCall.Name, call.FunctionCall.Arguments, permission, result, err)
-		toolError := ""
-		if err != nil {
-			toolError = err.Error()
-		}
-		if toolError == "" {
-			if assetRecord, ok := assetRecordFromToolResult(current.ID, requestID, call.ID, call.FunctionCall.Name, result, createdAt.Add(time.Duration(index*2+1)*time.Nanosecond)); ok {
-				assets = append(assets, assetRecord)
-			}
-		}
-
-		messages = append(messages, llms.MessageContent{
-			Role: llms.ChatMessageTypeTool,
-			Parts: []llms.ContentPart{
-				llms.ToolCallResponse{
-					ToolCallID: call.ID,
-					Name:       call.FunctionCall.Name,
-					Content:    result,
-				},
-			},
-		})
-		records = append(records, data.MessageRecord{
-			ID:            uuid.NewString(),
-			SessionID:     current.ID,
-			Role:          data.RoleTool,
-			Content:       result,
-			ToolCallID:    call.ID,
-			ToolName:      call.FunctionCall.Name,
-			ToolArguments: call.FunctionCall.Arguments,
-			ToolError:     toolError,
-			CreatedAt:     createdAt.Add(time.Duration(index*2+1) * time.Nanosecond),
-		})
-	}
-
-	return messages, records, assets, nil
-}
-
-func assetRecordFromToolResult(sessionID string, requestID string, toolCallID string, toolName string, result string, createdAt time.Time) (data.AssetRecord, bool) {
-	if toolName != "share_file" || strings.TrimSpace(result) == "" {
-		return data.AssetRecord{}, false
-	}
-
-	var parsed sharedAssetToolResult
-	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		return data.AssetRecord{}, false
-	}
-	parsed.ShortURL = strings.TrimSpace(parsed.ShortURL)
-	if parsed.ShortURL == "" {
-		return data.AssetRecord{}, false
-	}
-
-	var expiresAt *time.Time
-	if value := strings.TrimSpace(parsed.ExpiresAt); value != "" {
-		if parsedTime, err := time.Parse(time.RFC3339, value); err == nil {
-			expiresAt = &parsedTime
-		}
-	}
-
-	return data.AssetRecord{
-		ID:          uuid.NewString(),
-		SessionID:   sessionID,
-		RequestID:   requestID,
-		ToolCallID:  toolCallID,
-		ToolName:    toolName,
-		LocalPath:   strings.TrimSpace(parsed.Path),
-		FileName:    strings.TrimSpace(parsed.FileName),
-		ContentType: strings.TrimSpace(parsed.ContentType),
-		Size:        parsed.Size,
-		ShortURL:    parsed.ShortURL,
-		ShortCode:   strings.TrimSpace(parsed.Code),
-		ExpiresAt:   expiresAt,
-		CreatedAt:   createdAt,
-	}, true
-}
-
-func (s *ChatService) askPreToolUseHook(ctx context.Context, current *session.Session, name string, arguments string, permission tooldef.Permission) (hook.Result, error) {
-	if s.hooks == nil {
-		return hook.Result{Decision: hook.DecisionContinue}, nil
-	}
-	return s.hooks.PreToolUse(ctx, hook.Event{
-		SessionID:     sessionIDOrEmpty(current),
-		ToolName:      name,
-		ToolArguments: arguments,
-		Permission:    string(permission),
-		Reason:        "tool execution",
-	})
-}
-
-func (s *ChatService) emitPostToolUseHook(ctx context.Context, current *session.Session, name string, arguments string, permission tooldef.Permission, result string, toolErr error) {
-	if s.hooks == nil {
-		return
-	}
-	errText := ""
-	if toolErr != nil {
-		errText = toolErr.Error()
-	}
-	if err := s.hooks.Emit(ctx, hook.Event{
-		Type:          hook.EventPostToolUse,
-		SessionID:     sessionIDOrEmpty(current),
-		ToolName:      name,
-		ToolArguments: arguments,
-		Permission:    string(permission),
-		Result:        result,
-		Error:         errText,
-		Reason:        "tool execution completed",
-	}); err != nil {
-		log.Printf("post tool hook failed: %v", err)
-	}
-}
-
-func sessionIDOrEmpty(current *session.Session) string {
-	if current == nil {
-		return ""
-	}
-	return current.ID
-}
-
-func (s *ChatService) allowToolCall(current *session.Session, name string, arguments string, permission tooldef.Permission, hookAllowed bool, stream llm.ChatStreamHandler) (string, bool) {
-	if hookAllowed || permission == tooldef.PermissionRead {
-		return "", true
-	}
-
-	mode := session.PermissionModeAsk
-	if current != nil {
-		mode = session.NormalizePermissionMode(current.PermissionMode)
-	}
-	switch mode {
-	case session.PermissionModeReadonly:
-		return fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, name, permission), false
-	case session.PermissionModeFull:
-		return "", true
-	default:
-		if stream.OnToolAsk == nil {
-			return fmt.Sprintf("permission denied: tool %s requires %s but no permission handler is configured", name, permission), false
-		}
-		allowed := stream.OnToolAsk(llm.ToolPermissionRequest{
-			Name:       name,
-			Arguments:  arguments,
-			Permission: permission,
-			Mode:       string(mode),
-		})
-		if !allowed {
-			return fmt.Sprintf("permission denied by user: tool %s requires %s", name, permission), false
-		}
-		return "", true
-	}
-}
-
-func assistantToolCallMessage(calls []llms.ToolCall) llms.MessageContent {
-	parts := make([]llms.ContentPart, 0, len(calls))
-	for _, call := range calls {
-		parts = append(parts, call)
-	}
-
-	return llms.MessageContent{
-		Role:  llms.ChatMessageTypeAI,
-		Parts: parts,
-	}
+	return s.dependencies.ContextQueries.Info(ctx, current)
 }
 
 func (s *ChatService) NewSession(ctx context.Context) error {
-	if err := s.sessions.NewSession(); err != nil {
-		return err
-	}
-
-	current, err := s.sessions.Current()
-	if err != nil {
-		return err
-	}
-
-	if err := s.saveSession(ctx, current.ID, current.Model, "New chat"); err != nil {
-		return err
-	}
-	if err := s.saveCurrentSession(ctx, current.ID); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "new")
-	return nil
+	_, err := s.dependencies.SessionLifecycle.Create(ctx, lifecyclecommand.CreateSession{Title: "New chat"})
+	return err
 }
 
 func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
-	current, err := s.ensureSessionInMemory(ctx, sessionID, true)
-	if err != nil {
-		return err
-	}
-
-	if err := s.saveCurrentSession(ctx, current.ID); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "load")
-	return nil
+	_, err := s.dependencies.SessionLifecycle.Load(ctx, lifecyclecommand.LoadSession{SessionID: sessionID})
+	return err
 }
 
 func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		sessionID = s.CurrentSessionID()
-	}
-	if sessionID == "" {
-		return errors.New("session id is empty")
-	}
-	if s.sessions == nil {
-		return errors.New("session manager is nil")
-	}
-
-	deletingCurrent := sessionID == s.CurrentSessionID()
-	if s.store != nil {
-		if _, err := s.getSession(ctx, sessionID); err != nil {
-			return err
-		}
-		if err := s.store.MarkSessionDeleted(ctx, sessionID, time.Now()); err != nil {
-			return err
-		}
-	}
-
-	if err := s.sessions.RemoveSession(sessionID); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, sessionID, "delete")
-	if !deletingCurrent {
-		return nil
-	}
-
-	sessions, err := s.ListSessions(ctx)
-	if err != nil {
-		return err
-	}
-	for _, record := range sessions {
-		if record.ID != "" && record.ID != sessionID {
-			return s.LoadSession(ctx, record.ID)
-		}
-	}
-	return s.NewSession(ctx)
+	_, err := s.dependencies.SessionLifecycle.Delete(ctx, lifecyclecommand.DeleteSession{SessionID: sessionID})
+	return err
 }
 
 func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return errors.New("session id is empty")
-	}
-	if s.store == nil {
-		return errors.New("store is nil")
-	}
-
-	if err := s.store.MarkSessionRestored(ctx, sessionID, time.Now()); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, sessionID, "restore")
-	return nil
+	_, err := s.dependencies.SessionLifecycle.Restore(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID})
+	return err
 }
 
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
-	current, err := s.sessions.Current()
-	if err != nil {
-		return err
-	}
-
-	if s.store != nil {
-		if err := s.store.ClearMessages(ctx, current.ID); err != nil {
-			return err
-		}
-	}
-
-	if err := s.sessions.ClearCurrent(); err != nil {
-		return err
-	}
-
-	if err := s.saveSession(ctx, current.ID, current.Model, "New chat"); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "clear")
-	return nil
+	_, err := s.dependencies.SessionLifecycle.Clear(ctx, lifecyclecommand.ClearSession{Title: "New chat"})
+	return err
 }
 
-func (s *ChatService) ListSessions(ctx context.Context) ([]data.SessionRecord, error) {
+func (s *ChatService) ListSessions(ctx context.Context) ([]sessionresult.SessionListItem, error) {
 	return s.ListSessionsWithDeleted(ctx, false)
 }
 
-func (s *ChatService) ListDeletedSessions(ctx context.Context) ([]data.SessionRecord, error) {
+func (s *ChatService) ListDeletedSessions(ctx context.Context) ([]sessionresult.SessionListItem, error) {
 	return s.ListSessionsWithDeleted(ctx, true)
 }
 
-func (s *ChatService) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]data.SessionRecord, error) {
-	if s.store == nil {
-		return nil, nil
-	}
-
-	return s.store.ListSessionsWithDeleted(ctx, includeDeleted)
+func (s *ChatService) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]sessionresult.SessionListItem, error) {
+	return s.dependencies.SessionQueries.ListSessions(ctx, includeDeleted)
 }
 
-func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string) ([]data.MessageRecord, error) {
+func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string) ([]sessionresult.MessageListItem, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
@@ -907,44 +236,21 @@ func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string)
 	if sessionID == "" {
 		return nil, errors.New("session id is empty")
 	}
-	if s.store == nil {
-		return s.memorySessionMessages(sessionID), nil
-	}
-	if _, err := s.getSession(ctx, sessionID); err != nil {
-		return nil, err
-	}
-
-	records, err := s.store.ListMessages(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(records) > 0 {
-		return records, nil
-	}
-
-	return s.memorySessionMessages(sessionID), nil
+	return s.dependencies.MessageQueries.ListMessages(ctx, sessionID)
 }
 
-func (s *ChatService) SessionHistoryMeta(ctx context.Context, sessionID string) (data.MessageHistoryMeta, error) {
+func (s *ChatService) SessionHistoryMeta(ctx context.Context, sessionID string) (sessionresult.MessageHistoryMeta, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
 	}
 	if sessionID == "" {
-		return data.MessageHistoryMeta{}, errors.New("session id is empty")
+		return sessionresult.MessageHistoryMeta{}, errors.New("session id is empty")
 	}
-	if s.store == nil {
-		records := s.memorySessionMessages(sessionID)
-		return messageHistoryMetaFromRecords(sessionID, records), nil
-	}
-	if _, err := s.getSession(ctx, sessionID); err != nil {
-		return data.MessageHistoryMeta{}, err
-	}
-
-	return s.store.GetMessageHistoryMeta(ctx, sessionID)
+	return s.dependencies.MessageQueries.HistoryMeta(ctx, sessionID)
 }
 
-func (s *ChatService) ListSessionMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]data.MessageRecord, bool, error) {
+func (s *ChatService) ListSessionMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]sessionresult.MessageListItem, bool, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
@@ -952,17 +258,10 @@ func (s *ChatService) ListSessionMessagesAfter(ctx context.Context, sessionID st
 	if sessionID == "" {
 		return nil, false, errors.New("session id is empty")
 	}
-	if s.store == nil {
-		return messagesAfterID(s.memorySessionMessages(sessionID), afterMessageID, limit)
-	}
-	if _, err := s.getSession(ctx, sessionID); err != nil {
-		return nil, false, err
-	}
-
-	return s.store.ListMessagesAfter(ctx, sessionID, strings.TrimSpace(afterMessageID), limit)
+	return s.dependencies.MessageQueries.ListMessagesAfter(ctx, sessionID, strings.TrimSpace(afterMessageID), limit)
 }
 
-func (s *ChatService) ListAssets(ctx context.Context, sessionID string, limit int) ([]data.AssetRecord, error) {
+func (s *ChatService) ListAssets(ctx context.Context, sessionID string, limit int) ([]sessionresult.AssetListItem, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
@@ -970,29 +269,19 @@ func (s *ChatService) ListAssets(ctx context.Context, sessionID string, limit in
 	if sessionID == "" {
 		return nil, errors.New("session id is empty")
 	}
-	if s.store == nil {
-		return nil, nil
-	}
-
-	return s.store.ListAssets(ctx, sessionID, limit)
+	return s.dependencies.SessionQueries.ListAssets(ctx, querycommand.ListAssets{
+		SessionID: sessionID,
+		Limit:     limit,
+	})
 }
 
 func (s *ChatService) ListModels() []llm.ModelInfo {
-	if s.client == nil {
-		return nil
-	}
-
-	return s.client.ListModels()
+	return s.dependencies.ModelQueries.ListModels().Models
 }
 
 func (s *ChatService) ListSkills(ctx context.Context) ([]skill.Skill, error) {
-	if s.skills == nil {
-		return nil, nil
-	}
-	if err := s.skills.Reload(ctx); err != nil {
-		return nil, err
-	}
-	return s.skills.List(), nil
+	result, err := s.dependencies.SkillCatalog.List(ctx, skillquery.ListSkills{Refresh: true})
+	return result.Skills, err
 }
 
 func (s *ChatService) ReloadSkills(ctx context.Context, reason string) ([]skill.Skill, error) {
@@ -1005,10 +294,7 @@ func (s *ChatService) ReloadSkills(ctx context.Context, reason string) ([]skill.
 }
 
 func (s *ChatService) SkillRoot() string {
-	if s.skills == nil {
-		return ""
-	}
-	return s.skills.Root()
+	return s.dependencies.SkillCatalog.Root()
 }
 
 func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
@@ -1016,40 +302,10 @@ func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
 }
 
 func (s *ChatService) SwitchModelForSession(ctx context.Context, sessionID string, modelID string) error {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return errors.New("model id is empty")
-	}
-	if s.client == nil {
-		return errors.New("llm client is nil")
-	}
-	if !s.client.HasModel(modelID) {
-		return fmt.Errorf("model not found: %s", modelID)
-	}
-	if s.sessions == nil {
-		return errors.New("session manager is nil")
-	}
-
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return s.sessions.SwitchModel(modelID)
-	}
-
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
-	if err != nil {
-		return err
-	}
-
-	if err := s.sessions.SwitchModelForSession(current.ID, modelID); err != nil {
-		return err
-	}
-	current.Model = modelID
-
-	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "model")
-	return nil
+	return s.dependencies.SessionSettings.SwitchModel(ctx, settingscommand.SwitchModel{
+		SessionID: sessionID,
+		ModelID:   modelID,
+	})
 }
 
 func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error {
@@ -1057,30 +313,21 @@ func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error 
 }
 
 func (s *ChatService) SetPermissionModeForSession(ctx context.Context, sessionID string, mode string) error {
-	if s.sessions == nil {
-		return errors.New("session manager is nil")
-	}
+	return s.dependencies.SessionSettings.SetPermissionMode(ctx, settingscommand.SetPermissionMode{
+		SessionID: sessionID,
+		Mode:      mode,
+	})
+}
 
-	permissionMode := session.PermissionMode(strings.TrimSpace(mode))
-	if !session.IsPermissionMode(permissionMode) {
-		return fmt.Errorf("unsupported permission mode: %s", mode)
-	}
+func (s *ChatService) SetAgentMode(ctx context.Context, mode string) error {
+	return s.SetAgentModeForSession(ctx, s.CurrentSessionID(), mode)
+}
 
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
-	if err != nil {
-		return err
-	}
-
-	if err := s.sessions.SetPermissionModeForSession(current.ID, permissionMode); err != nil {
-		return err
-	}
-	current.PermissionMode = permissionMode
-
-	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "permission")
-	return nil
+func (s *ChatService) SetAgentModeForSession(ctx context.Context, sessionID string, mode string) error {
+	return s.dependencies.SessionSettings.SetAgentMode(ctx, settingscommand.SetAgentMode{
+		SessionID: sessionID,
+		Mode:      mode,
+	})
 }
 
 func (s *ChatService) SetContextWindowK(ctx context.Context, windowK int) error {
@@ -1088,53 +335,21 @@ func (s *ChatService) SetContextWindowK(ctx context.Context, windowK int) error 
 }
 
 func (s *ChatService) SetContextWindowKForSession(ctx context.Context, sessionID string, windowK int) error {
-	if s.sessions == nil {
-		return errors.New("session manager is nil")
-	}
-	if err := contextmgr.ValidateWindowK(windowK); err != nil {
-		return err
-	}
-
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
-	if err != nil {
-		return err
-	}
-
-	if err := s.sessions.SetContextWindowKForSession(current.ID, windowK); err != nil {
-		return err
-	}
-	current.ContextWindowK = contextmgr.NormalizeWindowK(windowK)
-
-	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
-		return err
-	}
-	s.emitSessionChangedHook(ctx, current.ID, "context")
-	return nil
+	return s.dependencies.SessionSettings.SetContextWindow(ctx, settingscommand.SetContextWindow{
+		SessionID: sessionID,
+		WindowK:   windowK,
+	})
 }
 
 func (s *ChatService) emitSessionChangedHook(ctx context.Context, sessionID string, reason string) {
-	if s.hooks == nil {
-		return
-	}
-	if err := s.hooks.Emit(ctx, hook.Event{
-		Type:      hook.EventSessionChanged,
-		SessionID: sessionID,
-		Reason:    reason,
-	}); err != nil {
-		log.Printf("session changed hook failed: %v", err)
+	if s.dependencies.Events != nil {
+		s.dependencies.Events.SessionChanged(ctx, sessionID, reason)
 	}
 }
 
 func (s *ChatService) emitSkillReloadedHook(ctx context.Context, skillCount int, reason string) {
-	if s.hooks == nil {
-		return
-	}
-	if err := s.hooks.Emit(ctx, hook.Event{
-		Type:       hook.EventSkillReloaded,
-		SkillCount: skillCount,
-		Reason:     reason,
-	}); err != nil {
-		log.Printf("skill reloaded hook failed: %v", err)
+	if s.dependencies.Events != nil {
+		s.dependencies.Events.SkillReloaded(ctx, skillCount, reason)
 	}
 }
 
@@ -1143,206 +358,48 @@ func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, e
 }
 
 func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (ContextInfo, error) {
-	if s.sessions == nil {
-		return ContextInfo{}, errors.New("session manager is nil")
-	}
-	if s.client == nil {
-		return ContextInfo{}, errors.New("llm client is nil")
-	}
-
-	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
-	if err != nil {
-		return ContextInfo{}, err
-	}
-
-	model := s.client.GetModel(current.Model)
-	if model == nil {
-		return ContextInfo{}, fmt.Errorf("model not found: %s", current.Model)
-	}
-
-	if err := s.compactSession(ctx, current, model); err != nil {
-		if errors.Is(err, errNotEnoughHistoryToCompact) {
-			return s.contextInfo(ctx, current), err
-		}
-		return ContextInfo{}, err
-	}
-
-	return s.contextInfo(ctx, current), nil
+	return s.dependencies.SessionCompaction.Compact(ctx, compactioncommand.CompactSession{SessionID: sessionID})
 }
 
-func (s *ChatService) autoCompactIfNeeded(ctx context.Context, current *session.Session, model *llm.Model, skillPrompt string) (CompactInfo, error) {
-	if current == nil || model == nil {
-		return CompactInfo{}, nil
-	}
-
-	before := s.contextSnapshot(current, skillPrompt).Info
-	if !contextmgr.ShouldCompact(before, contextmgr.DefaultCompactTriggerRatio) {
-		return CompactInfo{}, nil
-	}
-
-	if err := s.compactSession(ctx, current, model); errors.Is(err, errNotEnoughHistoryToCompact) {
-		return CompactInfo{}, nil
-	} else {
-		after := s.contextSnapshot(current, skillPrompt).Info
-		return CompactInfo{
-			Triggered:         true,
-			Reason:            compactReason(before),
-			BeforeTokens:      before.SelectedTokens,
-			AfterTokens:       after.SelectedTokens,
-			NewMessages:       after.CompactedMessages - before.CompactedMessages,
-			CompactedMessages: after.CompactedMessages,
-			SummaryTokens:     after.SummaryTokens,
-			SummaryVersion:    after.SummaryVersion,
-			SummaryHash:       after.SummaryHash,
-			PrefixHash:        after.PrefixHash,
-			CacheableTokens:   after.CacheableTokens,
-		}, err
-	}
-}
-
-func (s *ChatService) compactSession(ctx context.Context, current *session.Session, model *llm.Model) error {
-	compactable, _, cutoff := contextmgr.CompactSplit(current.Messages, current.CompactedMessages, compactKeepChunks)
-	if len(compactable) == 0 {
-		return errNotEnoughHistoryToCompact
-	}
-
-	summary, err := s.summarizeMessages(ctx, model, current.Summary, compactable)
-	if err != nil {
-		return err
-	}
-	if err := s.sessions.SetSummaryForSession(current.ID, summary, cutoff); err != nil {
-		return err
-	}
-	if err := s.saveSession(ctx, current.ID, current.Model, ""); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *ChatService) AddModelConfig(ctx context.Context, config data.ModelConfig) error {
-	if s.store == nil {
-		return errors.New("model store is nil")
-	}
-	if s.client == nil {
-		return errors.New("llm client is nil")
-	}
-
-	config.ID = strings.TrimSpace(config.ID)
-	config.Name = strings.TrimSpace(config.Name)
-	config.Provider = strings.TrimSpace(strings.ToLower(config.Provider))
-	config.BaseURL = strings.TrimSpace(config.BaseURL)
-	config.APIKey = strings.TrimSpace(config.APIKey)
-	config.ModelName = strings.TrimSpace(config.ModelName)
-
-	if config.ID == "" {
-		return errors.New("model id is empty")
-	}
-	if strings.ContainsAny(config.ID, " \t\r\n") {
-		return errors.New("model id cannot contain spaces")
-	}
-	if s.client.HasModel(config.ID) {
-		return fmt.Errorf("model already exists: %s", config.ID)
-	}
-	if config.Name == "" {
-		config.Name = config.ID
-	}
-	if config.Provider == "" {
-		config.Provider = "openai"
-	}
-	if config.Provider != "openai" && config.Provider != "openai-compatible" {
-		return fmt.Errorf("unsupported provider: %s", config.Provider)
-	}
-	if config.BaseURL == "" {
-		return errors.New("base url is empty")
-	}
-	if config.APIKey == "" {
-		return errors.New("api key is empty")
-	}
-	if config.ModelName == "" {
-		config.ModelName = config.ID
-	}
-
-	model, err := utills.CreateLLM(config.APIKey, config.BaseURL, config.ModelName)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now()
-	if config.CreatedAt.IsZero() {
-		config.CreatedAt = now
-	}
-	config.UpdatedAt = now
-	config.Enabled = true
-
-	if err := s.store.SaveModelConfig(ctx, config); err != nil {
-		return err
-	}
-
-	s.client.SetModelInfo(config.ID, model, llm.ModelInfo{
-		ID:        config.ID,
-		Name:      config.Name,
-		Provider:  config.Provider,
-		ModelName: config.ModelName,
-		Enabled:   config.Enabled,
-		IsDefault: config.IsDefault,
-	})
-	return nil
+func (s *ChatService) AddModelConfig(ctx context.Context, command modelcommand.AddConfig) error {
+	_, err := s.dependencies.ModelConfig.AddConfig(ctx, command)
+	return err
 }
 
 func (s *ChatService) CurrentSessionID() string {
-	if s.sessions == nil {
-		return ""
-	}
-	return s.sessions.CurrentSessionId()
+	return s.dependencies.CurrentState.State().SessionID
 }
 
 func (s *ChatService) CurrentModelID() string {
-	if s.sessions == nil {
-		return s.modelID
-	}
-
-	modelID := s.sessions.CurrentModelId()
-	if modelID == "" {
-		return s.modelID
-	}
-	return modelID
+	return s.dependencies.CurrentState.State().ModelID
 }
 
 func (s *ChatService) CurrentPermissionMode() session.PermissionMode {
-	if s.sessions == nil {
-		return session.PermissionModeAsk
-	}
-	return s.sessions.CurrentPermissionMode()
+	return s.dependencies.CurrentState.State().PermissionMode
+}
+
+func (s *ChatService) CurrentAgentMode() session.AgentMode {
+	return s.dependencies.CurrentState.State().AgentMode
+}
+
+func (s *ChatService) CurrentPlan() *agentplan.Plan {
+	return s.dependencies.CurrentState.State().Plan
 }
 
 func (s *ChatService) CurrentContextWindowK() int {
-	if s.sessions == nil {
-		return contextmgr.DefaultWindowK
-	}
-	return contextmgr.NormalizeWindowK(s.sessions.CurrentContextWindowK())
+	return s.dependencies.CurrentState.State().ContextWindowK
 }
 
 func (s *ChatService) CurrentUsage() llm.TokenUsage {
-	if s.sessions == nil {
-		return llm.TokenUsage{}
-	}
-	return s.sessions.CurrentUsage()
+	return s.dependencies.CurrentState.State().Usage
 }
 
 func (s *ChatService) CurrentLastUsage() llm.TokenUsage {
-	if s.sessions == nil {
-		return llm.TokenUsage{}
-	}
-	return s.sessions.CurrentLastUsage()
+	return s.dependencies.CurrentState.State().LastUsage
 }
 
 func (s *ChatService) CurrentContextInfo() ContextInfo {
-	if s.sessions == nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
-	}
-
-	current, err := s.sessions.Current()
+	current, err := s.dependencies.CurrentState.CurrentSession()
 	if err != nil {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}
 	}
@@ -1351,10 +408,6 @@ func (s *ChatService) CurrentContextInfo() ContextInfo {
 }
 
 func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID string) (ContextInfo, error) {
-	if s.sessions == nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, errors.New("session manager is nil")
-	}
-
 	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
 		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, err
@@ -1362,570 +415,11 @@ func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID strin
 	return s.contextInfo(ctx, current), nil
 }
 
-func (s *ChatService) saveSession(ctx context.Context, sessionID string, model string, title string) error {
-	if s.store == nil {
-		return nil
-	}
-	if model == "" {
-		model = s.modelID
-	}
-	if title == "" {
-		title = "New chat"
-	}
-	permissionMode := string(session.PermissionModeAsk)
-	contextWindowK := contextmgr.DefaultWindowK
-	summary := ""
-	compactedMessages := 0
-	var compactedAt *time.Time
-	var usage *data.TokenUsageRecord
-	var lastUsage *data.TokenUsageRecord
-	hasCurrentState := false
-	if current, err := s.sessions.GetSession(sessionID); err == nil && current != nil && current.ID == sessionID {
-		hasCurrentState = true
-		permissionMode = string(session.NormalizePermissionMode(current.PermissionMode))
-		contextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
-		summary = current.Summary
-		compactedMessages = current.CompactedMessages
-		usage = tokenUsageRecord(current.Usage)
-		lastUsage = tokenUsageRecord(current.LastUsage)
-		if summary != "" {
-			now := time.Now()
-			compactedAt = &now
-		}
-	}
-
-	if !hasCurrentState {
-		record, err := s.getSession(ctx, sessionID)
-		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-			return err
-		}
-		if record.PermissionMode != "" {
-			permissionMode = record.PermissionMode
-		}
-		if record.ContextWindowK > 0 {
-			contextWindowK = record.ContextWindowK
-		}
-		summary = record.Summary
-		compactedMessages = record.CompactedMessages
-		compactedAt = record.CompactedAt
-		usage = record.Usage
-		lastUsage = record.LastUsage
-	}
-
-	return s.saveSessionRecord(ctx, data.SessionRecord{
-		ID:                sessionID,
-		Model:             model,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: compactedMessages,
-		CompactedAt:       compactedAt,
-		Title:             title,
-		Usage:             usage,
-		LastUsage:         lastUsage,
-	})
-}
-
-func (s *ChatService) saveSessionRecord(ctx context.Context, record data.SessionRecord) error {
-	if s.store == nil {
-		return nil
-	}
-	if record.ID == "" {
-		return errors.New("session id is empty")
-	}
-	if record.Model == "" {
-		record.Model = s.modelID
-	}
-	if record.PermissionMode == "" {
-		record.PermissionMode = string(session.PermissionModeAsk)
-	}
-	record.ContextWindowK = contextmgr.NormalizeWindowK(record.ContextWindowK)
-	if record.Title == "" {
-		record.Title = "New chat"
-	}
-
-	now := time.Now()
-	existing, err := s.getSession(ctx, record.ID)
-	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		return err
-	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = existing.CreatedAt
-	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = now
-	}
-	if existing.Title != "" && existing.Title != "New chat" {
-		record.Title = existing.Title
-	}
-	record.UpdatedAt = now
-
-	return s.store.SaveSession(ctx, record)
-}
-
 func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID string, setCurrent bool) (*session.Session, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, errors.New("session id is empty")
-	}
-	if s.sessions == nil {
-		return nil, errors.New("session manager is nil")
-	}
-
-	current, err := s.sessions.GetSession(sessionID)
-	if err == nil {
-		if setCurrent {
-			if err := s.sessions.UseSession(sessionID); err != nil {
-				return nil, err
-			}
-		}
-		return current, nil
-	}
-
-	record, err := s.getSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	messages, err := s.messagesFromStore(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	put := s.sessions.PutSessionWithUsageNoCurrent
-	if setCurrent {
-		put = s.sessions.PutSessionWithUsage
-	}
-	if err := put(
-		record.ID,
-		record.Model,
-		session.PermissionMode(record.PermissionMode),
-		record.ContextWindowK,
-		record.Summary,
-		record.CompactedMessages,
-		tokenUsageFromRecord(record.Usage),
-		tokenUsageFromRecord(record.LastUsage),
-		messages,
-	); err != nil {
-		return nil, err
-	}
-
-	return s.sessions.GetSession(record.ID)
-}
-
-func compactReason(info contextmgr.Info) string {
-	if info.Truncated {
-		return "window_limit"
-	}
-	return "threshold"
-}
-
-func sessionRecordFromSession(current *session.Session, title string) data.SessionRecord {
-	if current == nil {
-		return data.SessionRecord{}
-	}
-
-	return data.SessionRecord{
-		ID:                current.ID,
-		Model:             current.Model,
-		PermissionMode:    string(session.NormalizePermissionMode(current.PermissionMode)),
-		ContextWindowK:    contextmgr.NormalizeWindowK(current.ContextWindowK),
-		Summary:           current.Summary,
-		CompactedMessages: current.CompactedMessages,
-		Title:             title,
-		Usage:             tokenUsageRecord(current.Usage),
-		LastUsage:         tokenUsageRecord(current.LastUsage),
-	}
-}
-
-func tokenUsageRecord(usage llm.TokenUsage) *data.TokenUsageRecord {
-	if !usage.Available &&
-		usage.PromptTokens == 0 &&
-		usage.CompletionTokens == 0 &&
-		usage.TotalTokens == 0 &&
-		usage.ReasoningTokens == 0 &&
-		usage.PromptCachedTokens == 0 {
-		return nil
-	}
-
-	return &data.TokenUsageRecord{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
-	}
-}
-
-func tokenUsageFromRecord(record *data.TokenUsageRecord) llm.TokenUsage {
-	if record == nil {
-		return llm.TokenUsage{}
-	}
-
-	return llm.TokenUsage{
-		PromptTokens:       record.PromptTokens,
-		CompletionTokens:   record.CompletionTokens,
-		TotalTokens:        record.TotalTokens,
-		ReasoningTokens:    record.ReasoningTokens,
-		PromptCachedTokens: record.PromptCachedTokens,
-		Available:          record.Available,
-	}
-}
-
-func (s *ChatService) memorySessionMessages(sessionID string) []data.MessageRecord {
-	if s.sessions == nil {
-		return nil
-	}
-
-	current, err := s.sessions.GetSession(sessionID)
-	if err != nil || current == nil {
-		return nil
-	}
-
-	records := make([]data.MessageRecord, 0, len(current.Messages))
-	createdAt := time.Now().Add(-time.Duration(len(current.Messages)) * time.Nanosecond)
-	for index, message := range current.Messages {
-		record, ok := messageContentRecord(current.ID, message, createdAt.Add(time.Duration(index)*time.Nanosecond))
-		if ok {
-			records = append(records, record)
-		}
-	}
-	return records
-}
-
-func messageHistoryMetaFromRecords(sessionID string, records []data.MessageRecord) data.MessageHistoryMeta {
-	meta := data.MessageHistoryMeta{
-		SessionID:      sessionID,
-		MessageCount:   int64(len(records)),
-		HistoryVersion: int64(len(records)),
-	}
-	if len(records) == 0 {
-		return meta
-	}
-
-	last := records[len(records)-1]
-	meta.LastMessageID = last.ID
-	meta.LastMessageCreatedAt = &last.CreatedAt
-	return meta
-}
-
-func messagesAfterID(records []data.MessageRecord, afterMessageID string, limit int) ([]data.MessageRecord, bool, error) {
-	if limit <= 0 || limit > 300 {
-		limit = 100
-	}
-	afterMessageID = strings.TrimSpace(afterMessageID)
-	if afterMessageID == "" {
-		if len(records) <= limit {
-			return records, false, nil
-		}
-		return records[:limit], false, nil
-	}
-
-	start := -1
-	for index, record := range records {
-		if record.ID == afterMessageID {
-			start = index + 1
-			break
-		}
-	}
-	if start < 0 {
-		return nil, true, nil
-	}
-	if start >= len(records) {
-		return nil, false, nil
-	}
-
-	end := start + limit
-	if end > len(records) {
-		end = len(records)
-	}
-	return records[start:end], false, nil
-}
-
-func messageContentRecord(sessionID string, message llms.MessageContent, createdAt time.Time) (data.MessageRecord, bool) {
-	switch message.Role {
-	case llms.ChatMessageTypeSystem:
-		return data.MessageRecord{}, false
-	case llms.ChatMessageTypeHuman:
-		return data.MessageRecord{
-			ID:        uuid.NewString(),
-			SessionID: sessionID,
-			Role:      data.RoleUser,
-			Content:   rawMessageText(message),
-			CreatedAt: createdAt,
-		}, true
-	case llms.ChatMessageTypeAI:
-		if call, ok := firstToolCall(message); ok {
-			record := data.MessageRecord{
-				ID:         uuid.NewString(),
-				SessionID:  sessionID,
-				Role:       data.RoleToolCall,
-				ToolCallID: call.ID,
-				CreatedAt:  createdAt,
-			}
-			if call.FunctionCall != nil {
-				record.ToolName = call.FunctionCall.Name
-				record.ToolArguments = call.FunctionCall.Arguments
-			}
-			return record, true
-		}
-		return data.MessageRecord{
-			ID:        uuid.NewString(),
-			SessionID: sessionID,
-			Role:      data.RoleAssistant,
-			Content:   rawMessageText(message),
-			CreatedAt: createdAt,
-		}, true
-	case llms.ChatMessageTypeTool:
-		if response, ok := firstToolResponse(message); ok {
-			return data.MessageRecord{
-				ID:         uuid.NewString(),
-				SessionID:  sessionID,
-				Role:       data.RoleTool,
-				Content:    response.Content,
-				ToolCallID: response.ToolCallID,
-				ToolName:   response.Name,
-				CreatedAt:  createdAt,
-			}, true
-		}
-		return data.MessageRecord{
-			ID:        uuid.NewString(),
-			SessionID: sessionID,
-			Role:      data.RoleTool,
-			Content:   rawMessageText(message),
-			CreatedAt: createdAt,
-		}, true
-	default:
-		return data.MessageRecord{}, false
-	}
-}
-
-func rawMessageText(message llms.MessageContent) string {
-	parts := make([]string, 0, len(message.Parts))
-	for _, part := range message.Parts {
-		if text, ok := part.(llms.TextContent); ok {
-			parts = append(parts, text.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-func firstToolCall(message llms.MessageContent) (llms.ToolCall, bool) {
-	for _, part := range message.Parts {
-		if call, ok := part.(llms.ToolCall); ok {
-			return call, true
-		}
-	}
-	return llms.ToolCall{}, false
-}
-
-func firstToolResponse(message llms.MessageContent) (llms.ToolCallResponse, bool) {
-	for _, part := range message.Parts {
-		if response, ok := part.(llms.ToolCallResponse); ok {
-			return response, true
-		}
-	}
-	return llms.ToolCallResponse{}, false
-}
-
-func (s *ChatService) saveAssistantMessage(ctx context.Context, sessionID string, result llm.ChatResult) error {
-	return s.saveMessage(ctx, data.MessageRecord{
-		ID:                 uuid.NewString(),
-		SessionID:          sessionID,
-		Role:               data.RoleAssistant,
-		Content:            result.Content,
-		Reasoning:          result.Reasoning,
-		PromptTokens:       result.Usage.PromptTokens,
-		CompletionTokens:   result.Usage.CompletionTokens,
-		TotalTokens:        result.Usage.TotalTokens,
-		ReasoningTokens:    result.Usage.ReasoningTokens,
-		PromptCachedTokens: result.Usage.PromptCachedTokens,
-		CreatedAt:          time.Now(),
+	return s.dependencies.SessionLoader.EnsureInMemory(ctx, loadcommand.EnsureInMemory{
+		SessionID:  sessionID,
+		SetCurrent: setCurrent,
 	})
-}
-
-func (s *ChatService) persistUserMessageAsync(sessionID string, model string, title string, input string) {
-	createdAt := time.Now()
-
-	s.runAsync(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := s.saveSession(ctx, sessionID, model, title); err != nil {
-			log.Printf("save session failed: %v", err)
-		}
-		if err := s.saveMessage(ctx, data.MessageRecord{
-			ID:        uuid.NewString(),
-			SessionID: sessionID,
-			Role:      data.RoleUser,
-			Content:   input,
-			CreatedAt: createdAt,
-		}); err != nil {
-			log.Printf("save user message failed: %v", err)
-		}
-	})
-}
-
-func (s *ChatService) persistAssistantMessageAsync(sessionRecord data.SessionRecord, result llm.ChatResult) {
-	s.runAsync(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := s.saveAssistantMessage(ctx, sessionRecord.ID, result); err != nil {
-			log.Printf("save assistant message failed: %v", err)
-		}
-		if err := s.saveSessionRecord(ctx, sessionRecord); err != nil {
-			log.Printf("save assistant session failed: %v", err)
-		}
-	})
-}
-
-func (s *ChatService) persistToolRecordsAsync(records []data.MessageRecord) {
-	if len(records) == 0 {
-		return
-	}
-
-	s.runAsync(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		for _, record := range records {
-			if err := s.saveMessage(ctx, record); err != nil {
-				log.Printf("save tool record failed: %v", err)
-			}
-		}
-	})
-}
-
-func (s *ChatService) persistAssetRecordsAsync(records []data.AssetRecord) {
-	if len(records) == 0 {
-		return
-	}
-
-	s.runAsync(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		for _, record := range records {
-			if err := s.saveAsset(ctx, record); err != nil {
-				log.Printf("save asset record failed: %v", err)
-			}
-		}
-	})
-}
-
-func (s *ChatService) persistCurrentSessionAsync(sessionID string) {
-	s.runAsync(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := s.saveCurrentSession(ctx, sessionID); err != nil {
-			log.Printf("save current session failed: %v", err)
-		}
-	})
-}
-
-func (s *ChatService) runAsync(task func()) {
-	if task == nil {
-		return
-	}
-	if s.pool == nil {
-		go task()
-		return
-	}
-	if err := s.pool.Submit(task); err != nil {
-		go task()
-	}
-}
-
-func (s *ChatService) saveMessage(ctx context.Context, message data.MessageRecord) error {
-	if s.store == nil {
-		return nil
-	}
-
-	return s.store.SaveMessage(ctx, message)
-}
-
-func (s *ChatService) saveAsset(ctx context.Context, asset data.AssetRecord) error {
-	if s.store == nil {
-		return nil
-	}
-
-	return s.store.SaveAsset(ctx, asset)
-}
-
-func (s *ChatService) getSession(ctx context.Context, sessionID string) (data.SessionRecord, error) {
-	if s.store == nil {
-		return data.SessionRecord{}, mongo.ErrNoDocuments
-	}
-
-	return s.store.GetSession(ctx, sessionID)
-}
-
-func (s *ChatService) cachedCurrentSession(ctx context.Context) (string, error) {
-	if s.cache == nil {
-		return "", nil
-	}
-
-	return s.cache.GetCurrentSession(ctx, s.userID)
-}
-
-func (s *ChatService) saveCurrentSession(ctx context.Context, sessionID string) error {
-	if s.cache == nil {
-		return nil
-	}
-
-	return s.cache.SetCurrentSession(ctx, s.userID, sessionID, currentSessionTTL)
-}
-
-func (s *ChatService) messagesFromStore(ctx context.Context, sessionID string) ([]llms.MessageContent, error) {
-	if s.store == nil {
-		return nil, nil
-	}
-
-	records, err := s.store.ListMessages(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	messages := make([]llms.MessageContent, 0, len(records)+1)
-	messages = append(messages, llms.TextParts(llms.ChatMessageTypeSystem, session.SystemPrompt()))
-	for _, record := range records {
-		switch record.Role {
-		case data.RoleUser:
-			messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, record.Content))
-		case data.RoleAssistant:
-			messages = append(messages, llms.TextParts(llms.ChatMessageTypeAI, record.Content))
-		case data.RoleToolCall:
-			messages = append(messages, llms.MessageContent{
-				Role: llms.ChatMessageTypeAI,
-				Parts: []llms.ContentPart{
-					llms.ToolCall{
-						ID:   record.ToolCallID,
-						Type: "function",
-						FunctionCall: &llms.FunctionCall{
-							Name:      record.ToolName,
-							Arguments: record.ToolArguments,
-						},
-					},
-				},
-			})
-		case data.RoleTool:
-			messages = append(messages, llms.MessageContent{
-				Role: llms.ChatMessageTypeTool,
-				Parts: []llms.ContentPart{
-					llms.ToolCallResponse{
-						ToolCallID: record.ToolCallID,
-						Name:       record.ToolName,
-						Content:    record.Content,
-					},
-				},
-			})
-		}
-	}
-
-	return messages, nil
 }
 
 func titleFromInput(input string) string {

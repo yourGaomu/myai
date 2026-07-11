@@ -13,6 +13,7 @@ import (
 )
 
 type Manager struct {
+	// Manager 管理 MCP 子进程生命周期，并把远程工具包装成项目统一的 Tool 接口。
 	config  Config
 	mu      sync.Mutex
 	clients []*Client
@@ -39,6 +40,7 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 			return fmt.Errorf("mcp server %s command is empty", server.Name)
 		}
 
+		// required 服务启动失败会阻止应用启动；可选服务只记录警告并继续。
 		client := NewClient(server)
 		if err := client.Start(ctx); err != nil {
 			err = fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
@@ -63,6 +65,7 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 		wrapped := make([]tooldef.Tool, 0, len(infos))
 		usedNames := make(map[string]int)
 		for _, info := range infos {
+			// 工具名加入 server 前缀并处理冲突，避免多个 MCP 暴露同名工具。
 			if strings.TrimSpace(info.Name) == "" {
 				continue
 			}

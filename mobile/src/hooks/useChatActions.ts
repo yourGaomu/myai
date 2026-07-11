@@ -29,6 +29,7 @@ type Args = {
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
 };
 
+// 把发送、授权、暂停和重新生成封装成会话命令，并维护 request_id 到 session_id 的关联。
 export function useChatActions({
   activeRequestIDRef,
   addEventMessage,
@@ -56,6 +57,7 @@ export function useChatActions({
     }
 
     const targetSessionID = sessionID.trim();
+    // 先写本地用户消息并标记 pending，流式 delta 到达时即可追加到同一 assistant 消息。
     const requestID = newRequestID();
     activeRequestIDRef.current = requestID;
     requestSessionMapRef.current[requestID] = targetSessionID;

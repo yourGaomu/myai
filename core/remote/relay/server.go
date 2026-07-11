@@ -12,21 +12,23 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	authorizationport "myai/core/port/authorization"
 	"myai/core/remote/protocol"
 )
 
 type Server struct {
+	// Relay 只管理连接、配对和消息路由，不依赖 ChatService，也不执行模型或工具逻辑。
 	addr       string
 	upgrader   websocket.Upgrader
 	agentLock  sync.RWMutex
 	agents     map[string]*agentEntry
 	bindings   map[string]string
-	authStore  AuthStore
+	authStore  authorizationport.Store
 	clientLock sync.RWMutex
 	clients    map[string]*clientEntry
 }
 
-func NewServer(addr string) *Server {
+func NewServer(addr string, authStore authorizationport.Store) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -35,7 +37,7 @@ func NewServer(addr string) *Server {
 		addr:      addr,
 		agents:    make(map[string]*agentEntry),
 		bindings:  make(map[string]string),
-		authStore: NewMemoryAuthStore(),
+		authStore: authStore,
 		clients:   make(map[string]*clientEntry),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -45,7 +47,7 @@ func NewServer(addr string) *Server {
 	}
 }
 
-func (s *Server) SetAuthStore(store AuthStore) {
+func (s *Server) SetAuthStore(store authorizationport.Store) {
 	if store != nil {
 		s.authStore = store
 	}
@@ -81,6 +83,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) routes() http.Handler {
+	// HTTP 用于健康检查、配对和授权；聊天等实时消息统一走 Agent/Client WebSocket。
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/agents", s.handleAgents)
@@ -171,6 +174,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 	}()
 
 	for {
+		// Relay 保持业务消息原样，只在注册连接和路由失败时生成自己的 ack/error。
 		var message protocol.Message
 		if err := conn.ReadJSON(&message); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
@@ -211,6 +215,7 @@ func (s *Server) handleRemoteMessage(p *peer, role string, remoteAddr string, me
 func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol.Message, agentUserID *string, agentDeviceID *string) error {
 	switch message.Type {
 	case protocol.TypeAgentOnline:
+		// AgentOnline 建立 user/device 到连接的路由，之后手机请求才能定位到这台电脑。
 		payload, err := protocol.DecodePayload[protocol.AgentOnlinePayload](message)
 		if err != nil {
 			return fmt.Errorf("decode agent online failed: %w", err)
@@ -226,7 +231,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	}
 
@@ -235,7 +240,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
-	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
@@ -249,6 +255,7 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 }
 
 func (s *Server) forwardToAgent(message protocol.Message) error {
+	// request_id 和 session_id 原样保留，流式响应才能准确回到原请求和会话。
 	agent := s.getAgent(message.UserID, message.DeviceID)
 	if agent == nil {
 		return fmt.Errorf("agent is not online: user=%s device=%s", message.UserID, message.DeviceID)
@@ -293,6 +300,8 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSessionHistoryDeltaResult
 	case protocol.TypeSessionPermissionSet:
 		return responseType == protocol.TypeSessionPermissionSetResult
+	case protocol.TypeSessionModeSet:
+		return responseType == protocol.TypeSessionModeSetResult
 	case protocol.TypeSessionContextSet:
 		return responseType == protocol.TypeSessionContextSetResult
 	case protocol.TypeSessionCompact:

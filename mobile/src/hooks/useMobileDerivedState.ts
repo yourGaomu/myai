@@ -24,6 +24,7 @@ type Args = {
   viewMode: ViewMode;
 };
 
+// 从多个原始状态计算当前 Session、模型和按钮可用性，减少组件中的条件分支。
 export function useMobileDerivedState({
   attachedFiles,
   changeDiff,
