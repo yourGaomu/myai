@@ -2,6 +2,7 @@ package session
 
 import (
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
@@ -57,20 +58,23 @@ const (
 
 type Session struct {
 	// Session 是聊天聚合根：消息、模式、上下文摘要、用量和当前 Plan 必须作为一致状态更新。
-	ID                string
-	Model             string
-	AgentMode         AgentMode
-	PermissionMode    PermissionMode
-	ContextWindowK    int
-	Summary           string
-	CompactedMessages int
-	Usage             llm.TokenUsage
-	LastUsage         llm.TokenUsage
-	CurrentPlan       *agentplan.Plan
-	Messages          []domainmessage.Message
+	ID                 string
+	Model              string
+	AgentMode          AgentMode
+	PermissionMode     PermissionMode
+	ContextWindowK     int
+	Summary            string
+	CompactedMessages  int
+	Usage              llm.TokenUsage
+	LastUsage          llm.TokenUsage
+	CurrentPlan        *agentplan.Plan
+	RAGSettings        RAGSettings
+	GenerationSettings generation.Settings
+	StyleInstruction   string
+	Messages           []domainmessage.Message
 }
 
-func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) *Session {
+func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, ragSettings RAGSettings, generationSettings generation.Settings, styleInstruction string, messages []domainmessage.Message) *Session {
 	if len(messages) == 0 {
 		messages = defaultMessages()
 	}
@@ -79,20 +83,37 @@ func newSession(id, model string, agentMode AgentMode, permissionMode Permission
 	contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
 
 	return &Session{
-		ID:                id,
-		Model:             model,
-		AgentMode:         agentMode,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: contextmgr.NormalizeCompactedMessages(messages, compactedMessages),
-		Usage:             usage,
-		LastUsage:         lastUsage,
-		Messages:          messages,
+		ID:                 id,
+		Model:              model,
+		AgentMode:          agentMode,
+		PermissionMode:     permissionMode,
+		ContextWindowK:     contextWindowK,
+		Summary:            summary,
+		CompactedMessages:  contextmgr.NormalizeCompactedMessages(messages, compactedMessages),
+		Usage:              usage,
+		LastUsage:          lastUsage,
+		RAGSettings:        CloneRAGSettings(ragSettings),
+		GenerationSettings: generation.Clone(generationSettings),
+		StyleInstruction:   styleInstruction,
+		Messages:           messages,
 	}
 }
 
 func (s *Session) AddUserMessage(content string) {
+	s.AddUserTurn("", content)
+}
+
+func (s *Session) AddUserTurn(runtimeInstruction string, content string) {
+	s.AddUserTurnWithContext("", runtimeInstruction, content)
+}
+
+func (s *Session) AddUserTurnWithContext(ragContext string, runtimeInstruction string, content string) {
+	if ragMessage := domainmessage.RAGContext(ragContext); ragMessage.IsSynthetic() {
+		s.Messages = append(s.Messages, ragMessage)
+	}
+	if runtimeMessage := domainmessage.RuntimeInstruction(runtimeInstruction); runtimeMessage.IsSynthetic() {
+		s.Messages = append(s.Messages, runtimeMessage)
+	}
 	s.Messages = append(s.Messages,
 		domainmessage.Text(domainmessage.RoleUser, content),
 	)

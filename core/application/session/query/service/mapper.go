@@ -3,6 +3,7 @@ package service
 import (
 	sessionresult "myai/core/application/session/result"
 	repository "myai/core/port/repository"
+	"myai/core/session"
 )
 
 func SessionListItems(records []repository.SessionRecord) []sessionresult.SessionListItem {
@@ -13,7 +14,8 @@ func SessionListItems(records []repository.SessionRecord) []sessionresult.Sessio
 			AgentMode: record.AgentMode, PermissionMode: record.PermissionMode,
 			ContextWindowK: record.ContextWindowK, Usage: TokenUsageResultFromRecord(record.Usage),
 			LastUsage: TokenUsageResultFromRecord(record.LastUsage), CurrentPlan: record.CurrentPlan,
-			Deleted: record.Deleted, DeletedAt: record.DeletedAt,
+			RAGSettings: session.CloneRAGSettings(record.RAGSettings),
+			Deleted:     record.Deleted, DeletedAt: record.DeletedAt,
 			CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 		})
 	}
@@ -23,10 +25,15 @@ func SessionListItems(records []repository.SessionRecord) []sessionresult.Sessio
 func MessageListItems(records []repository.MessageRecord) []sessionresult.MessageListItem {
 	items := make([]sessionresult.MessageListItem, 0, len(records))
 	for _, record := range records {
+		if record.SyntheticReason != "" {
+			continue
+		}
 		items = append(items, sessionresult.MessageListItem{
 			ID: record.ID, Role: record.Role, Content: record.Content, Reasoning: record.Reasoning,
 			ToolCallID: record.ToolCallID, ToolName: record.ToolName, ToolArguments: record.ToolArguments,
-			ToolError: record.ToolError, PromptTokens: record.PromptTokens,
+			ToolError: record.ToolError, ToolStatus: record.ToolStatus,
+			ToolErrorCode: record.ToolErrorCode, ToolTruncated: record.ToolTruncated,
+			PromptTokens:     record.PromptTokens,
 			CompletionTokens: record.CompletionTokens, TotalTokens: record.TotalTokens,
 			ReasoningTokens: record.ReasoningTokens, PromptCachedTokens: record.PromptCachedTokens,
 			CreatedAt: record.CreatedAt,

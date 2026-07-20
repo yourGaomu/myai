@@ -1,4 +1,8 @@
-import type { FileReadResultPayload, TokenUsage, UploadedAssetPayload } from "../protocol";
+import type {
+  FileReadResultPayload,
+  TokenUsage,
+  UploadedAssetPayload,
+} from "../protocol";
 
 export type WorkspaceFileAttachment = FileReadResultPayload & {
   kind: "workspace_file";
@@ -11,7 +15,8 @@ export type UploadedAssetAttachment = UploadedAssetPayload & {
 
 export type ChatAttachment = WorkspaceFileAttachment | UploadedAssetAttachment;
 
-export type ChatMessageStatus = "streaming" | "done" | "paused" | "error" | "tool_running";
+export type ChatMessageStatus =
+  "streaming" | "done" | "paused" | "error" | "tool_running";
 
 export type ChatItem = {
   id: string;
@@ -23,5 +28,8 @@ export type ChatItem = {
   toolName?: string;
   toolArguments?: string;
   toolError?: string;
+  toolStatus?: string;
+  toolErrorCode?: string;
+  toolTruncated?: boolean;
   usage?: TokenUsage;
 };

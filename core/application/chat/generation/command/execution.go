@@ -8,17 +8,20 @@ import (
 )
 
 type PersistUserMessage struct {
-	SessionID string
-	Model     string
-	Title     string
-	Input     string
+	SessionID          string
+	Model              string
+	Title              string
+	Input              string
+	RuntimeInstruction string
+	RAGContext         string
 }
 
 type ToolExecution struct {
-	Session   *session.Session
-	Calls     []domainmessage.ToolCall
-	Stream    modelport.ChatStreamHandler
-	RequestID string
+	Session       *session.Session
+	Calls         []domainmessage.ToolCall
+	Stream        modelport.ChatStreamHandler
+	RequestID     string
+	ForceChatMode bool
 }
 
 type ToolExecutionRecord struct {

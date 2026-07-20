@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	domainmessage "myai/core/domain/message"
 	"myai/core/session"
 	tooldef "myai/core/tool/tool"
 )
@@ -46,7 +45,7 @@ func TestRuntimeInstructionBuilderForceChatSkipsPlanPrompt(t *testing.T) {
 	if strings.Contains(prompt, PlanModePrompt) {
 		t.Fatal("did not expect plan mode instructions when chat mode is forced")
 	}
-	if prompt != "Skill instruction" {
+	if !strings.Contains(prompt, "Skill instruction") || !strings.Contains(prompt, RuntimeTurnBoundaryPrompt) {
 		t.Fatalf("unexpected prompt: %q", prompt)
 	}
 }
@@ -72,8 +71,27 @@ func TestSessionPromptProviderDefaultsNilSessionToChatMode(t *testing.T) {
 	if strings.Contains(prompt, PlanModePrompt) {
 		t.Fatal("did not expect plan mode instructions for nil session")
 	}
-	if prompt != "Skill instruction" {
+	if !strings.Contains(prompt, "Skill instruction") || !strings.Contains(prompt, RuntimeTurnBoundaryPrompt) {
 		t.Fatalf("unexpected prompt: %q", prompt)
+	}
+}
+
+func TestRuntimeInstructionBuilderAddsSessionStyleAfterModeAndSkillRules(t *testing.T) {
+	builder := NewRuntimeInstructionBuilder(stubSkillPromptProvider{prompt: "Skill instruction"})
+	prompt := builder.Build(context.Background(), InstructionRequest{
+		AgentMode:        session.AgentModePlan,
+		Input:            "write a poem",
+		StyleInstruction: "Use concise Chinese.",
+	})
+
+	planIndex := strings.Index(prompt, PlanModePrompt)
+	skillIndex := strings.Index(prompt, "Skill instruction")
+	styleIndex := strings.Index(prompt, SessionStylePromptPrefix)
+	if planIndex < 0 || skillIndex < planIndex || styleIndex < skillIndex {
+		t.Fatalf("unexpected instruction order: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Use concise Chinese.") {
+		t.Fatalf("missing style instruction: %q", prompt)
 	}
 }
 
@@ -88,26 +106,5 @@ func TestModePolicyPlanModeOnlyAllowsReadTools(t *testing.T) {
 	}
 	if !policy.AllowsToolPermission(tooldef.PermissionWrite, session.AgentModePlan, true) {
 		t.Fatal("expected force chat mode to allow write tools")
-	}
-}
-
-func TestInsertRuntimeInstructionsBeforeLatestHumanMessage(t *testing.T) {
-	messages := []domainmessage.Message{
-		domainmessage.Text(domainmessage.RoleSystem, "stable system"),
-		domainmessage.Text(domainmessage.RoleUser, "first"),
-		domainmessage.Text(domainmessage.RoleAssistant, "reply"),
-		domainmessage.Text(domainmessage.RoleUser, "latest"),
-	}
-
-	withRuntime := InsertRuntimeInstructions(messages, "turn prompt")
-
-	if len(withRuntime) != len(messages)+1 {
-		t.Fatalf("expected runtime message to be inserted, got %d", len(withRuntime))
-	}
-	if withRuntime[3].Role != domainmessage.RoleSystem {
-		t.Fatalf("expected runtime message at index 3, got %s", withRuntime[3].Role)
-	}
-	if withRuntime[4].Role != domainmessage.RoleUser {
-		t.Fatalf("expected latest human message after runtime prompt, got %s", withRuntime[4].Role)
 	}
 }

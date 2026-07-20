@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
@@ -16,7 +17,6 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 	current := assistantGenerationSession()
 	model := &assistantGenerationModel{}
 	models := &assistantModelProvider{models: map[string]modelport.ChatModelPort{"model-a": model}}
-	runtime := &assistantRuntimeProvider{prompt: "runtime prompt"}
 	contexts := &assistantContextProvider{info: contextmgr.Info{WindowK: 32, PrefixHash: "prefix"}}
 	compactor := &assistantCompactor{info: CompactInfo{Triggered: true, BeforeTokens: 20, AfterTokens: 10}}
 	runner := &assistantRunner{result: modelport.ChatResult{Content: "answer", Usage: modelport.TokenUsage{TotalTokens: 3, Available: true}}}
@@ -25,13 +25,12 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 	persistence := &assistantPersistence{}
 
 	response, err := AssistantGenerationService{
-		Models:              models,
-		RuntimeInstructions: runtime,
-		Contexts:            contexts,
-		Compactor:           compactor,
-		AgentRunner:         runner,
-		ResponseCommitter:   committer,
-		Persistence:         persistence,
+		Models:            models,
+		Contexts:          contexts,
+		Compactor:         compactor,
+		AgentRunner:       runner,
+		ResponseCommitter: committer,
+		Persistence:       persistence,
 	}.Generate(context.Background(), AssistantGenerationCommand{
 		Session:       current,
 		LatestInput:   "write a poem",
@@ -58,13 +57,10 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 	if models.requestedName != "model-a" {
 		t.Fatalf("expected model lookup by session model, got %q", models.requestedName)
 	}
-	if runtime.input != "write a poem" || !runtime.forceChatMode {
-		t.Fatalf("expected runtime input and force flag, got %#v", runtime)
+	if compactor.model != model {
+		t.Fatalf("expected compactor to receive model, got %#v", compactor)
 	}
-	if compactor.runtimePrompt != "runtime prompt" || compactor.model != model {
-		t.Fatalf("expected compactor to receive runtime prompt and model, got %#v", compactor)
-	}
-	if runner.command.RequestID != "request-1" || runner.command.RuntimePrompt != "runtime prompt" || !runner.command.ForceChatMode {
+	if runner.command.RequestID != "request-1" || !runner.command.ForceChatMode {
 		t.Fatalf("expected runner command to be forwarded, got %#v", runner.command)
 	}
 	if !committer.command.CapturePlan || committer.command.Result.Content != "answer" {
@@ -80,12 +76,11 @@ func TestAssistantGenerationServiceCompactErrorIsNonFatal(t *testing.T) {
 	var compactErr error
 
 	response, err := AssistantGenerationService{
-		Models:              &assistantModelProvider{models: map[string]modelport.ChatModelPort{"model-a": &assistantGenerationModel{}}},
-		RuntimeInstructions: &assistantRuntimeProvider{prompt: "runtime prompt"},
-		Contexts:            &assistantContextProvider{},
-		Compactor:           &assistantCompactor{err: expected},
-		AgentRunner:         &assistantRunner{result: modelport.ChatResult{Content: "answer"}},
-		ResponseCommitter:   &assistantCommitter{},
+		Models:            &assistantModelProvider{models: map[string]modelport.ChatModelPort{"model-a": &assistantGenerationModel{}}},
+		Contexts:          &assistantContextProvider{},
+		Compactor:         &assistantCompactor{err: expected},
+		AgentRunner:       &assistantRunner{result: modelport.ChatResult{Content: "answer"}},
+		ResponseCommitter: &assistantCommitter{},
 		OnCompactError: func(err error) {
 			compactErr = err
 		},
@@ -108,15 +103,52 @@ func TestAssistantGenerationServiceCompactErrorIsNonFatal(t *testing.T) {
 
 func TestAssistantGenerationServiceReturnsModelNotFound(t *testing.T) {
 	_, err := AssistantGenerationService{
-		Models:              &assistantModelProvider{},
-		RuntimeInstructions: &assistantRuntimeProvider{},
-		AgentRunner:         &assistantRunner{},
-		ResponseCommitter:   &assistantCommitter{},
+		Models:            &assistantModelProvider{},
+		AgentRunner:       &assistantRunner{},
+		ResponseCommitter: &assistantCommitter{},
 	}.Generate(context.Background(), AssistantGenerationCommand{
 		Session: assistantGenerationSession(),
 	})
 	if err == nil || err.Error() != "model not found: model-a" {
 		t.Fatalf("expected model not found error, got %v", err)
+	}
+}
+
+func TestAssistantGenerationServiceResolvesSessionAndModelSettings(t *testing.T) {
+	modelTemperature := 0.4
+	modelTopP := 0.8
+	modelTokens := 4096
+	sessionTemperature := 0.0
+	sessionTokens := 1024
+	current := assistantGenerationSession()
+	current.GenerationSettings = generation.Settings{
+		Temperature:     &sessionTemperature,
+		MaxOutputTokens: &sessionTokens,
+	}
+	runner := &assistantRunner{}
+
+	_, err := AssistantGenerationService{
+		Models: &assistantModelProvider{models: map[string]modelport.ChatModelPort{
+			"model-a": &assistantGenerationModel{},
+		}},
+		ModelMetadata: assistantModelMetadata{info: modelport.ModelInfo{
+			ID: "model-a",
+			DefaultGenerationSettings: generation.Settings{
+				Temperature:     &modelTemperature,
+				TopP:            &modelTopP,
+				MaxOutputTokens: &modelTokens,
+			},
+		}},
+		AgentRunner:       runner,
+		ResponseCommitter: &assistantCommitter{},
+	}.Generate(context.Background(), AssistantGenerationCommand{Session: current})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if runner.command.Settings.Temperature != 0 ||
+		runner.command.Settings.TopP != modelTopP ||
+		runner.command.Settings.MaxOutputTokens != sessionTokens {
+		t.Fatalf("resolved settings = %#v", runner.command.Settings)
 	}
 }
 
@@ -131,6 +163,14 @@ type assistantModelProvider struct {
 	requestedName string
 }
 
+type assistantModelMetadata struct {
+	info modelport.ModelInfo
+}
+
+func (m assistantModelMetadata) GetModelInfo(modelID string) (modelport.ModelInfo, bool) {
+	return m.info, m.info.ID == modelID
+}
+
 func (p *assistantModelProvider) GetModel(name string) modelport.ChatModelPort {
 	p.requestedName = name
 	if p.models == nil {
@@ -139,25 +179,11 @@ func (p *assistantModelProvider) GetModel(name string) modelport.ChatModelPort {
 	return p.models[name]
 }
 
-type assistantRuntimeProvider struct {
-	prompt        string
-	input         string
-	forceChatMode bool
-}
-
-func (p *assistantRuntimeProvider) Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
-	p.input = input
-	p.forceChatMode = forceChatMode
-	return p.prompt
-}
-
 type assistantContextProvider struct {
-	runtimePrompt string
-	info          contextmgr.Info
+	info contextmgr.Info
 }
 
-func (p *assistantContextProvider) Snapshot(current *session.Session, runtimePrompt string) contextmgr.Snapshot {
-	p.runtimePrompt = runtimePrompt
+func (p *assistantContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {
 	return contextmgr.Snapshot{
 		Info: p.info,
 		Messages: []domainmessage.Message{
@@ -167,15 +193,13 @@ func (p *assistantContextProvider) Snapshot(current *session.Session, runtimePro
 }
 
 type assistantCompactor struct {
-	model         modelport.ChatModelPort
-	runtimePrompt string
-	info          CompactInfo
-	err           error
+	model modelport.ChatModelPort
+	info  CompactInfo
+	err   error
 }
 
-func (c *assistantCompactor) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort, runtimePrompt string) (CompactInfo, error) {
+func (c *assistantCompactor) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (CompactInfo, error) {
 	c.model = model
-	c.runtimePrompt = runtimePrompt
 	if c.err != nil {
 		return CompactInfo{}, c.err
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	memorysession "myai/core/adapter/session/memory"
+	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	"myai/core/session"
 )
@@ -36,6 +37,35 @@ func TestMessageCommandServiceRejectsEmptyUserMessage(t *testing.T) {
 
 	if _, err := service.AppendUserMessage(context.Background(), AppendUserMessageCommand{Input: "   "}); err == nil {
 		t.Fatal("expected empty input error")
+	}
+}
+
+func TestMessageCommandServiceAppendsRuntimeInstructionBeforeUser(t *testing.T) {
+	memory := memorysession.NewStore("gpt-5")
+	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	provider := &messageRuntimeProvider{prompt: "plan rules"}
+	service := newMessageCommandService(memory)
+	service.RuntimeInstructions = provider
+
+	result, err := service.AppendUserMessage(context.Background(), AppendUserMessageCommand{
+		SessionID: "session-1", Input: "write a poem", ForceChatMode: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RuntimeInstruction != "plan rules" || provider.input != "write a poem" || !provider.forceChatMode {
+		t.Fatalf("unexpected runtime instruction result: result=%#v provider=%#v", result, provider)
+	}
+	if len(result.Session.Messages) != 3 {
+		t.Fatalf("expected system, runtime, and user messages: %#v", result.Session.Messages)
+	}
+	if !result.Session.Messages[1].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) {
+		t.Fatalf("expected persisted runtime message before user: %#v", result.Session.Messages[1])
+	}
+	if result.Session.Messages[2].Role != domainmessage.RoleUser || result.Session.Messages[2].Text() != "write a poem" {
+		t.Fatalf("unexpected user message: %#v", result.Session.Messages[2])
 	}
 }
 
@@ -76,4 +106,16 @@ func newMessageCommandService(memory *memorysession.Store) MessageCommandService
 		Loader: LoadService{Memory: memory},
 		Memory: memory,
 	}
+}
+
+type messageRuntimeProvider struct {
+	prompt        string
+	input         string
+	forceChatMode bool
+}
+
+func (p *messageRuntimeProvider) Prompt(_ context.Context, _ *session.Session, input string, forceChatMode bool) string {
+	p.input = input
+	p.forceChatMode = forceChatMode
+	return p.prompt
 }

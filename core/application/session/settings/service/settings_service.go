@@ -9,6 +9,7 @@ import (
 	settingscommand "myai/core/application/session/settings/command"
 	settingsport "myai/core/application/session/settings/port"
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
@@ -111,6 +112,66 @@ func (s SettingsService) SetContextWindow(ctx context.Context, command settingsc
 		return nil, err
 	}
 	current.ContextWindowK = contextmgr.NormalizeWindowK(command.WindowK)
+	return current, nil
+}
+
+func (s SettingsService) SetGenerationSettings(ctx context.Context, command settingscommand.SetGenerationSettings) (*session.Session, error) {
+	if s.Memory == nil {
+		return nil, errors.New("session manager is nil")
+	}
+	if err := generation.Validate(command.Settings); err != nil {
+		return nil, fmt.Errorf("invalid session generation settings: %w", err)
+	}
+
+	current, err := s.ensureInMemory(ctx, command.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	settings := generation.Clone(command.Settings)
+	if err := s.Memory.SetGenerationSettingsForSession(current.ID, settings); err != nil {
+		return nil, err
+	}
+	current.GenerationSettings = settings
+	return current, nil
+}
+
+func (s SettingsService) SetStyleInstruction(ctx context.Context, command settingscommand.SetStyleInstruction) (*session.Session, error) {
+	if s.Memory == nil {
+		return nil, errors.New("session manager is nil")
+	}
+	instruction, err := session.NormalizeStyleInstruction(command.Instruction)
+	if err != nil {
+		return nil, err
+	}
+
+	current, err := s.ensureInMemory(ctx, command.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Memory.SetStyleInstructionForSession(current.ID, instruction); err != nil {
+		return nil, err
+	}
+	current.StyleInstruction = instruction
+	return current, nil
+}
+
+func (s SettingsService) SetRAGSettings(ctx context.Context, command settingscommand.SetRAGSettings) (*session.Session, error) {
+	if s.Memory == nil {
+		return nil, errors.New("session manager is nil")
+	}
+	settings := session.NormalizeRAGSettings(command.Settings)
+	if err := session.ValidateRAGSettings(settings); err != nil {
+		return nil, err
+	}
+
+	current, err := s.ensureInMemory(ctx, command.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Memory.SetRAGSettingsForSession(current.ID, settings); err != nil {
+		return nil, err
+	}
+	current.RAGSettings = session.CloneRAGSettings(settings)
 	return current, nil
 }
 

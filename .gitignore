@@ -3559,3 +3559,7 @@
 /.gocache/
 deploy/minio/data/
 deploy/kafka/data/
+__pycache__/
+*.py[cod]
+.venv/
+/resource/application.yaml

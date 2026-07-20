@@ -56,10 +56,6 @@ type searchFileMatch struct {
 	Text string `json:"text"`
 }
 
-func NewSearchFilesTool() *SearchFilesTool {
-	return &SearchFilesTool{}
-}
-
 func NewSearchFilesToolWithWorkspace(workspace string) *SearchFilesTool {
 	return &SearchFilesTool{workspace: workspace}
 }
@@ -105,14 +101,14 @@ func (t *SearchFilesTool) Permission() tooldef.Permission {
 	return tooldef.PermissionRead
 }
 
-func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	input, err := normalizeSearchFilesArgs(workspace, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	matches := make([]searchFileMatch, 0)
@@ -152,7 +148,7 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (strin
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
@@ -171,9 +167,11 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (strin
 	}
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	resultOutput := tooldef.SuccessOutput(string(output))
+	resultOutput.Truncated = truncated
+	return resultOutput, nil
 }
 
 func normalizeSearchFilesArgs(workspace string, args json.RawMessage) (searchFilesArgs, error) {

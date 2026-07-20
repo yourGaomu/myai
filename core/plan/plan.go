@@ -51,16 +51,7 @@ func NewDraft(sessionID string, goal string, content string, now time.Time) *Pla
 		now = time.Now()
 	}
 
-	// 优先解析 Markdown 计划；解析不到时保留一个兜底步骤，避免产生不可执行的空 Plan。
 	steps := ExtractSteps(content)
-	if len(steps) == 0 {
-		steps = []Step{{
-			ID:     uuid.NewString(),
-			Order:  1,
-			Title:  summarizeLine(content, "Review request and propose next action"),
-			Status: StepStatusPending,
-		}}
-	}
 
 	return &Plan{
 		ID:         uuid.NewString(),
@@ -71,6 +62,15 @@ func NewDraft(sessionID string, goal string, content string, now time.Time) *Pla
 		Steps:      steps,
 		CreatedAt:  now,
 		UpdatedAt:  now,
+	}
+}
+
+func IsExecutableStatus(status string) bool {
+	switch status {
+	case StatusDraft, StatusApproved, StatusFailed, StatusCanceled:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -122,8 +122,7 @@ func planSectionLines(content string) []string {
 		}
 		heading := strings.TrimSpace(strings.TrimLeft(trimmedLine, "#"))
 		heading = strings.Trim(heading, " :：")
-		lower := strings.ToLower(heading)
-		if lower == "plan" || strings.Contains(lower, "plan") || strings.Contains(heading, "计划") || strings.Contains(heading, "规划") || strings.Contains(heading, "步骤") {
+		if isPlanHeading(heading) {
 			start = index + 1
 			break
 		}
@@ -153,20 +152,31 @@ func HasResultSection(content string) bool {
 		}
 		heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
 		heading = strings.Trim(heading, " :：")
-		lower := strings.ToLower(heading)
-		if strings.Contains(lower, "result") ||
-			strings.Contains(lower, "final") ||
-			strings.Contains(lower, "output") ||
-			strings.Contains(lower, "answer") ||
-			strings.Contains(heading, "结果") ||
-			strings.Contains(heading, "正文") ||
-			strings.Contains(heading, "产出") ||
-			strings.Contains(heading, "成品") ||
-			strings.Contains(heading, "作品") {
+		if isResultHeading(heading) {
 			return true
 		}
 	}
 	return false
+}
+
+func isPlanHeading(heading string) bool {
+	switch strings.ToLower(strings.Join(strings.Fields(heading), " ")) {
+	case "plan", "execution plan", "implementation plan", "proposed plan",
+		"计划", "执行计划", "执行规划", "规划", "步骤":
+		return true
+	default:
+		return false
+	}
+}
+
+func isResultHeading(heading string) bool {
+	switch strings.ToLower(strings.Join(strings.Fields(heading), " ")) {
+	case "result", "final result", "output", "final output", "answer", "final answer",
+		"结果", "最终结果", "正文", "产出", "成品", "作品":
+		return true
+	default:
+		return false
+	}
 }
 
 func splitStepText(text string) (string, string) {

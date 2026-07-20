@@ -6,6 +6,7 @@ import (
 
 	toolcommand "myai/core/application/tool/command"
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 )
 
 func TestSharedAssetExtractorParsesTransportResult(t *testing.T) {
@@ -19,7 +20,7 @@ func TestSharedAssetExtractorParsesTransportResult(t *testing.T) {
 			ID:   "call-1",
 			Name: "share_file",
 		},
-		Result:    `{"path":" ./file.txt ","short_url":" https://s/abc ","code":" abc ","file_name":" file.txt ","content_type":"text/plain","size":7,"expires_at":"` + expiresAt + `"}`,
+		Output:    domaintool.SuccessOutput(`{"path":" ./file.txt ","short_url":" https://s/abc ","code":" abc ","file_name":" file.txt ","content_type":"text/plain","size":7,"expires_at":"` + expiresAt + `"}`),
 		CreatedAt: createdAt,
 	})
 	if !ok {
@@ -36,7 +37,7 @@ func TestSharedAssetExtractorParsesTransportResult(t *testing.T) {
 func TestSharedAssetExtractorRejectsNonShareFile(t *testing.T) {
 	_, ok := (SharedAssetExtractor{}).Extract(toolcommand.AssetExtraction{
 		Call:   domainmessage.ToolCall{Name: "read_file"},
-		Result: `{"short_url":"https://s/abc"}`,
+		Output: domaintool.SuccessOutput(`{"short_url":"https://s/abc"}`),
 	})
 	if ok {
 		t.Fatal("expected non share_file result to be ignored")

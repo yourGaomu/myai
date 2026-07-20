@@ -18,12 +18,11 @@ const DefaultMaxToolRounds = 6
 
 type AgentLoopService struct {
 	// AgentLoopService 实现“模型 -> 工具 -> 模型”的循环，直到模型不再请求工具。
-	Contexts            generationport.ContextProvider
-	Tools               generationport.ToolCatalog
-	RuntimeInstructions generationport.RuntimeInstructionProvider
-	ToolExecutor        generationport.ToolExecutor
-	ToolRecords         generationport.ToolExecutionRecordSink
-	MaxToolRounds       int
+	Contexts      generationport.ContextProvider
+	Tools         generationport.ToolCatalog
+	ToolExecutor  generationport.ToolExecutor
+	ToolRecords   generationport.ToolExecutionRecordSink
+	MaxToolRounds int
 }
 
 var _ generationapi.AgentRunner = AgentLoopService{}
@@ -41,14 +40,13 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 	totalUsage := modelport.TokenUsage{}
 	reasoningParts := make([]string, 0, s.maxToolRounds())
-	runtimePrompt := command.RuntimePrompt
-
 	for round := 0; round < s.maxToolRounds(); round++ {
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
 		result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-			Messages: s.Contexts.Snapshot(command.Session, runtimePrompt).Messages,
+			Messages: s.Contexts.Snapshot(command.Session).Messages,
 			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
 			Stream:   command.Stream,
+			Settings: command.Settings,
 		})
 		if err != nil {
 			return modelport.ChatResult{}, err
@@ -63,6 +61,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 		toolResult, err := s.executeTools(ctx, generationcommand.ToolExecution{
 			Session: command.Session, Calls: result.ToolCalls, Stream: command.Stream, RequestID: command.RequestID,
+			ForceChatMode: command.ForceChatMode,
 		})
 		if err != nil {
 			return modelport.ChatResult{}, err
@@ -71,13 +70,13 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		// 工具调用与结果都进入会话，下一轮模型才能基于真实执行结果继续推理。
 		command.Session.Messages = append(command.Session.Messages, domainmessage.ToolCallMessage(result.ToolCalls))
 		command.Session.Messages = append(command.Session.Messages, toolResult.Messages...)
-		runtimePrompt = s.runtimePrompt(ctx, command.Session, command.LatestInput, command.ForceChatMode, runtimePrompt)
 	}
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
 	result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-		Messages: s.Contexts.Snapshot(command.Session, runtimePrompt).Messages,
+		Messages: s.Contexts.Snapshot(command.Session).Messages,
 		Stream:   command.Stream,
+		Settings: command.Settings,
 	})
 	if err != nil {
 		return modelport.ChatResult{}, err
@@ -117,13 +116,6 @@ func (s AgentLoopService) recordToolExecution(ctx context.Context, result genera
 
 func (s AgentLoopService) RecordToolExecution(ctx context.Context, result generationresult.ToolExecution) {
 	s.recordToolExecution(ctx, result)
-}
-
-func (s AgentLoopService) runtimePrompt(ctx context.Context, current *session.Session, input string, forceChatMode bool, fallback string) string {
-	if s.RuntimeInstructions == nil {
-		return fallback
-	}
-	return s.RuntimeInstructions.Prompt(ctx, current, input, forceChatMode)
 }
 
 func finalizeResult(result modelport.ChatResult, usage modelport.TokenUsage, reasoningParts []string) modelport.ChatResult {

@@ -13,6 +13,10 @@ import type {
   HistoryDiffResultPayload,
   HistoryListResultPayload,
   HistoryRevertResultPayload,
+  KnowledgeCatalogResultPayload,
+  KnowledgeDocumentListResultPayload,
+  KnowledgeProfileListResultPayload,
+  KnowledgeSearchPreviewResultPayload,
   ModelListResultPayload,
   ModelSwitchResultPayload,
   PermissionAskPayload,
@@ -36,9 +40,27 @@ type Args = {
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (sessionID: string, message: string) => void;
   addEventMessage: (sessionID: string, message: string) => void;
-  addToolCall: (sessionID: string, name: string, argumentsText: string, requestID?: string) => void;
-  addToolResult: (sessionID: string, name: string, argumentsText: string, result: string, failed: boolean, requestID?: string) => void;
-  appendAssistant: (sessionID: string, requestID: string | undefined, text: string, reasoning?: string) => void;
+  addToolCall: (
+    sessionID: string,
+    name: string,
+    argumentsText: string,
+    requestID?: string,
+  ) => void;
+  addToolResult: (
+    sessionID: string,
+    name: string,
+    argumentsText: string,
+    result: string,
+    failed: boolean,
+    requestID?: string,
+    details?: ToolResultPayload,
+  ) => void;
+  appendAssistant: (
+    sessionID: string,
+    requestID: string | undefined,
+    text: string,
+    reasoning?: string,
+  ) => void;
   applyAssetList: (payload?: AssetListResultPayload) => void;
   applyChangeDiff: (payload?: ChangeDiffResultPayload) => void;
   applyChangeRevert: (payload?: ChangeRevertResultPayload) => void;
@@ -48,21 +70,43 @@ type Args = {
   applyHistoryDiff: (payload?: HistoryDiffResultPayload) => void;
   applyHistoryList: (payload?: HistoryListResultPayload) => void;
   applyHistoryRevert: (payload?: HistoryRevertResultPayload) => void;
+  applyKnowledgeCatalog: (payload?: KnowledgeCatalogResultPayload) => void;
+  applyKnowledgeDocuments: (payload?: KnowledgeDocumentListResultPayload) => void;
+  applyKnowledgeProfiles: (payload?: KnowledgeProfileListResultPayload) => void;
+  applyKnowledgeSearch: (payload?: KnowledgeSearchPreviewResultPayload) => void;
+  applyKnowledgeError: (message: string) => void;
   applyModelList: (payload?: ModelListResultPayload) => void;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
   applySessionChanged: (payload?: SessionChangedPayload) => void;
-  applySessionHistoryDelta: (payload?: SessionHistoryDeltaResultPayload) => void;
+  applySessionHistoryDelta: (
+    payload?: SessionHistoryDeltaResultPayload,
+  ) => void;
   applySessionHistoryMeta: (payload?: SessionHistoryMetaResultPayload) => void;
   applySessionHistory: (payload?: SessionHistoryResultPayload) => void;
   applySessionList: (payload?: SessionListResultPayload) => void;
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
-  completeAssistant: (sessionID: string, requestID: string | undefined, status: "done" | "paused", usage?: TokenUsage | null, content?: string, reasoning?: string) => void;
+  completeAssistant: (
+    sessionID: string,
+    requestID: string | undefined,
+    status: "done" | "paused",
+    usage?: TokenUsage | null,
+    content?: string,
+    reasoning?: string,
+  ) => void;
   currentFilePath: string;
-  getSessionChat: (sessionID: string) => { activeAssistantID: string; pendingRequestID: string };
+  getSessionChat: (sessionID: string) => {
+    activeAssistantID: string;
+    pendingRequestID: string;
+  };
   historySessionIDRef: RefObject<string>;
-  markAssistantError: (sessionID: string, requestID: string | undefined, message?: string) => void;
+  isKnowledgeOperationPending: boolean;
+  markAssistantError: (
+    sessionID: string,
+    requestID: string | undefined,
+    message?: string,
+  ) => void;
   mergeSessionChats: (fromSessionID: string, toSessionID: string) => void;
   requestChanges: () => boolean;
   requestAssets: (sessionID?: string) => boolean;
@@ -75,9 +119,18 @@ type Args = {
   requestSessionMapRef: RefObject<Record<string, string>>;
   sessionIDRef: RefObject<string>;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
-  setSessionCompact: (sessionID: string, compact: NonNullable<AssistantDonePayload["compact"]>) => void;
-  setSessionContext: (sessionID: string, context: NonNullable<AssistantDonePayload["context"]>) => void;
-  setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
+  setSessionCompact: (
+    sessionID: string,
+    compact: NonNullable<AssistantDonePayload["compact"]>,
+  ) => void;
+  setSessionContext: (
+    sessionID: string,
+    context: NonNullable<AssistantDonePayload["context"]>,
+  ) => void;
+  setSessionPendingPermission: (
+    sessionID: string,
+    permission: PermissionState | null,
+  ) => void;
   setSessionID: (sessionID: string) => void;
   setStatus: (status: string) => void;
   stopPending: (action: PendingAction) => void;
@@ -100,6 +153,11 @@ export function useRemoteMessageHandler({
   applyHistoryDiff,
   applyHistoryList,
   applyHistoryRevert,
+  applyKnowledgeCatalog,
+  applyKnowledgeDocuments,
+  applyKnowledgeProfiles,
+  applyKnowledgeSearch,
+  applyKnowledgeError,
   applyModelList,
   applyModelSwitch,
   applySessionChanged,
@@ -114,6 +172,7 @@ export function useRemoteMessageHandler({
   currentFilePath,
   getSessionChat,
   historySessionIDRef,
+  isKnowledgeOperationPending,
   markAssistantError,
   mergeSessionChats,
   requestChanges,
@@ -139,7 +198,11 @@ export function useRemoteMessageHandler({
       // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
       switch (message.type) {
         case "heartbeat":
-          setStatus(message.request_id ? `Ack ${shortID(message.request_id)}` : "Connected");
+          setStatus(
+            message.request_id
+              ? `Ack ${shortID(message.request_id)}`
+              : "Connected",
+          );
           break;
         case "assistant_delta":
           {
@@ -153,12 +216,16 @@ export function useRemoteMessageHandler({
           }
           break;
         case "assistant_done": {
-          const requestSessionID = message.request_id ? requestSessionMapRef.current[message.request_id] || "" : "";
-          const targetSessionID = message.session_id || requestSessionID || sessionIDRef.current;
+          const requestSessionID = message.request_id
+            ? requestSessionMapRef.current[message.request_id] || ""
+            : "";
+          const targetSessionID =
+            message.session_id || requestSessionID || sessionIDRef.current;
           if (message.session_id && requestSessionID !== message.session_id) {
             mergeSessionChats(requestSessionID, message.session_id);
             if (message.request_id) {
-              requestSessionMapRef.current[message.request_id] = message.session_id;
+              requestSessionMapRef.current[message.request_id] =
+                message.session_id;
             }
           }
           const payload = (message.payload || {}) as AssistantDonePayload;
@@ -169,15 +236,23 @@ export function useRemoteMessageHandler({
           if (payload.compact) {
             setSessionCompact(targetSessionID, payload.compact);
           }
+          if (payload.retrieval) {
+            applyKnowledgeSearch(payload.retrieval);
+          }
           completeAssistant(
             targetSessionID,
             message.request_id,
             payload.paused ? "paused" : "done",
             payload.usage || null,
-            payload.content || payload.message || (payload.paused ? "Session task paused." : ""),
+            payload.content ||
+              payload.message ||
+              (payload.paused ? "Session task paused." : ""),
             payload.reasoning || "",
           );
-          if (message.session_id && (!sessionIDRef.current || sessionIDRef.current === requestSessionID)) {
+          if (
+            message.session_id &&
+            (!sessionIDRef.current || sessionIDRef.current === requestSessionID)
+          ) {
             setSessionID(message.session_id);
             historySessionIDRef.current = message.session_id;
           }
@@ -194,7 +269,10 @@ export function useRemoteMessageHandler({
           requestFiles(currentFilePath);
           requestChanges();
           requestHistory();
-          if (!message.request_id || activeRequestIDRef.current === message.request_id) {
+          if (
+            !message.request_id ||
+            activeRequestIDRef.current === message.request_id
+          ) {
             activeRequestIDRef.current = "";
           }
           if (message.request_id) {
@@ -204,7 +282,12 @@ export function useRemoteMessageHandler({
         }
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
-          addToolCall(resolveChatSessionID(message, requestSessionMapRef, sessionIDRef), payload.name || "tool", payload.arguments || "", message.request_id);
+          addToolCall(
+            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+            payload.name || "tool",
+            payload.arguments || "",
+            message.request_id,
+          );
           break;
         }
         case "tool_result": {
@@ -214,14 +297,20 @@ export function useRemoteMessageHandler({
             payload.name || "tool",
             payload.arguments || "",
             payload.result || "",
-            Boolean(payload.error),
+            Boolean(payload.error) ||
+              Boolean(payload.status && payload.status !== "success"),
             message.request_id,
+            payload,
           );
           break;
         }
         case "permission_ask": {
           const payload = (message.payload || {}) as PermissionAskPayload;
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const targetSessionID = resolveChatSessionID(
+            message,
+            requestSessionMapRef,
+            sessionIDRef,
+          );
           setSessionPendingPermission(targetSessionID, {
             requestID: message.request_id || "",
             sessionID: targetSessionID,
@@ -233,21 +322,28 @@ export function useRemoteMessageHandler({
         }
         case "session_list_result":
           stopPending("sessions");
-          applySessionList(message.payload as SessionListResultPayload | undefined);
+          applySessionList(
+            message.payload as SessionListResultPayload | undefined,
+          );
           break;
         case "session_changed":
         case "session_delete_result":
         case "session_restore_result":
           stopPending("sessions");
-          applySessionChanged(message.payload as SessionChangedPayload | undefined);
+          applySessionChanged(
+            message.payload as SessionChangedPayload | undefined,
+          );
           requestDeletedSessions();
           break;
         case "session_history_result":
           stopPending("sessions");
-          applySessionHistory(message.payload as SessionHistoryResultPayload | undefined);
+          applySessionHistory(
+            message.payload as SessionHistoryResultPayload | undefined,
+          );
           break;
         case "session_history_meta_result": {
-          const payload = message.payload as SessionHistoryMetaResultPayload | undefined;
+          const payload = message.payload as
+            SessionHistoryMetaResultPayload | undefined;
           if (payload?.up_to_date) {
             stopPending("sessions");
           }
@@ -255,7 +351,8 @@ export function useRemoteMessageHandler({
           break;
         }
         case "session_history_delta_result": {
-          const payload = message.payload as SessionHistoryDeltaResultPayload | undefined;
+          const payload = message.payload as
+            SessionHistoryDeltaResultPayload | undefined;
           if (!payload?.full_sync_required) {
             stopPending("sessions");
           }
@@ -265,31 +362,51 @@ export function useRemoteMessageHandler({
         case "session_permission_set_result":
         case "session_mode_set_result":
         case "session_context_set_result":
+        case "session_rag_set_result":
         case "session_compact_result":
           // 设置以服务端返回的 Session 为准，并重新拉取列表，避免本地乐观状态与持久层不一致。
           stopPending("settings");
-          applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
+          applySessionSettings(
+            message.payload as SessionSettingsResultPayload | undefined,
+          );
           requestSessions();
           break;
         case "session_plan_update":
           // Plan 执行中间态只更新当前 Session，不结束 pending，后续还会继续收到步骤状态。
-          applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
+          applySessionSettings(
+            message.payload as SessionSettingsResultPayload | undefined,
+          );
           break;
         case "session_plan_execute_result":
           // 只有 execute_result 才表示整个计划结束，可以释放 Plan 按钮和会话运行状态。
           stopPending("plan");
-          applySessionSettings(message.payload as SessionSettingsResultPayload | undefined);
+          applySessionSettings(
+            message.payload as SessionSettingsResultPayload | undefined,
+          );
           requestSessions();
           break;
         case "session_pause_result": {
           stopPending("pause");
           const payload = (message.payload || {}) as SessionPauseResultPayload;
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          addEventMessage(targetSessionID, payload.message || (payload.paused ? "Session paused." : "No running task to pause."));
+          const targetSessionID = resolveChatSessionID(
+            message,
+            requestSessionMapRef,
+            sessionIDRef,
+          );
+          addEventMessage(
+            targetSessionID,
+            payload.message ||
+              (payload.paused
+                ? "Session paused."
+                : "No running task to pause."),
+          );
           setStatus(payload.paused ? "Paused" : "Idle");
           if (!payload.paused) {
             clearSessionPendingRequest(targetSessionID);
-            if (!message.request_id || activeRequestIDRef.current === message.request_id) {
+            if (
+              !message.request_id ||
+              activeRequestIDRef.current === message.request_id
+            ) {
               activeRequestIDRef.current = "";
             }
           }
@@ -304,7 +421,9 @@ export function useRemoteMessageHandler({
           break;
         case "model_switch_result":
           stopPending("models");
-          applyModelSwitch(message.payload as ModelSwitchResultPayload | undefined);
+          applyModelSwitch(
+            message.payload as ModelSwitchResultPayload | undefined,
+          );
           requestSessions();
           break;
         case "skill_list_result":
@@ -316,6 +435,23 @@ export function useRemoteMessageHandler({
           stopPending("assets");
           applyAssetList(message.payload as AssetListResultPayload | undefined);
           break;
+        case "knowledge_catalog_list_result":
+        case "knowledge_catalog_mutation_result":
+          stopPending("knowledge");
+          applyKnowledgeCatalog(message.payload as KnowledgeCatalogResultPayload | undefined);
+          break;
+        case "knowledge_document_list_result":
+        case "knowledge_document_mutation_result":
+          stopPending("knowledge");
+          applyKnowledgeDocuments(message.payload as KnowledgeDocumentListResultPayload | undefined);
+          break;
+        case "knowledge_profile_list_result":
+          applyKnowledgeProfiles(message.payload as KnowledgeProfileListResultPayload | undefined);
+          break;
+        case "knowledge_search_preview_result":
+          stopPending("knowledge");
+          applyKnowledgeSearch(message.payload as KnowledgeSearchPreviewResultPayload | undefined);
+          break;
         case "file_list_result":
           stopPending("files");
           applyFileList(message.payload as FileListResultPayload | undefined);
@@ -326,33 +462,61 @@ export function useRemoteMessageHandler({
           break;
         case "changes_list_result":
           stopPending("changes");
-          applyChangesList(message.payload as ChangesListResultPayload | undefined);
+          applyChangesList(
+            message.payload as ChangesListResultPayload | undefined,
+          );
           break;
         case "change_diff_result":
           stopPending("diff");
-          applyChangeDiff(message.payload as ChangeDiffResultPayload | undefined);
+          applyChangeDiff(
+            message.payload as ChangeDiffResultPayload | undefined,
+          );
           break;
         case "change_revert_result":
           stopPending("revert");
-          applyChangeRevert(message.payload as ChangeRevertResultPayload | undefined);
+          applyChangeRevert(
+            message.payload as ChangeRevertResultPayload | undefined,
+          );
           break;
         case "history_list_result":
           stopPending("history");
-          applyHistoryList(message.payload as HistoryListResultPayload | undefined);
+          applyHistoryList(
+            message.payload as HistoryListResultPayload | undefined,
+          );
           break;
         case "history_diff_result":
           stopPending("diff");
-          applyHistoryDiff(message.payload as HistoryDiffResultPayload | undefined);
+          applyHistoryDiff(
+            message.payload as HistoryDiffResultPayload | undefined,
+          );
           break;
         case "history_revert_result":
           stopPending("revert");
-          applyHistoryRevert(message.payload as HistoryRevertResultPayload | undefined);
+          applyHistoryRevert(
+            message.payload as HistoryRevertResultPayload | undefined,
+          );
           break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          if (isChatRequestError(getSessionChat(targetSessionID), message.request_id)) {
-            markAssistantError(targetSessionID, message.request_id, payload.message || "Remote error");
+          if (isKnowledgeOperationPending) {
+            applyKnowledgeError(payload.message || "知识库操作失败");
+          }
+          const targetSessionID = resolveChatSessionID(
+            message,
+            requestSessionMapRef,
+            sessionIDRef,
+          );
+          if (
+            isChatRequestError(
+              getSessionChat(targetSessionID),
+              message.request_id,
+            )
+          ) {
+            markAssistantError(
+              targetSessionID,
+              message.request_id,
+              payload.message || "Remote error",
+            );
           }
           addErrorMessage(targetSessionID, payload.message || "Remote error");
           setSessionPendingPermission(targetSessionID, null);
@@ -369,7 +533,11 @@ export function useRemoteMessageHandler({
           stopPending("settings");
           stopPending("plan");
           stopPending("pause");
-          if (!message.request_id || activeRequestIDRef.current === message.request_id) {
+          stopPending("knowledge");
+          if (
+            !message.request_id ||
+            activeRequestIDRef.current === message.request_id
+          ) {
             activeRequestIDRef.current = "";
           }
           if (message.request_id) {
@@ -397,6 +565,11 @@ export function useRemoteMessageHandler({
       applyHistoryDiff,
       applyHistoryList,
       applyHistoryRevert,
+      applyKnowledgeCatalog,
+      applyKnowledgeDocuments,
+      applyKnowledgeProfiles,
+      applyKnowledgeSearch,
+      applyKnowledgeError,
       applyModelList,
       applyModelSwitch,
       applySessionChanged,
@@ -411,6 +584,7 @@ export function useRemoteMessageHandler({
       currentFilePath,
       getSessionChat,
       historySessionIDRef,
+      isKnowledgeOperationPending,
       markAssistantError,
       mergeSessionChats,
       requestChanges,
@@ -439,10 +613,20 @@ function resolveChatSessionID(
   requestSessionMapRef: RefObject<Record<string, string>>,
   sessionIDRef: RefObject<string>,
 ) {
-  return (message.session_id || (message.request_id ? requestSessionMapRef.current[message.request_id] : "") || sessionIDRef.current || "").trim();
+  return (
+    message.session_id ||
+    (message.request_id
+      ? requestSessionMapRef.current[message.request_id]
+      : "") ||
+    sessionIDRef.current ||
+    ""
+  ).trim();
 }
 
-function isChatRequestError(chat: { activeAssistantID: string; pendingRequestID: string }, requestID?: string) {
+function isChatRequestError(
+  chat: { activeAssistantID: string; pendingRequestID: string },
+  requestID?: string,
+) {
   if (!requestID) {
     return false;
   }

@@ -10,3 +10,7 @@ type MutableRegistry interface {
 	Registry
 	SetModelInfo(modelName string, model ChatModelPort, info ModelInfo)
 }
+
+type MetadataProvider interface {
+	GetModelInfo(modelID string) (ModelInfo, bool)
+}

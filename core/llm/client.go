@@ -3,6 +3,7 @@ package llm
 import (
 	"sort"
 
+	generation "myai/core/domain/generation"
 	modelport "myai/core/port/model"
 )
 
@@ -14,6 +15,13 @@ type Client struct {
 }
 
 var _ modelport.MutableRegistry = (*Client)(nil)
+var _ modelport.MetadataProvider = (*Client)(nil)
+
+func (c *Client) GetModelInfo(modelID string) (ModelInfo, bool) {
+	info, ok := c.infos[modelID]
+	info.DefaultGenerationSettings = generation.Clone(info.DefaultGenerationSettings)
+	return info, ok
+}
 
 func NewClient() *Client {
 	return &Client{
@@ -48,6 +56,7 @@ func (c *Client) SetModelInfo(modelName string, model modelport.ChatModelPort, i
 		info.ModelName = info.ID
 	}
 	info.Enabled = true
+	info.DefaultGenerationSettings = generation.Clone(info.DefaultGenerationSettings)
 
 	c.models[modelName] = model
 	c.infos[modelName] = info
@@ -75,6 +84,7 @@ func (c *Client) ListModels() []ModelInfo {
 
 	models := make([]ModelInfo, 0, len(c.infos))
 	for _, info := range c.infos {
+		info.DefaultGenerationSettings = generation.Clone(info.DefaultGenerationSettings)
 		models = append(models, info)
 	}
 

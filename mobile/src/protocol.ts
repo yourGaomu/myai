@@ -32,6 +32,8 @@ export type MessageType =
   | "session_plan_execute_result"
   | "session_context_set"
   | "session_context_set_result"
+  | "session_rag_set"
+  | "session_rag_set_result"
   | "session_compact"
   | "session_compact_result"
   | "session_pause"
@@ -47,6 +49,25 @@ export type MessageType =
   | "skill_reload_result"
   | "asset_list"
   | "asset_list_result"
+  | "knowledge_catalog_list"
+  | "knowledge_catalog_list_result"
+  | "knowledge_category_create"
+  | "knowledge_category_move"
+  | "knowledge_category_delete"
+  | "knowledge_base_create"
+  | "knowledge_base_update"
+  | "knowledge_base_delete"
+  | "knowledge_catalog_mutation_result"
+  | "knowledge_document_list"
+  | "knowledge_document_list_result"
+  | "knowledge_document_ingest"
+  | "knowledge_document_retry"
+  | "knowledge_document_delete"
+  | "knowledge_document_mutation_result"
+  | "knowledge_profile_list"
+  | "knowledge_profile_list_result"
+  | "knowledge_search_preview"
+  | "knowledge_search_preview_result"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -94,6 +115,7 @@ export type AssistantDonePayload = {
   context?: ContextInfo;
   compact?: CompactInfo;
   plan?: Plan;
+  retrieval?: KnowledgeSearchPreviewResultPayload;
   paused?: boolean;
   message?: string;
 };
@@ -121,6 +143,10 @@ export type ToolResultPayload = {
   arguments?: string;
   result?: string;
   error?: boolean;
+  status?: "success" | "failed" | "denied" | "timeout" | "canceled" | string;
+  error_code?: string;
+  error_message?: string;
+  truncated?: boolean;
 };
 
 export type PermissionAskPayload = {
@@ -143,10 +169,22 @@ export type SessionSummary = {
   usage?: TokenUsage;
   last_usage?: TokenUsage;
   current_plan?: Plan;
+  rag?: RAGSettings;
   deleted?: boolean;
   deleted_at?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+export type RAGSettings = {
+  mode: "off" | "manual" | "auto" | "always" | string;
+  knowledge_base_ids: string[];
+  category_ids: string[];
+  top_k: number;
+};
+
+export type SessionRAGSetPayload = RAGSettings & {
+  session_id?: string;
 };
 
 export type Plan = {
@@ -199,6 +237,9 @@ export type SessionHistoryMessage = {
   tool_name?: string;
   tool_arguments?: string;
   tool_error?: string;
+  tool_status?: string;
+  tool_error_code?: string;
+  tool_truncated?: boolean;
   usage?: TokenUsage;
   created_at?: string;
 };
@@ -399,6 +440,206 @@ export type AssetListResultPayload = {
   session_id: string;
   assets?: AssetSummary[];
   count?: number;
+};
+
+export type KnowledgeCategory = {
+  id: string;
+  name: string;
+  parent_id?: string;
+  ancestor_ids?: string[];
+  sort_order?: number;
+  deleted?: boolean;
+  deleted_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeBase = {
+  id: string;
+  category_id?: string;
+  name: string;
+  description?: string;
+  rag_enabled: boolean;
+  active_index_profile_id?: string;
+  pending_index_profile_id?: string;
+  deleted?: boolean;
+  deleted_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeCatalogResultPayload = {
+  categories: KnowledgeCategory[];
+  knowledge_bases: KnowledgeBase[];
+  message?: string;
+};
+
+export type KnowledgeCatalogListPayload = {
+  include_deleted?: boolean;
+};
+
+export type KnowledgeCategoryCreatePayload = {
+  name: string;
+  parent_id?: string;
+  sort_order?: number;
+};
+
+export type KnowledgeCategoryMovePayload = {
+  category_id: string;
+  parent_id?: string;
+  sort_order?: number;
+};
+
+export type KnowledgeCategoryDeletePayload = {
+  category_id: string;
+  reason?: string;
+  recursive?: boolean;
+};
+
+export type KnowledgeBaseCreatePayload = {
+  category_id?: string;
+  name: string;
+  description?: string;
+  rag_enabled: boolean;
+  active_index_profile_id?: string;
+};
+
+export type KnowledgeBaseUpdatePayload = {
+  knowledge_base_id: string;
+  category_id?: string;
+  name: string;
+  description?: string;
+  rag_enabled: boolean;
+  active_index_profile_id?: string;
+};
+
+export type KnowledgeBaseDeletePayload = {
+  knowledge_base_id: string;
+  reason?: string;
+};
+
+export type KnowledgeDocumentListPayload = {
+  knowledge_base_id: string;
+  include_deleted?: boolean;
+};
+
+export type KnowledgeDocumentIngestPayload = {
+  knowledge_base_id: string;
+  url?: string;
+  code?: string;
+};
+
+export type KnowledgeDocumentRetryPayload = {
+  knowledge_base_id: string;
+  job_id: string;
+};
+
+export type KnowledgeDocumentDeletePayload = {
+  knowledge_base_id: string;
+  document_id: string;
+  reason?: string;
+};
+
+export type KnowledgeDocument = {
+  id: string;
+  knowledge_base_id: string;
+  file_name: string;
+  content_type?: string;
+  version: number;
+  status: "uploaded" | "parsing" | "chunking" | "embedding" | "indexing" | "ready" | "failed" | "deleted" | string;
+  failure_reason?: string;
+  deleted?: boolean;
+  deleted_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeIndexingJob = {
+  id: string;
+  knowledge_base_id: string;
+  document_id: string;
+  index_profile_id: string;
+  stage: string;
+  status: string;
+  total_chunks: number;
+  completed_chunks: number;
+  failed_chunks: number;
+  last_error?: string;
+  retry_count: number;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string;
+};
+
+export type KnowledgeDocumentListResultPayload = {
+  knowledge_base_id: string;
+  documents: KnowledgeDocument[];
+  jobs: KnowledgeIndexingJob[];
+  message?: string;
+};
+
+export type KnowledgeIndexProfile = {
+  id: string;
+  name: string;
+  parsing_profile_id: string;
+  chunking_profile_id: string;
+  embedding_profile_id: string;
+  distance_metric_id: string;
+  status: string;
+  failure_reason?: string;
+  deleted?: boolean;
+  deleted_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeProfileListResultPayload = {
+  profiles: KnowledgeIndexProfile[];
+};
+
+export type KnowledgeProfileListPayload = {
+  include_deleted?: boolean;
+};
+
+export type KnowledgeSearchHit = {
+  knowledge_base_id: string;
+  document_id: string;
+  chunk_id: string;
+  text: string;
+  source_name?: string;
+  source_location?: string;
+  score: number;
+  rank: number;
+  channel: string;
+  origin: string;
+};
+
+export type KnowledgeSearchProfileDiagnostic = {
+  index_profile_id: string;
+  embedding_profile_id: string;
+  knowledge_base_ids: string[];
+  local_vector_hits: number;
+  local_keyword_hits: number;
+  remote_vector_hits: number;
+  remote_fallback: boolean;
+  cache_fill_count: number;
+  error?: string;
+};
+
+export type KnowledgeSearchPreviewResultPayload = {
+  query: string;
+  hits: KnowledgeSearchHit[];
+  resolved_knowledge_base_ids: string[];
+  profiles: KnowledgeSearchProfileDiagnostic[];
+  warnings: string[];
+  error?: string;
+};
+
+export type KnowledgeSearchPreviewPayload = {
+  query: string;
+  knowledge_base_ids?: string[];
+  category_ids?: string[];
+  top_k?: number;
 };
 
 export type FileListPayload = {

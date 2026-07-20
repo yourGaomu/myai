@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	domaintool "myai/core/domain/tool"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -22,10 +23,6 @@ type Tool struct {
 	description  string
 	inputSchema  json.RawMessage
 	permission   tooldef.Permission
-}
-
-func NewTool(client *Client, serverName string, info ToolInfo, permission tooldef.Permission) *Tool {
-	return NewToolWithName(client, serverName, info, ExposedToolName(serverName, info.Name), permission)
 }
 
 func NewToolWithName(client *Client, serverName string, info ToolInfo, exposedName string, permission tooldef.Permission) *Tool {
@@ -75,10 +72,10 @@ func (t *Tool) Permission() tooldef.Permission {
 	return t.permission
 }
 
-func (t *Tool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *Tool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	result, err := t.client.CallTool(ctx, t.originalName, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	output := formatCallResult(result)
@@ -86,9 +83,9 @@ func (t *Tool) Call(ctx context.Context, args json.RawMessage) (string, error) {
 		if output == "" {
 			output = "mcp tool returned an error"
 		}
-		return "", fmt.Errorf("%s", output)
+		return tooldef.FailedOutput(domaintool.ResultStatusFailed, "mcp_tool_error", output), nil
 	}
-	return output, nil
+	return tooldef.SuccessOutput(output), nil
 }
 
 func ExposedToolName(serverName string, toolName string) string {

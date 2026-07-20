@@ -59,32 +59,53 @@ func (m *Store) GetSession(ctx context.Context, sessionID string) (repository.Se
 
 func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecord) error {
 	document := mongomapper.SessionDocumentFromRecord(session)
+	setValues := bson.M{
+		"model":              document.Model,
+		"agent_mode":         document.AgentMode,
+		"permission_mode":    document.PermissionMode,
+		"context_window_k":   document.ContextWindowK,
+		"summary":            document.Summary,
+		"compacted_messages": document.CompactedMessages,
+		"compacted_at":       document.CompactedAt,
+		"title":              document.Title,
+		"usage":              document.Usage,
+		"last_usage":         document.LastUsage,
+		"current_plan":       document.CurrentPlan,
+		"updated_at":         document.UpdatedAt,
+	}
+	update := bson.M{
+		"$set": setValues,
+		"$setOnInsert": bson.M{
+			"_id":        document.ID,
+			"deleted":    false,
+			"created_at": document.CreatedAt,
+		},
+	}
+	unsetValues := bson.M{}
+	if document.GenerationSettings == nil {
+		unsetValues["generation_settings"] = ""
+	} else {
+		setValues["generation_settings"] = document.GenerationSettings
+	}
+	if document.RAGSettings == nil {
+		unsetValues["rag_settings"] = ""
+	} else {
+		setValues["rag_settings"] = document.RAGSettings
+	}
+	if document.StyleInstruction == "" {
+		unsetValues["style_instruction"] = ""
+	} else {
+		setValues["style_instruction"] = document.StyleInstruction
+	}
+	if len(unsetValues) > 0 {
+		update["$unset"] = unsetValues
+	}
 	// 使用 upsert 保证新会话和已有会话走同一写入路径；created_at 只在首次插入时设置。
 	_, err := m.template.UpdateOne(
 		ctx,
 		sessionsCollection,
 		bson.M{"_id": document.ID},
-		bson.M{
-			"$set": bson.M{
-				"model":              document.Model,
-				"agent_mode":         document.AgentMode,
-				"permission_mode":    document.PermissionMode,
-				"context_window_k":   document.ContextWindowK,
-				"summary":            document.Summary,
-				"compacted_messages": document.CompactedMessages,
-				"compacted_at":       document.CompactedAt,
-				"title":              document.Title,
-				"usage":              document.Usage,
-				"last_usage":         document.LastUsage,
-				"current_plan":       document.CurrentPlan,
-				"updated_at":         document.UpdatedAt,
-			},
-			"$setOnInsert": bson.M{
-				"_id":        document.ID,
-				"deleted":    false,
-				"created_at": document.CreatedAt,
-			},
-		},
+		update,
 		options.UpdateOne().SetUpsert(true),
 	)
 	return err
@@ -124,26 +145,33 @@ func (m *Store) MarkSessionRestored(ctx context.Context, sessionID string, resto
 
 func (m *Store) SaveConfig(ctx context.Context, model domainmodel.Config) error {
 	document := mongomapper.ModelConfigDocumentFromDomain(model)
+	setValues := bson.M{
+		"name":       document.Name,
+		"provider":   document.Provider,
+		"base_url":   document.BaseURL,
+		"api_key":    document.APIKey,
+		"model_name": document.ModelName,
+		"enabled":    document.Enabled,
+		"is_default": document.IsDefault,
+		"updated_at": document.UpdatedAt,
+	}
+	update := bson.M{
+		"$set": setValues,
+		"$setOnInsert": bson.M{
+			"_id":        document.ID,
+			"created_at": document.CreatedAt,
+		},
+	}
+	if document.DefaultGenerationSettings == nil {
+		update["$unset"] = bson.M{"default_generation_settings": ""}
+	} else {
+		setValues["default_generation_settings"] = document.DefaultGenerationSettings
+	}
 	_, err := m.template.UpdateOne(
 		ctx,
 		modelConfigsCollection,
 		bson.M{"_id": document.ID},
-		bson.M{
-			"$set": bson.M{
-				"name":       document.Name,
-				"provider":   document.Provider,
-				"base_url":   document.BaseURL,
-				"api_key":    document.APIKey,
-				"model_name": document.ModelName,
-				"enabled":    document.Enabled,
-				"is_default": document.IsDefault,
-				"updated_at": document.UpdatedAt,
-			},
-			"$setOnInsert": bson.M{
-				"_id":        document.ID,
-				"created_at": document.CreatedAt,
-			},
-		},
+		update,
 		options.UpdateOne().SetUpsert(true),
 	)
 	return err

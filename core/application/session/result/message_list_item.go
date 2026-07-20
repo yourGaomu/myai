@@ -11,6 +11,9 @@ type MessageListItem struct {
 	ToolName           string
 	ToolArguments      string
 	ToolError          string
+	ToolStatus         string
+	ToolErrorCode      string
+	ToolTruncated      bool
 	PromptTokens       int
 	CompletionTokens   int
 	TotalTokens        int

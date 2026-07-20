@@ -36,7 +36,7 @@ type Info struct {
 }
 
 type Snapshot struct {
-	// Prefix 是稳定的 system + summary 前缀，用于计算缓存哈希；Messages 是实际发送给模型的完整快照。
+	// Prefix 是当前 runtime/user turn 之前的已选历史；Messages 是实际发送给模型的完整快照。
 	Info     Info
 	Messages []domainmessage.Message
 	Prefix   []domainmessage.Message
@@ -56,27 +56,6 @@ func ValidateWindowK(windowK int) error {
 	return nil
 }
 
-func Build(messages []domainmessage.Message, windowK int) []domainmessage.Message {
-	return BuildWithSummary(messages, "", 0, windowK)
-}
-
-func BuildWithSummary(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) []domainmessage.Message {
-	info, selected := AnalyzeWithSummary(messages, summary, compactedMessages, windowK)
-	if info.Truncated {
-		return selected
-	}
-	return selected
-}
-
-func Analyze(messages []domainmessage.Message, windowK int) (Info, []domainmessage.Message) {
-	return AnalyzeWithSummary(messages, "", 0, windowK)
-}
-
-func AnalyzeWithSummary(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) (Info, []domainmessage.Message) {
-	snapshot := BuildSnapshot(messages, summary, compactedMessages, windowK)
-	return snapshot.Info, snapshot.Messages
-}
-
 func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) Snapshot {
 	// base 始终放固定 system 和可选摘要，recent 再按 token 预算从新到旧选择完整消息块。
 	summary = strings.TrimSpace(summary)
@@ -84,15 +63,34 @@ func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMe
 	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
 	info.SummaryVersion = info.CompactedMessages
 	info.SummaryHash = StableTextHash(summary)
-	info.PrefixTokens = EstimateMessagesTokens(base)
+	cacheablePrefix := stableCacheablePrefix(selected)
+	info.PrefixTokens = EstimateMessagesTokens(cacheablePrefix)
 	info.CacheableTokens = info.PrefixTokens
-	info.PrefixHash = StableMessagesHash(base)
+	info.PrefixHash = StableMessagesHash(cacheablePrefix)
 
 	return Snapshot{
 		Info:     info,
 		Messages: selected,
-		Prefix:   base,
+		Prefix:   cacheablePrefix,
 	}
+}
+
+func stableCacheablePrefix(messages []domainmessage.Message) []domainmessage.Message {
+	lastUserIndex := -1
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == domainmessage.RoleUser {
+			lastUserIndex = index
+			break
+		}
+	}
+	if lastUserIndex < 0 {
+		return messages
+	}
+	turnStart := lastUserIndex
+	for turnStart > 0 && messages[turnStart-1].IsSynthetic() {
+		turnStart--
+	}
+	return messages[:turnStart]
 }
 
 func ShouldCompact(info Info, triggerRatio float64) bool {
@@ -214,68 +212,19 @@ func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Messag
 }
 
 func displayCompactedMessages(messages []domainmessage.Message, compactedMessages int) int {
-	count := NormalizeCompactedMessages(messages, compactedMessages)
-	if len(messages) > 0 && messages[0].Role == domainmessage.RoleSystem {
-		count--
-	}
-	if count < 0 {
-		return 0
+	limit := NormalizeCompactedMessages(messages, compactedMessages)
+	count := 0
+	for index := 0; index < limit; index++ {
+		message := messages[index]
+		if index == 0 && message.Role == domainmessage.RoleSystem && !message.IsSynthetic() {
+			continue
+		}
+		if message.IsSynthetic() {
+			continue
+		}
+		count++
 	}
 	return count
-}
-
-func LegacyBuild(messages []domainmessage.Message, windowK int) []domainmessage.Message {
-	info, selected := Analyze(messages, windowK)
-	if info.Truncated {
-		return selected
-	}
-	return messages
-}
-
-func LegacyAnalyze(messages []domainmessage.Message, windowK int) (Info, []domainmessage.Message) {
-	windowK = NormalizeWindowK(windowK)
-	if len(messages) == 0 {
-		return Info{WindowK: windowK}, nil
-	}
-
-	fullTokens := EstimateMessagesTokens(messages)
-	budget := windowK * 1000
-	system, rest := splitSystemMessage(messages)
-	systemTokens := EstimateMessagesTokens(system)
-
-	chunks := messageChunks(rest)
-	selectedChunks := make([][]domainmessage.Message, 0, len(chunks))
-	selectedTokens := systemTokens
-
-	for i := len(chunks) - 1; i >= 0; i-- {
-		chunk := chunks[i]
-		chunkTokens := EstimateMessagesTokens(chunk)
-		shouldInclude := selectedTokens+chunkTokens <= budget
-		if !shouldInclude && len(selectedChunks) == 0 {
-			shouldInclude = true
-		}
-		if !shouldInclude {
-			break
-		}
-
-		selectedChunks = append(selectedChunks, chunk)
-		selectedTokens += chunkTokens
-	}
-
-	selected := make([]domainmessage.Message, 0, len(messages))
-	selected = append(selected, system...)
-	for i := len(selectedChunks) - 1; i >= 0; i-- {
-		selected = append(selected, selectedChunks[i]...)
-	}
-
-	return Info{
-		WindowK:          windowK,
-		FullTokens:       fullTokens,
-		SelectedTokens:   selectedTokens,
-		FullMessages:     len(messages),
-		SelectedMessages: len(selected),
-		Truncated:        len(selected) < len(messages) || fullTokens > budget,
-	}, selected
 }
 
 func EstimateMessagesTokens(messages []domainmessage.Message) int {
@@ -294,6 +243,11 @@ func StableMessagesHash(messages []domainmessage.Message) string {
 	for _, message := range messages {
 		builder.WriteString(string(message.Role))
 		builder.WriteString("\n")
+		if message.SyntheticReason != "" {
+			builder.WriteString("synthetic:")
+			builder.WriteString(string(message.SyntheticReason))
+			builder.WriteString("\n")
+		}
 		for _, part := range message.Parts {
 			writeStablePart(&builder, part)
 			builder.WriteString("\n")
@@ -323,6 +277,19 @@ func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
 	chunks := make([][]domainmessage.Message, 0, len(messages))
 	for i := 0; i < len(messages); i++ {
 		message := messages[i]
+		if message.IsSynthetic() {
+			chunk := []domainmessage.Message{message}
+			for i+1 < len(messages) && messages[i+1].IsSynthetic() {
+				i++
+				chunk = append(chunk, messages[i])
+			}
+			if i+1 < len(messages) && messages[i+1].Role == domainmessage.RoleUser {
+				i++
+				chunk = append(chunk, messages[i])
+			}
+			chunks = append(chunks, chunk)
+			continue
+		}
 		chunk := []domainmessage.Message{message}
 		if message.Role == domainmessage.RoleAssistant && message.HasToolCall() {
 			for i+1 < len(messages) && messages[i+1].Role == domainmessage.RoleTool {

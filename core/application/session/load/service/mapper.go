@@ -2,6 +2,7 @@ package service
 
 import (
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
 	repository "myai/core/port/repository"
 	"myai/core/session"
@@ -23,6 +24,11 @@ func MessagesFromRecords(records []repository.MessageRecord) []domainmessage.Mes
 	messages = append(messages, domainmessage.Text(domainmessage.RoleSystem, session.SystemPrompt()))
 	for _, record := range records {
 		switch record.Role {
+		case repository.RoleSystem:
+			reason := domainmessage.SyntheticReason(record.SyntheticReason)
+			if reason != "" {
+				messages = append(messages, domainmessage.SyntheticText(reason, record.Content))
+			}
 		case repository.RoleUser:
 			messages = append(messages, domainmessage.Text(domainmessage.RoleUser, record.Content))
 		case repository.RoleAssistant:
@@ -34,6 +40,8 @@ func MessagesFromRecords(records []repository.MessageRecord) []domainmessage.Mes
 		case repository.RoleTool:
 			messages = append(messages, domainmessage.ToolResultMessage(domainmessage.ToolResult{
 				ToolCallID: record.ToolCallID, Name: record.ToolName, Content: record.Content,
+				Status: domaintool.ResultStatus(record.ToolStatus), ErrorCode: record.ToolErrorCode,
+				ErrorMessage: record.ToolError, Truncated: record.ToolTruncated,
 			}))
 		}
 	}

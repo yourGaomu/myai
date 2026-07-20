@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
@@ -89,22 +90,37 @@ func (sm *Store) PutSessionWithModeUsageNoCurrent(sessionID string, modelID stri
 }
 
 func (sm *Store) putSessionWithModeUsage(sessionID string, modelID string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message, setCurrent bool) error {
-	if sessionID == "" {
+	return sm.PutSessionState(domainsession.InitialState{
+		ID:                sessionID,
+		Model:             modelID,
+		AgentMode:         agentMode,
+		PermissionMode:    permissionMode,
+		ContextWindowK:    contextWindowK,
+		Summary:           summary,
+		CompactedMessages: compactedMessages,
+		Usage:             usage,
+		LastUsage:         lastUsage,
+		Messages:          messages,
+	}, setCurrent)
+}
+
+func (sm *Store) PutSessionState(state domainsession.InitialState, setCurrent bool) error {
+	if state.ID == "" {
 		return errors.New("session id is empty")
 	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if modelID == "" {
-		modelID = sm.currentModelId
+	if state.Model == "" {
+		state.Model = sm.currentModelId
 	}
 
 	if setCurrent {
-		sm.currentSessionId = sessionID
-		sm.currentModelId = modelID
+		sm.currentSessionId = state.ID
+		sm.currentModelId = state.Model
 	}
-	sm.session[sessionID] = newSession(sessionID, modelID, agentMode, permissionMode, contextWindowK, summary, compactedMessages, usage, lastUsage, messages)
+	sm.session[state.ID] = domainsession.NewFromState(state)
 	return nil
 }
 
@@ -129,6 +145,14 @@ func (sm *Store) AddUserMessage(input string) error {
 }
 
 func (sm *Store) AddUserMessageTo(sessionID string, input string) error {
+	return sm.AddUserTurnTo(sessionID, "", input)
+}
+
+func (sm *Store) AddUserTurnTo(sessionID string, runtimeInstruction string, input string) error {
+	return sm.AddUserTurnWithContextTo(sessionID, "", runtimeInstruction, input)
+}
+
+func (sm *Store) AddUserTurnWithContextTo(sessionID string, ragContext string, runtimeInstruction string, input string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -137,7 +161,7 @@ func (sm *Store) AddUserMessageTo(sessionID string, input string) error {
 		return err
 	}
 
-	session.AddUserMessage(input)
+	session.AddUserTurnWithContext(ragContext, runtimeInstruction, input)
 	return nil
 }
 
@@ -349,6 +373,47 @@ func (sm *Store) SetContextWindowKForSession(sessionID string, windowK int) erro
 	}
 
 	session.ContextWindowK = windowK
+	return nil
+}
+
+func (sm *Store) SetGenerationSettingsForSession(sessionID string, settings generation.Settings) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	current.GenerationSettings = generation.Clone(settings)
+	return nil
+}
+
+func (sm *Store) SetStyleInstructionForSession(sessionID string, instruction string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	current.StyleInstruction = instruction
+	return nil
+}
+
+func (sm *Store) SetRAGSettingsForSession(sessionID string, settings domainsession.RAGSettings) error {
+	settings = domainsession.NormalizeRAGSettings(settings)
+	if err := domainsession.ValidateRAGSettings(settings); err != nil {
+		return err
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	current.RAGSettings = domainsession.CloneRAGSettings(settings)
 	return nil
 }
 

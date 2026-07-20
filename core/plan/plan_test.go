@@ -65,9 +65,12 @@ func TestHasResultSection(t *testing.T) {
 	if HasResultSection("## Plan\n1. Inspect only") {
 		t.Fatal("did not expect result section")
 	}
+	if HasResultSection("## Result format\nUse JSON") {
+		t.Fatal("did not expect a descriptive heading to count as a result")
+	}
 }
 
-func TestNewDraftFallsBackToSingleStep(t *testing.T) {
+func TestNewDraftDoesNotInventExecutableStep(t *testing.T) {
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	draft := NewDraft("session-1", "make a plan", "No numbered list yet.", now)
 	if draft == nil {
@@ -76,10 +79,7 @@ func TestNewDraftFallsBackToSingleStep(t *testing.T) {
 	if draft.Status != StatusDraft {
 		t.Fatalf("unexpected status: %q", draft.Status)
 	}
-	if len(draft.Steps) != 1 {
-		t.Fatalf("expected fallback step, got %d", len(draft.Steps))
-	}
-	if draft.Steps[0].Title != "No numbered list yet." {
-		t.Fatalf("unexpected fallback title: %q", draft.Steps[0].Title)
+	if len(draft.Steps) != 0 {
+		t.Fatalf("expected malformed plan to have no executable steps, got %d", len(draft.Steps))
 	}
 }

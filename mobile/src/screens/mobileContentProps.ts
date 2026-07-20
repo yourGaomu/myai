@@ -14,9 +14,17 @@ import type {
   ModelSummary,
   SkillSummary,
   SessionSummary,
+  KnowledgeBase,
+  KnowledgeCategory,
+  KnowledgeDocument,
+  KnowledgeIndexProfile,
+  KnowledgeIndexingJob,
+  KnowledgeSearchPreviewResultPayload,
+  RAGSettings,
 } from "../protocol";
 import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
+import type { KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 
 export type MainContentCommonProps = {
@@ -130,6 +138,31 @@ export type SessionsContentProps = {
   onSelectSession: (sessionID: string) => void;
 };
 
+export type KnowledgeContentProps = {
+  activeSession?: SessionSummary;
+  categories: KnowledgeCategory[];
+  documents: KnowledgeDocument[];
+  jobs: KnowledgeIndexingJob[];
+  knowledgeBases: KnowledgeBase[];
+  message: string;
+  onCreateCategory: (name: string, parentID?: string) => boolean;
+  onCreateKnowledgeBase: (name: string, categoryID?: string, profileID?: string) => boolean;
+  onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
+  onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
+  onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onMoveCategory: (categoryID: string, parentID?: string) => boolean;
+  onRefresh: () => void;
+  onRefreshDocuments: () => void;
+  onRetryDocument: (knowledgeBaseID: string, jobID: string) => void;
+  onSearch: (query: string, settings?: RAGSettings) => boolean;
+  onSelectKnowledgeBase: (knowledgeBaseID: string) => void;
+  onSetRAG: (settings: RAGSettings) => boolean;
+  onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
+  onUploadDocument: () => void;
+  profiles: KnowledgeIndexProfile[];
+  searchResult: KnowledgeSearchPreviewResultPayload | null;
+};
+
 export type PermissionContentProps = {
   onAllowPermission: () => void;
   onDenyPermission: () => void;
@@ -140,7 +173,8 @@ export type MobileMainContentProps = {
   changes: ChangesContentProps;
   chat: ChatContentProps;
   common: MainContentCommonProps;
-  files: FilesContentProps;
+	files: FilesContentProps;
+	knowledge: KnowledgeContentProps;
   permission: PermissionContentProps;
   plan: PlanContentProps;
   sessions: SessionsContentProps;

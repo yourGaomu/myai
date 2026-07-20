@@ -18,16 +18,21 @@ func TestPermissionWaiterRegistryResolvesAndUnregisters(t *testing.T) {
 	}
 }
 
-func TestPermissionWaiterRegistryKeepsReplacement(t *testing.T) {
+func TestPermissionWaiterRegistryQueuesWaitersForSameRequest(t *testing.T) {
 	registry := newPermissionWaiterRegistry()
 	first := registry.register("request-1")
 	second := registry.register("request-1")
 
-	registry.unregister("request-1", first)
 	if !registry.resolve("request-1", true) {
-		t.Fatal("expected replacement waiter to remain registered")
+		t.Fatal("expected first waiter to resolve")
 	}
-	if allowed := <-second; !allowed {
-		t.Fatal("expected replacement waiter result")
+	if allowed := <-first; !allowed {
+		t.Fatal("expected first waiter result")
+	}
+	if !registry.resolve("request-1", false) {
+		t.Fatal("expected second waiter to resolve")
+	}
+	if allowed := <-second; allowed {
+		t.Fatal("expected second waiter denial")
 	}
 }

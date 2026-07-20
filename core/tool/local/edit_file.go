@@ -34,14 +34,6 @@ type editFileResult struct {
 	HistoryError string `json:"history_error,omitempty"`
 }
 
-func NewEditFileTool() *EditFileTool {
-	return &EditFileTool{}
-}
-
-func NewEditFileToolWithRecorder(recorder historyRecorder) *EditFileTool {
-	return &EditFileTool{recorder: recorder}
-}
-
 func NewEditFileToolWithWorkspace(workspace string) *EditFileTool {
 	return &EditFileTool{workspace: workspace}
 }
@@ -87,60 +79,60 @@ func (t *EditFileTool) Permission() tooldef.Permission {
 	return tooldef.PermissionWrite
 }
 
-func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	input, err := normalizeEditFileArgs(workspace, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	defer closeRecorder()
 
 	// 写入前先保存快照；成功后记录 before/after，手机才能按检查点恢复。
 	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	info, err := os.Stat(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("path is a directory: %s", input.Path)
+		return tooldef.ToolOutput{}, fmt.Errorf("path is a directory: %s", input.Path)
 	}
 
 	contentBytes, err := os.ReadFile(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if !utf8.Valid(contentBytes) {
-		return "", fmt.Errorf("file is not valid UTF-8 text: %s", input.Path)
+		return tooldef.ToolOutput{}, fmt.Errorf("file is not valid UTF-8 text: %s", input.Path)
 	}
 
 	content := string(contentBytes)
 	replacements := strings.Count(content, input.OldText)
 	if replacements == 0 {
-		return "", errors.New("old_text was not found in file")
+		return tooldef.ToolOutput{}, errors.New("old_text was not found in file")
 	}
 	if replacements > 1 && !input.ReplaceAll {
-		return "", fmt.Errorf("old_text appears %d times; set replace_all=true to replace every occurrence", replacements)
+		return tooldef.ToolOutput{}, fmt.Errorf("old_text appears %d times; set replace_all=true to replace every occurrence", replacements)
 	}
 
 	nextContent := strings.Replace(content, input.OldText, input.NewText, replacementLimit(input.ReplaceAll))
 	if err := os.WriteFile(input.Path, []byte(nextContent), info.Mode().Perm()); err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	result := editFileResult{
@@ -159,9 +151,9 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (string, 
 	}
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	return tooldef.SuccessOutput(string(output)), nil
 }
 
 func normalizeEditFileArgs(workspace string, args json.RawMessage) (editFileArgs, error) {

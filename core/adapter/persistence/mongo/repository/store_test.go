@@ -88,6 +88,10 @@ func (f *fakeMongoOperations) UpdateOne(context.Context, string, any, any, ...op
 	return &gomongo.UpdateResult{}, nil
 }
 
+func (f *fakeMongoOperations) UpdateMany(context.Context, string, any, any, ...options.Lister[options.UpdateManyOptions]) (*gomongo.UpdateResult, error) {
+	return &gomongo.UpdateResult{}, nil
+}
+
 func (f *fakeMongoOperations) InsertOne(_ context.Context, collection string, document any) (*gomongo.InsertOneResult, error) {
 	f.collection = collection
 	f.document = document

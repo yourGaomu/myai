@@ -10,8 +10,7 @@ import (
 )
 
 type QueryService struct {
-	Contexts            chatcontextport.Provider
-	RuntimeInstructions chatcontextport.RuntimeInstructionProvider
+	Contexts chatcontextport.Provider
 }
 
 var _ chatcontextapi.QueryService = QueryService{}
@@ -20,19 +19,8 @@ func (s QueryService) Info(ctx context.Context, current *session.Session) contex
 	if current == nil {
 		return contextmgr.Info{WindowK: contextmgr.DefaultWindowK}
 	}
-	return s.InfoWithRuntimePrompt(current, s.runtimePrompt(ctx, current))
-}
-
-func (s QueryService) InfoWithRuntimePrompt(current *session.Session, runtimePrompt string) contextmgr.Info {
-	if current == nil || s.Contexts == nil {
+	if s.Contexts == nil {
 		return contextmgr.Info{WindowK: contextmgr.DefaultWindowK}
 	}
-	return s.Contexts.Snapshot(current, runtimePrompt).Info
-}
-
-func (s QueryService) runtimePrompt(ctx context.Context, current *session.Session) string {
-	if s.RuntimeInstructions == nil {
-		return ""
-	}
-	return s.RuntimeInstructions.Prompt(ctx, current, "", false)
+	return s.Contexts.Snapshot(current).Info
 }

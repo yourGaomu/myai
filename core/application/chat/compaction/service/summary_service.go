@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	compactionport "myai/core/application/chat/compaction/port"
+	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 )
@@ -28,7 +29,13 @@ func (SummaryService) Summarize(ctx context.Context, model modelport.ChatModelPo
 		prompt += "\n\nExisting summary:\n" + existingSummary
 	}
 	prompt += "\n\nNew history to compact:\n" + text
-	generated, err := model.Generate(ctx, modelport.GenerateRequest{Messages: []domainmessage.Message{domainmessage.Text(domainmessage.RoleSystem, "You are a context compression model for a coding assistant."), domainmessage.Text(domainmessage.RoleUser, prompt)}})
+	generated, err := model.Generate(ctx, modelport.GenerateRequest{
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleSystem, "You are a context compression model for a coding assistant."),
+			domainmessage.Text(domainmessage.RoleUser, prompt),
+		},
+		Settings: generation.SystemDefaults(),
+	})
 	if err != nil {
 		return "", err
 	}
@@ -42,6 +49,9 @@ func (SummaryService) Summarize(ctx context.Context, model modelport.ChatModelPo
 func messagesForSummary(messages []domainmessage.Message) string {
 	var builder strings.Builder
 	for _, message := range messages {
+		if message.IsSynthetic() {
+			continue
+		}
 		switch message.Role {
 		case domainmessage.RoleSystem:
 			continue

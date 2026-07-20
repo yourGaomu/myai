@@ -16,10 +16,6 @@ type readFileArgs struct {
 	Path string `json:"path"`
 }
 
-func NewReadFileTool() *ReadFileTool {
-	return &ReadFileTool{}
-}
-
 func NewReadFileToolWithWorkspace(workspace string) *ReadFileTool {
 	return &ReadFileTool{workspace: workspace}
 }
@@ -49,20 +45,20 @@ func (t *ReadFileTool) Permission() tooldef.Permission {
 	return tooldef.PermissionRead
 }
 
-func (t *ReadFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *ReadFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	var input readFileArgs
 	if err := json.Unmarshal(args, &input); err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	path, err := cleanWorkspacePath(t.workspace, input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
-	return string(content), nil
+	return tooldef.SuccessOutput(string(content)), nil
 }

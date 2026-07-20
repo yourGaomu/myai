@@ -155,10 +155,10 @@ func newChatStreamHandler(reader *bufio.Scanner) llm.ChatStreamHandler {
 			printToolCall(name, arguments)
 			toolStarted = true
 		},
-		OnToolResult: func(name string, arguments string, result string) {
+		OnToolResult: func(event llm.ToolResultEvent) {
 			reasoningPrinter.Finish()
 			answerPrinter.Finish()
-			printToolResult(name, result)
+			printToolResult(event.Name, event.Output.Content)
 			toolStarted = true
 		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
@@ -258,6 +258,12 @@ func printChatHelp() {
 	printCommand("/context", "Show context window usage")
 	printCommand("/context <K>", "Set session context window")
 	printCommand("/compact", "Summarize older context")
+	printCommand("/generation", "Show generation settings")
+	printCommand("/generation set <t> <p> <n>", "Set session generation overrides")
+	printCommand("/generation reset", "Use model generation defaults")
+	printCommand("/style", "Show session response style")
+	printCommand("/style <instruction>", "Set session response style")
+	printCommand("/style reset", "Clear session response style")
 	printCommand("/models", "List available models")
 	printCommand("/model", "Show current model")
 	printCommand("/model add", "Add a model urlConfig")
@@ -267,12 +273,43 @@ func printChatHelp() {
 	fmt.Println()
 }
 
-func printCommand(name string, description string) {
-	fmt.Printf("%s %s\n", commandStyle.Render(padRight(name, 16)), mutedStyle.Render(description))
+func printSessionPreferences(view service.SessionPreferencesView) {
+	printSectionTitle("Generation settings")
+	fmt.Println(contentPrefix + "session  temperature=" + optionalFloat(view.SessionOverrides.Temperature) +
+		" top_p=" + optionalFloat(view.SessionOverrides.TopP) +
+		" max_tokens=" + optionalInt(view.SessionOverrides.MaxOutputTokens))
+	fmt.Println(contentPrefix + "model    temperature=" + optionalFloat(view.ModelDefaults.Temperature) +
+		" top_p=" + optionalFloat(view.ModelDefaults.TopP) +
+		" max_tokens=" + optionalInt(view.ModelDefaults.MaxOutputTokens))
+	fmt.Printf("%seffective temperature=%g top_p=%g max_tokens=%d\n",
+		contentPrefix, view.Effective.Temperature, view.Effective.TopP, view.Effective.MaxOutputTokens)
 }
 
-func printTokenUsage(usage llm.TokenUsage) {
-	fmt.Println(statusLine("usage", tokenSummary(usage), tokenStyle))
+func printStyleInstruction(instruction string) {
+	printSectionTitle("Session style")
+	if strings.TrimSpace(instruction) == "" {
+		fmt.Println(contentPrefix + mutedStyle.Render("default"))
+		return
+	}
+	printBlockText(instruction)
+}
+
+func optionalFloat(value *float64) string {
+	if value == nil {
+		return "default"
+	}
+	return strconv.FormatFloat(*value, 'g', -1, 64)
+}
+
+func optionalInt(value *int) string {
+	if value == nil {
+		return "default"
+	}
+	return strconv.Itoa(*value)
+}
+
+func printCommand(name string, description string) {
+	fmt.Printf("%s %s\n", commandStyle.Render(padRight(name, 16)), mutedStyle.Render(description))
 }
 
 func printSessionsTable(sessions []sessionresult.SessionListItem, currentID string) {
@@ -451,14 +488,6 @@ func printFormPrompt(label string, defaultValue string) {
 		text += " " + mutedStyle.Render("["+defaultValue+"]")
 	}
 	fmt.Print(commandStyle.Render(text) + mutedStyle.Render(" >") + " ")
-}
-
-func indentText(text string) string {
-	lines := wrapText(text, currentContentWidth())
-	for i := range lines {
-		lines[i] = contentPrefix + lines[i]
-	}
-	return strings.Join(lines, "\n")
 }
 
 func printBlockText(text string) {

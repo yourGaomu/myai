@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"myai/core"
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	remoteagent "myai/core/remote/agent"
 	"myai/core/remote/changes"
 	"myai/core/remote/files"
@@ -51,7 +51,7 @@ var agentCmd = &cobra.Command{
 			DeviceID:    agentDeviceID,
 			BindingCode: agentBindCode,
 			Workspace:   agentWorkspace,
-		}, core.GetApp().GetChatService(), fileService, changeService)
+		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService())
 
 		return a.Run(ctx)
 	},

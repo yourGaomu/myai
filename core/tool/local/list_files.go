@@ -45,10 +45,6 @@ type listFileEntry struct {
 	Error string `json:"error,omitempty"`
 }
 
-func NewListFilesTool() *ListFilesTool {
-	return &ListFilesTool{}
-}
-
 func NewListFilesToolWithWorkspace(workspace string) *ListFilesTool {
 	return &ListFilesTool{workspace: workspace}
 }
@@ -93,21 +89,21 @@ func (t *ListFilesTool) Permission() tooldef.Permission {
 	return tooldef.PermissionRead
 }
 
-func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	input, err := normalizeListFilesArgs(workspace, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	entries := make([]listFileEntry, 0)
 	truncated := false
 
 	err = walkFiles(ctx, input.Path, input.Path, 1, input, &entries, &truncated)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	result := listFilesResult{
@@ -119,9 +115,11 @@ func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (string,
 
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	resultOutput := tooldef.SuccessOutput(string(output))
+	resultOutput.Truncated = truncated
+	return resultOutput, nil
 }
 
 func normalizeListFilesArgs(workspace string, args json.RawMessage) (listFilesArgs, error) {

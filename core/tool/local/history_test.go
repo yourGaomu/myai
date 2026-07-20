@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 	"myai/core/sandbox"
@@ -28,11 +28,11 @@ func TestWriteFileRecordsCheckpoint(t *testing.T) {
 	}
 
 	var result writeFileResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
 		t.Fatalf("decode write result failed: %v", err)
 	}
 	if result.CheckpointID == "" {
-		t.Fatalf("expected checkpoint id, output=%s", output)
+		t.Fatalf("expected checkpoint id, output=%s", output.Content)
 	}
 	if _, err := os.Stat(filepath.Join(root, "notes.txt")); err != nil {
 		t.Fatalf("expected file in configured workspace: %v", err)
@@ -60,11 +60,11 @@ func TestEditFileRecordsCheckpoint(t *testing.T) {
 	}
 
 	var result editFileResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
 		t.Fatalf("decode edit result failed: %v", err)
 	}
 	if result.CheckpointID == "" {
-		t.Fatalf("expected checkpoint id, output=%s", output)
+		t.Fatalf("expected checkpoint id, output=%s", output.Content)
 	}
 	assertCheckpointCount(t, store, root, 1)
 }
@@ -207,7 +207,7 @@ func main() {
 		"command": "go run script.go",
 	}))
 	if err != nil {
-		t.Fatalf("shell failed: %v\n%s", err, output)
+		t.Fatalf("shell failed: %v\n%s", err, output.Content)
 	}
 
 	ids, err := task.Save(context.Background())

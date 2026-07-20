@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	compactioncommand "myai/core/application/chat/compaction/command"
@@ -10,6 +11,8 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	plancommand "myai/core/application/chat/plan/command"
 	planport "myai/core/application/chat/plan/port"
+	chatretrievalcommand "myai/core/application/chat/retrieval/command"
+	chatretrievalresult "myai/core/application/chat/retrieval/result"
 	modelcommand "myai/core/application/model/command"
 	bootstrapcommand "myai/core/application/session/bootstrap/command"
 	bootstrapresult "myai/core/application/session/bootstrap/result"
@@ -21,6 +24,8 @@ import (
 	settingscommand "myai/core/application/session/settings/command"
 	skillquery "myai/core/application/skill/query"
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
+	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/session"
@@ -42,6 +47,15 @@ type ChatResponse struct {
 	Context   ContextInfo
 	Compact   CompactInfo
 	Plan      *agentplan.Plan
+	Retrieval chatretrievalresult.Context
+}
+
+type SessionPreferencesView struct {
+	SessionOverrides generation.Settings
+	ModelDefaults    generation.Settings
+	Effective        generation.ResolvedSettings
+	StyleInstruction string
+	RAGSettings      session.RAGSettings
 }
 
 func NewChatService(dependencies ChatDependencies) *ChatService {
@@ -89,10 +103,24 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		sessionID = s.CurrentSessionID()
 	}
 
-	// 用户消息必须先进入内存 Session，后续上下文快照才能包含本轮输入。
+	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
+	var retrievalInfo chatretrievalresult.Context
+	if s.dependencies.RetrievalContext != nil {
+		current, loadErr := s.dependencies.SessionLoader.Load(ctx, sessionID)
+		if loadErr != nil {
+			return ChatResponse{}, loadErr
+		}
+		var retrievalErr error
+		retrievalInfo, retrievalErr = s.dependencies.RetrievalContext.Prepare(ctx, chatretrievalcommand.Prepare{Session: current, Input: input})
+		if retrievalErr != nil {
+			// 自动检索失败不阻断聊天；错误随终态响应返回客户端。
+			retrievalInfo.Error = retrievalErr.Error()
+		}
+	}
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
-		SessionID: sessionID,
-		Input:     input,
+		SessionID:  sessionID,
+		Input:      input,
+		RAGContext: retrievalInfo.Prompt,
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -100,20 +128,32 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	current := prepared.Session
 
 	title := "New chat"
-	if len(current.Messages) <= 2 {
+	if userMessageCount(current.Messages) == 1 {
 		title = titleFromInput(input)
 	}
 	// 持久化与主生成流程解耦；落库失败由适配器上报，不阻断已经开始的模型请求。
 	if s.dependencies.UserMessages != nil {
 		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
-			SessionID: current.ID,
-			Model:     current.Model,
-			Title:     title,
-			Input:     input,
+			SessionID:          current.ID,
+			Model:              current.Model,
+			Title:              title,
+			Input:              input,
+			RuntimeInstruction: prepared.RuntimeInstruction,
+			RAGContext:         prepared.RAGContext,
 		})
 	}
 
-	return s.generateAssistantForSession(ctx, current, input, title, "user request", stream)
+	return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream)
+}
+
+func userMessageCount(messages []domainmessage.Message) int {
+	count := 0
+	for _, message := range messages {
+		if message.Role == domainmessage.RoleUser {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
@@ -128,7 +168,7 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 		return ChatResponse{}, err
 	}
 
-	return s.generateAssistantForSession(ctx, prepared.Session, prepared.Input, "", "regenerate response", stream)
+	return s.generateAssistantForSession(ctx, prepared.Session, prepared.Input, "", "regenerate response", chatretrievalresult.Context{}, stream)
 }
 
 func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, onPlanUpdate func(*agentplan.Plan)) (ChatResponse, error) {
@@ -164,7 +204,7 @@ func (f planUpdateSinkFunc) PlanUpdated(currentPlan *agentplan.Plan) {
 	f(currentPlan)
 }
 
-func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	// CapturePlan 始终开启，但只有当前会话处于 Plan 模式时，ResponseCommitService 才会解析计划。
 	response, err := s.dependencies.GenerationTasks.Generate(ctx, generationcommand.GenerationTask{
 		Session:     current,
@@ -184,6 +224,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Context:   response.Context,
 		Compact:   response.Compact,
 		Plan:      response.Plan,
+		Retrieval: retrievalInfo,
 	}, nil
 }
 
@@ -339,6 +380,73 @@ func (s *ChatService) SetContextWindowKForSession(ctx context.Context, sessionID
 		SessionID: sessionID,
 		WindowK:   windowK,
 	})
+}
+
+func (s *ChatService) SetGenerationSettings(ctx context.Context, settings generation.Settings) error {
+	return s.SetGenerationSettingsForSession(ctx, s.CurrentSessionID(), settings)
+}
+
+func (s *ChatService) SetGenerationSettingsForSession(ctx context.Context, sessionID string, settings generation.Settings) error {
+	return s.dependencies.SessionSettings.SetGenerationSettings(ctx, settingscommand.SetGenerationSettings{
+		SessionID: sessionID,
+		Settings:  settings,
+	})
+}
+
+func (s *ChatService) SetStyleInstruction(ctx context.Context, instruction string) error {
+	return s.SetStyleInstructionForSession(ctx, s.CurrentSessionID(), instruction)
+}
+
+func (s *ChatService) SetStyleInstructionForSession(ctx context.Context, sessionID string, instruction string) error {
+	return s.dependencies.SessionSettings.SetStyleInstruction(ctx, settingscommand.SetStyleInstruction{
+		SessionID:   sessionID,
+		Instruction: instruction,
+	})
+}
+
+func (s *ChatService) SetRAGSettings(ctx context.Context, settings session.RAGSettings) error {
+	return s.SetRAGSettingsForSession(ctx, s.CurrentSessionID(), settings)
+}
+
+func (s *ChatService) SetRAGSettingsForSession(ctx context.Context, sessionID string, settings session.RAGSettings) error {
+	return s.dependencies.SessionSettings.SetRAGSettings(ctx, settingscommand.SetRAGSettings{
+		SessionID: sessionID,
+		Settings:  settings,
+	})
+}
+
+func (s *ChatService) CurrentSessionPreferences(ctx context.Context) (SessionPreferencesView, error) {
+	return s.SessionPreferencesForSession(ctx, s.CurrentSessionID())
+}
+
+func (s *ChatService) SessionPreferencesForSession(ctx context.Context, sessionID string) (SessionPreferencesView, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return SessionPreferencesView{}, errors.New("session id is empty")
+	}
+	current, err := s.dependencies.SessionLoader.Load(ctx, sessionID)
+	if err != nil {
+		return SessionPreferencesView{}, err
+	}
+	modelDefaults := generation.Settings{}
+	if s.dependencies.ModelMetadata != nil {
+		info, ok := s.dependencies.ModelMetadata.GetModelInfo(current.Model)
+		if !ok {
+			return SessionPreferencesView{}, fmt.Errorf("model metadata not found: %s", current.Model)
+		}
+		modelDefaults = info.DefaultGenerationSettings
+	}
+	effective, err := generation.Resolve(modelDefaults, current.GenerationSettings)
+	if err != nil {
+		return SessionPreferencesView{}, err
+	}
+	return SessionPreferencesView{
+		SessionOverrides: generation.Clone(current.GenerationSettings),
+		ModelDefaults:    generation.Clone(modelDefaults),
+		Effective:        effective,
+		StyleInstruction: current.StyleInstruction,
+		RAGSettings:      session.CloneRAGSettings(current.RAGSettings),
+	}, nil
 }
 
 func (s *ChatService) emitSessionChangedHook(ctx context.Context, sessionID string, reason string) {

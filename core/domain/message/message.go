@@ -1,6 +1,11 @@
 package message
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+
+	domaintool "myai/core/domain/tool"
+)
 
 type Role string
 
@@ -11,6 +16,18 @@ const (
 	RoleTool      Role = "tool"
 )
 
+type SyntheticReason string
+
+const (
+	SyntheticReasonRuntimeInstruction SyntheticReason = "runtime_instruction"
+	SyntheticReasonProjectInstruction SyntheticReason = "project_instruction"
+	SyntheticReasonSkillInstruction   SyntheticReason = "skill_instruction"
+	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
+)
+
+const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
+const RAGContextPrefix = "Retrieved knowledge context for this turn:"
+
 type PartType string
 
 const (
@@ -20,8 +37,9 @@ const (
 )
 
 type Message struct {
-	Role  Role
-	Parts []Part
+	Role            Role
+	Parts           []Part
+	SyntheticReason SyntheticReason
 }
 
 type Part struct {
@@ -39,9 +57,13 @@ type ToolCall struct {
 }
 
 type ToolResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
+	ToolCallID   string
+	Name         string
+	Content      string
+	Status       domaintool.ResultStatus
+	ErrorCode    string
+	ErrorMessage string
+	Truncated    bool
 }
 
 func Text(role Role, text string) Message {
@@ -51,6 +73,28 @@ func Text(role Role, text string) Message {
 			{Type: PartText, Text: text},
 		},
 	}
+}
+
+func SyntheticText(reason SyntheticReason, text string) Message {
+	message := Text(RoleSystem, text)
+	message.SyntheticReason = reason
+	return message
+}
+
+func RuntimeInstruction(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticText(SyntheticReasonRuntimeInstruction, RuntimeInstructionPrefix+"\n"+text)
+}
+
+func RAGContext(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticText(SyntheticReasonRAGContext, RAGContextPrefix+"\n"+text)
 }
 
 func ToolCallMessage(calls []ToolCall) Message {
@@ -72,41 +116,6 @@ func ToolResultMessage(result ToolResult) Message {
 	}
 }
 
-func CloneMessages(messages []Message) []Message {
-	if len(messages) == 0 {
-		return nil
-	}
-	cloned := make([]Message, len(messages))
-	for index := range messages {
-		cloned[index] = messages[index].Clone()
-	}
-	return cloned
-}
-
-func (m Message) Clone() Message {
-	cloned := Message{
-		Role:  m.Role,
-		Parts: make([]Part, len(m.Parts)),
-	}
-	for index, part := range m.Parts {
-		cloned.Parts[index] = part.Clone()
-	}
-	return cloned
-}
-
-func (p Part) Clone() Part {
-	cloned := p
-	if p.ToolCall != nil {
-		call := *p.ToolCall
-		cloned.ToolCall = &call
-	}
-	if p.ToolResult != nil {
-		result := *p.ToolResult
-		cloned.ToolResult = &result
-	}
-	return cloned
-}
-
 func (m Message) Text() string {
 	parts := make([]string, 0, len(m.Parts))
 	for _, part := range m.Parts {
@@ -115,6 +124,23 @@ func (m Message) Text() string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func (m Message) IsSynthetic() bool {
+	return m.SyntheticReason != ""
+}
+
+func (m Message) IsSyntheticReason(reason SyntheticReason) bool {
+	return reason != "" && m.SyntheticReason == reason
+}
+
+func (m Message) RuntimeInstructionText() (string, bool) {
+	if !m.IsSyntheticReason(SyntheticReasonRuntimeInstruction) {
+		return "", false
+	}
+	text := strings.TrimSpace(m.Text())
+	text = strings.TrimSpace(strings.TrimPrefix(text, RuntimeInstructionPrefix))
+	return text, true
 }
 
 func (m Message) HasToolCall() bool {
@@ -138,4 +164,29 @@ func (m Message) FirstToolResult() (ToolResult, bool) {
 		}
 	}
 	return ToolResult{}, false
+}
+
+func (r ToolResult) PromptContent() string {
+	status := r.Status
+	if status == "" {
+		status = domaintool.ResultStatusSuccess
+	}
+	payload := map[string]any{"status": status}
+	if r.Content != "" {
+		payload["content"] = r.Content
+	}
+	if r.ErrorCode != "" {
+		payload["error_code"] = r.ErrorCode
+	}
+	if r.ErrorMessage != "" {
+		payload["error_message"] = r.ErrorMessage
+	}
+	if r.Truncated {
+		payload["truncated"] = true
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return r.Content
+	}
+	return string(encoded)
 }

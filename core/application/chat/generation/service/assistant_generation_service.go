@@ -12,19 +12,21 @@ import (
 	generationresult "myai/core/application/chat/generation/result"
 	chatport "myai/core/application/chat/port"
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
+	modelport "myai/core/port/model"
 	"myai/core/session"
 )
 
 type AssistantGenerationService struct {
 	// 该服务编排一次完整回答：解析模型、构建运行时指令、压缩上下文、运行 Agent Loop、提交结果。
-	Models              chatport.ModelProvider
-	RuntimeInstructions generationport.RuntimeInstructionProvider
-	Contexts            generationport.ContextProvider
-	Compactor           generationport.AutoCompactor
-	AgentRunner         generationapi.AgentRunner
-	ResponseCommitter   generationapi.ResponseCommitter
-	Persistence         generationport.Persistence
-	OnCompactError      func(error)
+	Models            chatport.ModelProvider
+	ModelMetadata     modelport.MetadataProvider
+	Contexts          generationport.ContextProvider
+	Compactor         generationport.AutoCompactor
+	AgentRunner       generationapi.AgentRunner
+	ResponseCommitter generationapi.ResponseCommitter
+	Persistence       generationport.Persistence
+	OnCompactError    func(error)
 }
 
 var _ generationapi.Generator = AssistantGenerationService{}
@@ -35,9 +37,6 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	}
 	if s.Models == nil {
 		return generationresult.GenerationResponse{}, fmt.Errorf("model provider is nil")
-	}
-	if s.RuntimeInstructions == nil {
-		return generationresult.GenerationResponse{}, fmt.Errorf("runtime instruction provider is nil")
 	}
 	if s.AgentRunner == nil {
 		return generationresult.GenerationResponse{}, fmt.Errorf("agent runner is nil")
@@ -50,12 +49,14 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	if model == nil {
 		return generationresult.GenerationResponse{}, fmt.Errorf("model not found: %s", command.Session.Model)
 	}
-	// Plan/Skill 指令按本轮输入动态计算，不写回 Session.Messages，从而保持历史前缀稳定。
-	runtimePrompt := s.RuntimeInstructions.Prompt(ctx, command.Session, command.LatestInput, command.ForceChatMode)
+	settings, err := s.resolveGenerationSettings(command.Session)
+	if err != nil {
+		return generationresult.GenerationResponse{}, err
+	}
 	compactInfo := compactionresult.CompactInfo{}
 	if s.Compactor != nil {
-		// 压缩发生在模型调用前，确保本轮上下文不会因超过窗口而丢失最新消息。
-		info, err := s.Compactor.CompactIfNeeded(ctx, command.Session, model, runtimePrompt)
+		// Runtime instructions already live in Session.Messages before the user message.
+		info, err := s.Compactor.CompactIfNeeded(ctx, command.Session, model)
 		if err != nil {
 			if s.OnCompactError != nil {
 				s.OnCompactError(err)
@@ -66,8 +67,9 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	}
 
 	result, err := s.AgentRunner.Run(ctx, generationcommand.Run{
-		Model: model, Session: command.Session, Stream: command.Stream, RuntimePrompt: runtimePrompt,
-		LatestInput: command.LatestInput, RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
+		Model: model, Session: command.Session, Stream: command.Stream,
+		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
+		Settings: settings,
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
@@ -84,11 +86,23 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		s.Persistence.PersistCurrentSession(command.Session.ID)
 	}
 	return generationresult.GenerationResponse{
-		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session, runtimePrompt),
+		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),
 		Compact: compactInfo, Plan: commitResult.Plan,
 	}, nil
 }
 
-func (s AssistantGenerationService) contextInfo(current *session.Session, runtimePrompt string) contextmgr.Info {
-	return chatcontextservice.QueryService{Contexts: s.Contexts}.InfoWithRuntimePrompt(current, runtimePrompt)
+func (s AssistantGenerationService) resolveGenerationSettings(current *session.Session) (generation.ResolvedSettings, error) {
+	modelDefaults := generation.Settings{}
+	if s.ModelMetadata != nil {
+		info, ok := s.ModelMetadata.GetModelInfo(current.Model)
+		if !ok {
+			return generation.ResolvedSettings{}, fmt.Errorf("model metadata not found: %s", current.Model)
+		}
+		modelDefaults = info.DefaultGenerationSettings
+	}
+	return generation.Resolve(modelDefaults, current.GenerationSettings)
+}
+
+func (s AssistantGenerationService) contextInfo(current *session.Session) contextmgr.Info {
+	return chatcontextservice.QueryService{Contexts: s.Contexts}.Info(context.Background(), current)
 }

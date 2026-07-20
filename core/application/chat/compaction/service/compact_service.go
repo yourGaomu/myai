@@ -51,22 +51,21 @@ func (s CompactService) CompactSession(ctx context.Context, current *session.Ses
 	return s.Summaries.SaveSummary(ctx, current, summary, cutoff)
 }
 
-func (s CompactService) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort, runtimePrompt string) (compactionresult.CompactInfo, error) {
+func (s CompactService) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (compactionresult.CompactInfo, error) {
 	if current == nil || model == nil {
 		return compactionresult.CompactInfo{}, nil
 	}
 	if s.Contexts == nil {
 		return compactionresult.CompactInfo{}, errors.New("context provider is nil")
 	}
-	// 压缩判断包含本轮 runtimePrompt，避免注入 Plan/Skill 后才意外超过上下文窗口。
-	before := s.Contexts.Snapshot(current, runtimePrompt).Info
+	before := s.Contexts.Snapshot(current).Info
 	if !contextmgr.ShouldCompact(before, contextmgr.DefaultCompactTriggerRatio) {
 		return compactionresult.CompactInfo{}, nil
 	}
 	if err := s.CompactSession(ctx, current, model); errors.Is(err, ErrNotEnoughHistory) {
 		return compactionresult.CompactInfo{}, nil
 	} else {
-		after := s.Contexts.Snapshot(current, runtimePrompt).Info
+		after := s.Contexts.Snapshot(current).Info
 		return compactionresult.CompactInfo{Triggered: true, Reason: compactReason(before), BeforeTokens: before.SelectedTokens, AfterTokens: after.SelectedTokens, NewMessages: after.CompactedMessages - before.CompactedMessages, CompactedMessages: after.CompactedMessages, SummaryTokens: after.SummaryTokens, SummaryVersion: after.SummaryVersion, SummaryHash: after.SummaryHash, PrefixHash: after.PrefixHash, CacheableTokens: after.CacheableTokens}, err
 	}
 }

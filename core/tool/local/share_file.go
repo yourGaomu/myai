@@ -43,10 +43,6 @@ type shareFileResult struct {
 	ExpiresAt   string `json:"expires_at,omitempty"`
 }
 
-func NewShareFileToolWithWorkspace(workspace string) *ShareFileTool {
-	return &ShareFileTool{workspace: workspace}
-}
-
 func NewShareFileToolWithWorkspaceAndUploader(workspace string, uploader assetUploader) *ShareFileTool {
 	return &ShareFileTool{workspace: workspace, uploader: uploader}
 }
@@ -89,43 +85,43 @@ func (t *ShareFileTool) Schema() any {
 }
 
 func (t *ShareFileTool) Permission() tooldef.Permission {
-	return tooldef.PermissionRead
+	return tooldef.PermissionWrite
 }
 
-func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	if t.uploader == nil {
-		return "", errors.New("asset short-link service is not configured; set asset.shortener_base_url")
+		return tooldef.ToolOutput{}, errors.New("asset short-link service is not configured; set asset.shortener_base_url")
 	}
 
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	input, err := normalizeShareFileArgs(workspace, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	info, err := os.Stat(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("path is a directory: %s", input.Path)
+		return tooldef.ToolOutput{}, fmt.Errorf("path is a directory: %s", input.Path)
 	}
 	if info.Size() > maxShareFileBytes {
-		return "", fmt.Errorf("file is too large to share: %s (%d bytes, max %d bytes)", filepath.ToSlash(relativePath(workspace, input.Path)), info.Size(), maxShareFileBytes)
+		return tooldef.ToolOutput{}, fmt.Errorf("file is too large to share: %s (%d bytes, max %d bytes)", filepath.ToSlash(relativePath(workspace, input.Path)), info.Size(), maxShareFileBytes)
 	}
 	if isSensitiveFileName(filepath.Base(input.Path)) {
-		return "", fmt.Errorf("refusing to share sensitive file: %s", filepath.ToSlash(relativePath(workspace, input.Path)))
+		return tooldef.ToolOutput{}, fmt.Errorf("refusing to share sensitive file: %s", filepath.ToSlash(relativePath(workspace, input.Path)))
 	}
 
 	file, err := os.Open(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	defer file.Close()
 
@@ -139,7 +135,7 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 		MaxVisits:   input.MaxVisits,
 	})
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	result := shareFileResult{
@@ -156,9 +152,9 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	return tooldef.SuccessOutput(string(output)), nil
 }
 
 func normalizeShareFileArgs(workspace string, args json.RawMessage) (shareFileArgs, error) {

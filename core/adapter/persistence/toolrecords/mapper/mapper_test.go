@@ -38,6 +38,9 @@ func TestMapperConvertsDomainEntriesToMessageRecords(t *testing.T) {
 			ToolName:   "read_file",
 			Content:    "content",
 			Error:      "warning",
+			Status:     domaintool.ResultStatusFailed,
+			ErrorCode:  "tool_failed",
+			Truncated:  true,
 			CreatedAt:  createdAt.Add(time.Nanosecond),
 		},
 		{Kind: "unknown"},
@@ -49,7 +52,7 @@ func TestMapperConvertsDomainEntriesToMessageRecords(t *testing.T) {
 	if records[0].ID != "id-1" || records[0].Role != repository.RoleToolCall || records[0].ToolArguments == "" {
 		t.Fatalf("unexpected tool call record: %#v", records[0])
 	}
-	if records[1].ID != "id-2" || records[1].Role != repository.RoleTool || records[1].Content != "content" || records[1].ToolError != "warning" {
+	if records[1].ID != "id-2" || records[1].Role != repository.RoleTool || records[1].Content != "content" || records[1].ToolError != "warning" || records[1].ToolStatus != "failed" || records[1].ToolErrorCode != "tool_failed" || !records[1].ToolTruncated {
 		t.Fatalf("unexpected tool result record: %#v", records[1])
 	}
 }

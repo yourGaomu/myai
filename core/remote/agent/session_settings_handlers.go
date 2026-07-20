@@ -8,6 +8,7 @@ import (
 
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	"myai/core/session"
 )
 
 func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, info service.ContextInfo, message string) (protocol.SessionSettingsResultPayload, error) {
@@ -138,6 +139,40 @@ func (a *Agent) handleSessionContextSet(ctx context.Context, conn *websocket.Con
 		return err
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSessionContextSetResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionRAGSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionRAGSetPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session RAG set failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	settings := session.RAGSettings{
+		Mode: session.RetrievalMode(payload.Mode), KnowledgeBaseIDs: payload.KnowledgeBaseIDs,
+		CategoryIDs: payload.CategoryIDs, TopK: payload.TopK,
+	}
+	if err := a.chatService.SetRAGSettingsForSession(ctx, sessionID, settings); err != nil {
+		return err
+	}
+	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	result, err := a.sessionSettingsPayload(ctx, sessionID, info, fmt.Sprintf("RAG mode set to %s.", session.NormalizeRAGSettings(settings).Mode))
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionRAGSetResult, message.RequestID, sessionID, result)
 }
 
 func (a *Agent) handleSessionCompact(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {

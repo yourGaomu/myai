@@ -188,7 +188,7 @@ func TestApplicationPackageRolesDoNotMixDeclarations(t *testing.T) {
 
 func TestStructuredApplicationModuleRootsAreContainers(t *testing.T) {
 	applicationRoot := filepath.Join(coreDirectory(t), "application")
-	for _, module := range []string{"chat", "model", "plan", "runtime", "session", "skill", "tool"} {
+	for _, module := range []string{"chat", "knowledge", "model", "plan", "runtime", "session", "skill", "tool"} {
 		entries, err := os.ReadDir(filepath.Join(applicationRoot, module))
 		if err != nil {
 			t.Fatal(err)
@@ -278,7 +278,7 @@ func TestProductionCodeDoesNotImportLegacyPackages(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if strings.HasPrefix(importPath, "myai/core/store/") || strings.HasPrefix(importPath, "myai/utills") {
+			if isLegacyImportPath(importPath) {
 				t.Errorf("production code imports legacy package %s in %s", importPath, relative)
 			}
 		}
@@ -286,6 +286,20 @@ func TestProductionCodeDoesNotImportLegacyPackages(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func isLegacyImportPath(importPath string) bool {
+	if strings.HasPrefix(importPath, "myai/core/store/") || strings.HasPrefix(importPath, "myai/utills") {
+		return true
+	}
+	switch importPath {
+	case "myai/core/adapter/persistence/mongo",
+		"myai/core/adapter/persistence/mongo/authorization",
+		"myai/core/adapter/persistence/sqlite/history":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -73,14 +73,6 @@ func New(root string) (*Service, error) {
 	return &Service{root: abs}, nil
 }
 
-func MustNew(root string) *Service {
-	service, err := New(root)
-	if err != nil {
-		return &Service{root: "."}
-	}
-	return service
-}
-
 func (s *Service) List(ctx context.Context, payload protocol.FileListPayload) (protocol.FileListResultPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return protocol.FileListResultPayload{}, err

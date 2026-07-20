@@ -1,7 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
-import type { SessionHistoryMessage, SessionHistoryMetaPayload } from "../protocol";
+import type {
+  SessionHistoryMessage,
+  SessionHistoryMetaPayload,
+} from "../protocol";
 
 type SQLiteModule = typeof import("expo-sqlite");
 type SQLiteDatabase = Awaited<ReturnType<SQLiteModule["openDatabaseAsync"]>>;
@@ -15,6 +18,9 @@ type MessageRow = {
   tool_arguments: string | null;
   tool_call_id: string | null;
   tool_error: string | null;
+  tool_status: string | null;
+  tool_error_code: string | null;
+  tool_truncated: number | null;
   tool_name: string | null;
   usage_json: string | null;
 };
@@ -45,7 +51,7 @@ export async function loadCachedSessionHistory(sessionID: string) {
 
   const db = await database();
   const rows = await db.getAllAsync<MessageRow>(
-    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, usage_json, created_at
+    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
      FROM session_messages
      WHERE session_id = ?
      ORDER BY created_at ASC, rowid ASC`,
@@ -58,14 +64,20 @@ export async function loadCachedSessionHistory(sessionID: string) {
   };
 }
 
-export async function replaceCachedSessionHistory(sessionID: string, messages: SessionHistoryMessage[]) {
+export async function replaceCachedSessionHistory(
+  sessionID: string,
+  messages: SessionHistoryMessage[],
+) {
   const id = sessionID.trim();
   if (!id) {
     return;
   }
 
   if (useWebStorageCache()) {
-    await AsyncStorage.setItem(webHistoryCacheKey(id), JSON.stringify(messages));
+    await AsyncStorage.setItem(
+      webHistoryCacheKey(id),
+      JSON.stringify(messages),
+    );
     return;
   }
 
@@ -78,7 +90,10 @@ export async function replaceCachedSessionHistory(sessionID: string, messages: S
   });
 }
 
-export async function appendCachedSessionHistory(sessionID: string, messages: SessionHistoryMessage[]) {
+export async function appendCachedSessionHistory(
+  sessionID: string,
+  messages: SessionHistoryMessage[],
+) {
   const id = sessionID.trim();
   if (!id || messages.length === 0) {
     return;
@@ -86,7 +101,10 @@ export async function appendCachedSessionHistory(sessionID: string, messages: Se
 
   if (useWebStorageCache()) {
     const current = await loadWebCachedMessages(id);
-    await AsyncStorage.setItem(webHistoryCacheKey(id), JSON.stringify(mergeHistoryMessages(current, messages)));
+    await AsyncStorage.setItem(
+      webHistoryCacheKey(id),
+      JSON.stringify(mergeHistoryMessages(current, messages)),
+    );
     return;
   }
 
@@ -98,7 +116,9 @@ export async function appendCachedSessionHistory(sessionID: string, messages: Se
   });
 }
 
-export async function getCachedSessionHistoryMeta(sessionID: string): Promise<SessionHistoryMetaPayload> {
+export async function getCachedSessionHistoryMeta(
+  sessionID: string,
+): Promise<SessionHistoryMetaPayload> {
   const id = sessionID.trim();
   if (!id) {
     return emptyMeta("");
@@ -114,7 +134,7 @@ export async function getCachedSessionHistoryMeta(sessionID: string): Promise<Se
     id,
   );
   const lastRows = await db.getAllAsync<MessageRow>(
-    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, usage_json, created_at
+    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
      FROM session_messages
      WHERE session_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -155,6 +175,9 @@ async function database() {
           tool_name TEXT,
           tool_arguments TEXT,
           tool_error TEXT,
+          tool_status TEXT,
+          tool_error_code TEXT,
+          tool_truncated INTEGER,
           usage_json TEXT,
           created_at TEXT,
           PRIMARY KEY (session_id, message_id)
@@ -162,10 +185,26 @@ async function database() {
         CREATE INDEX IF NOT EXISTS idx_session_messages_order
           ON session_messages(session_id, created_at, message_id);
       `);
+      await ensureHistoryColumns(db);
       return db;
     });
   }
   return dbPromise;
+}
+
+async function ensureHistoryColumns(db: SQLiteDatabase) {
+  const rows = await db.getAllAsync<{ name: string }>(
+    "PRAGMA table_info(session_messages)",
+  );
+  const existing = new Set(rows.map((row) => row.name));
+  for (const column of ["tool_status", "tool_error_code", "tool_truncated"]) {
+    if (!existing.has(column)) {
+      const type = column === "tool_truncated" ? "INTEGER" : "TEXT";
+      await db.execAsync(
+        `ALTER TABLE session_messages ADD COLUMN ${column} ${type}`,
+      );
+    }
+  }
 }
 
 function loadSQLite() {
@@ -175,7 +214,11 @@ function loadSQLite() {
   return sqlitePromise;
 }
 
-async function upsertMessage(db: SQLiteDatabase, sessionID: string, message: SessionHistoryMessage) {
+async function upsertMessage(
+  db: SQLiteDatabase,
+  sessionID: string,
+  message: SessionHistoryMessage,
+) {
   const messageID = message.id?.trim();
   if (!messageID) {
     return;
@@ -184,8 +227,8 @@ async function upsertMessage(db: SQLiteDatabase, sessionID: string, message: Ses
   await db.runAsync(
     `INSERT OR REPLACE INTO session_messages (
       session_id, message_id, role, content, reasoning, tool_call_id, tool_name,
-      tool_arguments, tool_error, usage_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     sessionID,
     messageID,
     message.role || "event",
@@ -195,6 +238,9 @@ async function upsertMessage(db: SQLiteDatabase, sessionID: string, message: Ses
     message.tool_name || "",
     message.tool_arguments || "",
     message.tool_error || "",
+    message.tool_status || "",
+    message.tool_error_code || "",
+    message.tool_truncated ? 1 : 0,
     JSON.stringify(message.usage || {}),
     message.created_at || "",
   );
@@ -208,7 +254,9 @@ function webHistoryCacheKey(sessionID: string) {
   return `${webHistoryCachePrefix}${sessionID}`;
 }
 
-async function loadWebCachedMessages(sessionID: string): Promise<SessionHistoryMessage[]> {
+async function loadWebCachedMessages(
+  sessionID: string,
+): Promise<SessionHistoryMessage[]> {
   const raw = await AsyncStorage.getItem(webHistoryCacheKey(sessionID));
   return parseCachedMessages(raw);
 }
@@ -231,15 +279,20 @@ function parseCachedMessages(raw: string | null): SessionHistoryMessage[] {
 function isHistoryMessage(value: unknown): value is SessionHistoryMessage {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      "id" in value &&
-      typeof (value as { id?: unknown }).id === "string",
+    typeof value === "object" &&
+    "id" in value &&
+    typeof (value as { id?: unknown }).id === "string",
   );
 }
 
-function mergeHistoryMessages(current: SessionHistoryMessage[], next: SessionHistoryMessage[]) {
+function mergeHistoryMessages(
+  current: SessionHistoryMessage[],
+  next: SessionHistoryMessage[],
+) {
   const merged = [...current];
-  const indexByID = new Map(merged.map((message, index) => [message.id, index]));
+  const indexByID = new Map(
+    merged.map((message, index) => [message.id, index]),
+  );
   for (const message of next) {
     const index = indexByID.get(message.id);
     if (index === undefined) {
@@ -262,6 +315,9 @@ function rowToMessage(row: MessageRow): SessionHistoryMessage {
     tool_name: row.tool_name || "",
     tool_arguments: row.tool_arguments || "",
     tool_error: row.tool_error || "",
+    tool_status: row.tool_status || "",
+    tool_error_code: row.tool_error_code || "",
+    tool_truncated: Boolean(row.tool_truncated),
     usage: parseUsage(row.usage_json),
     created_at: row.created_at || undefined,
   };
@@ -278,7 +334,10 @@ function parseUsage(value: string | null) {
   }
 }
 
-function metaFromMessages(sessionID: string, messages: SessionHistoryMessage[]): SessionHistoryMetaPayload {
+function metaFromMessages(
+  sessionID: string,
+  messages: SessionHistoryMessage[],
+): SessionHistoryMetaPayload {
   const last = messages[messages.length - 1];
   const meta: SessionHistoryMetaPayload = {
     session_id: sessionID,

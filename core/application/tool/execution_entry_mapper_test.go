@@ -36,8 +36,7 @@ func TestToolResultEntry(t *testing.T) {
 			Name:      "read_file",
 			Arguments: `{"path":"README.md"}`,
 		},
-		Result:    "content",
-		ToolError: "boom",
+		Output: domaintool.ToolOutput{Content: "content", Status: domaintool.ResultStatusFailed, ErrorMessage: "boom"},
 	})
 
 	if entry.Kind != domaintool.ExecutionEntryToolResult || entry.Content != "content" || entry.Error != "boom" {
@@ -49,7 +48,7 @@ func TestToolResultMessage(t *testing.T) {
 	message := ToolResultMessage(domainmessage.ToolCall{
 		ID:   "call-1",
 		Name: "read_file",
-	}, "content")
+	}, domaintool.SuccessOutput("content"))
 
 	result, ok := message.FirstToolResult()
 	if !ok {

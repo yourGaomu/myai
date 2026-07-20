@@ -15,15 +15,16 @@ type PermissionService struct{}
 var _ toolapi.PermissionService = PermissionService{}
 
 func (PermissionService) Allow(command toolcommand.Permission) toolresult.PermissionDecision {
-	// Hook 显式允许和只读工具无需询问；其余操作再根据会话权限模式决定。
+	// Hook 决策在本服务之前处理，任何 Hook 结果都不能提升会话权限。
 	permission := tooldef.NormalizePermission(command.Permission)
 	mode := session.NormalizePermissionMode(command.Mode)
-	if command.HookAllowed || permission == tooldef.PermissionRead {
+	if permission == tooldef.PermissionRead {
 		return toolresult.PermissionDecision{Allowed: true}
 	}
-	switch mode {
-	case session.PermissionModeReadonly:
+	if mode == session.PermissionModeReadonly {
 		return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, command.Name, permission)}
+	}
+	switch mode {
 	case session.PermissionModeFull:
 		return toolresult.PermissionDecision{Allowed: true}
 	default:

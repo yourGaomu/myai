@@ -4,6 +4,15 @@ import agentplan "myai/core/plan"
 
 type StateService struct{}
 
+func (StateService) Approve(currentPlan *agentplan.Plan) *agentplan.Plan {
+	currentPlan = agentplan.Clone(currentPlan)
+	if currentPlan == nil {
+		return nil
+	}
+	currentPlan.Status = agentplan.StatusApproved
+	return currentPlan
+}
+
 func (StateService) Start(currentPlan *agentplan.Plan) *agentplan.Plan {
 	currentPlan = agentplan.Clone(currentPlan)
 	if currentPlan == nil {
@@ -11,7 +20,12 @@ func (StateService) Start(currentPlan *agentplan.Plan) *agentplan.Plan {
 	}
 	currentPlan.Status = agentplan.StatusRunning
 	for index := range currentPlan.Steps {
-		currentPlan.Steps[index].Status = agentplan.StepStatusPending
+		switch currentPlan.Steps[index].Status {
+		case agentplan.StepStatusDone, agentplan.StepStatusSkipped:
+			continue
+		default:
+			currentPlan.Steps[index].Status = agentplan.StepStatusPending
+		}
 	}
 	return currentPlan
 }
@@ -52,6 +66,11 @@ func (StateService) MarkCanceled(currentPlan *agentplan.Plan) *agentplan.Plan {
 		return nil
 	}
 	currentPlan.Status = agentplan.StatusCanceled
+	for index := range currentPlan.Steps {
+		if currentPlan.Steps[index].Status == agentplan.StepStatusRunning {
+			currentPlan.Steps[index].Status = agentplan.StepStatusPending
+		}
+	}
 	return currentPlan
 }
 

@@ -14,5 +14,5 @@ type Persistence interface {
 }
 
 type AutoCompactor interface {
-	CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort, runtimePrompt string) (compactionresult.CompactInfo, error)
+	CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (compactionresult.CompactInfo, error)
 }

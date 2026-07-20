@@ -11,15 +11,11 @@ import (
 )
 
 type ContextProvider interface {
-	Snapshot(current *session.Session, runtimePrompt string) contextmgr.Snapshot
+	Snapshot(current *session.Session) contextmgr.Snapshot
 }
 
 type ToolCatalog interface {
 	ToolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool
-}
-
-type RuntimeInstructionProvider interface {
-	Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string
 }
 
 type ToolExecutor interface {

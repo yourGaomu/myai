@@ -4,39 +4,35 @@ import (
 	"strings"
 	"testing"
 
-	runtimeservice "myai/core/application/runtime/service"
 	domainmessage "myai/core/domain/message"
 	"myai/core/session"
 )
 
-func TestContextSnapshotServiceRuntimePromptDoesNotChangeCacheablePrefix(t *testing.T) {
+func TestContextSnapshotServiceUsesPersistedRuntimeInstruction(t *testing.T) {
 	current := &session.Session{
 		ID:             "session-1",
 		AgentMode:      session.AgentModePlan,
 		ContextWindowK: 16,
 		Messages: []domainmessage.Message{
 			domainmessage.Text(domainmessage.RoleSystem, session.SystemPrompt()),
+			domainmessage.RuntimeInstruction("plan prompt"),
 			domainmessage.Text(domainmessage.RoleUser, "帮我写一个优美的古诗"),
 		},
 	}
 	service := ContextSnapshotService{}
 
-	chatSnapshot := service.Snapshot(current, "")
-	planSnapshot := service.Snapshot(current, runtimeservice.PlanModePrompt)
+	snapshot := service.Snapshot(current)
 
-	if chatSnapshot.Info.PrefixHash == "" {
+	if snapshot.Info.PrefixHash == "" {
 		t.Fatal("expected stable prefix hash")
 	}
-	if chatSnapshot.Info.PrefixHash != planSnapshot.Info.PrefixHash {
-		t.Fatalf("expected runtime prompt to keep prefix hash stable, chat=%s plan=%s", chatSnapshot.Info.PrefixHash, planSnapshot.Info.PrefixHash)
-	}
-	if len(planSnapshot.Messages) != len(chatSnapshot.Messages)+1 {
-		t.Fatalf("expected runtime message to be added for this turn")
+	if len(snapshot.Messages) != len(current.Messages) {
+		t.Fatalf("snapshot added temporary messages: got %d want %d", len(snapshot.Messages), len(current.Messages))
 	}
 
 	runtimeIndex := -1
-	for index, message := range planSnapshot.Messages {
-		if message.Role == domainmessage.RoleSystem && strings.Contains(message.Text(), runtimeservice.RuntimeInstructionPrefix) {
+	for index, message := range snapshot.Messages {
+		if message.IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) && strings.Contains(message.Text(), domainmessage.RuntimeInstructionPrefix) {
 			runtimeIndex = index
 			break
 		}
@@ -44,13 +40,13 @@ func TestContextSnapshotServiceRuntimePromptDoesNotChangeCacheablePrefix(t *test
 	if runtimeIndex < 0 {
 		t.Fatal("expected runtime instructions in selected messages")
 	}
-	if runtimeIndex+1 >= len(planSnapshot.Messages) || planSnapshot.Messages[runtimeIndex+1].Role != domainmessage.RoleUser {
+	if runtimeIndex+1 >= len(snapshot.Messages) || snapshot.Messages[runtimeIndex+1].Role != domainmessage.RoleUser {
 		t.Fatal("expected runtime instructions immediately before the latest user message")
 	}
 }
 
 func TestContextSnapshotServiceNilSessionReturnsEmptySnapshot(t *testing.T) {
-	snapshot := ContextSnapshotService{}.Snapshot(nil, "runtime")
+	snapshot := ContextSnapshotService{}.Snapshot(nil)
 	if len(snapshot.Messages) != 0 || snapshot.Info.WindowK != 0 {
 		t.Fatalf("expected empty snapshot for nil session, got %#v", snapshot)
 	}

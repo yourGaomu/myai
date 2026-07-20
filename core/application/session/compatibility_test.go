@@ -72,6 +72,8 @@ type SwitchModelCommand = settingscommand.SwitchModel
 type SetPermissionModeCommand = settingscommand.SetPermissionMode
 type SetAgentModeCommand = settingscommand.SetAgentMode
 type SetContextWindowCommand = settingscommand.SetContextWindow
+type SetGenerationSettingsCommand = settingscommand.SetGenerationSettings
+type SetStyleInstructionCommand = settingscommand.SetStyleInstruction
 type SettingsService = settingsservice.SettingsService
 type SettingsUseCase = settingsservice.UseCase
 

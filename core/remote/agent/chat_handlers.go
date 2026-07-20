@@ -50,6 +50,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		Context:   contextInfoPayload(response.Context),
 		Compact:   compactInfoPayload(response.Compact),
 		Plan:      planPayload(response.Plan),
+		Retrieval: chatRetrievalPayload(response.Retrieval),
 	})
 }
 
@@ -138,15 +139,19 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 				Arguments: arguments,
 			})
 		},
-		OnToolResult: func(name string, arguments string, result string) {
-			toolFailed := strings.Contains(strings.ToLower(result), "tool error:")
+		OnToolResult: func(event llm.ToolResultEvent) {
+			output := event.Output.Normalized()
 			send(protocol.TypeToolResult, protocol.ToolResultPayload{
-				Name:      name,
-				Arguments: arguments,
-				Result:    result,
-				Error:     toolFailed,
+				Name:         event.Name,
+				Arguments:    event.Arguments,
+				Result:       output.Content,
+				Error:        output.Failed(),
+				Status:       string(output.Status),
+				ErrorCode:    output.ErrorCode,
+				ErrorMessage: output.ErrorMessage,
+				Truncated:    output.Truncated,
 			})
-			if name != "install_skill" || toolFailed {
+			if event.Name != "install_skill" || output.Failed() {
 				return
 			}
 			payload, err := a.skillListPayload(ctx, false)
@@ -191,4 +196,15 @@ func (a *Agent) writePausedAssistantDone(conn *websocket.Conn, requestID string,
 		Paused:  true,
 		Message: "Session task paused.",
 	})
+}
+
+func (a *Agent) writeCanceledPlanExecution(conn *websocket.Conn, requestID string, sessionID string) error {
+	if err := a.writePausedAssistantDone(conn, requestID, sessionID); err != nil {
+		return err
+	}
+	result, err := a.sessionSettingsPayload(context.Background(), sessionID, service.ContextInfo{}, "Plan execution canceled.")
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionPlanExecuteResult, requestID, sessionID, result)
 }

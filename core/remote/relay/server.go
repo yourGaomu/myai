@@ -231,7 +231,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	}
 
@@ -240,7 +240,18 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
-	case protocol.TypeUserMessage, protocol.TypePermissionResult, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypePermissionResult:
+		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
+			return fmt.Errorf("client token is invalid or expired")
+		}
+		// permission_result 属于原聊天请求，不能覆盖 request_id 已登记的请求类型，
+		// 否则后续 assistant_done 无法按 user_message 终态释放路由。
+		client := s.getClient(message.RequestID)
+		if client == nil || client.peer != p {
+			return fmt.Errorf("client request is not online: request=%s", message.RequestID)
+		}
+		return s.forwardToAgent(message)
+	case protocol.TypeUserMessage, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
@@ -302,6 +313,8 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSessionPermissionSetResult
 	case protocol.TypeSessionModeSet:
 		return responseType == protocol.TypeSessionModeSetResult
+	case protocol.TypeSessionPlanExecute:
+		return responseType == protocol.TypeSessionPlanExecuteResult
 	case protocol.TypeSessionContextSet:
 		return responseType == protocol.TypeSessionContextSetResult
 	case protocol.TypeSessionCompact:
@@ -372,11 +385,4 @@ func writeError(p *peer, received protocol.Message, text string) error {
 		return err
 	}
 	return p.writeJSON(message)
-}
-
-func URL(addr string) string {
-	if addr == "" {
-		addr = ":8080"
-	}
-	return fmt.Sprintf("http://localhost%s", addr)
 }

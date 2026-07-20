@@ -140,8 +140,8 @@ func (t fakeTool) Permission() tooldef.Permission {
 	return t.permission
 }
 
-func (t fakeTool) Call(context.Context, json.RawMessage) (string, error) {
-	return t.result, nil
+func (t fakeTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+	return tooldef.SuccessOutput(t.result), nil
 }
 
 type recordingHookHandler struct {

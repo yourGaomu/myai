@@ -8,6 +8,7 @@ import (
 	generationapi "myai/core/application/chat/generation/api"
 	planapi "myai/core/application/chat/plan/api"
 	planport "myai/core/application/chat/plan/port"
+	chatretrievalapi "myai/core/application/chat/retrieval/api"
 	modelapi "myai/core/application/model/api"
 	bootstrapapi "myai/core/application/session/bootstrap/api"
 	currentapi "myai/core/application/session/current/api"
@@ -27,12 +28,14 @@ type ChatEventPublisher interface {
 
 type ChatDependencies struct {
 	// ChatDependencies 只组合应用接口和共享 port；具体 adapter 在 composition/chat 中注入。
-	Models modelport.Registry
+	Models        modelport.Registry
+	ModelMetadata modelport.MetadataProvider
 
 	GenerationTasks   generationapi.TaskService
 	PlanExecution     planapi.Service
 	SessionCompaction compactionapi.SessionService
 	ContextQueries    chatcontextapi.QueryService
+	RetrievalContext  chatretrievalapi.ContextPreparer
 	UserMessages      planport.UserMessagePersistence
 
 	SessionLoader    loadapi.Service

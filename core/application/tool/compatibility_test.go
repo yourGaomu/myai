@@ -50,6 +50,6 @@ func ToolResultEntry(command ToolResultEntryCommand) domaintool.ExecutionEntry {
 	return toolservice.ToolResultEntry(command)
 }
 
-func ToolResultMessage(call domainmessage.ToolCall, result string) domainmessage.Message {
-	return toolservice.ToolResultMessage(call, result)
+func ToolResultMessage(call domainmessage.ToolCall, output domaintool.ToolOutput) domainmessage.Message {
+	return toolservice.ToolResultMessage(call, output)
 }

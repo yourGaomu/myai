@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	plancommand "myai/core/application/plan/command"
@@ -75,6 +76,69 @@ func TestPlanExecutionServiceMarksStepFailedWhenGenerationFails(t *testing.T) {
 	last := states.plans[len(states.plans)-1]
 	if last.Status != agentplan.StatusFailed || last.Steps[0].Status != agentplan.StepStatusFailed {
 		t.Fatalf("unexpected failed state: %#v", last)
+	}
+}
+
+func TestPlanExecutionServiceResumesFromFirstUnfinishedStep(t *testing.T) {
+	current := planExecutionSession()
+	current.CurrentPlan.Status = agentplan.StatusFailed
+	current.CurrentPlan.Steps[0].Status = agentplan.StepStatusDone
+	current.CurrentPlan.Steps[1].Status = agentplan.StepStatusFailed
+	generation := &recordingPlanGeneration{responses: []GenerationResponse{{
+		SessionID: current.ID,
+		Result:    modelport.ChatResult{Content: "resumed"},
+	}}}
+
+	result, err := (PlanExecutionService{
+		Models:     &assistantModelProvider{},
+		Sessions:   staticPlanSessionLoader{current: current},
+		Messages:   &planMessageAppender{current: current},
+		Generation: generation,
+		PlanStates: &recordingPlanStateStore{},
+	}).Execute(context.Background(), PlanExecutionCommand{SessionID: current.ID}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(generation.commands) != 1 || result.Plan == nil || result.Plan.Status != agentplan.StatusDone {
+		t.Fatalf("unexpected resumed execution: commands=%d result=%#v", len(generation.commands), result)
+	}
+	if result.Plan.Steps[0].Status != agentplan.StepStatusDone || result.Plan.Steps[1].Status != agentplan.StepStatusDone {
+		t.Fatalf("unexpected resumed steps: %#v", result.Plan.Steps)
+	}
+}
+
+func TestPlanExecutionServiceRejectsCompletedPlan(t *testing.T) {
+	current := planExecutionSession()
+	current.CurrentPlan.Status = agentplan.StatusDone
+
+	_, err := (PlanExecutionService{
+		Models:     &assistantModelProvider{},
+		Sessions:   staticPlanSessionLoader{current: current},
+		Messages:   &planMessageAppender{current: current},
+		Generation: &recordingPlanGeneration{},
+	}).Execute(context.Background(), PlanExecutionCommand{SessionID: current.ID}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot execute") {
+		t.Fatalf("expected completed plan rejection, got %v", err)
+	}
+}
+
+func TestPlanExecutionServiceMarksCancellationWithoutFailingStep(t *testing.T) {
+	current := planExecutionSession()
+	states := &recordingPlanStateStore{}
+
+	_, err := (PlanExecutionService{
+		Models:     &assistantModelProvider{},
+		Sessions:   staticPlanSessionLoader{current: current},
+		Messages:   &planMessageAppender{current: current},
+		Generation: &recordingPlanGeneration{err: context.Canceled},
+		PlanStates: states,
+	}).Execute(context.Background(), PlanExecutionCommand{SessionID: current.ID}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	last := states.plans[len(states.plans)-1]
+	if last.Status != agentplan.StatusCanceled || last.Steps[0].Status != agentplan.StepStatusPending {
+		t.Fatalf("unexpected canceled state: %#v", last)
 	}
 }
 

@@ -12,7 +12,12 @@ type SessionLoader interface {
 
 type CommandMemory interface {
 	CurrentSessionId() string
-	AddUserMessageTo(sessionID string, input string) error
+	AddUserTurnTo(sessionID string, runtimeInstruction string, input string) error
+	AddUserTurnWithContextTo(sessionID string, ragContext string, runtimeInstruction string, input string) error
 	TrimAfterLastUserMessage(sessionID string) (string, error)
 	GetSession(sessionID string) (*session.Session, error)
+}
+
+type RuntimeInstructionProvider interface {
+	Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string
 }

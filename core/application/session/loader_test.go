@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	domainmessage "myai/core/domain/message"
-	"myai/core/llm"
+	domaintool "myai/core/domain/tool"
 	agentplan "myai/core/plan"
 	repository "myai/core/port/repository"
 	"myai/core/session"
@@ -31,38 +31,12 @@ func (s *fakeMemoryStore) UseSession(sessionID string) error {
 	return nil
 }
 
-func (s *fakeMemoryStore) PutSessionWithModeUsage(sessionID string, modelID string, agentMode session.AgentMode, permissionMode session.PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) error {
-	s.putCurrent = true
-	s.currentID = sessionID
-	s.sessions[sessionID] = &session.Session{
-		ID:                sessionID,
-		Model:             modelID,
-		AgentMode:         agentMode,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: compactedMessages,
-		Usage:             usage,
-		LastUsage:         lastUsage,
-		Messages:          messages,
+func (s *fakeMemoryStore) PutSessionState(state session.InitialState, setCurrent bool) error {
+	s.putCurrent = setCurrent
+	if setCurrent {
+		s.currentID = state.ID
 	}
-	return nil
-}
-
-func (s *fakeMemoryStore) PutSessionWithModeUsageNoCurrent(sessionID string, modelID string, agentMode session.AgentMode, permissionMode session.PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) error {
-	s.putCurrent = false
-	s.sessions[sessionID] = &session.Session{
-		ID:                sessionID,
-		Model:             modelID,
-		AgentMode:         agentMode,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: compactedMessages,
-		Usage:             usage,
-		LastUsage:         lastUsage,
-		Messages:          messages,
-	}
+	s.sessions[state.ID] = session.NewFromState(state)
 	return nil
 }
 
@@ -125,7 +99,9 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 			Usage:          &repository.TokenUsageRecord{TotalTokens: 12, Available: true},
 		}},
 		Messages: fakeMessageLister{records: []repository.MessageRecord{
+			{Role: repository.RoleSystem, Content: domainmessage.RuntimeInstructionPrefix + "\nplan rules", SyntheticReason: "runtime_instruction"},
 			{Role: repository.RoleUser, Content: "hello"},
+			{Role: repository.RoleTool, ToolCallID: "call-1", ToolName: "shell", Content: "exit code 1", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero", ToolError: "exit code 1", ToolTruncated: true},
 		}},
 	}).EnsureInMemory(context.Background(), EnsureInMemoryCommand{
 		SessionID:  "session-1",
@@ -140,8 +116,12 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 	if memory.putCurrent {
 		t.Fatal("expected hydration without setting current")
 	}
-	if len(current.Messages) != 2 || current.Messages[1].Text() != "hello" {
+	if len(current.Messages) != 4 || !current.Messages[1].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || current.Messages[2].Text() != "hello" {
 		t.Fatalf("unexpected messages: %#v", current.Messages)
+	}
+	toolResult, ok := current.Messages[3].FirstToolResult()
+	if !ok || toolResult.Status != domaintool.ResultStatusFailed || toolResult.ErrorCode != "command_exit_nonzero" || !toolResult.Truncated {
+		t.Fatalf("unexpected restored tool result: %#v", current.Messages[3])
 	}
 	if current.Usage.TotalTokens != 12 {
 		t.Fatalf("unexpected usage: %#v", current.Usage)

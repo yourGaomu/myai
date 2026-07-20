@@ -8,6 +8,7 @@ import (
 	"time"
 
 	domainhistory "myai/core/domain/history"
+	domaintool "myai/core/domain/tool"
 	"myai/core/history"
 	"myai/core/sandbox"
 	tooldef "myai/core/tool/tool"
@@ -23,10 +24,6 @@ type shellArgs struct {
 	WorkDir        string `json:"work_dir"`
 	TimeoutMS      int    `json:"timeout_ms"`
 	MaxOutputBytes int    `json:"max_output_bytes"`
-}
-
-func NewShellTool(sandbox sandbox.Sandbox) *ShellTool {
-	return &ShellTool{sandbox: sandbox}
 }
 
 func NewShellToolWithWorkspace(workspace string, sandbox sandbox.Sandbox) *ShellTool {
@@ -70,14 +67,14 @@ func (t *ShellTool) Permission() tooldef.Permission {
 	return tooldef.PermissionExecute
 }
 
-func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	if t.sandbox == nil {
-		return "", errors.New("sandbox is nil")
+		return tooldef.ToolOutput{}, errors.New("sandbox is nil")
 	}
 
 	input, err := normalizeShellArgs(args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	// Shell 可能修改任意数量文件，因此执行前后扫描 workspace 并归入同一个任务检查点。
@@ -89,7 +86,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 		MaxOutputBytes: input.MaxOutputBytes,
 	})
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if recorder != nil && before != nil {
 		if _, recordErr := recorder.RecordWorkspaceChanges(ctx, before, history.RecordCommand{
@@ -105,9 +102,20 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (string, err
 
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	resultOutput := tooldef.SuccessOutput(string(output))
+	resultOutput.Truncated = result.Truncated
+	if result.TimedOut {
+		resultOutput.Status = domaintool.ResultStatusTimeout
+		resultOutput.ErrorCode = "command_timeout"
+		resultOutput.ErrorMessage = result.ErrorMessage
+	} else if result.ExitCode != 0 {
+		resultOutput.Status = domaintool.ResultStatusFailed
+		resultOutput.ErrorCode = "command_exit_nonzero"
+		resultOutput.ErrorMessage = result.ErrorMessage
+	}
+	return resultOutput, nil
 }
 
 func (t *ShellTool) snapshotBeforeShell(ctx context.Context) (*history.TaskWorkspaceRecorder, map[string]domainhistory.FileSnapshot, error) {

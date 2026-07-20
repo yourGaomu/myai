@@ -90,17 +90,17 @@ func TestInstallSkillToolInstallsAndReloadsSkillCatalog(t *testing.T) {
 	assertInstallSkillHubArgs(t, call, []string{"install", "demo", "--dir", root, "--force"})
 
 	var result installSkillResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
 		t.Fatalf("decode install result failed: %v", err)
 	}
 	if !result.Reloaded {
-		t.Fatalf("expected skill catalog to be reloaded, output=%s", output)
+		t.Fatalf("expected skill catalog to be reloaded, output=%s", output.Content)
 	}
 	if result.Skill != "demo" || result.Namespace != "" {
 		t.Fatalf("expected installed skill metadata, got %+v", result)
 	}
 	if result.SkillCount != 1 {
-		t.Fatalf("expected one loaded skill, got %d: %s", result.SkillCount, output)
+		t.Fatalf("expected one loaded skill, got %d: %s", result.SkillCount, output.Content)
 	}
 	if len(manager.List()) != 1 {
 		t.Fatalf("expected manager to contain installed skill")

@@ -11,7 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	memoryauthorization "myai/core/adapter/authorization/memory"
-	mongoauthorization "myai/core/adapter/persistence/mongo/authorization"
+	mongoauthorization "myai/core/adapter/persistence/mongo/authorization/repository"
 	appconfig "myai/core/config"
 	"myai/core/infra"
 	"myai/core/remote/relay"

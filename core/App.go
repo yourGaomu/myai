@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	redis "github.com/redis/go-redis/v9"
@@ -11,9 +12,33 @@ import (
 
 	adapterthreadpool "myai/core/adapter/async/threadpool"
 	adapterredis "myai/core/adapter/cache/redis"
+	grpcprocessor "myai/core/adapter/documentprocessor/grpc"
+	assetsource "myai/core/adapter/documentsource/asset"
+	embeddingmemory "myai/core/adapter/embedding/memory"
+	openaiembedding "myai/core/adapter/embedding/openaicompatible"
+	contenthashid "myai/core/adapter/id/contenthash"
+	snowflakeid "myai/core/adapter/id/snowflake"
+	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
 	adaptermodel "myai/core/adapter/model/langchaingo"
-	adaptermongo "myai/core/adapter/persistence/mongo"
+	minioadapter "myai/core/adapter/objectstorage/minio"
+	knowledgemongo "myai/core/adapter/persistence/mongo/knowledge/repository"
+	adaptermongo "myai/core/adapter/persistence/mongo/repository"
 	memorysession "myai/core/adapter/session/memory"
+	milvusadapter "myai/core/adapter/vectorstore/milvus"
+	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
+	catalogapi "myai/core/application/knowledge/catalog/api"
+	catalogservice "myai/core/application/knowledge/catalog/service"
+	documentapi "myai/core/application/knowledge/document/api"
+	documentservice "myai/core/application/knowledge/document/service"
+	embeddingservice "myai/core/application/knowledge/embedding/service"
+	indexingapi "myai/core/application/knowledge/indexing/api"
+	indexingservice "myai/core/application/knowledge/indexing/service"
+	queryapi "myai/core/application/knowledge/query/api"
+	queryservice "myai/core/application/knowledge/query/service"
+	retrievalapi "myai/core/application/knowledge/retrieval/api"
+	retrievalservice "myai/core/application/knowledge/retrieval/service"
+	searchapi "myai/core/application/knowledge/search/api"
+	searchservice "myai/core/application/knowledge/search/service"
 	modelcommand "myai/core/application/model/command"
 	modelservice "myai/core/application/model/service"
 	"myai/core/asset"
@@ -24,6 +49,8 @@ import (
 	"myai/core/llm"
 	"myai/core/mcp"
 	cacheport "myai/core/port/cache"
+	knowledgeport "myai/core/port/knowledge"
+	documentprocessorport "myai/core/port/knowledge/documentprocessor"
 	persistenceport "myai/core/port/persistence"
 	"myai/core/sandbox"
 	"myai/core/service"
@@ -36,23 +63,48 @@ import (
 type Application struct {
 	// Application 是进程级资源容器，作用类似 Spring Boot 的 ApplicationContext。
 	// 它只负责创建和持有基础设施，不承载聊天、Plan 等业务规则。
-	threadPool     *adapterthreadpool.Pool
-	properties     appconfig.Properties
-	client         *llm.Client
-	sessionMemory  *memorysession.Store
-	mongoDb        *mongo.Client
-	redisDb        *redis.Client
-	store          persistenceport.Store
-	cache          cacheport.CurrentSessionCache
-	assetClient    *asset.Client
-	chatService    *service.ChatService
-	toolRegister   *tool.RegisterTools
-	skillManager   *skill.Manager
-	hookManager    *hook.Manager
-	mcpManager     *mcp.Manager
-	sandbox        sandbox.Sandbox
-	defaultModelID string
-	workspace      string
+	threadPool                  *adapterthreadpool.Pool
+	properties                  appconfig.Properties
+	client                      *llm.Client
+	sessionMemory               *memorysession.Store
+	mongoDb                     *mongo.Client
+	redisDb                     *redis.Client
+	store                       persistenceport.Store
+	cache                       cacheport.CurrentSessionCache
+	assetClient                 *asset.Client
+	knowledgeBaseRepository     knowledgeport.KnowledgeBaseRepository
+	knowledgeCategoryRepository knowledgeport.KnowledgeCategoryRepository
+	documentRepository          knowledgeport.DocumentRepository
+	chunkRepository             knowledgeport.ChunkRepository
+	profileRepository           knowledgeport.ProfileRepository
+	indexingJobRepository       knowledgeport.IndexingJobRepository
+	syncChangeRepository        knowledgeport.SyncChangeRepository
+	documentObjectStore         knowledgeport.DocumentObjectStore
+	documentProcessor           documentprocessorport.DocumentProcessor
+	documentProcessorCloser     interface{ Close() error }
+	embeddingModelRegistry      knowledgeport.EmbeddingModelRegistry
+	embeddingModelResolver      knowledgeport.EmbeddingModelResolver
+	vectorStore                 knowledgeport.VectorStore
+	vectorStoreCloser           interface{ Close() error }
+	localVectorStore            knowledgeport.VectorStore
+	localVectorStoreCloser      interface{ Close() error }
+	keywordStore                knowledgeport.KeywordStore
+	keywordStoreCloser          interface{ Close() error }
+	indexingService             indexingapi.Service
+	retrievalService            retrievalapi.Service
+	knowledgeCatalogService     catalogapi.Service
+	knowledgeSearchService      searchapi.Service
+	knowledgeQueryService       queryapi.Service
+	knowledgeDocumentService    documentapi.Service
+	knowledgeService            *service.KnowledgeService
+	chatService                 *service.ChatService
+	toolRegister                *tool.RegisterTools
+	skillManager                *skill.Manager
+	hookManager                 *hook.Manager
+	mcpManager                  *mcp.Manager
+	sandbox                     sandbox.Sandbox
+	defaultModelID              string
+	workspace                   string
 }
 
 var (
@@ -74,8 +126,9 @@ func InitApp() {
 		instance.InitMongoDb()
 		instance.InitRedisDb()
 		instance.InitStore()
-		instance.InitCache()
 		instance.InitThreadPool()
+		instance.InitKnowledgeStorage()
+		instance.InitCache()
 		instance.InitClient()
 		instance.InitSessionMemory()
 		instance.InitSandbox()
@@ -146,6 +199,256 @@ func (app *Application) InitStore() {
 	app.store = adaptermongo.New(app.mongoDb, database)
 }
 
+func (app *Application) InitKnowledgeStorage() {
+	embeddingRegistry := embeddingmemory.NewRegistry()
+	mapper := appconfig.Mapper{}
+	for _, properties := range app.properties.RAG.Embedding.Models {
+		info := mapper.EmbeddingModelInfo(properties)
+		if !info.Enabled {
+			continue
+		}
+		var provider knowledgeport.EmbeddingProvider
+		var err error
+		switch info.Provider {
+		case "openai", "openai-compatible":
+			provider, err = openaiembedding.New(mapper.EmbeddingProviderConfig(properties))
+		default:
+			err = fmt.Errorf("unsupported embedding provider %q", info.Provider)
+		}
+		if err != nil {
+			panic(fmt.Errorf("init embedding model %q failed: %w", info.ID, err))
+		}
+		if err := embeddingRegistry.Set(info.ID, provider, info); err != nil {
+			panic(fmt.Errorf("register embedding model %q failed: %w", info.ID, err))
+		}
+	}
+	app.embeddingModelRegistry = embeddingRegistry
+	app.embeddingModelResolver = embeddingservice.Resolver{Registry: embeddingRegistry}
+	if app.properties.RAG.Milvus.Enabled {
+		store, err := milvusadapter.New(context.Background(), mapper.MilvusConfig(app.properties.RAG.Milvus))
+		if err != nil {
+			panic(fmt.Errorf("init Milvus vector store failed: %w", err))
+		}
+		app.vectorStore = store
+		app.vectorStoreCloser = store
+	}
+
+	if app.mongoDb != nil {
+		database := app.properties.Mongo.Database
+		app.knowledgeBaseRepository = knowledgemongo.NewKnowledgeBaseRepository(app.mongoDb, database)
+		app.knowledgeCategoryRepository = knowledgemongo.NewKnowledgeCategoryRepository(app.mongoDb, database)
+		app.documentRepository = knowledgemongo.NewDocumentRepository(app.mongoDb, database)
+		app.chunkRepository = knowledgemongo.NewChunkRepository(app.mongoDb, database)
+		app.profileRepository = knowledgemongo.NewProfileRepository(app.mongoDb, database)
+		app.indexingJobRepository = knowledgemongo.NewIndexingJobRepository(app.mongoDb, database)
+		app.syncChangeRepository = knowledgemongo.NewSyncChangeRepository(app.mongoDb, database)
+	}
+
+	properties := app.properties.RAG.MinIO
+	if strings.TrimSpace(properties.Endpoint) != "" {
+		store, err := minioadapter.New((appconfig.Mapper{}).MinIOConfig(properties))
+		if err != nil {
+			panic(fmt.Errorf("init RAG MinIO failed: %w", err))
+		}
+		if err := store.EnsureBucket(context.Background()); err != nil {
+			panic(fmt.Errorf("ensure RAG MinIO bucket failed: %w", err))
+		}
+		app.documentObjectStore = store
+	}
+
+	processorProperties := app.properties.RAG.DocumentProcessor
+	if processorProperties.Enabled {
+		processor, err := grpcprocessor.New(context.Background(), (appconfig.Mapper{}).DocumentProcessorConfig(processorProperties))
+		if err != nil {
+			panic(fmt.Errorf("init document processor failed: %w", err))
+		}
+		app.documentProcessor = processor
+		app.documentProcessorCloser = processor
+	}
+
+	localProperties := app.properties.RAG.Local
+	if localProperties.Enabled {
+		keywordPath := localProperties.Path
+		if strings.TrimSpace(keywordPath) == "" {
+			var err error
+			keywordPath, err = sqlitefts5.DefaultPath(app.workspace)
+			if err != nil {
+				panic(fmt.Errorf("resolve local knowledge database path failed: %w", err))
+			}
+		}
+		keywordStore, err := sqlitefts5.Open(mapper.KeywordStoreConfig(localProperties, keywordPath))
+		if err != nil {
+			panic(fmt.Errorf("init SQLite FTS5 keyword store failed: %w", err))
+		}
+		vectorPath := localProperties.VectorPath
+		if strings.TrimSpace(vectorPath) == "" {
+			vectorPath, err = sqlitevec.PathBeside(keywordPath)
+			if err != nil {
+				_ = keywordStore.Close()
+				panic(fmt.Errorf("resolve local vector database path failed: %w", err))
+			}
+		}
+		vectorStore, err := sqlitevec.Open(mapper.LocalVectorStoreConfig(localProperties, vectorPath))
+		if err != nil {
+			_ = keywordStore.Close()
+			panic(fmt.Errorf("init sqlite-vec vector store failed: %w", err))
+		}
+		app.keywordStore = keywordStore
+		app.keywordStoreCloser = keywordStore
+		app.localVectorStore = vectorStore
+		app.localVectorStoreCloser = vectorStore
+	}
+
+	app.initIndexingService()
+	app.initKnowledgeDocumentService()
+	app.initRetrievalService()
+	app.initKnowledgeCatalogService()
+	app.initKnowledgeSearchService()
+	app.initKnowledgeQueryService()
+	app.initKnowledgeFacade()
+}
+
+func (app *Application) initKnowledgeDocumentService() {
+	if app.indexingService == nil || app.assetClient == nil || app.documentObjectStore == nil || app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.chunkRepository == nil || app.indexingJobRepository == nil {
+		return
+	}
+	ids, err := snowflakeid.New(app.properties.RAG.IDNode)
+	if err != nil {
+		panic(fmt.Errorf("init knowledge document id generator failed: %w", err))
+	}
+	app.knowledgeDocumentService = documentservice.DocumentService{
+		KnowledgeBases: app.knowledgeBaseRepository,
+		Documents:      app.documentRepository,
+		Chunks:         app.chunkRepository,
+		Objects:        app.documentObjectStore,
+		Sources:        assetsource.Source{Client: app.assetClient},
+		Indexing:       app.indexingService,
+		Jobs:           app.indexingJobRepository,
+		IDs:            ids,
+		Async:          adapterthreadpool.Executor{Pool: app.threadPool},
+	}
+}
+
+func (app *Application) initKnowledgeCatalogService() {
+	if app.knowledgeCategoryRepository == nil || app.knowledgeBaseRepository == nil {
+		return
+	}
+	ids, err := snowflakeid.New(app.properties.RAG.IDNode)
+	if err != nil {
+		panic(fmt.Errorf("init knowledge catalog id generator failed: %w", err))
+	}
+	app.knowledgeCatalogService = catalogservice.CatalogService{
+		Categories:     app.knowledgeCategoryRepository,
+		KnowledgeBases: app.knowledgeBaseRepository,
+		Profiles:       app.profileRepository,
+		IDs:            ids,
+	}
+}
+
+func (app *Application) initKnowledgeSearchService() {
+	if app.knowledgeCategoryRepository == nil || app.knowledgeBaseRepository == nil || app.profileRepository == nil || app.retrievalService == nil {
+		return
+	}
+	rrfK := app.properties.RAG.Retrieval.RRFK
+	if rrfK == 0 {
+		rrfK = 60
+	}
+	fusion, err := retrievalservice.NewReciprocalRankFusion(rrfK)
+	if err != nil {
+		panic(fmt.Errorf("init cross-profile knowledge search fusion failed: %w", err))
+	}
+	app.knowledgeSearchService = searchservice.SearchService{
+		Categories:     app.knowledgeCategoryRepository,
+		KnowledgeBases: app.knowledgeBaseRepository,
+		Profiles:       app.profileRepository,
+		Retrieval:      app.retrievalService,
+		Fusion:         fusion,
+	}
+}
+
+func (app *Application) initKnowledgeQueryService() {
+	if app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.profileRepository == nil {
+		return
+	}
+	jobs, _ := app.indexingJobRepository.(knowledgeport.IndexingJobQueryRepository)
+	profiles, _ := app.profileRepository.(knowledgeport.IndexProfileCatalog)
+	app.knowledgeQueryService = queryservice.QueryService{
+		KnowledgeBases:     app.knowledgeBaseRepository,
+		DocumentRepository: app.documentRepository,
+		Jobs:               jobs,
+		Profiles:           profiles,
+	}
+}
+
+func (app *Application) initKnowledgeFacade() {
+	if app.knowledgeCatalogService == nil && app.knowledgeQueryService == nil && app.knowledgeSearchService == nil && app.knowledgeDocumentService == nil {
+		return
+	}
+	app.knowledgeService = &service.KnowledgeService{
+		Catalog:   app.knowledgeCatalogService,
+		Query:     app.knowledgeQueryService,
+		Search:    app.knowledgeSearchService,
+		Documents: app.knowledgeDocumentService,
+	}
+}
+
+func (app *Application) initIndexingService() {
+	if app.documentRepository == nil || app.profileRepository == nil || app.indexingJobRepository == nil || app.chunkRepository == nil || app.documentObjectStore == nil || app.documentProcessor == nil || app.embeddingModelResolver == nil || app.vectorStore == nil || app.keywordStore == nil {
+		return
+	}
+	jobIDs, err := snowflakeid.New(app.properties.RAG.IDNode)
+	if err != nil {
+		panic(fmt.Errorf("init indexing job id generator failed: %w", err))
+	}
+	service, err := indexingservice.New(indexingservice.Configuration{
+		Documents:  app.documentRepository,
+		Profiles:   app.profileRepository,
+		Jobs:       app.indexingJobRepository,
+		Chunks:     app.chunkRepository,
+		Objects:    app.documentObjectStore,
+		Processor:  app.documentProcessor,
+		Embeddings: app.embeddingModelResolver,
+		Vectors:    app.vectorStore,
+		Keywords:   app.keywordStore,
+		JobIDs:     jobIDs,
+		StableIDs:  contenthashid.Deriver{},
+	})
+	if err != nil {
+		panic(fmt.Errorf("init knowledge indexing service failed: %w", err))
+	}
+	app.indexingService = service
+}
+
+func (app *Application) initRetrievalService() {
+	if app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.profileRepository == nil || app.chunkRepository == nil || app.embeddingModelResolver == nil {
+		return
+	}
+	if app.localVectorStore == nil && app.keywordStore == nil && app.vectorStore == nil {
+		return
+	}
+	properties := app.properties.RAG.Retrieval
+	service, err := retrievalservice.New(retrievalservice.Configuration{
+		KnowledgeBases:      app.knowledgeBaseRepository,
+		Documents:           app.documentRepository,
+		Profiles:            app.profileRepository,
+		Chunks:              app.chunkRepository,
+		Embeddings:          app.embeddingModelResolver,
+		LocalVectors:        app.localVectorStore,
+		LocalKeywords:       app.keywordStore,
+		RemoteVectors:       app.vectorStore,
+		CandidateMultiplier: properties.CandidateMultiplier,
+		MaxCandidates:       properties.MaxCandidates,
+		MinLocalResults:     properties.MinLocalResults,
+		MinLocalScore:       properties.MinLocalScore,
+		RRFK:                properties.RRFK,
+		CacheRemoteResults:  properties.CacheRemoteResults,
+	})
+	if err != nil {
+		panic(fmt.Errorf("init knowledge retrieval service failed: %w", err))
+	}
+	app.retrievalService = service
+}
+
 func (app *Application) InitCache() {
 	if app.redisDb == nil {
 		// Redis 只保存“用户当前会话”等短期状态，不影响核心聊天流程启动。
@@ -210,16 +513,17 @@ func (app *Application) InitSandbox() {
 func (app *Application) InitChatService() {
 	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
-		Models:       app.client,
-		ModelFactory: adaptermodel.Factory{},
-		Sessions:     app.sessionMemory,
-		Store:        app.store,
-		Cache:        app.cache,
-		Async:        adapterthreadpool.Executor{Pool: app.threadPool},
-		Tools:        app.toolRegister,
-		Skills:       app.skillManager,
-		Hooks:        app.hookManager,
-		DefaultModel: app.defaultModelID,
+		Models:          app.client,
+		ModelFactory:    adaptermodel.Factory{},
+		Sessions:        app.sessionMemory,
+		Store:           app.store,
+		Cache:           app.cache,
+		Async:           adapterthreadpool.Executor{Pool: app.threadPool},
+		Tools:           app.toolRegister,
+		Skills:          app.skillManager,
+		Hooks:           app.hookManager,
+		DefaultModel:    app.defaultModelID,
+		KnowledgeSearch: app.knowledgeSearchService,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -234,42 +538,102 @@ func (app *Application) Close() error {
 	if app.mcpManager != nil {
 		errs = append(errs, app.mcpManager.Close())
 	}
+	if app.documentProcessorCloser != nil {
+		errs = append(errs, app.documentProcessorCloser.Close())
+	}
+	if app.vectorStoreCloser != nil {
+		errs = append(errs, app.vectorStoreCloser.Close())
+	}
+	if app.localVectorStoreCloser != nil {
+		errs = append(errs, app.localVectorStoreCloser.Close())
+	}
+	if app.keywordStoreCloser != nil {
+		errs = append(errs, app.keywordStoreCloser.Close())
+	}
 	if app.threadPool != nil {
 		app.threadPool.Shutdown()
 	}
 	return errors.Join(errs...)
 }
 
-func (app *Application) GetClient() *llm.Client {
-	return app.client
-}
-
-func (app *Application) GetSessionMemory() *memorysession.Store {
-	return app.sessionMemory
-}
-
-func (app *Application) GetMongoDb() *mongo.Client {
-	return app.mongoDb
-}
-
-func (app *Application) GetRedisDb() *redis.Client {
-	return app.redisDb
-}
-
-func (app *Application) GetStore() persistenceport.Store {
-	return app.store
-}
-
-func (app *Application) GetCache() cacheport.CurrentSessionCache {
-	return app.cache
-}
-
-func (app *Application) GetAssetClient() *asset.Client {
-	return app.assetClient
-}
-
 func (app *Application) GetChatService() *service.ChatService {
 	return app.chatService
+}
+
+func (app *Application) GetKnowledgeBaseRepository() knowledgeport.KnowledgeBaseRepository {
+	return app.knowledgeBaseRepository
+}
+
+func (app *Application) GetKnowledgeCategoryRepository() knowledgeport.KnowledgeCategoryRepository {
+	return app.knowledgeCategoryRepository
+}
+
+func (app *Application) GetDocumentRepository() knowledgeport.DocumentRepository {
+	return app.documentRepository
+}
+
+func (app *Application) GetChunkRepository() knowledgeport.ChunkRepository {
+	return app.chunkRepository
+}
+
+func (app *Application) GetProfileRepository() knowledgeport.ProfileRepository {
+	return app.profileRepository
+}
+
+func (app *Application) GetIndexingJobRepository() knowledgeport.IndexingJobRepository {
+	return app.indexingJobRepository
+}
+
+func (app *Application) GetSyncChangeRepository() knowledgeport.SyncChangeRepository {
+	return app.syncChangeRepository
+}
+
+func (app *Application) GetDocumentObjectStore() knowledgeport.DocumentObjectStore {
+	return app.documentObjectStore
+}
+
+func (app *Application) GetDocumentProcessor() documentprocessorport.DocumentProcessor {
+	return app.documentProcessor
+}
+
+func (app *Application) GetEmbeddingModelRegistry() knowledgeport.EmbeddingModelRegistry {
+	return app.embeddingModelRegistry
+}
+
+func (app *Application) GetEmbeddingModelResolver() knowledgeport.EmbeddingModelResolver {
+	return app.embeddingModelResolver
+}
+
+func (app *Application) GetVectorStore() knowledgeport.VectorStore {
+	return app.vectorStore
+}
+
+func (app *Application) GetLocalVectorStore() knowledgeport.VectorStore {
+	return app.localVectorStore
+}
+
+func (app *Application) GetKeywordStore() knowledgeport.KeywordStore {
+	return app.keywordStore
+}
+
+func (app *Application) GetIndexingService() indexingapi.Service {
+	return app.indexingService
+}
+
+func (app *Application) GetRetrievalService() retrievalapi.Service {
+	return app.retrievalService
+}
+
+func (app *Application) GetKnowledgeCatalogService() catalogapi.Service {
+	return app.knowledgeCatalogService
+}
+
+func (app *Application) GetKnowledgeSearchService() searchapi.Service {
+	return app.knowledgeSearchService
+}
+
+func (app *Application) GetKnowledgeService() *service.KnowledgeService {
+	return app.knowledgeService
 }
 
 func (app *Application) InitRegister() *tool.RegisterTools {
@@ -288,13 +652,12 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		localTools = append(localTools, local.NewReadAssetToolWithDownloader(app.assetClient))
 		localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndUploader(app.workspace, app.assetClient))
 	}
+	if app.knowledgeSearchService != nil {
+		localTools = append(localTools, local.NewKnowledgeSearchTool(app.knowledgeSearchService))
+	}
 	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools
 	return tools
-}
-
-func (app *Application) GetToolRegister() *tool.RegisterTools {
-	return app.toolRegister
 }
 
 func (app *Application) InitMCP() *mcp.Manager {
@@ -308,10 +671,6 @@ func (app *Application) InitMCP() *mcp.Manager {
 	if err := app.mcpManager.RegisterAll(context.Background(), app.toolRegister); err != nil {
 		panic(fmt.Errorf("init mcp failed: %w", err))
 	}
-	return app.mcpManager
-}
-
-func (app *Application) GetMCPManager() *mcp.Manager {
 	return app.mcpManager
 }
 
@@ -331,8 +690,4 @@ func (app *Application) skillRoot() string {
 
 func (app *Application) skillHubRegistry() string {
 	return app.properties.Skill.Registry
-}
-
-func (app *Application) GetSkillManager() *skill.Manager {
-	return app.skillManager
 }

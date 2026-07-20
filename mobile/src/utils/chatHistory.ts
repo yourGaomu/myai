@@ -2,7 +2,9 @@ import type { SessionHistoryMessage } from "../protocol";
 import type { ChatItem } from "../types/chat";
 import { newRequestID } from "./ids";
 
-export function historyMessageToChatItem(message: SessionHistoryMessage): ChatItem {
+export function historyMessageToChatItem(
+  message: SessionHistoryMessage,
+): ChatItem {
   const role = chatRoleFromHistory(message.role);
   return {
     id: message.id || newRequestID(),
@@ -12,7 +14,14 @@ export function historyMessageToChatItem(message: SessionHistoryMessage): ChatIt
     reasoning: message.reasoning,
     toolName: message.tool_name,
     toolArguments: message.tool_arguments,
-    toolError: message.tool_error,
+    toolError:
+      message.tool_error ||
+      (message.tool_status && message.tool_status !== "success"
+        ? message.tool_error_code || message.tool_status
+        : undefined),
+    toolStatus: message.tool_status,
+    toolErrorCode: message.tool_error_code,
+    toolTruncated: message.tool_truncated,
     usage: message.usage,
   };
 }
@@ -43,6 +52,11 @@ function historyMessageText(message: SessionHistoryMessage) {
     case "user":
       return message.content || "(empty user message)";
     default:
-      return message.content || message.tool_arguments || message.tool_error || `(message: ${message.role})`;
+      return (
+        message.content ||
+        message.tool_arguments ||
+        message.tool_error ||
+        `(message: ${message.role})`
+      );
   }
 }

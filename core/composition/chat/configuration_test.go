@@ -7,6 +7,7 @@ import (
 	memorysession "myai/core/adapter/session/memory"
 	lifecyclecommand "myai/core/application/session/lifecycle/command"
 	messagecommand "myai/core/application/session/message/command"
+	domainmessage "myai/core/domain/message"
 )
 
 func TestBuildDependenciesWiresStableSessionServices(t *testing.T) {
@@ -33,8 +34,11 @@ func TestBuildDependenciesWiresStableSessionServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendUserMessage() error = %v", err)
 	}
-	if len(prepared.Session.Messages) != initialMessageCount+1 {
-		t.Fatalf("message count = %d, want %d", len(prepared.Session.Messages), initialMessageCount+1)
+	if len(prepared.Session.Messages) != initialMessageCount+2 {
+		t.Fatalf("message count = %d, want %d", len(prepared.Session.Messages), initialMessageCount+2)
+	}
+	if !prepared.Session.Messages[initialMessageCount].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) {
+		t.Fatalf("expected runtime boundary message: %#v", prepared.Session.Messages)
 	}
 
 	state := dependencies.CurrentState.State()

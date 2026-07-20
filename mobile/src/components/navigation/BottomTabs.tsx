@@ -9,7 +9,7 @@ type Props = {
   onChangesPress: () => void;
   onChatPress: () => void;
   onFilesPress: () => void;
-  onSessionsPress: () => void;
+  onKnowledgePress: () => void;
   onSettingsPress: () => void;
   viewMode: ViewMode;
 };
@@ -20,7 +20,7 @@ export function BottomTabs({
   onChangesPress,
   onChatPress,
   onFilesPress,
-  onSessionsPress,
+  onKnowledgePress,
   onSettingsPress,
   viewMode,
 }: Props) {
@@ -35,8 +35,8 @@ export function BottomTabs({
       <Pressable onPress={onChangesPress} style={({ pressed }) => buttonFeedback([styles.segment, changesActive && styles.segmentActive], pressed)}>
         <Text style={[styles.segmentText, changesActive && styles.segmentTextActive]}>变更</Text>
       </Pressable>
-      <Pressable onPress={onSessionsPress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "sessions" && styles.segmentActive], pressed)}>
-        <Text style={[styles.segmentText, viewMode === "sessions" && styles.segmentTextActive]}>会话</Text>
+      <Pressable onPress={onKnowledgePress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "knowledge" && styles.segmentActive], pressed)}>
+        <Text style={[styles.segmentText, viewMode === "knowledge" && styles.segmentTextActive]}>知识</Text>
       </Pressable>
       <Pressable onPress={onSettingsPress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "settings" && styles.segmentActive], pressed)}>
         <Text style={[styles.segmentIconText, viewMode === "settings" && styles.segmentTextActive]}>⚙</Text>

@@ -9,6 +9,7 @@ import (
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	"myai/core/session"
 	"myai/core/skill"
 )
 
@@ -71,6 +72,7 @@ func sessionSummaries(sessions []sessionresult.SessionListItem) []protocol.Sessi
 			Usage:          tokenUsageResultToPayload(session.Usage),
 			LastUsage:      tokenUsageResultToPayload(session.LastUsage),
 			CurrentPlan:    planPayload(session.CurrentPlan),
+			RAG:            ragSettingsPayload(session.RAGSettings),
 			Deleted:        session.Deleted,
 			DeletedAt:      session.DeletedAt,
 			CreatedAt:      session.CreatedAt,
@@ -78,6 +80,14 @@ func sessionSummaries(sessions []sessionresult.SessionListItem) []protocol.Sessi
 		})
 	}
 	return summaries
+}
+
+func ragSettingsPayload(settings session.RAGSettings) protocol.RAGSettings {
+	settings = session.CloneRAGSettings(settings)
+	return protocol.RAGSettings{
+		Mode: string(settings.Mode), KnowledgeBaseIDs: settings.KnowledgeBaseIDs,
+		CategoryIDs: settings.CategoryIDs, TopK: settings.TopK,
+	}
 }
 
 func sessionHistoryMessages(records []sessionresult.MessageListItem) []protocol.SessionHistoryMessage {
@@ -92,6 +102,9 @@ func sessionHistoryMessages(records []sessionresult.MessageListItem) []protocol.
 			ToolName:      record.ToolName,
 			ToolArguments: record.ToolArguments,
 			ToolError:     record.ToolError,
+			ToolStatus:    record.ToolStatus,
+			ToolErrorCode: record.ToolErrorCode,
+			ToolTruncated: record.ToolTruncated,
 			Usage:         tokenUsageRecordFromMessage(record),
 			CreatedAt:     record.CreatedAt,
 		})

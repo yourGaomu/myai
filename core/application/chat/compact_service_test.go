@@ -51,7 +51,7 @@ func TestCompactServiceCompactIfNeededSkipsBelowThreshold(t *testing.T) {
 		Summarizer: summarizer,
 		Summaries:  &compactStore{},
 		KeepChunks: 2,
-	}.CompactIfNeeded(context.Background(), compactTestSession(), compactModel{}, "runtime")
+	}.CompactIfNeeded(context.Background(), compactTestSession(), compactModel{})
 	if err != nil {
 		t.Fatalf("CompactIfNeeded returned error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestCompactServiceCompactIfNeededReturnsCompactInfo(t *testing.T) {
 		Summarizer: &compactSummarizer{summary: "new summary"},
 		Summaries:  &compactStore{},
 		KeepChunks: 2,
-	}.CompactIfNeeded(context.Background(), compactTestSession(), compactModel{}, "runtime")
+	}.CompactIfNeeded(context.Background(), compactTestSession(), compactModel{})
 	if err != nil {
 		t.Fatalf("CompactIfNeeded returned error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestCompactServiceCompactIfNeededIgnoresNotEnoughHistory(t *testing.T) {
 		Summarizer: &compactSummarizer{summary: "new summary"},
 		Summaries:  &compactStore{},
 		KeepChunks: 2,
-	}.CompactIfNeeded(context.Background(), current, compactModel{}, "runtime")
+	}.CompactIfNeeded(context.Background(), current, compactModel{})
 	if err != nil {
 		t.Fatalf("CompactIfNeeded returned error: %v", err)
 	}
@@ -192,13 +192,13 @@ type compactContextProvider struct {
 	calls int
 }
 
-func (p *compactContextProvider) Snapshot(current *session.Session, runtimePrompt string) contextmgr.Snapshot {
+func (p *compactContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {
 	index := p.calls
 	p.calls++
 	if index >= len(p.infos) {
 		index = len(p.infos) - 1
 	}
-	return contextmgr.Snapshot{Info: p.infos[index], Messages: domainmessage.CloneMessages(current.Messages)}
+	return contextmgr.Snapshot{Info: p.infos[index], Messages: cloneMessagesForTest(current.Messages)}
 }
 
 func compactTestSession() *session.Session {

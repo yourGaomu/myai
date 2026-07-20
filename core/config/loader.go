@@ -54,11 +54,18 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 		return Properties{}, errors.New("config source is nil")
 	}
 
+	cacheRemoteResults := true
+	if v.IsSet("rag.retrieval.cache_remote_results") {
+		cacheRemoteResults = v.GetBool("rag.retrieval.cache_remote_results")
+	}
 	properties := Properties{
 		Model: ModelProperties{
-			ID:      strings.TrimSpace(v.GetString("myai.model")),
-			BaseURL: strings.TrimSpace(v.GetString("myai.base_url")),
-			APIKey:  strings.TrimSpace(v.GetString("myai.api_key")),
+			ID:              strings.TrimSpace(v.GetString("myai.model")),
+			BaseURL:         strings.TrimSpace(v.GetString("myai.base_url")),
+			APIKey:          strings.TrimSpace(v.GetString("myai.api_key")),
+			Temperature:     optionalFloat64(v, "myai.temperature"),
+			TopP:            optionalFloat64(v, "myai.top_p"),
+			MaxOutputTokens: optionalInt(v, "myai.max_output_tokens"),
 		},
 		Mongo: MongoProperties{
 			URI:      strings.TrimSpace(v.GetString("mongo.uri")),
@@ -68,6 +75,61 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			Address:  strings.TrimSpace(v.GetString("redis.addr")),
 			Password: v.GetString("redis.password"),
 			DB:       v.GetInt("redis.db"),
+		},
+		RAG: RAGProperties{
+			IDNode: v.GetInt64("rag.id_node"),
+			Retrieval: RetrievalProperties{
+				CandidateMultiplier: v.GetInt("rag.retrieval.candidate_multiplier"),
+				MaxCandidates:       v.GetInt("rag.retrieval.max_candidates"),
+				MinLocalResults:     v.GetInt("rag.retrieval.min_local_results"),
+				MinLocalScore:       v.GetFloat64("rag.retrieval.min_local_score"),
+				RRFK:                v.GetInt("rag.retrieval.rrf_k"),
+				CacheRemoteResults:  cacheRemoteResults,
+			},
+			Local: LocalKnowledgeProperties{
+				Enabled:            v.GetBool("rag.local.enabled"),
+				Path:               strings.TrimSpace(v.GetString("rag.local.path")),
+				VectorPath:         strings.TrimSpace(v.GetString("rag.local.vector_path")),
+				MaxOpenConnections: v.GetInt("rag.local.max_open_connections"),
+			},
+			Milvus: MilvusProperties{
+				Enabled:          v.GetBool("rag.milvus.enabled"),
+				Address:          strings.TrimSpace(v.GetString("rag.milvus.address")),
+				Username:         strings.TrimSpace(v.GetString("rag.milvus.username")),
+				Password:         v.GetString("rag.milvus.password"),
+				Database:         strings.TrimSpace(v.GetString("rag.milvus.database")),
+				APIKey:           strings.TrimSpace(v.GetString("rag.milvus.api_key")),
+				EnableTLS:        v.GetBool("rag.milvus.enable_tls"),
+				CollectionPrefix: strings.TrimSpace(v.GetString("rag.milvus.collection_prefix")),
+				Shards:           int32(v.GetInt("rag.milvus.shards")),
+			},
+			MinIO: MinIOProperties{
+				Endpoint:         strings.TrimSpace(v.GetString("rag.minio.endpoint")),
+				AccessKey:        strings.TrimSpace(v.GetString("rag.minio.access_key")),
+				SecretKey:        v.GetString("rag.minio.secret_key"),
+				SessionToken:     v.GetString("rag.minio.session_token"),
+				Bucket:           strings.TrimSpace(v.GetString("rag.minio.bucket")),
+				Region:           strings.TrimSpace(v.GetString("rag.minio.region")),
+				UseSSL:           v.GetBool("rag.minio.use_ssl"),
+				AutoCreateBucket: v.GetBool("rag.minio.auto_create_bucket"),
+			},
+			DocumentProcessor: DocumentProcessorProperties{
+				Enabled:               v.GetBool("rag.document_processor.enabled"),
+				PythonExecutable:      strings.TrimSpace(v.GetString("rag.document_processor.python_executable")),
+				Script:                strings.TrimSpace(v.GetString("rag.document_processor.script")),
+				WorkingDirectory:      strings.TrimSpace(v.GetString("rag.document_processor.working_directory")),
+				Transport:             strings.TrimSpace(v.GetString("rag.document_processor.transport")),
+				WorkerCount:           v.GetInt("rag.document_processor.worker_count"),
+				MaxPendingJobs:        v.GetInt("rag.document_processor.max_pending_jobs"),
+				StartupTimeoutSeconds: v.GetInt("rag.document_processor.startup_timeout_seconds"),
+				TimeoutSeconds:        v.GetInt("rag.document_processor.timeout_seconds"),
+				ShutdownGraceSeconds:  v.GetInt("rag.document_processor.shutdown_grace_seconds"),
+				MaxDocumentSizeMB:     v.GetInt64("rag.document_processor.max_document_size_mb"),
+				ContentChunkKB:        v.GetInt("rag.document_processor.content_chunk_kb"),
+				ChunkBatchSize:        v.GetInt("rag.document_processor.chunk_batch_size"),
+				GRPCMaxMessageMB:      v.GetInt("rag.document_processor.grpc_max_message_mb"),
+				TempDirectory:         strings.TrimSpace(v.GetString("rag.document_processor.temp_directory")),
+			},
 		},
 		Thread: ThreadProperties{
 			Core:      v.GetInt("thread.core"),
@@ -90,6 +152,73 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	if properties.Skill.Root == "" {
 		properties.Skill.Root = DefaultSkillRoot
 	}
+	if properties.RAG.DocumentProcessor.TimeoutSeconds == 0 {
+		properties.RAG.DocumentProcessor.TimeoutSeconds = 120
+	}
+	if properties.RAG.DocumentProcessor.StartupTimeoutSeconds == 0 {
+		properties.RAG.DocumentProcessor.StartupTimeoutSeconds = 30
+	}
+	if properties.RAG.DocumentProcessor.ShutdownGraceSeconds == 0 {
+		properties.RAG.DocumentProcessor.ShutdownGraceSeconds = 5
+	}
+	if properties.RAG.DocumentProcessor.PythonExecutable == "" {
+		properties.RAG.DocumentProcessor.PythonExecutable = "python"
+	}
+	if properties.RAG.DocumentProcessor.Script == "" {
+		properties.RAG.DocumentProcessor.Script = "./document_processor/main.py"
+	}
+	if properties.RAG.DocumentProcessor.Transport == "" {
+		properties.RAG.DocumentProcessor.Transport = "auto"
+	}
+	if properties.RAG.Local.MaxOpenConnections == 0 {
+		properties.RAG.Local.MaxOpenConnections = 4
+	}
+	if properties.RAG.Retrieval.CandidateMultiplier == 0 {
+		properties.RAG.Retrieval.CandidateMultiplier = 3
+	}
+	if properties.RAG.Retrieval.MaxCandidates == 0 {
+		properties.RAG.Retrieval.MaxCandidates = 100
+	}
+	if properties.RAG.Retrieval.MinLocalResults == 0 {
+		properties.RAG.Retrieval.MinLocalResults = 3
+	}
+	if properties.RAG.Retrieval.MinLocalScore == 0 {
+		properties.RAG.Retrieval.MinLocalScore = 0.55
+	}
+	if properties.RAG.Retrieval.RRFK == 0 {
+		properties.RAG.Retrieval.RRFK = 60
+	}
+	if properties.RAG.Local.Path != "" {
+		properties.RAG.Local.Path = resolveWorkspacePath(workspace, properties.RAG.Local.Path)
+	}
+	if properties.RAG.Local.VectorPath != "" {
+		properties.RAG.Local.VectorPath = resolveWorkspacePath(workspace, properties.RAG.Local.VectorPath)
+	}
+	if err := v.UnmarshalKey("rag.embedding", &properties.RAG.Embedding); err != nil {
+		return Properties{}, err
+	}
+	for index := range properties.RAG.Embedding.Models {
+		model := &properties.RAG.Embedding.Models[index]
+		model.ID = strings.TrimSpace(model.ID)
+		model.Name = strings.TrimSpace(model.Name)
+		model.Provider = strings.ToLower(strings.TrimSpace(model.Provider))
+		model.BaseURL = strings.TrimSpace(model.BaseURL)
+		model.APIKey = strings.TrimSpace(model.APIKey)
+		model.Model = strings.TrimSpace(model.Model)
+		model.ModelVersion = strings.TrimSpace(model.ModelVersion)
+		if model.Name == "" {
+			model.Name = model.ID
+		}
+		if model.Provider == "" {
+			model.Provider = "openai-compatible"
+		}
+		if model.BatchSize == 0 {
+			model.BatchSize = 32
+		}
+		if model.TimeoutSeconds == 0 {
+			model.TimeoutSeconds = 60
+		}
+	}
 	properties.Skill.Root = resolveWorkspacePath(workspace, properties.Skill.Root)
 
 	if err := v.UnmarshalKey("hooks.commands", &properties.Hooks.Commands); err != nil {
@@ -99,6 +228,22 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 		return Properties{}, err
 	}
 	return properties, nil
+}
+
+func optionalFloat64(v *viper.Viper, key string) *float64 {
+	if !v.IsSet(key) {
+		return nil
+	}
+	value := v.GetFloat64(key)
+	return &value
+}
+
+func optionalInt(v *viper.Viper, key string) *int {
+	if !v.IsSet(key) {
+		return nil
+	}
+	value := v.GetInt(key)
+	return &value
 }
 
 func (l ViperLoader) configFile() string {

@@ -3,11 +3,13 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
 
 	llmmapper "myai/core/adapter/llm/langchaingo"
+	generation "myai/core/domain/generation"
 	modelport "myai/core/port/model"
 )
 
@@ -20,15 +22,17 @@ var _ modelport.ChatModelPort = (*Model)(nil)
 type TokenUsage = modelport.TokenUsage
 type ChatResult = modelport.ChatResult
 type ChatStreamHandler = modelport.ChatStreamHandler
+type ToolResultEvent = modelport.ToolResultEvent
 type ToolPermissionRequest = modelport.ToolPermissionRequest
 type GenerateRequest = modelport.GenerateRequest
 
 func (m *Model) Generate(ctx context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
-	return m.ChatWithStreamToolsHandlerCtx(
+	return m.chatWithStreamToolsHandlerCtx(
 		ctx,
 		llmmapper.ToLLMS(request.Messages),
 		llmmapper.ToLLMTools(request.Tools),
 		request.Stream,
+		request.Settings,
 	)
 }
 
@@ -61,8 +65,15 @@ func (m *Model) ChatWithStreamToolsHandler(mes []llms.MessageContent, tools []ll
 }
 
 func (m *Model) ChatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.MessageContent, tools []llms.Tool, handler ChatStreamHandler) (ChatResult, error) {
+	return m.chatWithStreamToolsHandlerCtx(ctx, mes, tools, handler, generation.SystemDefaults())
+}
+
+func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.MessageContent, tools []llms.Tool, handler ChatStreamHandler, settings generation.ResolvedSettings) (ChatResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := settings.Validate(); err != nil {
+		return ChatResult{}, fmt.Errorf("invalid resolved generation settings: %w", err)
 	}
 	var builder strings.Builder
 	var reasoningBuilder strings.Builder
@@ -85,8 +96,9 @@ func (m *Model) ChatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 		return nil
 	}
 	callOptions := []llms.CallOption{
-		llms.WithTemperature(0.7),
-		llms.WithMaxTokens(2048),
+		llms.WithTemperature(settings.Temperature),
+		llms.WithTopP(settings.TopP),
+		llms.WithMaxTokens(settings.MaxOutputTokens),
 		llms.WithStreamingFunc(streamAnswer),
 		llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
 			if len(reasoningChunk) > 0 {
@@ -163,11 +175,13 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	settings := generation.SystemDefaults()
 	resp, err := m.LlmModel.GenerateContent(
 		ctx,
 		mes,
-		llms.WithTemperature(0.7),
-		llms.WithMaxTokens(2048),
+		llms.WithTemperature(settings.Temperature),
+		llms.WithTopP(settings.TopP),
+		llms.WithMaxTokens(settings.MaxOutputTokens),
 	)
 	if err != nil {
 		return ChatResult{}, err

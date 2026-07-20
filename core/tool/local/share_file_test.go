@@ -10,7 +10,14 @@ import (
 	"testing"
 
 	"myai/core/asset"
+	tooldef "myai/core/tool/tool"
 )
+
+func TestShareFileToolRequiresWritePermission(t *testing.T) {
+	if permission := NewShareFileToolWithWorkspaceAndUploader(".", nil).Permission(); permission != tooldef.PermissionWrite {
+		t.Fatalf("Permission() = %q, want %q", permission, tooldef.PermissionWrite)
+	}
+}
 
 type fakeAssetUploader struct {
 	request asset.UploadFileRequest
@@ -49,7 +56,7 @@ func TestShareFileTool(t *testing.T) {
 	}
 
 	var result shareFileResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result.ShortURL != "http://short.local/s/abc123" {

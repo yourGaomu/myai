@@ -10,6 +10,7 @@ import (
 	modelapi "myai/core/application/model/api"
 	modelcommand "myai/core/application/model/command"
 	modelresult "myai/core/application/model/result"
+	generation "myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
 	modelport "myai/core/port/model"
 )
@@ -36,13 +37,14 @@ func (s ConfigService) AddConfig(ctx context.Context, command modelcommand.AddCo
 	}
 
 	config := normalizeModelConfig(domainmodel.Config{
-		ID:        command.ID,
-		Name:      command.Name,
-		Provider:  command.Provider,
-		BaseURL:   command.BaseURL,
-		APIKey:    command.APIKey,
-		ModelName: command.ModelName,
-		IsDefault: command.IsDefault,
+		ID:                        command.ID,
+		Name:                      command.Name,
+		Provider:                  command.Provider,
+		BaseURL:                   command.BaseURL,
+		APIKey:                    command.APIKey,
+		ModelName:                 command.ModelName,
+		IsDefault:                 command.IsDefault,
+		DefaultGenerationSettings: generation.Clone(command.DefaultGenerationSettings),
 	})
 	if err := validateModelID(config.ID); err != nil {
 		return modelresult.AddConfig{}, err
@@ -70,18 +72,22 @@ func (s ConfigService) AddConfig(ctx context.Context, command modelcommand.AddCo
 	}
 
 	s.Registry.SetModelInfo(config.ID, model, modelport.ModelInfo{
-		ID:        config.ID,
-		Name:      config.Name,
-		Provider:  config.Provider,
-		ModelName: config.ModelName,
-		Enabled:   config.Enabled,
-		IsDefault: config.IsDefault,
+		ID:                        config.ID,
+		Name:                      config.Name,
+		Provider:                  config.Provider,
+		ModelName:                 config.ModelName,
+		Enabled:                   config.Enabled,
+		IsDefault:                 config.IsDefault,
+		DefaultGenerationSettings: generation.Clone(config.DefaultGenerationSettings),
 	})
 	return modelresult.AddConfig{Config: config}, nil
 }
 
 func (s ConfigService) prepareNewConfig(config domainmodel.Config) (domainmodel.Config, error) {
 	config = normalizeModelConfig(config)
+	if err := generation.Validate(config.DefaultGenerationSettings); err != nil {
+		return domainmodel.Config{}, fmt.Errorf("invalid model generation settings: %w", err)
+	}
 	if err := validateModelID(config.ID); err != nil {
 		return domainmodel.Config{}, err
 	}

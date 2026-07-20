@@ -82,6 +82,29 @@ func TestMessageQueryServiceFallsBackToMemoryWhenStoreMessagesAreEmpty(t *testin
 	}
 }
 
+func TestMessageQueryServiceHidesSyntheticMessagesFromHistory(t *testing.T) {
+	store := &fakeMessageQueryStore{messages: []repository.MessageRecord{
+		{ID: "runtime-1", Role: repository.RoleSystem, SyntheticReason: "runtime_instruction", Content: "plan rules"},
+		{ID: "user-1", Role: repository.RoleUser, Content: "hello"},
+	}}
+	service := MessageQueryService{Store: store}
+
+	messages, err := service.ListMessages(context.Background(), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ID != "user-1" {
+		t.Fatalf("synthetic message leaked into history: %#v", messages)
+	}
+	meta, err := service.HistoryMeta(context.Background(), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MessageCount != 1 || meta.LastMessageID != "user-1" || meta.HistoryVersion != 1 {
+		t.Fatalf("unexpected visible history metadata: %#v", meta)
+	}
+}
+
 func TestMessageQueryServiceUsesMemoryForMessagesAfterWhenStoreMissing(t *testing.T) {
 	service := MessageQueryService{
 		MemoryRecords: fakeMemoryMessageRecordMapper{},

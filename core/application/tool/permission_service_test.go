@@ -50,14 +50,13 @@ func TestPermissionServiceAsksInAskMode(t *testing.T) {
 	}
 }
 
-func TestPermissionServiceHonorsHookAllow(t *testing.T) {
+func TestPermissionServiceKeepsReadonlyAsHardBoundary(t *testing.T) {
 	decision := PermissionService{}.Allow(PermissionCommand{
-		Name:        "shell",
-		Permission:  tooldef.PermissionExecute,
-		Mode:        session.PermissionModeReadonly,
-		HookAllowed: true,
+		Name:       "shell",
+		Permission: tooldef.PermissionExecute,
+		Mode:       session.PermissionModeReadonly,
 	})
-	if !decision.Allowed {
-		t.Fatalf("expected hook allow to bypass mode: %#v", decision)
+	if decision.Allowed || !strings.Contains(decision.Message, "readonly") {
+		t.Fatalf("expected readonly mode to remain a hard boundary: %#v", decision)
 	}
 }

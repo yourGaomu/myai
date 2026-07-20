@@ -22,6 +22,7 @@ type Agent struct {
 	chatService       ChatFacade
 	fileService       WorkspaceFileFacade
 	changeService     WorkspaceChangeFacade
+	knowledgeService  KnowledgeFacade
 	runtimes          *sessionRuntimeManager
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
@@ -29,7 +30,7 @@ type Agent struct {
 	permissionTimeout time.Duration
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
@@ -39,6 +40,7 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		chatService:       chatService,
 		fileService:       fileService,
 		changeService:     changeService,
+		knowledgeService:  knowledgeService,
 		runtimes:          newSessionRuntimeManager(),
 		permissionWaiters: newPermissionWaiterRegistry(),
 		permissionTimeout: 60 * time.Second,
@@ -193,6 +195,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		go a.processPlanExecuteMessage(ctx, conn, message)
 	case protocol.TypeSessionContextSet:
 		return a.handleSessionContextSet(ctx, conn, message)
+	case protocol.TypeSessionRAGSet:
+		return a.handleSessionRAGSet(ctx, conn, message)
 	case protocol.TypeSessionCompact:
 		return a.handleSessionCompact(ctx, conn, message)
 	case protocol.TypeSessionPause:
@@ -207,6 +211,32 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSkillReload(ctx, conn, message)
 	case protocol.TypeAssetList:
 		return a.handleAssetList(ctx, conn, message)
+	case protocol.TypeKnowledgeCatalogList:
+		return a.handleKnowledgeCatalogList(ctx, conn, message)
+	case protocol.TypeKnowledgeCategoryCreate:
+		return a.handleKnowledgeCategoryCreate(ctx, conn, message)
+	case protocol.TypeKnowledgeCategoryMove:
+		return a.handleKnowledgeCategoryMove(ctx, conn, message)
+	case protocol.TypeKnowledgeCategoryDelete:
+		return a.handleKnowledgeCategoryDelete(ctx, conn, message)
+	case protocol.TypeKnowledgeBaseCreate:
+		return a.handleKnowledgeBaseCreate(ctx, conn, message)
+	case protocol.TypeKnowledgeBaseUpdate:
+		return a.handleKnowledgeBaseUpdate(ctx, conn, message)
+	case protocol.TypeKnowledgeBaseDelete:
+		return a.handleKnowledgeBaseDelete(ctx, conn, message)
+	case protocol.TypeKnowledgeDocumentList:
+		return a.handleKnowledgeDocumentList(ctx, conn, message)
+	case protocol.TypeKnowledgeDocumentIngest:
+		return a.handleKnowledgeDocumentIngest(ctx, conn, message)
+	case protocol.TypeKnowledgeDocumentRetry:
+		return a.handleKnowledgeDocumentRetry(ctx, conn, message)
+	case protocol.TypeKnowledgeDocumentDelete:
+		return a.handleKnowledgeDocumentDelete(ctx, conn, message)
+	case protocol.TypeKnowledgeProfileList:
+		return a.handleKnowledgeProfileList(ctx, conn, message)
+	case protocol.TypeKnowledgeSearchPreview:
+		return a.handleKnowledgeSearchPreview(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:
@@ -326,7 +356,7 @@ func (a *Agent) processPlanExecuteMessage(ctx context.Context, conn *websocket.C
 
 	if err := a.handleSessionPlanExecute(runCtx, conn, message, sessionID); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
-			if writeErr := a.writePausedAssistantDone(conn, message.RequestID, sessionID); writeErr != nil {
+			if writeErr := a.writeCanceledPlanExecution(conn, message.RequestID, sessionID); writeErr != nil {
 				log.Printf("send remote plan execute paused failed: %v", writeErr)
 			}
 			return

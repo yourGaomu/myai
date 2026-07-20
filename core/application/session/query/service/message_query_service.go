@@ -31,6 +31,7 @@ func (s MessageQueryService) ListMessages(ctx context.Context, sessionID string)
 	if err != nil {
 		return nil, err
 	}
+	records = visibleMessageRecords(records)
 	if len(records) > 0 {
 		return MessageListItems(records), nil
 	}
@@ -44,16 +45,16 @@ func (s MessageQueryService) HistoryMeta(ctx context.Context, sessionID string) 
 	if _, err := s.Store.GetSession(ctx, sessionID); err != nil {
 		return sessionresult.MessageHistoryMeta{}, err
 	}
-	record, err := s.Store.GetMessageHistoryMeta(ctx, sessionID)
+	records, err := s.Store.ListMessages(ctx, sessionID)
 	if err != nil {
 		return sessionresult.MessageHistoryMeta{}, err
 	}
-	return MessageHistoryMetaResultFromRecord(record), nil
+	return MessageHistoryMetaResultFromRecord(MessageHistoryMetaFromRecords(sessionID, visibleMessageRecords(records))), nil
 }
 
 func (s MessageQueryService) ListMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]sessionresult.MessageListItem, bool, error) {
 	if s.Store == nil {
-		records, fullSyncRequired, err := MessagesAfterID(s.memoryMessages(sessionID), afterMessageID, limit)
+		records, fullSyncRequired, err := MessagesAfterID(visibleMessageRecords(s.memoryMessages(sessionID)), afterMessageID, limit)
 		if err != nil {
 			return nil, false, err
 		}
@@ -62,7 +63,11 @@ func (s MessageQueryService) ListMessagesAfter(ctx context.Context, sessionID st
 	if _, err := s.Store.GetSession(ctx, sessionID); err != nil {
 		return nil, false, err
 	}
-	records, fullSyncRequired, err := s.Store.ListMessagesAfter(ctx, sessionID, afterMessageID, limit)
+	records, err := s.Store.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	records, fullSyncRequired, err := MessagesAfterID(visibleMessageRecords(records), afterMessageID, limit)
 	return MessageListItems(records), fullSyncRequired, err
 }
 
@@ -78,6 +83,7 @@ func (s MessageQueryService) memoryMessages(sessionID string) []repository.Messa
 }
 
 func MessageHistoryMetaFromRecords(sessionID string, records []repository.MessageRecord) repository.MessageHistoryMeta {
+	records = visibleMessageRecords(records)
 	meta := repository.MessageHistoryMeta{
 		SessionID:      sessionID,
 		MessageCount:   int64(len(records)),
@@ -89,6 +95,17 @@ func MessageHistoryMetaFromRecords(sessionID string, records []repository.Messag
 		meta.LastMessageCreatedAt = &last.CreatedAt
 	}
 	return meta
+}
+
+func visibleMessageRecords(records []repository.MessageRecord) []repository.MessageRecord {
+	visible := make([]repository.MessageRecord, 0, len(records))
+	for _, record := range records {
+		if record.SyntheticReason != "" {
+			continue
+		}
+		visible = append(visible, record)
+	}
+	return visible
 }
 
 func MessagesAfterID(records []repository.MessageRecord, afterMessageID string, limit int) ([]repository.MessageRecord, bool, error) {

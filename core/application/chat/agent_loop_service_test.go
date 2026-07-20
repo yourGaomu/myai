@@ -32,9 +32,8 @@ func TestAgentLoopServiceReturnsWhenModelDoesNotRequestTools(t *testing.T) {
 		Tools:        tools,
 		ToolExecutor: executor,
 	}.Run(context.Background(), RunCommand{
-		Model:         model,
-		Session:       current,
-		RuntimePrompt: "runtime",
+		Model:   model,
+		Session: current,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -58,8 +57,8 @@ func TestAgentLoopServiceReturnsWhenModelDoesNotRequestTools(t *testing.T) {
 	if len(model.requests) != 1 || len(model.requests[0].Tools) != 1 {
 		t.Fatalf("expected one model request with available tools, got %#v", model.requests)
 	}
-	if got := contexts.prompts; len(got) != 1 || got[0] != "runtime" {
-		t.Fatalf("expected initial runtime prompt, got %#v", got)
+	if contexts.calls != 1 {
+		t.Fatalf("expected one snapshot, got %d", contexts.calls)
 	}
 }
 
@@ -82,7 +81,6 @@ func TestAgentLoopServiceExecutesToolsAndContinuesGeneration(t *testing.T) {
 	}
 	contexts := &recordingContextProvider{}
 	tools := &recordingToolCatalog{}
-	runtime := &recordingRuntimeProvider{prompt: "runtime-after-tool"}
 	records := &recordingToolExecutionRecordSink{}
 	executor := &recordingToolExecutor{
 		result: ToolExecutionResult{
@@ -99,16 +97,13 @@ func TestAgentLoopServiceExecutesToolsAndContinuesGeneration(t *testing.T) {
 	}
 
 	result, err := AgentLoopService{
-		Contexts:            contexts,
-		Tools:               tools,
-		RuntimeInstructions: runtime,
-		ToolExecutor:        executor,
-		ToolRecords:         records,
+		Contexts:     contexts,
+		Tools:        tools,
+		ToolExecutor: executor,
+		ToolRecords:  records,
 	}.Run(context.Background(), RunCommand{
 		Model:         model,
 		Session:       current,
-		RuntimePrompt: "runtime-initial",
-		LatestInput:   "inspect file",
 		RequestID:     "request-1",
 		ForceChatMode: true,
 	})
@@ -140,11 +135,8 @@ func TestAgentLoopServiceExecutesToolsAndContinuesGeneration(t *testing.T) {
 	if len(model.requests) != 2 || len(model.requests[0].Tools) != 1 || len(model.requests[1].Tools) != 1 {
 		t.Fatalf("expected both loop requests to include tools, got %#v", model.requests)
 	}
-	if got := contexts.prompts; len(got) != 2 || got[0] != "runtime-initial" || got[1] != "runtime-after-tool" {
-		t.Fatalf("expected runtime prompt refresh after tool execution, got %#v", got)
-	}
-	if runtime.input != "inspect file" || !runtime.forceChatMode {
-		t.Fatalf("expected runtime provider to receive latest input and forced chat mode, got %#v", runtime)
+	if contexts.calls != 2 {
+		t.Fatalf("expected snapshots for both rounds, got %d", contexts.calls)
 	}
 	if records.calls != 1 || len(records.last.Entries) != 1 || records.last.Entries[0].ToolCallID != "call-1" {
 		t.Fatalf("expected tool execution entries to be recorded, got calls=%d command=%#v", records.calls, records.last)
@@ -190,7 +182,6 @@ func TestAgentLoopServiceFinalGenerationOmitsToolsAfterMaxRounds(t *testing.T) {
 		},
 	}
 	contexts := &recordingContextProvider{}
-	runtime := &recordingRuntimeProvider{prompt: "runtime-after-tool"}
 	executor := &recordingToolExecutor{
 		result: ToolExecutionResult{
 			Messages: []domainmessage.Message{
@@ -200,15 +191,13 @@ func TestAgentLoopServiceFinalGenerationOmitsToolsAfterMaxRounds(t *testing.T) {
 	}
 
 	result, err := AgentLoopService{
-		Contexts:            contexts,
-		Tools:               &recordingToolCatalog{},
-		RuntimeInstructions: runtime,
-		ToolExecutor:        executor,
-		MaxToolRounds:       1,
+		Contexts:      contexts,
+		Tools:         &recordingToolCatalog{},
+		ToolExecutor:  executor,
+		MaxToolRounds: 1,
 	}.Run(context.Background(), RunCommand{
-		Model:         model,
-		Session:       current,
-		RuntimePrompt: "runtime-initial",
+		Model:   model,
+		Session: current,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -229,8 +218,8 @@ func TestAgentLoopServiceFinalGenerationOmitsToolsAfterMaxRounds(t *testing.T) {
 	if len(model.requests[1].Tools) != 0 {
 		t.Fatalf("expected final request to omit tools, got %#v", model.requests[1].Tools)
 	}
-	if got := contexts.prompts; len(got) != 2 || got[1] != "runtime-after-tool" {
-		t.Fatalf("expected final request to use refreshed runtime prompt, got %#v", got)
+	if contexts.calls != 2 {
+		t.Fatalf("expected snapshots for both requests, got %d", contexts.calls)
 	}
 }
 
@@ -254,12 +243,32 @@ func (m *scriptedModel) Generate(ctx context.Context, request modelport.Generate
 }
 
 type recordingContextProvider struct {
-	prompts []string
+	calls int
 }
 
-func (p *recordingContextProvider) Snapshot(current *session.Session, runtimePrompt string) contextmgr.Snapshot {
-	p.prompts = append(p.prompts, runtimePrompt)
-	return contextmgr.Snapshot{Messages: domainmessage.CloneMessages(current.Messages)}
+func (p *recordingContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {
+	p.calls++
+	return contextmgr.Snapshot{Messages: cloneMessagesForTest(current.Messages)}
+}
+
+func cloneMessagesForTest(messages []domainmessage.Message) []domainmessage.Message {
+	cloned := make([]domainmessage.Message, len(messages))
+	for messageIndex, message := range messages {
+		cloned[messageIndex] = message
+		cloned[messageIndex].Parts = make([]domainmessage.Part, len(message.Parts))
+		for partIndex, part := range message.Parts {
+			cloned[messageIndex].Parts[partIndex] = part
+			if part.ToolCall != nil {
+				call := *part.ToolCall
+				cloned[messageIndex].Parts[partIndex].ToolCall = &call
+			}
+			if part.ToolResult != nil {
+				result := *part.ToolResult
+				cloned[messageIndex].Parts[partIndex].ToolResult = &result
+			}
+		}
+	}
+	return cloned
 }
 
 type recordingToolCatalog struct{}
@@ -274,18 +283,6 @@ func (recordingToolCatalog) ToolsForSession(current *session.Session, forceChatM
 			},
 		},
 	}
-}
-
-type recordingRuntimeProvider struct {
-	prompt        string
-	input         string
-	forceChatMode bool
-}
-
-func (p *recordingRuntimeProvider) Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
-	p.input = input
-	p.forceChatMode = forceChatMode
-	return p.prompt
 }
 
 type recordingToolExecutor struct {

@@ -110,6 +110,10 @@ func (f *fakeOperations) UpdateOne(_ context.Context, collection string, _ any, 
 	return &gomongo.UpdateResult{MatchedCount: 1}, nil
 }
 
+func (*fakeOperations) UpdateMany(context.Context, string, any, any, ...options.Lister[options.UpdateManyOptions]) (*gomongo.UpdateResult, error) {
+	return &gomongo.UpdateResult{}, nil
+}
+
 func (*fakeOperations) InsertOne(context.Context, string, any) (*gomongo.InsertOneResult, error) {
 	return &gomongo.InsertOneResult{}, nil
 }

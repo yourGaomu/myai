@@ -20,6 +20,9 @@ import (
 	chatcontextservice "myai/core/application/chat/context/service"
 	generationservice "myai/core/application/chat/generation/service"
 	planservice "myai/core/application/chat/plan/service"
+	chatretrievalapi "myai/core/application/chat/retrieval/api"
+	chatretrievalservice "myai/core/application/chat/retrieval/service"
+	searchapi "myai/core/application/knowledge/search/api"
 	modelservice "myai/core/application/model/service"
 	planserviceapp "myai/core/application/plan/service"
 	runtimeservice "myai/core/application/runtime/service"
@@ -48,19 +51,25 @@ const (
 	currentSessionTTL = 24 * time.Hour
 )
 
+type ModelRegistry interface {
+	modelport.MutableRegistry
+	modelport.MetadataProvider
+}
+
 type Configuration struct {
 	// Configuration 只接收进程已经创建好的基础设施，BuildDependencies 再把它们装配成应用服务。
-	Models       modelport.MutableRegistry
-	ModelFactory modelport.Factory
-	Sessions     *memorysession.Store
-	Store        persistenceport.Store
-	Cache        cacheport.CurrentSessionCache
-	Async        asyncport.Executor
-	Tools        *tool.RegisterTools
-	Skills       *skill.Manager
-	Hooks        *hook.Manager
-	DefaultModel string
-	UserID       string
+	Models          ModelRegistry
+	ModelFactory    modelport.Factory
+	Sessions        *memorysession.Store
+	Store           persistenceport.Store
+	Cache           cacheport.CurrentSessionCache
+	Async           asyncport.Executor
+	Tools           *tool.RegisterTools
+	Skills          *skill.Manager
+	Hooks           *hook.Manager
+	DefaultModel    string
+	UserID          string
+	KnowledgeSearch searchapi.Service
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -96,7 +105,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Store:         configuration.Store,
 		MemoryRecords: chatmessagemapper.Mapper{IDs: uuidadapter.Generator{}},
 	}
-	messageCommands := messageservice.CommandService{}
+	runtimePrompts := runtimeservice.NewSessionPromptProvider(configuration.Skills)
+	messageCommands := messageservice.CommandService{RuntimeInstructions: runtimePrompts}
 	currentState := currentservice.StateQueryService{DefaultModel: configuration.DefaultModel}
 	sessionPersistence := persistenceservice.PersistenceService{
 		Sessions:     configuration.Store,
@@ -134,11 +144,17 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	}
 
 	// 第三组：生成链路。固定系统提示词保留在 Session，Plan/Skill 作为每轮运行时指令注入。
-	runtimePrompts := runtimeservice.NewSessionPromptProvider(configuration.Skills)
 	contexts := chatcontextservice.SnapshotService{}
+	var retrievalContext chatretrievalapi.ContextPreparer
+	if configuration.KnowledgeSearch != nil {
+		retrievalContext = chatretrievalservice.ContextService{
+			Search:    configuration.KnowledgeSearch,
+			Policy:    chatretrievalservice.DefaultTriggerPolicy{},
+			Formatter: chatretrievalservice.ContextFormatter{},
+		}
+	}
 	contextQueries := chatcontextservice.QueryService{
-		Contexts:            contexts,
-		RuntimeInstructions: runtimePrompts,
+		Contexts: contexts,
 	}
 	summaryStore := generationadapter.SummaryStore{
 		Sessions: sessionPersistence,
@@ -165,10 +181,9 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		},
 	}
 	agentLoop := generationservice.AgentLoopService{
-		Contexts:            contexts,
-		Tools:               toolcatalog.Catalog{Tools: configuration.Tools},
-		RuntimeInstructions: runtimePrompts,
-		ToolExecutor:        toolExecutor,
+		Contexts:     contexts,
+		Tools:        toolcatalog.Catalog{Tools: configuration.Tools},
+		ToolExecutor: toolExecutor,
 		ToolRecords: toolrecordsrepository.Recorder{
 			Persistence: configuration.Store,
 			IDs:         uuidadapter.Generator{},
@@ -187,13 +202,13 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		},
 	}
 	assistantGeneration := generationservice.AssistantGenerationService{
-		Models:              configuration.Models,
-		RuntimeInstructions: runtimePrompts,
-		Contexts:            contexts,
-		Compactor:           compactor,
-		AgentRunner:         agentLoop,
-		ResponseCommitter:   responseCommit,
-		Persistence:         generationPersistence,
+		Models:            configuration.Models,
+		ModelMetadata:     configuration.Models,
+		Contexts:          contexts,
+		Compactor:         compactor,
+		AgentRunner:       agentLoop,
+		ResponseCommitter: responseCommit,
+		Persistence:       generationPersistence,
 		OnCompactError: func(err error) {
 			log.Printf("auto compact failed: %v", err)
 		},
@@ -264,7 +279,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 
 	// ChatService 只拿接口，不知道 Mongo、Redis、LangChainGo 等具体技术实现。
 	return service.ChatDependencies{
-		Models: configuration.Models,
+		Models:        configuration.Models,
+		ModelMetadata: configuration.Models,
 
 		GenerationTasks: generationTasks,
 		PlanExecution:   planExecution,
@@ -274,8 +290,9 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 			Compactor: compactor,
 			Contexts:  contextQueries,
 		},
-		ContextQueries: contextQueries,
-		UserMessages:   userMessages,
+		ContextQueries:   contextQueries,
+		RetrievalContext: retrievalContext,
+		UserMessages:     userMessages,
 
 		SessionLoader:    loader,
 		SessionLifecycle: lifecycleUseCase,

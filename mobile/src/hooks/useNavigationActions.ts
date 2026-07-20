@@ -9,6 +9,7 @@ type Args = {
   requestAssets: () => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
+  requestKnowledge: () => boolean;
   requestSessions: () => boolean;
   setViewMode: (updater: ViewMode | ((current: ViewMode) => ViewMode)) => void;
 };
@@ -21,6 +22,7 @@ export function useNavigationActions({
   requestAssets,
   requestChanges,
   requestFiles,
+  requestKnowledge,
   requestSessions,
   setViewMode,
 }: Args) {
@@ -36,6 +38,10 @@ export function useNavigationActions({
       requestFiles(filePath);
     }
   }, [fileEntriesCount, filePath, requestAssets, requestFiles, setViewMode]);
+  const openKnowledge = useCallback(() => {
+    setViewMode("knowledge");
+    requestKnowledge();
+  }, [requestKnowledge, setViewMode]);
   const openSessions = useCallback(() => {
     setViewMode("sessions");
     requestSessions();
@@ -56,6 +62,7 @@ export function useNavigationActions({
     openChanges,
     openChat,
     openFiles,
+    openKnowledge,
     openPlan,
     openSessions,
     selectSession,

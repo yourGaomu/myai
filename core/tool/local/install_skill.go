@@ -48,18 +48,6 @@ type installSkillResult struct {
 	Candidates int      `json:"candidates,omitempty"`
 }
 
-func NewInstallSkillToolWithWorkspace(workspace string, skillRoot string) *InstallSkillTool {
-	return NewInstallSkillToolWithWorkspaceAndSkills(workspace, skillRoot, nil)
-}
-
-func NewInstallSkillToolWithWorkspaceAndSkills(workspace string, skillRoot string, skills skillCatalog) *InstallSkillTool {
-	return NewInstallSkillToolWithWorkspaceRegistryAndSkills(workspace, skillRoot, "", skills)
-}
-
-func NewInstallSkillToolWithWorkspaceRegistryAndSkills(workspace string, skillRoot string, registry string, skills skillCatalog) *InstallSkillTool {
-	return NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(workspace, skillRoot, registry, nil, skills)
-}
-
 func NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(workspace string, skillRoot string, registry string, hooks *hook.Manager, skills skillCatalog) *InstallSkillTool {
 	return newInstallSkillTool(workspace, skillRoot, registry, hooks, nil, skills)
 }
@@ -105,15 +93,15 @@ func (t *InstallSkillTool) Permission() tooldef.Permission {
 	return tooldef.PermissionExecute
 }
 
-func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	input, err := normalizeInstallSkillArgs(args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	client := skillhub.NewClient(skillhub.Options{
 		Workspace: workspace,
@@ -124,23 +112,23 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 	// 先解析唯一 Skill 候选再安装，安装完成后立即 reload，使下一轮 Prompt 可以匹配新 Skill。
 	target, candidates, err := client.ResolveSkill(ctx, input.Name)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	result, err := client.InstallSkill(ctx, skillhub.InstallRequest{Name: target.Slug, Namespace: target.Namespace, Force: input.Force})
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	skillRoot, err := client.SkillRootPath()
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	reloaded := false
 	skillCount := 0
 	if t.skills != nil {
 		if err := t.skills.Reload(ctx); err != nil {
-			return "", errors.New("reload installed skills: " + err.Error())
+			return tooldef.ToolOutput{}, errors.New("reload installed skills: " + err.Error())
 		}
 		reloaded = true
 		skillCount = len(t.skills.List())
@@ -161,9 +149,9 @@ func (t *InstallSkillTool) Call(ctx context.Context, args json.RawMessage) (stri
 		Candidates: len(candidates),
 	}, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	return tooldef.SuccessOutput(string(output)), nil
 }
 
 func (t *InstallSkillTool) emitSkillReloaded(ctx context.Context, skillCount int) {

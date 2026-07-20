@@ -18,6 +18,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   revert: false,
   upload: false,
   pause: false,
+  knowledge: false,
 };
 
 // 各功能独立维护 pending，避免一个慢请求错误地锁住所有无关页面操作。

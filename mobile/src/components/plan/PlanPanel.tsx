@@ -25,7 +25,14 @@ export function PlanPanel({
 }: Props) {
   const plan = activeSession?.current_plan;
   const progress = planProgress(plan);
-  const canExecute = Boolean(clientToken && sessionID && plan && plan.status !== "done" && !pendingPlan);
+  const canExecute = Boolean(
+    clientToken &&
+      sessionID &&
+      plan &&
+      (plan.steps?.length || 0) > 0 &&
+      ["draft", "approved", "failed", "canceled"].includes(plan.status) &&
+      !pendingPlan,
+  );
 
   return (
     <View style={[styles.panel, styles.planPanel]}>

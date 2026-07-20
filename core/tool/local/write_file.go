@@ -34,14 +34,6 @@ type writeFileResult struct {
 	HistoryError string `json:"history_error,omitempty"`
 }
 
-func NewWriteFileTool() *WriteFileTool {
-	return &WriteFileTool{}
-}
-
-func NewWriteFileToolWithRecorder(recorder historyRecorder) *WriteFileTool {
-	return &WriteFileTool{recorder: recorder}
-}
-
 func NewWriteFileToolWithWorkspace(workspace string) *WriteFileTool {
 	return &WriteFileTool{workspace: workspace}
 }
@@ -91,48 +83,48 @@ func (t *WriteFileTool) Schema() any {
 	}
 }
 
-func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	workspace, err := toolWorkspace(t.workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	input, err := normalizeWriteFileArgs(workspace, args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 	defer closeRecorder()
 
 	// 与 edit_file 使用相同历史协议：先取 before，写入成功后再记录最终文件状态。
 	before, err := recorder.SnapshotPath(input.Path)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	parent := filepath.Dir(input.Path)
 	if input.CreateDirs && parent != "." {
 		if err := os.MkdirAll(parent, 0755); err != nil {
-			return "", err
+			return tooldef.ToolOutput{}, err
 		}
 	}
 
 	if info, err := os.Stat(input.Path); err == nil {
 		if info.IsDir() {
-			return "", fmt.Errorf("path is a directory: %s", input.Path)
+			return tooldef.ToolOutput{}, fmt.Errorf("path is a directory: %s", input.Path)
 		}
 		if !input.Append && !input.Overwrite {
-			return "", fmt.Errorf("file already exists: %s; set overwrite=true to replace it", input.Path)
+			return tooldef.ToolOutput{}, fmt.Errorf("file already exists: %s; set overwrite=true to replace it", input.Path)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	operation := "write"
@@ -143,7 +135,7 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 		err = os.WriteFile(input.Path, []byte(input.Content), 0644)
 	}
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	result := writeFileResult{
@@ -162,9 +154,9 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (string,
 	}
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	return tooldef.SuccessOutput(string(output)), nil
 }
 
 func normalizeWriteFileArgs(workspace string, args json.RawMessage) (writeFileArgs, error) {

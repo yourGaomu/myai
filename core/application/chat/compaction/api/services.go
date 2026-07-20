@@ -12,7 +12,7 @@ import (
 
 type Compactor interface {
 	CompactSession(ctx context.Context, current *session.Session, model modelport.ChatModelPort) error
-	CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort, runtimePrompt string) (compactionresult.CompactInfo, error)
+	CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (compactionresult.CompactInfo, error)
 }
 
 type SessionService interface {

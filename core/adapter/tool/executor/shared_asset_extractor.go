@@ -13,12 +13,12 @@ type SharedAssetExtractor struct{}
 
 func (SharedAssetExtractor) Extract(command toolcommand.AssetExtraction) (domaintool.SharedAsset, bool) {
 	// 只有 share_file 的成功 JSON 结果可以转换为 Asset，其他工具输出保持普通文本。
-	if command.Call.Name != "share_file" || strings.TrimSpace(command.Result) == "" {
+	if command.Call.Name != "share_file" || command.Output.Failed() || strings.TrimSpace(command.Output.Content) == "" {
 		return domaintool.SharedAsset{}, false
 	}
 
 	var payload sharedAssetResultDTO
-	if err := json.Unmarshal([]byte(command.Result), &payload); err != nil {
+	if err := json.Unmarshal([]byte(command.Output.Content), &payload); err != nil {
 		return domaintool.SharedAsset{}, false
 	}
 	payload.ShortURL = strings.TrimSpace(payload.ShortURL)

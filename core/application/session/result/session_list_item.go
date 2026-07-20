@@ -4,6 +4,7 @@ import (
 	"time"
 
 	agentplan "myai/core/plan"
+	"myai/core/session"
 )
 
 type SessionListItem struct {
@@ -16,6 +17,7 @@ type SessionListItem struct {
 	Usage          *TokenUsage
 	LastUsage      *TokenUsage
 	CurrentPlan    *agentplan.Plan
+	RAGSettings    session.RAGSettings
 	Deleted        bool
 	DeletedAt      *time.Time
 	CreatedAt      time.Time

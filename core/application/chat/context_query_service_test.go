@@ -9,23 +9,18 @@ import (
 	"myai/core/session"
 )
 
-func TestContextQueryServiceBuildsInfoWithRuntimePrompt(t *testing.T) {
+func TestContextQueryServiceBuildsInfoFromPersistedMessages(t *testing.T) {
 	contexts := &queryContextProvider{info: contextmgr.Info{WindowK: 32, SelectedTokens: 9}}
-	runtime := &queryRuntimeProvider{prompt: "runtime prompt"}
 
 	info := (ContextQueryService{
-		Contexts:            contexts,
-		RuntimeInstructions: runtime,
+		Contexts: contexts,
 	}).Info(context.Background(), &session.Session{ID: "session-1"})
 
 	if info.WindowK != 32 || info.SelectedTokens != 9 {
 		t.Fatalf("unexpected context info: %#v", info)
 	}
-	if contexts.runtimePrompt != "runtime prompt" {
-		t.Fatalf("expected runtime prompt to be forwarded, got %q", contexts.runtimePrompt)
-	}
-	if runtime.input != "" || runtime.forceChatMode {
-		t.Fatalf("expected neutral runtime prompt request, got %#v", runtime)
+	if contexts.calls != 1 {
+		t.Fatalf("expected one snapshot call, got %d", contexts.calls)
 	}
 }
 
@@ -38,7 +33,7 @@ func TestContextQueryServiceReturnsDefaultForNilSession(t *testing.T) {
 }
 
 func TestContextQueryServiceReturnsDefaultWithoutContextProvider(t *testing.T) {
-	info := (ContextQueryService{}).InfoWithRuntimePrompt(&session.Session{ID: "session-1"}, "runtime")
+	info := (ContextQueryService{}).Info(context.Background(), &session.Session{ID: "session-1"})
 
 	if info.WindowK != contextmgr.DefaultWindowK {
 		t.Fatalf("expected default context info, got %#v", info)
@@ -46,26 +41,14 @@ func TestContextQueryServiceReturnsDefaultWithoutContextProvider(t *testing.T) {
 }
 
 type queryContextProvider struct {
-	info          contextmgr.Info
-	runtimePrompt string
+	info  contextmgr.Info
+	calls int
 }
 
-func (p *queryContextProvider) Snapshot(current *session.Session, runtimePrompt string) contextmgr.Snapshot {
-	p.runtimePrompt = runtimePrompt
+func (p *queryContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {
+	p.calls++
 	return contextmgr.Snapshot{
 		Info:     p.info,
 		Messages: []domainmessage.Message{},
 	}
-}
-
-type queryRuntimeProvider struct {
-	prompt        string
-	input         string
-	forceChatMode bool
-}
-
-func (p *queryRuntimeProvider) Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
-	p.input = input
-	p.forceChatMode = forceChatMode
-	return p.prompt
 }

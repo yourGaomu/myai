@@ -14,9 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
-	_ "github.com/mattn/go-sqlite3"
-
 	domainhistory "myai/core/domain/history"
+	"myai/core/infra/sqliteruntime"
 )
 
 type Store struct {
@@ -31,7 +30,12 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on")
+	sqliteruntime.Configure()
+	dsn, err := sqliteruntime.DataSourceName(path)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}

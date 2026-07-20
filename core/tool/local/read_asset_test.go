@@ -42,7 +42,7 @@ func TestReadAssetToolParsesTextAsset(t *testing.T) {
 	}
 
 	var result readAssetResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}
 	if result.Code != "abc123" {

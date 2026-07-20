@@ -8,6 +8,7 @@ import (
 	modelapi "myai/core/application/model/api"
 	modelcommand "myai/core/application/model/command"
 	modelresult "myai/core/application/model/result"
+	generation "myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
 	modelport "myai/core/port/model"
 )
@@ -28,6 +29,11 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 	if s.Factory == nil {
 		return modelresult.Bootstrap{}, errors.New("model factory is nil")
 	}
+	if command.Seed.ID != "" {
+		if err := generation.Validate(command.Seed.DefaultGenerationSettings); err != nil {
+			return modelresult.Bootstrap{}, fmt.Errorf("invalid generation settings for seed model %s: %w", command.Seed.ID, err)
+		}
+	}
 
 	// 数据库配置优先；为空时 loadConfigs 会使用配置文件提供的 seed 模型。
 	configs, err := s.loadConfigs(ctx, command.Seed)
@@ -41,6 +47,9 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 			continue
 		}
 		modelID := config.ID
+		if err := generation.Validate(config.DefaultGenerationSettings); err != nil {
+			return modelresult.Bootstrap{}, fmt.Errorf("invalid generation settings for model %s: %w", modelID, err)
+		}
 		modelName := config.ModelName
 		if modelName == "" {
 			modelName = modelID
@@ -57,12 +66,13 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 		}
 
 		s.Registry.SetModelInfo(modelID, model, modelport.ModelInfo{
-			ID:        modelID,
-			Name:      config.Name,
-			Provider:  config.Provider,
-			ModelName: modelName,
-			Enabled:   config.Enabled,
-			IsDefault: config.IsDefault || modelID == defaultModelID,
+			ID:                        modelID,
+			Name:                      config.Name,
+			Provider:                  config.Provider,
+			ModelName:                 modelName,
+			Enabled:                   config.Enabled,
+			IsDefault:                 config.IsDefault || modelID == defaultModelID,
+			DefaultGenerationSettings: generation.Clone(config.DefaultGenerationSettings),
 		})
 	}
 

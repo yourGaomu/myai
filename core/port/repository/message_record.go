@@ -3,6 +3,7 @@ package repository
 import "time"
 
 const (
+	RoleSystem    = "system"
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
 	RoleToolCall  = "tool_call"
@@ -19,6 +20,10 @@ type MessageRecord struct {
 	ToolName           string
 	ToolArguments      string
 	ToolError          string
+	ToolStatus         string
+	ToolErrorCode      string
+	ToolTruncated      bool
+	SyntheticReason    string
 	PromptTokens       int
 	CompletionTokens   int
 	TotalTokens        int

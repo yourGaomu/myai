@@ -6,6 +6,8 @@
 
 希望先看动态版本，可以直接打开 [PROJECT_ARCHITECTURE_INTRO.html](PROJECT_ARCHITECTURE_INTRO.html)。
 
+需要按照真实启动参数、协议消息和函数调用链维护项目时，阅读 [DEVELOPER_FLOW_GUIDE.md](DEVELOPER_FLOW_GUIDE.md)。
+
 ## 1. 一句话认识 MyAI
 
 MyAI 是一个可以通过命令行或手机远程使用的 AI 编程助手：

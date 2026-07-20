@@ -64,6 +64,9 @@ func (m Mapper) messageRecord(entry domaintool.ExecutionEntry) (repository.Messa
 		ToolName:      entry.ToolName,
 		ToolArguments: entry.Arguments,
 		ToolError:     entry.Error,
+		ToolStatus:    string(entry.Status),
+		ToolErrorCode: entry.ErrorCode,
+		ToolTruncated: entry.Truncated,
 		CreatedAt:     entry.CreatedAt,
 	}, true
 }

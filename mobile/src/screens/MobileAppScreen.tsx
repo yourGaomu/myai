@@ -15,6 +15,8 @@ import { useMobileDerivedState } from "../hooks/useMobileDerivedState";
 import { useMobileLayoutMetrics } from "../hooks/useMobileLayoutMetrics";
 import { useMobileSettings } from "../hooks/useMobileSettings";
 import { useMobileUiState } from "../hooks/useMobileUiState";
+import { useKnowledgeActions } from "../hooks/useKnowledgeActions";
+import { useKnowledgeState } from "../hooks/useKnowledgeState";
 import { useNavigationActions } from "../hooks/useNavigationActions";
 import { useNormalizedRelayUrl } from "../hooks/useNormalizedRelayUrl";
 import { usePairingActions } from "../hooks/usePairingActions";
@@ -93,6 +95,22 @@ export function MobileAppScreen() {
     clearAssets,
     setAssets,
   } = useAssetState();
+  const {
+    applyCatalog: applyKnowledgeCatalog,
+    applyDocuments: applyKnowledgeDocuments,
+    applyProfiles: applyKnowledgeProfiles,
+    applySearchResult: applyKnowledgeSearch,
+    categories: knowledgeCategories,
+    documentsByBase,
+    jobsByBase,
+    knowledgeBases,
+    message: knowledgeMessage,
+    profiles: knowledgeProfiles,
+    searchResult: knowledgeSearchResult,
+    selectedKnowledgeBaseID,
+    setMessage: setKnowledgeMessage,
+    setSelectedKnowledgeBaseID,
+  } = useKnowledgeState();
   const {
     changeDiff,
     changes,
@@ -198,6 +216,7 @@ export function MobileAppScreen() {
     socketRef,
     userID,
   });
+  const activeKnowledgeBase = knowledgeBases.find((base) => base.id === selectedKnowledgeBaseID);
 
   const {
     refreshRemoteState,
@@ -241,6 +260,31 @@ export function MobileAppScreen() {
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionID,
+    startPending,
+    stopPending,
+  });
+  const {
+    createCategory,
+    createKnowledgeBase,
+    deleteCategory,
+    deleteDocument,
+    deleteKnowledgeBase,
+    moveCategory,
+    requestCatalog,
+    requestDocuments,
+    requestProfiles,
+    retryDocument,
+    searchKnowledge,
+    setRAGSettings,
+    updateKnowledgeBase,
+    uploadDocument,
+  } = useKnowledgeActions({
+    activeKnowledgeBase,
+    assetBaseURL,
+    clientToken,
+    onError: (message) => addMessage(sessionID, "error", message),
+    sendEnvelope,
+    sessionID,
     startPending,
     stopPending,
   });
@@ -422,6 +466,11 @@ export function MobileAppScreen() {
     applyHistoryDiff,
     applyHistoryList,
     applyHistoryRevert,
+    applyKnowledgeCatalog,
+    applyKnowledgeDocuments,
+    applyKnowledgeProfiles,
+    applyKnowledgeSearch,
+    applyKnowledgeError: setKnowledgeMessage,
     applyModelList,
     applyModelSwitch,
     applySkillList,
@@ -436,6 +485,7 @@ export function MobileAppScreen() {
     currentFilePath: filePath,
     getSessionChat,
     historySessionIDRef,
+    isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
     markAssistantError,
     mergeSessionChats,
     requestChanges,
@@ -457,11 +507,16 @@ export function MobileAppScreen() {
     stopPending,
   });
 
+  const refreshAllRemoteState = useCallback(() => {
+    refreshRemoteState();
+    requestCatalog();
+    requestProfiles();
+  }, [refreshRemoteState, requestCatalog, requestProfiles]);
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
     normalizedRelayURL,
-    onConnected: refreshRemoteState,
+    onConnected: refreshAllRemoteState,
     onMessage: handleRemoteMessage,
     setConnected,
     setStatus,
@@ -473,6 +528,7 @@ export function MobileAppScreen() {
     openChanges,
     openChat,
     openFiles,
+    openKnowledge,
     openPlan,
     openSessions,
     selectSession,
@@ -484,6 +540,7 @@ export function MobileAppScreen() {
     requestAssets,
     requestChanges,
     requestFiles,
+    requestKnowledge: requestCatalog,
     requestSessions,
     setViewMode,
   });
@@ -506,7 +563,7 @@ export function MobileAppScreen() {
           onPause={pauseSession}
           onRemoveAttachedFile={removeAttachedFile}
           onSend={sendUserMessage}
-          onSessionsPress={openSessions}
+          onKnowledgePress={openKnowledge}
           onSettingsPress={toggleSettings}
           onUploadFile={uploadLocalFile}
           pendingPause={currentPauseBusy}
@@ -578,6 +635,30 @@ export function MobileAppScreen() {
           onOpenFileEntry: openFileEntry,
           onRefreshAssets: () => requestAssets(),
           onRefreshFiles: refreshCurrentFiles,
+        }}
+        knowledge={{
+          activeSession,
+          categories: knowledgeCategories,
+          documents: documentsByBase[selectedKnowledgeBaseID] || [],
+          jobs: jobsByBase[selectedKnowledgeBaseID] || [],
+          knowledgeBases,
+          message: knowledgeMessage,
+          onCreateCategory: createCategory,
+          onCreateKnowledgeBase: createKnowledgeBase,
+          onDeleteCategory: deleteCategory,
+          onDeleteDocument: deleteDocument,
+          onDeleteKnowledgeBase: deleteKnowledgeBase,
+          onMoveCategory: moveCategory,
+          onRefresh: () => { requestCatalog(); requestProfiles(); },
+          onRefreshDocuments: () => requestDocuments(selectedKnowledgeBaseID),
+          onRetryDocument: retryDocument,
+          onSearch: searchKnowledge,
+          onSelectKnowledgeBase: (knowledgeBaseID) => { setSelectedKnowledgeBaseID(knowledgeBaseID); requestDocuments(knowledgeBaseID); },
+          onSetRAG: setRAGSettings,
+          onUpdateKnowledgeBase: updateKnowledgeBase,
+          onUploadDocument: uploadDocument,
+          profiles: knowledgeProfiles,
+          searchResult: knowledgeSearchResult,
         }}
         permission={{
           onAllowPermission: allowPermission,

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	domainhistory "myai/core/domain/history"
 	"myai/core/history"
 	"myai/core/remote/protocol"

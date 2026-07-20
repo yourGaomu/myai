@@ -3,7 +3,7 @@ package taskrecorder
 import (
 	"context"
 
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	"myai/core/history"

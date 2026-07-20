@@ -20,12 +20,15 @@ func NewSessionPromptProvider(skillPrompts runtimeport.SkillPromptProvider) Sess
 
 func (p SessionPromptProvider) Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
 	agentMode := session.AgentModeChat
+	styleInstruction := ""
 	if current != nil {
 		agentMode = current.AgentMode
+		styleInstruction = current.StyleInstruction
 	}
 	return p.Builder.Build(ctx, runtimecommand.InstructionRequest{
-		AgentMode:     agentMode,
-		ForceChatMode: forceChatMode,
-		Input:         input,
+		AgentMode:        agentMode,
+		ForceChatMode:    forceChatMode,
+		Input:            input,
+		StyleInstruction: styleInstruction,
 	})
 }

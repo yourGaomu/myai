@@ -24,7 +24,7 @@ type Props = {
   onPause: () => void;
   onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
-  onSessionsPress: () => void;
+  onKnowledgePress: () => void;
   onSettingsPress: () => void;
   onUploadFile: () => void;
   pendingPause: boolean;
@@ -49,7 +49,7 @@ export function BottomDock({
   onPause,
   onRemoveAttachedFile,
   onSend,
-  onSessionsPress,
+  onKnowledgePress,
   onSettingsPress,
   onUploadFile,
   pendingPause,
@@ -65,7 +65,7 @@ export function BottomDock({
         onChangesPress={onChangesPress}
         onChatPress={onChatPress}
         onFilesPress={onFilesPress}
-        onSessionsPress={onSessionsPress}
+        onKnowledgePress={onKnowledgePress}
         onSettingsPress={onSettingsPress}
         viewMode={viewMode}
       />
@@ -78,7 +78,7 @@ export function BottomDock({
           onSettingsPress={onSettingsPress}
         />
       ) : null}
-      {viewMode !== "settings" && viewMode !== "changeDetail" && viewMode !== "plan" ? (
+      {viewMode !== "settings" && viewMode !== "changeDetail" && viewMode !== "plan" && viewMode !== "knowledge" ? (
         <Composer
           attachedFiles={attachedFiles}
           buttonFeedback={buttonFeedback}

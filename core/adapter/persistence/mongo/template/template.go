@@ -53,6 +53,14 @@ func (t *Template) UpdateOne(ctx context.Context, collection string, filter any,
 	return target.UpdateOne(ctx, filter, update, opts...)
 }
 
+func (t *Template) UpdateMany(ctx context.Context, collection string, filter any, update any, opts ...options.Lister[options.UpdateManyOptions]) (*gomongo.UpdateResult, error) {
+	target, err := t.collection(collection)
+	if err != nil {
+		return nil, err
+	}
+	return target.UpdateMany(ctx, filter, update, opts...)
+}
+
 func (t *Template) InsertOne(ctx context.Context, collection string, document any) (*gomongo.InsertOneResult, error) {
 	target, err := t.collection(collection)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	"myai/core/session"
 	tooldef "myai/core/tool/tool"
 )
@@ -19,32 +20,33 @@ type PermissionAskFunc func(PermissionRequest) bool
 
 type ExecutionCallbacks struct {
 	OnToolCall   func(name string, arguments string)
-	OnToolResult func(name string, arguments string, result string)
+	OnToolResult func(name string, arguments string, output domaintool.ToolOutput)
 	OnToolAsk    PermissionAskFunc
 }
 
 type Execution struct {
 	SessionID      string
+	AgentMode      session.AgentMode
 	PermissionMode session.PermissionMode
+	ForceChatMode  bool
 	RequestID      string
 	Calls          []domainmessage.ToolCall
 	Callbacks      ExecutionCallbacks
 }
 
 type Permission struct {
-	Name        string
-	Arguments   string
-	Permission  tooldef.Permission
-	Mode        session.PermissionMode
-	HookAllowed bool
-	Ask         PermissionAskFunc
+	Name       string
+	Arguments  string
+	Permission tooldef.Permission
+	Mode       session.PermissionMode
+	Ask        PermissionAskFunc
 }
 
 type AssetExtraction struct {
 	SessionID string
 	RequestID string
 	Call      domainmessage.ToolCall
-	Result    string
+	Output    domaintool.ToolOutput
 	CreatedAt time.Time
 }
 
@@ -57,8 +59,7 @@ type ToolCallEntry struct {
 type ToolResultEntry struct {
 	SessionID string
 	Call      domainmessage.ToolCall
-	Result    string
-	ToolError string
+	Output    domaintool.ToolOutput
 	CreatedAt time.Time
 }
 

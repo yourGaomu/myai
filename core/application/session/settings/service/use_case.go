@@ -51,6 +51,30 @@ func (u UseCase) SetContextWindow(ctx context.Context, command settingscommand.S
 	return u.saveAndPublish(ctx, current, "context")
 }
 
+func (u UseCase) SetGenerationSettings(ctx context.Context, command settingscommand.SetGenerationSettings) error {
+	current, err := u.Settings.SetGenerationSettings(ctx, command)
+	if err != nil {
+		return err
+	}
+	return u.saveAndPublish(ctx, current, "generation")
+}
+
+func (u UseCase) SetStyleInstruction(ctx context.Context, command settingscommand.SetStyleInstruction) error {
+	current, err := u.Settings.SetStyleInstruction(ctx, command)
+	if err != nil {
+		return err
+	}
+	return u.saveAndPublish(ctx, current, "style")
+}
+
+func (u UseCase) SetRAGSettings(ctx context.Context, command settingscommand.SetRAGSettings) error {
+	current, err := u.Settings.SetRAGSettings(ctx, command)
+	if err != nil {
+		return err
+	}
+	return u.saveAndPublish(ctx, current, "rag")
+}
+
 func (u UseCase) saveAndPublish(ctx context.Context, current *session.Session, reason string) error {
 	if current == nil {
 		return nil

@@ -38,6 +38,7 @@ type SessionSettingsFacade interface {
 	SetPermissionModeForSession(ctx context.Context, sessionID string, mode string) error
 	SetAgentModeForSession(ctx context.Context, sessionID string, mode string) error
 	SetContextWindowKForSession(ctx context.Context, sessionID string, windowK int) error
+	SetRAGSettingsForSession(ctx context.Context, sessionID string, settings session.RAGSettings) error
 	CompactSession(ctx context.Context, sessionID string) (service.ContextInfo, error)
 	SwitchModelForSession(ctx context.Context, sessionID string, modelID string) error
 }

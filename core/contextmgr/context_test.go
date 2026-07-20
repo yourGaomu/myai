@@ -49,3 +49,29 @@ func TestShouldCompactAtThreshold(t *testing.T) {
 		t.Fatal("expected compaction to stay below threshold")
 	}
 }
+
+func TestBuildSnapshotCachePrefixIncludesCompletedTurnsOnly(t *testing.T) {
+	messages := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system prompt"),
+		domainmessage.RuntimeInstruction("plan rules"),
+		domainmessage.Text(domainmessage.RoleUser, "first request"),
+		domainmessage.Text(domainmessage.RoleAssistant, "first answer"),
+		domainmessage.RuntimeInstruction("different current rules"),
+		domainmessage.Text(domainmessage.RoleUser, "second request"),
+	}
+
+	snapshot := BuildSnapshot(messages, "", 0, 16)
+	wantPrefix := messages[:4]
+	if snapshot.Info.PrefixHash != StableMessagesHash(wantPrefix) {
+		t.Fatalf("prefix hash = %s, want completed-turn hash %s", snapshot.Info.PrefixHash, StableMessagesHash(wantPrefix))
+	}
+	if len(snapshot.Prefix) != len(wantPrefix) {
+		t.Fatalf("prefix length = %d, want %d", len(snapshot.Prefix), len(wantPrefix))
+	}
+
+	messages[4] = domainmessage.RuntimeInstruction("changed again")
+	changed := BuildSnapshot(messages, "", 0, 16)
+	if changed.Info.PrefixHash != snapshot.Info.PrefixHash {
+		t.Fatalf("current turn runtime changed cacheable prefix: %s != %s", changed.Info.PrefixHash, snapshot.Info.PrefixHash)
+	}
+}

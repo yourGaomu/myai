@@ -10,9 +10,11 @@ import (
 	toolport "myai/core/application/tool/port"
 	toolresult "myai/core/application/tool/result"
 	toolservice "myai/core/application/tool/service"
+	domaintool "myai/core/domain/tool"
 	"myai/core/hook"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	toolruntime "myai/core/tool/runtimecontext"
 )
 
 type Executor struct {
@@ -25,6 +27,7 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 	if command.Session == nil {
 		return generationresult.ToolExecution{}, errors.New("session is nil")
 	}
+	ctx = toolruntime.WithRAGSettings(ctx, command.Session.RAGSettings)
 
 	result, err := toolservice.ExecutionService{
 		Registry: e.Registry,
@@ -32,7 +35,9 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		Assets:   SharedAssetExtractor{},
 	}.Execute(ctx, toolcommand.Execution{
 		SessionID:      command.Session.ID,
+		AgentMode:      session.NormalizeAgentMode(command.Session.AgentMode),
 		PermissionMode: session.NormalizePermissionMode(command.Session.PermissionMode),
+		ForceChatMode:  command.ForceChatMode,
 		RequestID:      command.RequestID,
 		Calls:          command.Calls,
 		Callbacks:      callbacksFromStream(command.Stream),
@@ -51,8 +56,17 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 func callbacksFromStream(stream modelport.ChatStreamHandler) toolcommand.ExecutionCallbacks {
 	return toolcommand.ExecutionCallbacks{
 		OnToolCall:   stream.OnToolCall,
-		OnToolResult: stream.OnToolResult,
+		OnToolResult: toolResultFromStream(stream),
 		OnToolAsk:    permissionAskFromStream(stream),
+	}
+}
+
+func toolResultFromStream(stream modelport.ChatStreamHandler) func(string, string, domaintool.ToolOutput) {
+	if stream.OnToolResult == nil {
+		return nil
+	}
+	return func(name string, arguments string, output domaintool.ToolOutput) {
+		stream.OnToolResult(modelport.ToolResultEvent{Name: name, Arguments: arguments, Output: output.Normalized()})
 	}
 }
 

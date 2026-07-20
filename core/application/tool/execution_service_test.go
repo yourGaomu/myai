@@ -8,6 +8,7 @@ import (
 	"time"
 
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	"myai/core/session"
 	tooldef "myai/core/tool/tool"
 )
@@ -47,8 +48,8 @@ func (t fakeExecutableTool) Permission() tooldef.Permission {
 	return t.permission
 }
 
-func (t fakeExecutableTool) Call(context.Context, json.RawMessage) (string, error) {
-	return t.result, t.err
+func (t fakeExecutableTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+	return tooldef.SuccessOutput(t.result), t.err
 }
 
 type fakeHookBridge struct {
@@ -88,7 +89,7 @@ func TestExecutionServiceExecutesTool(t *testing.T) {
 			OnToolCall: func(name string, arguments string) {
 				calledName = name
 			},
-			OnToolResult: func(name string, arguments string, result string) {
+			OnToolResult: func(name string, arguments string, output domaintool.ToolOutput) {
 				resultName = name
 			},
 		},
@@ -156,11 +157,70 @@ func TestExecutionServiceHonorsAskDenial(t *testing.T) {
 	if len(result.Entries) != 2 {
 		t.Fatalf("unexpected entries: %#v", result.Entries)
 	}
-	if result.Entries[1].Error != "" {
-		t.Fatalf("permission denial is a model-visible result, not tool error: %#v", result.Entries[1])
+	if result.Entries[1].Status != domaintool.ResultStatusDenied || result.Entries[1].ErrorCode != "permission_denied" {
+		t.Fatalf("expected structured permission denial: %#v", result.Entries[1])
 	}
 	toolResult, ok := result.Messages[0].FirstToolResult()
 	if !ok || toolResult.Content == "" {
 		t.Fatalf("expected model-visible permission denial message: %#v", result.Messages[0])
 	}
+}
+
+func TestExecutionServiceHookAllowStillAsksForPermission(t *testing.T) {
+	asked := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": fakeExecutableTool{name: "write_file", permission: tooldef.PermissionWrite, result: "written"},
+		}},
+		Hooks: &fakeHookBridge{before: HookResult{Decision: HookDecisionAllow}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:      "session-1",
+		PermissionMode: session.PermissionModeAsk,
+		Calls:          []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
+		Callbacks: ExecutionCallbacks{OnToolAsk: func(PermissionRequest) bool {
+			asked = true
+			return false
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked || result.Entries[1].Status != domaintool.ResultStatusDenied {
+		t.Fatalf("expected hook allow to continue through permission policy: %#v", result)
+	}
+}
+
+func TestExecutionServicePlanModeBlocksWriteEvenWithFullPermission(t *testing.T) {
+	executed := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": recordingExecutableTool{onCall: func() { executed = true }},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:      "session-1",
+		AgentMode:      session.AgentModePlan,
+		PermissionMode: session.PermissionModeFull,
+		Calls:          []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed || result.Entries[1].ErrorCode != "plan_mode_denied" {
+		t.Fatalf("expected plan hard gate before execution: %#v", result)
+	}
+}
+
+type recordingExecutableTool struct {
+	onCall func()
+}
+
+func (recordingExecutableTool) Name() string                   { return "write_file" }
+func (recordingExecutableTool) Description() string            { return "write" }
+func (recordingExecutableTool) Schema() any                    { return nil }
+func (recordingExecutableTool) Permission() tooldef.Permission { return tooldef.PermissionWrite }
+func (t recordingExecutableTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+	if t.onCall != nil {
+		t.onCall()
+	}
+	return tooldef.SuccessOutput("written"), nil
 }

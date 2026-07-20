@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	generationapi "myai/core/application/chat/generation/api"
@@ -62,6 +63,16 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	if len(currentPlan.Steps) == 0 {
 		return planresult.Execution{}, errors.New("current plan has no steps")
 	}
+	if !agentplan.IsExecutableStatus(currentPlan.Status) {
+		return planresult.Execution{}, fmt.Errorf("current plan cannot execute from status %s", currentPlan.Status)
+	}
+
+	if currentPlan.Status != agentplan.StatusApproved {
+		currentPlan = s.State.Approve(currentPlan)
+		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+			return planresult.Execution{}, err
+		}
+	}
 
 	// 先把整体计划置为 running 并持久化，手机端会立即收到状态更新。
 	currentPlan = s.State.Start(currentPlan)
@@ -70,7 +81,11 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	}
 
 	combined := planresult.Execution{SessionID: current.ID}
+	executedSteps := 0
 	for index := range currentPlan.Steps {
+		if currentPlan.Steps[index].Status == agentplan.StepStatusDone || currentPlan.Steps[index].Status == agentplan.StepStatusSkipped {
+			continue
+		}
 		// 每个步骤都是独立生成任务；中途取消时保留已完成步骤，并把整体计划标记为 canceled。
 		if err := ctx.Err(); err != nil {
 			currentPlan = s.State.MarkCanceled(currentPlan)
@@ -85,17 +100,20 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 
 		// 把目标、当前步骤和完整计划转换成一条明确的用户消息，保证模型只处理当前步骤。
 		input := s.Inputs.BuildStepInput(currentPlan, currentPlan.Steps[index], index, len(currentPlan.Steps))
-		prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input})
+		prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
 		if err != nil {
 			return planresult.Execution{}, err
 		}
 		current = prepared.Session
 		title := ""
-		if index == 0 {
+		if executedSteps == 0 {
 			title = "Execute plan"
 		}
 		if s.UserMessages != nil {
-			s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{SessionID: current.ID, Model: current.Model, Title: title, Input: input})
+			s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+				SessionID: current.ID, Model: current.Model, Title: title, Input: input,
+				RuntimeInstruction: prepared.RuntimeInstruction,
+			})
 		}
 
 		// ForceChatMode 跳过 Plan 提示和只读限制，避免执行阶段再次产出一份计划。
@@ -103,7 +121,11 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			Session: current, LatestInput: input, Title: title, Reason: "execute plan step", Stream: command.Stream, ForceChatMode: true,
 		})
 		if err != nil {
-			currentPlan = s.State.MarkStepFailed(currentPlan, index)
+			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				currentPlan = s.State.MarkCanceled(currentPlan)
+			} else {
+				currentPlan = s.State.MarkStepFailed(currentPlan, index)
+			}
 			_, _ = s.savePlanState(context.Background(), current, currentPlan, updates)
 			return planresult.Execution{}, err
 		}
@@ -113,6 +135,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			return planresult.Execution{}, err
 		}
 		combined = s.combine(combined, response)
+		executedSteps++
 	}
 
 	currentPlan = s.State.MarkDone(currentPlan)

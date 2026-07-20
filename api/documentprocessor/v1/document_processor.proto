@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package myai.documentprocessor.v1;
+
+option go_package = "myai/core/adapter/documentprocessor/grpc/pb;documentprocessorv1";
+
+service DocumentProcessorService {
+  rpc ProcessDocument(stream ProcessRequest) returns (stream ProcessEvent);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc GetCapabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message ProcessRequest {
+  oneof payload {
+    ProcessStart start = 1;
+    bytes content = 2;
+    ProcessInputCompleted completed = 3;
+  }
+}
+
+message ProcessStart {
+  string request_id = 1;
+  string document_id = 2;
+  int64 document_version = 3;
+  string content_type = 4;
+  ParsingProfile parsing_profile = 5;
+  ChunkingProfile chunking_profile = 6;
+}
+
+message ProcessInputCompleted {}
+
+message ParsingProfile {
+  string id = 1;
+  string name = 2;
+  string parser_id = 3;
+  string parser_version = 4;
+  bool ocr = 5;
+  map<string, string> options = 6;
+}
+
+message ChunkingProfile {
+  string id = 1;
+  string name = 2;
+  string strategy_id = 3;
+  string strategy_version = 4;
+  int32 max_chunk_size = 5;
+  int32 overlap = 6;
+  string tokenizer = 7;
+  map<string, string> options = 8;
+}
+
+message ProcessEvent {
+  oneof payload {
+    ProcessMetadata metadata = 1;
+    ChunkBatch chunk_batch = 2;
+    ProcessCompleted completed = 3;
+  }
+}
+
+message ProcessMetadata {
+  string request_id = 1;
+  string document_id = 2;
+  int64 document_version = 3;
+  string content_type = 4;
+  string parser_id = 5;
+  string parser_version = 6;
+  string chunking_strategy_id = 7;
+  string chunking_strategy_version = 8;
+}
+
+message ChunkBatch {
+  repeated ChunkDraft chunks = 1;
+}
+
+message ChunkDraft {
+  int32 ordinal = 1;
+  string text = 2;
+  int64 start_offset = 3;
+  int64 end_offset = 4;
+  int32 source_page = 5;
+  string source_heading = 6;
+}
+
+message ProcessCompleted {
+  int32 chunk_count = 1;
+  repeated string warnings = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string protocol_version = 2;
+  string worker_id = 3;
+}
+
+message CapabilitiesRequest {}
+
+message CapabilitiesResponse {
+  string protocol_version = 1;
+  repeated Capability parsers = 2;
+  repeated Capability chunking_strategies = 3;
+}
+
+message Capability {
+  string id = 1;
+  string version = 2;
+}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}

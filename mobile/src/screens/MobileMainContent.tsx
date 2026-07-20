@@ -2,6 +2,7 @@ import { ChangeDetailPanel } from "../components/changes/ChangeDetailPanel";
 import { ChangesPanel } from "../components/changes/ChangesPanel";
 import { ChatPanel } from "../components/chat/ChatPanel";
 import { FilesPanel } from "../components/files/FilesPanel";
+import { KnowledgePanel } from "../components/knowledge/KnowledgePanel";
 import { PermissionPrompt } from "../components/permissions/PermissionPrompt";
 import { PlanPanel } from "../components/plan/PlanPanel";
 import { SettingsPanel } from "../components/settings/SettingsPanel";
@@ -13,6 +14,7 @@ export function MobileMainContent({
   chat,
   common,
   files,
+  knowledge,
   permission,
   plan,
   sessions,
@@ -77,6 +79,34 @@ export function MobileMainContent({
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
           showAssistantLoading={Boolean(chat.pendingRequestID) && !chat.activeAssistantID}
+        />
+      ) : null}
+
+      {common.viewMode === "knowledge" ? (
+        <KnowledgePanel
+          activeSession={knowledge.activeSession}
+          buttonFeedback={common.buttonFeedback}
+          categories={knowledge.categories}
+          documents={knowledge.documents}
+          jobs={knowledge.jobs}
+          knowledgeBases={knowledge.knowledgeBases}
+          message={knowledge.message}
+          onCreateCategory={knowledge.onCreateCategory}
+          onCreateKnowledgeBase={knowledge.onCreateKnowledgeBase}
+          onDeleteCategory={knowledge.onDeleteCategory}
+          onDeleteDocument={knowledge.onDeleteDocument}
+          onDeleteKnowledgeBase={knowledge.onDeleteKnowledgeBase}
+          onMoveCategory={knowledge.onMoveCategory}
+          onRefresh={knowledge.onRefresh}
+          onRefreshDocuments={knowledge.onRefreshDocuments}
+          onRetryDocument={knowledge.onRetryDocument}
+          onSearch={knowledge.onSearch}
+          onSelectKnowledgeBase={knowledge.onSelectKnowledgeBase}
+          onSetRAG={knowledge.onSetRAG}
+          onUpdateKnowledgeBase={knowledge.onUpdateKnowledgeBase}
+          onUploadDocument={knowledge.onUploadDocument}
+          profiles={knowledge.profiles}
+          searchResult={knowledge.searchResult}
         />
       ) : null}
 

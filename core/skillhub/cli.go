@@ -152,19 +152,6 @@ func (c *Client) InstallSkill(ctx context.Context, request InstallRequest) (Comm
 	return result, nil
 }
 
-func (c *Client) InstallMatchedSkill(ctx context.Context, request InstallRequest) (SearchItem, CommandResult, error) {
-	target, _, err := c.ResolveSkill(ctx, request.Name)
-	if err != nil {
-		return SearchItem{}, CommandResult{}, err
-	}
-
-	result, err := c.InstallSkill(ctx, InstallRequest{Name: target.Slug, Namespace: target.Namespace, Force: request.Force})
-	if err != nil {
-		return target, result, err
-	}
-	return target, result, nil
-}
-
 func (c *Client) Search(ctx context.Context, request SearchRequest) (CommandResult, error) {
 	query := strings.TrimSpace(request.Query)
 	if query == "" {

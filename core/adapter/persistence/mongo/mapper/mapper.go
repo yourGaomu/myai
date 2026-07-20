@@ -2,51 +2,59 @@ package mapper
 
 import (
 	"myai/core/adapter/persistence/mongo/po"
+	generation "myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
 	agentplan "myai/core/plan"
 	repository "myai/core/port/repository"
+	"myai/core/session"
 )
 
 func SessionDocumentFromRecord(record repository.SessionRecord) po.SessionDocument {
 	// mapper 是 BSON PO 与仓库 Record 的唯一转换边界，内层对象不携带 bson 标签。
 	return po.SessionDocument{
-		ID:                record.ID,
-		Model:             record.Model,
-		AgentMode:         record.AgentMode,
-		PermissionMode:    record.PermissionMode,
-		ContextWindowK:    record.ContextWindowK,
-		Summary:           record.Summary,
-		CompactedMessages: record.CompactedMessages,
-		CompactedAt:       record.CompactedAt,
-		Title:             record.Title,
-		Usage:             TokenUsageDocumentFromRecord(record.Usage),
-		LastUsage:         TokenUsageDocumentFromRecord(record.LastUsage),
-		CurrentPlan:       PlanDocumentFromDomain(record.CurrentPlan),
-		Deleted:           record.Deleted,
-		DeletedAt:         record.DeletedAt,
-		CreatedAt:         record.CreatedAt,
-		UpdatedAt:         record.UpdatedAt,
+		ID:                 record.ID,
+		Model:              record.Model,
+		AgentMode:          record.AgentMode,
+		PermissionMode:     record.PermissionMode,
+		ContextWindowK:     record.ContextWindowK,
+		Summary:            record.Summary,
+		CompactedMessages:  record.CompactedMessages,
+		CompactedAt:        record.CompactedAt,
+		Title:              record.Title,
+		Usage:              TokenUsageDocumentFromRecord(record.Usage),
+		LastUsage:          TokenUsageDocumentFromRecord(record.LastUsage),
+		CurrentPlan:        PlanDocumentFromDomain(record.CurrentPlan),
+		RAGSettings:        RAGSettingsDocumentFromDomain(record.RAGSettings),
+		GenerationSettings: GenerationSettingsDocumentFromDomain(record.GenerationSettings),
+		StyleInstruction:   record.StyleInstruction,
+		Deleted:            record.Deleted,
+		DeletedAt:          record.DeletedAt,
+		CreatedAt:          record.CreatedAt,
+		UpdatedAt:          record.UpdatedAt,
 	}
 }
 
 func SessionRecordFromDocument(document po.SessionDocument) repository.SessionRecord {
 	return repository.SessionRecord{
-		ID:                document.ID,
-		Model:             document.Model,
-		AgentMode:         document.AgentMode,
-		PermissionMode:    document.PermissionMode,
-		ContextWindowK:    document.ContextWindowK,
-		Summary:           document.Summary,
-		CompactedMessages: document.CompactedMessages,
-		CompactedAt:       document.CompactedAt,
-		Title:             document.Title,
-		Usage:             TokenUsageRecordFromDocument(document.Usage),
-		LastUsage:         TokenUsageRecordFromDocument(document.LastUsage),
-		CurrentPlan:       PlanDomainFromDocument(document.CurrentPlan),
-		Deleted:           document.Deleted,
-		DeletedAt:         document.DeletedAt,
-		CreatedAt:         document.CreatedAt,
-		UpdatedAt:         document.UpdatedAt,
+		ID:                 document.ID,
+		Model:              document.Model,
+		AgentMode:          document.AgentMode,
+		PermissionMode:     document.PermissionMode,
+		ContextWindowK:     document.ContextWindowK,
+		Summary:            document.Summary,
+		CompactedMessages:  document.CompactedMessages,
+		CompactedAt:        document.CompactedAt,
+		Title:              document.Title,
+		Usage:              TokenUsageRecordFromDocument(document.Usage),
+		LastUsage:          TokenUsageRecordFromDocument(document.LastUsage),
+		CurrentPlan:        PlanDomainFromDocument(document.CurrentPlan),
+		RAGSettings:        RAGSettingsDomainFromDocument(document.RAGSettings),
+		GenerationSettings: GenerationSettingsDomainFromDocument(document.GenerationSettings),
+		StyleInstruction:   document.StyleInstruction,
+		Deleted:            document.Deleted,
+		DeletedAt:          document.DeletedAt,
+		CreatedAt:          document.CreatedAt,
+		UpdatedAt:          document.UpdatedAt,
 	}
 }
 
@@ -61,6 +69,10 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 		ToolName:           record.ToolName,
 		ToolArguments:      record.ToolArguments,
 		ToolError:          record.ToolError,
+		ToolStatus:         record.ToolStatus,
+		ToolErrorCode:      record.ToolErrorCode,
+		ToolTruncated:      record.ToolTruncated,
+		SyntheticReason:    record.SyntheticReason,
 		PromptTokens:       record.PromptTokens,
 		CompletionTokens:   record.CompletionTokens,
 		TotalTokens:        record.TotalTokens,
@@ -81,6 +93,10 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 		ToolName:           document.ToolName,
 		ToolArguments:      document.ToolArguments,
 		ToolError:          document.ToolError,
+		ToolStatus:         document.ToolStatus,
+		ToolErrorCode:      document.ToolErrorCode,
+		ToolTruncated:      document.ToolTruncated,
+		SyntheticReason:    document.SyntheticReason,
 		PromptTokens:       document.PromptTokens,
 		CompletionTokens:   document.CompletionTokens,
 		TotalTokens:        document.TotalTokens,
@@ -132,32 +148,97 @@ func AssetRecordFromDocument(document po.AssetDocument) repository.AssetRecord {
 
 func ModelConfigDocumentFromDomain(config domainmodel.Config) po.ModelConfigDocument {
 	return po.ModelConfigDocument{
-		ID:        config.ID,
-		Name:      config.Name,
-		Provider:  config.Provider,
-		BaseURL:   config.BaseURL,
-		APIKey:    config.APIKey,
-		ModelName: config.ModelName,
-		Enabled:   config.Enabled,
-		IsDefault: config.IsDefault,
-		CreatedAt: config.CreatedAt,
-		UpdatedAt: config.UpdatedAt,
+		ID:                        config.ID,
+		Name:                      config.Name,
+		Provider:                  config.Provider,
+		BaseURL:                   config.BaseURL,
+		APIKey:                    config.APIKey,
+		ModelName:                 config.ModelName,
+		Enabled:                   config.Enabled,
+		IsDefault:                 config.IsDefault,
+		DefaultGenerationSettings: GenerationSettingsDocumentFromDomain(config.DefaultGenerationSettings),
+		CreatedAt:                 config.CreatedAt,
+		UpdatedAt:                 config.UpdatedAt,
 	}
 }
 
 func ModelConfigDomainFromDocument(document po.ModelConfigDocument) domainmodel.Config {
 	return domainmodel.Config{
-		ID:        document.ID,
-		Name:      document.Name,
-		Provider:  document.Provider,
-		BaseURL:   document.BaseURL,
-		APIKey:    document.APIKey,
-		ModelName: document.ModelName,
-		Enabled:   document.Enabled,
-		IsDefault: document.IsDefault,
-		CreatedAt: document.CreatedAt,
-		UpdatedAt: document.UpdatedAt,
+		ID:                        document.ID,
+		Name:                      document.Name,
+		Provider:                  document.Provider,
+		BaseURL:                   document.BaseURL,
+		APIKey:                    document.APIKey,
+		ModelName:                 document.ModelName,
+		Enabled:                   document.Enabled,
+		IsDefault:                 document.IsDefault,
+		DefaultGenerationSettings: GenerationSettingsDomainFromDocument(document.DefaultGenerationSettings),
+		CreatedAt:                 document.CreatedAt,
+		UpdatedAt:                 document.UpdatedAt,
 	}
+}
+
+func GenerationSettingsDocumentFromDomain(settings generation.Settings) *po.GenerationSettingsDocument {
+	if settings.Temperature == nil && settings.TopP == nil && settings.MaxOutputTokens == nil {
+		return nil
+	}
+	return &po.GenerationSettingsDocument{
+		Temperature:     cloneFloat64(settings.Temperature),
+		TopP:            cloneFloat64(settings.TopP),
+		MaxOutputTokens: cloneInt(settings.MaxOutputTokens),
+	}
+}
+
+func RAGSettingsDocumentFromDomain(settings session.RAGSettings) *po.RAGSettingsDocument {
+	settings = session.NormalizeRAGSettings(settings)
+	if settings.Mode == session.RetrievalModeAuto && settings.TopK == session.DefaultRAGTopK && len(settings.KnowledgeBaseIDs) == 0 && len(settings.CategoryIDs) == 0 {
+		return nil
+	}
+	return &po.RAGSettingsDocument{
+		Mode:             string(settings.Mode),
+		KnowledgeBaseIDs: append([]string(nil), settings.KnowledgeBaseIDs...),
+		CategoryIDs:      append([]string(nil), settings.CategoryIDs...),
+		TopK:             settings.TopK,
+	}
+}
+
+func RAGSettingsDomainFromDocument(document *po.RAGSettingsDocument) session.RAGSettings {
+	if document == nil {
+		return session.DefaultRAGSettings()
+	}
+	return session.CloneRAGSettings(session.RAGSettings{
+		Mode:             session.RetrievalMode(document.Mode),
+		KnowledgeBaseIDs: document.KnowledgeBaseIDs,
+		CategoryIDs:      document.CategoryIDs,
+		TopK:             document.TopK,
+	})
+}
+
+func GenerationSettingsDomainFromDocument(document *po.GenerationSettingsDocument) generation.Settings {
+	if document == nil {
+		return generation.Settings{}
+	}
+	return generation.Settings{
+		Temperature:     cloneFloat64(document.Temperature),
+		TopP:            cloneFloat64(document.TopP),
+		MaxOutputTokens: cloneInt(document.MaxOutputTokens),
+	}
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func TokenUsageDocumentFromRecord(record *repository.TokenUsageRecord) *po.TokenUsageDocument {

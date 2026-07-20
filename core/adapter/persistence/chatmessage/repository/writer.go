@@ -32,9 +32,10 @@ func (w Writer) SaveUserMessage(ctx context.Context, command generationcommand.P
 		}
 	}
 	if w.Messages != nil {
-		record := (chatmessagemapper.Mapper{IDs: w.IDs}).UserMessage(command, w.now())
-		if err := w.Messages.SaveMessage(ctx, record); err != nil {
-			errs = append(errs, err)
+		for _, record := range (chatmessagemapper.Mapper{IDs: w.IDs}).UserTurn(command, w.now()) {
+			if err := w.Messages.SaveMessage(ctx, record); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errors.Join(errs...)

@@ -6,7 +6,7 @@ import (
 	agentplan "myai/core/plan"
 )
 
-func TestStateServiceStartResetsSteps(t *testing.T) {
+func TestStateServiceStartPreservesCompletedSteps(t *testing.T) {
 	currentPlan := &agentplan.Plan{
 		Status: agentplan.StatusDraft,
 		Steps: []agentplan.Step{
@@ -20,10 +20,8 @@ func TestStateServiceStartResetsSteps(t *testing.T) {
 	if started.Status != agentplan.StatusRunning {
 		t.Fatalf("expected running plan, got %q", started.Status)
 	}
-	for _, step := range started.Steps {
-		if step.Status != agentplan.StepStatusPending {
-			t.Fatalf("expected pending step, got %#v", started.Steps)
-		}
+	if started.Steps[0].Status != agentplan.StepStatusDone || started.Steps[1].Status != agentplan.StepStatusPending {
+		t.Fatalf("unexpected resumed steps: %#v", started.Steps)
 	}
 	if currentPlan.Status != agentplan.StatusDraft {
 		t.Fatal("expected original plan to remain unchanged")

@@ -12,6 +12,63 @@ redis:
   password: "***REDACTED***"
   db: 0
 
+rag:
+  id_node: 0
+
+  embedding:
+    models: []
+
+  milvus:
+    enabled: false
+    address: ""
+    username: ""
+    password: ""
+    database: default
+    api_key: ""
+    enable_tls: false
+    collection_prefix: knowledge_vectors
+    shards: 1
+
+  local:
+    enabled: false
+    path: ""
+    vector_path: ""
+    max_open_connections: 4
+
+  retrieval:
+    candidate_multiplier: 3
+    max_candidates: 100
+    min_local_results: 3
+    min_local_score: 0.55
+    rrf_k: 60
+    cache_remote_results: true
+
+  document_processor:
+    enabled: true
+    python_executable: python
+    script: ./document_processor/main.py
+    transport: auto
+    worker_count: 4
+    max_pending_jobs: 32
+    startup_timeout_seconds: 30
+    timeout_seconds: 120
+    shutdown_grace_seconds: 5
+    max_document_size_mb: 512
+    content_chunk_kb: 256
+    chunk_batch_size: 64
+    grpc_max_message_mb: 8
+    temp_directory: ""
+
+  minio:
+    endpoint: ""
+    access_key: ""
+    secret_key: ""
+    session_token: ""
+    bucket: myai-knowledge
+    region: ""
+    use_ssl: false
+    auto_create_bucket: true
+
 thread:
   core: 5
   queueSize: 10

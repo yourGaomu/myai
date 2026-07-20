@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	generation "myai/core/domain/generation"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
@@ -106,6 +107,39 @@ func TestSettingsServiceSetContextWindow(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceSetsGenerationSettingsAndStyle(t *testing.T) {
+	memory := settingsMemory("session-1")
+	temperature := 0.0
+	maxTokens := 4096
+	service := SettingsService{Memory: memory}
+
+	current, err := service.SetGenerationSettings(context.Background(), SetGenerationSettingsCommand{
+		SessionID: "session-1",
+		Settings: generation.Settings{
+			Temperature:     &temperature,
+			MaxOutputTokens: &maxTokens,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetGenerationSettings() error = %v", err)
+	}
+	temperature = 1.2
+	if current.GenerationSettings.Temperature == nil || *current.GenerationSettings.Temperature != 0 {
+		t.Fatalf("generation settings = %#v", current.GenerationSettings)
+	}
+
+	current, err = service.SetStyleInstruction(context.Background(), SetStyleInstructionCommand{
+		SessionID:   "session-1",
+		Instruction: "  Use concise Chinese.  ",
+	})
+	if err != nil {
+		t.Fatalf("SetStyleInstruction() error = %v", err)
+	}
+	if current.StyleInstruction != "Use concise Chinese." {
+		t.Fatalf("style instruction = %q", current.StyleInstruction)
+	}
+}
+
 func (s *fakeMemoryStore) SwitchModel(modelID string) error {
 	s.currentModelID = modelID
 	if s.currentID == "" {
@@ -154,6 +188,33 @@ func (s *fakeMemoryStore) SetContextWindowKForSession(sessionID string, windowK 
 		return errors.New("session not found")
 	}
 	current.ContextWindowK = windowK
+	return nil
+}
+
+func (s *fakeMemoryStore) SetGenerationSettingsForSession(sessionID string, settings generation.Settings) error {
+	current := s.sessions[sessionID]
+	if current == nil {
+		return errors.New("session not found")
+	}
+	current.GenerationSettings = generation.Clone(settings)
+	return nil
+}
+
+func (s *fakeMemoryStore) SetStyleInstructionForSession(sessionID string, instruction string) error {
+	current := s.sessions[sessionID]
+	if current == nil {
+		return errors.New("session not found")
+	}
+	current.StyleInstruction = instruction
+	return nil
+}
+
+func (s *fakeMemoryStore) SetRAGSettingsForSession(sessionID string, settings session.RAGSettings) error {
+	current, err := s.GetSession(sessionID)
+	if err != nil {
+		return err
+	}
+	current.RAGSettings = session.CloneRAGSettings(settings)
 	return nil
 }
 

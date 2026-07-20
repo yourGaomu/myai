@@ -78,13 +78,13 @@ func (t *ReadAssetTool) Permission() tooldef.Permission {
 	return tooldef.PermissionRead
 }
 
-func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	if t.downloader == nil {
-		return "", errors.New("asset short-link service is not configured; set asset.shortener_base_url")
+		return tooldef.ToolOutput{}, errors.New("asset short-link service is not configured; set asset.shortener_base_url")
 	}
 	input, err := normalizeReadAssetArgs(args)
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	// 下载与内容解析分离：Asset Client 处理短链接，parser 根据文件类型提取可供模型阅读的文本。
@@ -94,7 +94,7 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (string,
 		MaxBytes: input.MaxBytes,
 	})
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
 
 	parsed := parser.Parse(ctx, parser.Request{
@@ -120,9 +120,11 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (string,
 
 	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", err
+		return tooldef.ToolOutput{}, err
 	}
-	return string(output), nil
+	resultOutput := tooldef.SuccessOutput(string(output))
+	resultOutput.Truncated = result.Truncated
+	return resultOutput, nil
 }
 
 func normalizeReadAssetArgs(args json.RawMessage) (readAssetArgs, error) {

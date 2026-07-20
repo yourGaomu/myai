@@ -9,13 +9,15 @@ import (
 	messagecommand "myai/core/application/session/message/command"
 	messageport "myai/core/application/session/message/port"
 	messageresult "myai/core/application/session/message/result"
+	domainmessage "myai/core/domain/message"
 	"myai/core/session"
 )
 
 type CommandService struct {
 	// 消息命令只修改内存聚合根；异步落库由 generation adapter 在外层完成。
-	Loader messageport.SessionLoader
-	Memory messageport.CommandMemory
+	Loader              messageport.SessionLoader
+	Memory              messageport.CommandMemory
+	RuntimeInstructions messageport.RuntimeInstructionProvider
 }
 
 var _ messageapi.CommandService = CommandService{}
@@ -28,14 +30,15 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	if err := s.Memory.AddUserMessageTo(current.ID, command.Input); err != nil {
+	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode)
+	if err := s.Memory.AddUserTurnWithContextTo(current.ID, command.RAGContext, runtimeInstruction, command.Input); err != nil {
 		return messageresult.Command{}, err
 	}
 	current, err = s.Memory.GetSession(current.ID)
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	return messageresult.Command{Session: current, Input: command.Input}, nil
+	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext)}, nil
 }
 
 func (s CommandService) PrepareRegeneration(ctx context.Context, command messagecommand.PrepareRegeneration) (messageresult.Command, error) {
@@ -52,7 +55,29 @@ func (s CommandService) PrepareRegeneration(ctx context.Context, command message
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	return messageresult.Command{Session: current, Input: input}, nil
+	return messageresult.Command{Session: current, Input: input, RuntimeInstruction: latestRuntimeInstruction(current.Messages)}, nil
+}
+
+func (s CommandService) runtimeInstruction(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
+	if s.RuntimeInstructions == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.RuntimeInstructions.Prompt(ctx, current, input, forceChatMode))
+}
+
+func latestRuntimeInstruction(messages []domainmessage.Message) string {
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role != domainmessage.RoleUser {
+			continue
+		}
+		for previous := index - 1; previous >= 0 && messages[previous].IsSynthetic(); previous-- {
+			if instruction, ok := messages[previous].RuntimeInstructionText(); ok {
+				return instruction
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 func (s CommandService) loadSession(ctx context.Context, sessionID string) (*session.Session, error) {

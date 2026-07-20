@@ -62,7 +62,7 @@ func ToLLMToolCallResponse(result domainmessage.ToolResult) llms.ToolCallRespons
 	return llms.ToolCallResponse{
 		ToolCallID: result.ToolCallID,
 		Name:       result.Name,
-		Content:    result.Content,
+		Content:    result.PromptContent(),
 	}
 }
 
@@ -81,42 +81,7 @@ func ToLLMRole(role domainmessage.Role) llms.ChatMessageType {
 	}
 }
 
-func FromLLMS(messages []llms.MessageContent) []domainmessage.Message {
-	if len(messages) == 0 {
-		return nil
-	}
-	mapped := make([]domainmessage.Message, 0, len(messages))
-	for _, item := range messages {
-		mapped = append(mapped, FromLLMMessage(item))
-	}
-	return mapped
-}
-
-func FromLLMMessage(message llms.MessageContent) domainmessage.Message {
-	return domainmessage.Message{
-		Role:  FromLLMRole(message.Role),
-		Parts: FromLLMParts(message.Parts),
-	}
-}
-
-func FromLLMParts(parts []llms.ContentPart) []domainmessage.Part {
-	mapped := make([]domainmessage.Part, 0, len(parts))
-	for _, part := range parts {
-		switch value := part.(type) {
-		case llms.TextContent:
-			mapped = append(mapped, domainmessage.Part{Type: domainmessage.PartText, Text: value.Text})
-		case llms.ToolCall:
-			call := FromLLMToolCall(value)
-			mapped = append(mapped, domainmessage.Part{Type: domainmessage.PartToolCall, ToolCall: &call})
-		case llms.ToolCallResponse:
-			result := FromLLMToolCallResponse(value)
-			mapped = append(mapped, domainmessage.Part{Type: domainmessage.PartToolResult, ToolResult: &result})
-		}
-	}
-	return mapped
-}
-
-func FromLLMToolCall(call llms.ToolCall) domainmessage.ToolCall {
+func fromLLMToolCall(call llms.ToolCall) domainmessage.ToolCall {
 	mapped := domainmessage.ToolCall{
 		ID:   call.ID,
 		Type: call.Type,
@@ -134,30 +99,7 @@ func FromLLMToolCalls(calls []llms.ToolCall) []domainmessage.ToolCall {
 	}
 	mapped := make([]domainmessage.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		mapped = append(mapped, FromLLMToolCall(call))
+		mapped = append(mapped, fromLLMToolCall(call))
 	}
 	return mapped
-}
-
-func FromLLMToolCallResponse(response llms.ToolCallResponse) domainmessage.ToolResult {
-	return domainmessage.ToolResult{
-		ToolCallID: response.ToolCallID,
-		Name:       response.Name,
-		Content:    response.Content,
-	}
-}
-
-func FromLLMRole(role llms.ChatMessageType) domainmessage.Role {
-	switch role {
-	case llms.ChatMessageTypeSystem:
-		return domainmessage.RoleSystem
-	case llms.ChatMessageTypeHuman:
-		return domainmessage.RoleUser
-	case llms.ChatMessageTypeAI:
-		return domainmessage.RoleAssistant
-	case llms.ChatMessageTypeTool:
-		return domainmessage.RoleTool
-	default:
-		return domainmessage.RoleUser
-	}
 }

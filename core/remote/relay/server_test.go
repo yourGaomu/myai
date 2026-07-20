@@ -121,6 +121,139 @@ func TestRelayKeepsChatRequestOpenForIntermediateSkillReload(t *testing.T) {
 	}
 }
 
+func TestRelayPermissionResultPreservesOriginalChatRoute(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeUserMessage,
+		RequestID:   "permission-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		SessionID:   "session-1",
+		ClientToken: clientToken,
+	})
+	readTestMessage(t, agentConn, protocol.TypeUserMessage)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypePermissionAsk,
+		RequestID: "permission-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+		SessionID: "session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypePermissionAsk)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypePermissionResult,
+		RequestID:   "permission-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		SessionID:   "session-1",
+		ClientToken: clientToken,
+		Payload:     json.RawMessage(`{"allowed":true}`),
+	})
+	readTestMessage(t, agentConn, protocol.TypePermissionResult)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	registered := server.getClient("permission-req-1")
+	if registered == nil || registered.RequestType != protocol.TypeUserMessage {
+		t.Fatalf("expected original user message route, got %#v", registered)
+	}
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeAssistantDone,
+		RequestID: "permission-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+		SessionID: "session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDone)
+	deadline := time.Now().Add(time.Second)
+	for server.getClient("permission-req-1") != nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if server.getClient("permission-req-1") != nil {
+		t.Fatal("chat route was not released after assistant_done")
+	}
+}
+
+func TestRelayForwardsPlanExecutionUntilFinalResult(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeSessionPlanExecute,
+		RequestID:   "plan-req-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		SessionID:   "session-1",
+		ClientToken: clientToken,
+	})
+	forwarded := readTestMessage(t, agentConn, protocol.TypeSessionPlanExecute)
+	if forwarded.SessionID != "session-1" {
+		t.Fatalf("expected session-1, got %s", forwarded.SessionID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionPlanExecuteUpdate,
+		RequestID: "plan-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+		SessionID: "session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeSessionPlanExecuteUpdate)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeAssistantDone,
+		RequestID: "plan-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+		SessionID: "session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDone)
+	if server.getClient("plan-req-1") == nil {
+		t.Fatal("plan request closed before final result")
+	}
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeSessionPlanExecuteResult,
+		RequestID: "plan-req-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+		SessionID: "session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeSessionPlanExecuteResult)
+	if !isTerminalResponseForRequest(protocol.TypeSessionPlanExecute, protocol.TypeSessionPlanExecuteResult) {
+		t.Fatal("plan execute result must close the request route")
+	}
+}
+
 func TestRelayForwardsSessionMessages(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())

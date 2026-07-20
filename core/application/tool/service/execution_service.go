@@ -13,6 +13,7 @@ import (
 	toolresult "myai/core/application/tool/result"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
+	"myai/core/session"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -42,7 +43,7 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 			return toolresult.Execution{}, err
 		}
 		permission := tooldef.NormalizePermission(registeredTool.Permission())
-		// PreToolUse 可拒绝调用或重写参数；显式 Allow 才能跳过默认权限询问。
+		// PreToolUse 可拒绝调用或重写参数；Allow 只表示 Hook 放行，不能绕过权限检查。
 		hookResult, err := s.beforeToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission})
 		if err != nil {
 			return toolresult.Execution{}, err
@@ -59,43 +60,91 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 
 		if hookResult.Decision == toolresult.HookDecisionDeny {
 			err = fmt.Errorf("tool denied by hook: %s", hookResult.Message)
-			toolOutput := "tool error: " + err.Error()
+			output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "hook_denied", "tool error: "+err.Error())
 			if command.Callbacks.OnToolResult != nil {
-				command.Callbacks.OnToolResult(call.Name, call.Arguments, toolOutput)
+				command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
 			}
-			s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: toolOutput, Err: err})
-			result.Messages = append(result.Messages, ToolResultMessage(call, toolOutput))
-			result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Result: toolOutput, ToolError: err.Error(), CreatedAt: resultCreatedAt}))
+			s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: output.Content, Err: err})
+			result.Messages = append(result.Messages, ToolResultMessage(call, output))
+			result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}))
+			continue
+		}
+		if !allowsExecutionInMode(permission, command.AgentMode, command.ForceChatMode) {
+			message := fmt.Sprintf("permission denied: plan mode does not allow tool %s requiring %s", call.Name, permission)
+			output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "plan_mode_denied", message)
+			if command.Callbacks.OnToolResult != nil {
+				command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
+			}
+			s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: output.Content, Err: outputError(output, nil)})
+			result.Messages = append(result.Messages, ToolResultMessage(call, output))
+			result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}))
 			continue
 		}
 
-		permissionDecision := s.permissionService().Allow(toolcommand.Permission{Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode, HookAllowed: hookResult.Decision == toolresult.HookDecisionAllow, Ask: command.Callbacks.OnToolAsk})
-		toolOutput := permissionDecision.Message
+		permissionDecision := s.permissionService().Allow(toolcommand.Permission{Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode, Ask: command.Callbacks.OnToolAsk})
+		output := domaintool.ToolOutput{}
 		var toolErr error
 		if permissionDecision.Allowed {
-			toolOutput, toolErr = registeredTool.Call(ctx, []byte(call.Arguments))
+			output, toolErr = registeredTool.Call(ctx, []byte(call.Arguments))
+		} else {
+			output = domaintool.FailedOutput(domaintool.ResultStatusDenied, "permission_denied", permissionDecision.Message)
 		}
 		if toolErr != nil {
-			toolOutput = "tool error: " + toolErr.Error()
+			output = outputForError(ctx, toolErr)
 		}
+		output = output.Normalized()
 		if command.Callbacks.OnToolResult != nil {
-			command.Callbacks.OnToolResult(call.Name, call.Arguments, toolOutput)
+			command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
 		}
-		s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: toolOutput, Err: toolErr})
-		toolError := ""
-		if toolErr != nil {
-			toolError = toolErr.Error()
-		}
+		s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: output.Content, Err: outputError(output, toolErr)})
 		// 成功结果可能包含上传文件信息，提取后作为共享资源单独持久化并展示给手机。
-		if toolError == "" && s.Assets != nil {
-			if asset, ok := s.Assets.Extract(toolcommand.AssetExtraction{SessionID: command.SessionID, RequestID: command.RequestID, Call: call, Result: toolOutput, CreatedAt: resultCreatedAt}); ok {
+		if !output.Failed() && s.Assets != nil {
+			if asset, ok := s.Assets.Extract(toolcommand.AssetExtraction{SessionID: command.SessionID, RequestID: command.RequestID, Call: call, Output: output, CreatedAt: resultCreatedAt}); ok {
 				result.Assets = append(result.Assets, asset)
 			}
 		}
-		result.Messages = append(result.Messages, ToolResultMessage(call, toolOutput))
-		result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Result: toolOutput, ToolError: toolError, CreatedAt: resultCreatedAt}))
+		result.Messages = append(result.Messages, ToolResultMessage(call, output))
+		result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}))
 	}
 	return result, nil
+}
+
+func allowsExecutionInMode(permission tooldef.Permission, agentMode session.AgentMode, forceChatMode bool) bool {
+	if forceChatMode || session.NormalizeAgentMode(agentMode) != session.AgentModePlan {
+		return true
+	}
+	return tooldef.NormalizePermission(permission) == tooldef.PermissionRead
+}
+
+func outputForError(ctx context.Context, err error) domaintool.ToolOutput {
+	status := domaintool.ResultStatusFailed
+	code := "tool_failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		status = domaintool.ResultStatusTimeout
+		code = "tool_timeout"
+	} else if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		status = domaintool.ResultStatusCanceled
+		code = "tool_canceled"
+	}
+	return domaintool.FailedOutput(status, code, "tool error: "+err.Error())
+}
+
+func outputError(output domaintool.ToolOutput, err error) error {
+	if err != nil {
+		return err
+	}
+	output = output.Normalized()
+	if !output.Failed() {
+		return nil
+	}
+	message := strings.TrimSpace(output.ErrorMessage)
+	if message == "" {
+		message = strings.TrimSpace(output.Content)
+	}
+	if message == "" {
+		message = string(output.Status)
+	}
+	return errors.New(message)
 }
 
 func (s ExecutionService) beforeToolUse(ctx context.Context, event toolcommand.HookEvent) (toolresult.Hook, error) {

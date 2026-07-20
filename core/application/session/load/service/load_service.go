@@ -65,19 +65,21 @@ func (s LoadService) EnsureInMemory(ctx context.Context, command loadcommand.Ens
 	}
 	messages := MessagesFromRecords(messageRecords)
 
-	if command.SetCurrent {
-		err = s.Memory.PutSessionWithModeUsage(
-			record.ID, record.Model, session.AgentMode(record.AgentMode), session.PermissionMode(record.PermissionMode),
-			record.ContextWindowK, record.Summary, record.CompactedMessages,
-			TokenUsageFromRecord(record.Usage), TokenUsageFromRecord(record.LastUsage), messages,
-		)
-	} else {
-		err = s.Memory.PutSessionWithModeUsageNoCurrent(
-			record.ID, record.Model, session.AgentMode(record.AgentMode), session.PermissionMode(record.PermissionMode),
-			record.ContextWindowK, record.Summary, record.CompactedMessages,
-			TokenUsageFromRecord(record.Usage), TokenUsageFromRecord(record.LastUsage), messages,
-		)
-	}
+	err = s.Memory.PutSessionState(session.InitialState{
+		ID:                 record.ID,
+		Model:              record.Model,
+		AgentMode:          session.AgentMode(record.AgentMode),
+		PermissionMode:     session.PermissionMode(record.PermissionMode),
+		ContextWindowK:     record.ContextWindowK,
+		Summary:            record.Summary,
+		CompactedMessages:  record.CompactedMessages,
+		Usage:              TokenUsageFromRecord(record.Usage),
+		LastUsage:          TokenUsageFromRecord(record.LastUsage),
+		RAGSettings:        record.RAGSettings,
+		GenerationSettings: record.GenerationSettings,
+		StyleInstruction:   record.StyleInstruction,
+		Messages:           messages,
+	}, command.SetCurrent)
 	if err != nil {
 		return nil, err
 	}

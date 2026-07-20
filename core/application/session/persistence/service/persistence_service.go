@@ -10,6 +10,7 @@ import (
 	persistencecommand "myai/core/application/session/persistence/command"
 	persistenceport "myai/core/application/session/persistence/port"
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	repository "myai/core/port/repository"
@@ -118,6 +119,9 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		record.Usage = TokenUsageRecord(current.Usage)
 		record.LastUsage = TokenUsageRecord(current.LastUsage)
 		record.CurrentPlan = agentplan.Clone(current.CurrentPlan)
+		record.RAGSettings = session.CloneRAGSettings(current.RAGSettings)
+		record.GenerationSettings = generation.Clone(current.GenerationSettings)
+		record.StyleInstruction = current.StyleInstruction
 		if record.Summary != "" {
 			record.CompactedAt = &now
 		}
@@ -140,6 +144,9 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		record.Usage = existing.Usage
 		record.LastUsage = existing.LastUsage
 		record.CurrentPlan = agentplan.Clone(existing.CurrentPlan)
+		record.RAGSettings = session.CloneRAGSettings(existing.RAGSettings)
+		record.GenerationSettings = generation.Clone(existing.GenerationSettings)
+		record.StyleInstruction = existing.StyleInstruction
 	}
 	return record
 }
@@ -159,6 +166,10 @@ func PrepareSessionRecordForSave(command persistencecommand.PrepareRecord) (repo
 		record.PermissionMode = string(session.PermissionModeAsk)
 	}
 	record.ContextWindowK = contextmgr.NormalizeWindowK(record.ContextWindowK)
+	record.RAGSettings = session.NormalizeRAGSettings(record.RAGSettings)
+	if err := session.ValidateRAGSettings(record.RAGSettings); err != nil {
+		return repository.SessionRecord{}, err
+	}
 	if record.Title == "" {
 		record.Title = DefaultTitle
 	}

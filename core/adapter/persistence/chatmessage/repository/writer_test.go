@@ -25,10 +25,11 @@ func TestWriterSavesUserMessageAndSession(t *testing.T) {
 	}
 
 	err := writer.SaveUserMessage(context.Background(), generationcommand.PersistUserMessage{
-		SessionID: "session-1",
-		Model:     "gpt-5",
-		Title:     "title",
-		Input:     "hello",
+		SessionID:          "session-1",
+		Model:              "gpt-5",
+		Title:              "title",
+		Input:              "hello",
+		RuntimeInstruction: "plan rules",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,11 +37,17 @@ func TestWriterSavesUserMessageAndSession(t *testing.T) {
 	if sessions.command.SessionID != "session-1" || sessions.command.Title != "title" {
 		t.Fatalf("unexpected session command: %#v", sessions.command)
 	}
-	if len(messages.records) != 1 || messages.records[0].ID != "id-1" || messages.records[0].Role != repository.RoleUser || messages.records[0].Content != "hello" {
+	if len(messages.records) != 2 || messages.records[0].ID != "id-1" || messages.records[0].Role != repository.RoleSystem || messages.records[0].SyntheticReason != "runtime_instruction" {
 		t.Fatalf("unexpected message records: %#v", messages.records)
 	}
 	if !messages.records[0].CreatedAt.Equal(now) {
 		t.Fatalf("unexpected created time: %#v", messages.records[0].CreatedAt)
+	}
+	if messages.records[1].ID != "id-2" || messages.records[1].Role != repository.RoleUser || messages.records[1].Content != "hello" {
+		t.Fatalf("unexpected user record: %#v", messages.records[1])
+	}
+	if !messages.records[1].CreatedAt.Equal(now.Add(time.Nanosecond)) {
+		t.Fatalf("unexpected user created time: %#v", messages.records[1].CreatedAt)
 	}
 }
 

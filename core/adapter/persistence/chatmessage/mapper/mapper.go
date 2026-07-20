@@ -7,7 +7,9 @@ import (
 	chatmessageport "myai/core/adapter/persistence/chatmessage/port"
 	generationcommand "myai/core/application/chat/generation/command"
 	"myai/core/contextmgr"
+	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
 	repository "myai/core/port/repository"
@@ -27,6 +29,29 @@ func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, create
 		Content:   command.Input,
 		CreatedAt: createdAt,
 	}
+}
+
+func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt time.Time) []repository.MessageRecord {
+	records := make([]repository.MessageRecord, 0, 3)
+	if ragMessage := domainmessage.RAGContext(command.RAGContext); ragMessage.IsSynthetic() {
+		records = append(records, repository.MessageRecord{
+			ID: m.newID(), SessionID: command.SessionID, Role: repository.RoleSystem,
+			Content: ragMessage.Text(), SyntheticReason: string(ragMessage.SyntheticReason), CreatedAt: createdAt,
+		})
+	}
+	if runtimeMessage := domainmessage.RuntimeInstruction(command.RuntimeInstruction); runtimeMessage.IsSynthetic() {
+		records = append(records, repository.MessageRecord{
+			ID:              m.newID(),
+			SessionID:       command.SessionID,
+			Role:            repository.RoleSystem,
+			Content:         runtimeMessage.Text(),
+			SyntheticReason: string(runtimeMessage.SyntheticReason),
+			CreatedAt:       createdAt,
+		})
+	}
+	userCreatedAt := createdAt.Add(time.Duration(len(records)) * time.Nanosecond)
+	records = append(records, m.UserMessage(command, userCreatedAt))
+	return records
 }
 
 func (m Mapper) AssistantMessage(sessionID string, result modelport.ChatResult, createdAt time.Time) repository.MessageRecord {
@@ -50,17 +75,20 @@ func (m Mapper) Session(current *session.Session, title string) repository.Sessi
 		return repository.SessionRecord{}
 	}
 	return repository.SessionRecord{
-		ID:                current.ID,
-		Model:             current.Model,
-		AgentMode:         string(session.NormalizeAgentMode(current.AgentMode)),
-		PermissionMode:    string(session.NormalizePermissionMode(current.PermissionMode)),
-		ContextWindowK:    contextmgr.NormalizeWindowK(current.ContextWindowK),
-		Summary:           current.Summary,
-		CompactedMessages: current.CompactedMessages,
-		Title:             title,
-		Usage:             tokenUsage(current.Usage),
-		LastUsage:         tokenUsage(current.LastUsage),
-		CurrentPlan:       agentplan.Clone(current.CurrentPlan),
+		ID:                 current.ID,
+		Model:              current.Model,
+		AgentMode:          string(session.NormalizeAgentMode(current.AgentMode)),
+		PermissionMode:     string(session.NormalizePermissionMode(current.PermissionMode)),
+		ContextWindowK:     contextmgr.NormalizeWindowK(current.ContextWindowK),
+		Summary:            current.Summary,
+		CompactedMessages:  current.CompactedMessages,
+		Title:              title,
+		Usage:              tokenUsage(current.Usage),
+		LastUsage:          tokenUsage(current.LastUsage),
+		CurrentPlan:        agentplan.Clone(current.CurrentPlan),
+		RAGSettings:        session.CloneRAGSettings(current.RAGSettings),
+		GenerationSettings: generation.Clone(current.GenerationSettings),
+		StyleInstruction:   current.StyleInstruction,
 	}
 }
 
@@ -87,7 +115,12 @@ func (m Mapper) messageRecord(sessionID string, message domainmessage.Message, c
 	}
 	switch message.Role {
 	case domainmessage.RoleSystem:
-		return repository.MessageRecord{}, false
+		if !message.IsSynthetic() {
+			return repository.MessageRecord{}, false
+		}
+		record.Role = repository.RoleSystem
+		record.Content = message.Text()
+		record.SyntheticReason = string(message.SyntheticReason)
 	case domainmessage.RoleUser:
 		record.Role = repository.RoleUser
 		record.Content = message.Text()
@@ -104,9 +137,17 @@ func (m Mapper) messageRecord(sessionID string, message domainmessage.Message, c
 	case domainmessage.RoleTool:
 		record.Role = repository.RoleTool
 		if result, ok := message.FirstToolResult(); ok {
+			status := result.Status
+			if status == "" {
+				status = domaintool.ResultStatusSuccess
+			}
 			record.Content = result.Content
 			record.ToolCallID = result.ToolCallID
 			record.ToolName = result.Name
+			record.ToolStatus = string(status)
+			record.ToolError = result.ErrorMessage
+			record.ToolErrorCode = result.ErrorCode
+			record.ToolTruncated = result.Truncated
 		} else {
 			record.Content = message.Text()
 		}

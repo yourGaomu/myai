@@ -14,6 +14,7 @@ import (
 	"myai/core"
 	modelcommand "myai/core/application/model/command"
 	sessionresult "myai/core/application/session/result"
+	generation "myai/core/domain/generation"
 	"myai/core/llm"
 	"myai/core/service"
 	"myai/core/skill"
@@ -90,6 +91,32 @@ func runChat() {
 			printSuccess("current mode: " + string(chatService.CurrentAgentMode()))
 		case "/context":
 			printContextInfo(chatService.CurrentContextInfo())
+		case "/generation":
+			preferences, err := chatService.CurrentSessionPreferences(ctx)
+			if err != nil {
+				printError("generation settings error:", err)
+				continue
+			}
+			printSessionPreferences(preferences)
+		case "/generation reset":
+			if err := chatService.SetGenerationSettings(ctx, generation.Settings{}); err != nil {
+				printError("generation settings error:", err)
+				continue
+			}
+			printSuccess("session generation settings reset to model defaults.")
+		case "/style":
+			preferences, err := chatService.CurrentSessionPreferences(ctx)
+			if err != nil {
+				printError("style error:", err)
+				continue
+			}
+			printStyleInstruction(preferences.StyleInstruction)
+		case "/style reset":
+			if err := chatService.SetStyleInstruction(ctx, ""); err != nil {
+				printError("style error:", err)
+				continue
+			}
+			printSuccess("session style reset.")
 		case "/compact":
 			printWarning("compacting context...")
 			info, err := chatService.CompactCurrentSession(ctx)
@@ -110,6 +137,30 @@ func runChat() {
 			}
 			printModels(chatService)
 		default:
+			if strings.HasPrefix(input, "/generation set ") {
+				settings, err := parseGenerationSettings(input)
+				if err != nil {
+					printWarning(err.Error())
+					continue
+				}
+				if err := chatService.SetGenerationSettings(ctx, settings); err != nil {
+					printError("generation settings error:", err)
+					continue
+				}
+				printSuccess("session generation settings updated.")
+				continue
+			}
+
+			if strings.HasPrefix(input, "/style ") {
+				instruction := strings.TrimSpace(strings.TrimPrefix(input, "/style "))
+				if err := chatService.SetStyleInstruction(ctx, instruction); err != nil {
+					printError("style error:", err)
+					continue
+				}
+				printSuccess("session style updated.")
+				continue
+			}
+
 			if strings.HasPrefix(input, "/permission ") {
 				mode := strings.TrimSpace(strings.TrimPrefix(input, "/permission "))
 				if err := chatService.SetPermissionMode(ctx, mode); err != nil {
@@ -209,6 +260,30 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 	if err != nil {
 		return err
 	}
+	temperatureText, err := readModelField(reader, "default temperature", "default", false)
+	if err != nil {
+		return err
+	}
+	topPText, err := readModelField(reader, "default top_p", "default", false)
+	if err != nil {
+		return err
+	}
+	maxTokensText, err := readModelField(reader, "default max output tokens", "default", false)
+	if err != nil {
+		return err
+	}
+	temperature, err := parseOptionalFloat(temperatureText, "temperature")
+	if err != nil {
+		return err
+	}
+	topP, err := parseOptionalFloat(topPText, "top_p")
+	if err != nil {
+		return err
+	}
+	maxOutputTokens, err := parseOptionalInt(maxTokensText, "max output tokens")
+	if err != nil {
+		return err
+	}
 
 	config := modelcommand.AddConfig{
 		ID:        id,
@@ -217,6 +292,11 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
 		ModelName: modelName,
+		DefaultGenerationSettings: generation.Settings{
+			Temperature:     temperature,
+			TopP:            topP,
+			MaxOutputTokens: maxOutputTokens,
+		},
 	}
 	if err := chatService.AddModelConfig(ctx, config); err != nil {
 		return err
@@ -224,6 +304,52 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 
 	printSuccess("model added: " + id)
 	return nil
+}
+
+func parseGenerationSettings(input string) (generation.Settings, error) {
+	fields := strings.Fields(input)
+	if len(fields) != 5 || fields[0] != "/generation" || fields[1] != "set" {
+		return generation.Settings{}, errors.New("usage: /generation set <temperature|default> <top_p|default> <max_tokens|default>")
+	}
+	temperature, err := parseOptionalFloat(fields[2], "temperature")
+	if err != nil {
+		return generation.Settings{}, err
+	}
+	topP, err := parseOptionalFloat(fields[3], "top_p")
+	if err != nil {
+		return generation.Settings{}, err
+	}
+	maxOutputTokens, err := parseOptionalInt(fields[4], "max tokens")
+	if err != nil {
+		return generation.Settings{}, err
+	}
+	return generation.Settings{
+		Temperature:     temperature,
+		TopP:            topP,
+		MaxOutputTokens: maxOutputTokens,
+	}, nil
+}
+
+func parseOptionalFloat(input string, name string) (*float64, error) {
+	if strings.EqualFold(strings.TrimSpace(input), "default") {
+		return nil, nil
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(input), 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return &value, nil
+}
+
+func parseOptionalInt(input string, name string) (*int, error) {
+	if strings.EqualFold(strings.TrimSpace(input), "default") {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(input))
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return &value, nil
 }
 
 func readModelField(reader *bufio.Scanner, label string, defaultValue string, required bool) (string, error) {
