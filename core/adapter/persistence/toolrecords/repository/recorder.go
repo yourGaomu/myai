@@ -15,11 +15,12 @@ import (
 const defaultTimeout = 10 * time.Second
 
 type Recorder struct {
-	Persistence toolrecordsport.Persistence
-	IDs         toolrecordsport.IDGenerator
-	RunAsync    toolrecordsport.AsyncRunner
-	Timeout     time.Duration
-	OnError     func(error)
+	Persistence        toolrecordsport.Persistence
+	IDs                toolrecordsport.IDGenerator
+	RunAsync           toolrecordsport.AsyncRunner
+	RunAsyncForSession toolrecordsport.SessionAsyncRunner
+	Timeout            time.Duration
+	OnError            func(error)
 }
 
 func (r Recorder) RecordToolExecution(ctx context.Context, command generationcommand.ToolExecutionRecord) {
@@ -32,7 +33,8 @@ func (r Recorder) RecordToolExecution(ctx context.Context, command generationcom
 
 	entries := append([]domaintool.ExecutionEntry(nil), command.Entries...)
 	assets := append([]domaintool.SharedAsset(nil), command.Assets...)
-	r.run(func() {
+	sessionID := toolSessionID(entries, assets)
+	r.run(sessionID, func() {
 		saveCtx, cancel := context.WithTimeout(context.Background(), r.timeout())
 		defer cancel()
 
@@ -42,12 +44,34 @@ func (r Recorder) RecordToolExecution(ctx context.Context, command generationcom
 	})
 }
 
-func (r Recorder) run(task func()) {
-	if r.RunAsync != nil {
-		r.RunAsync(task)
+func (r Recorder) run(sessionID string, task func()) {
+	if r.RunAsyncForSession != nil && sessionID != "" {
+		if err := r.RunAsyncForSession(sessionID, task); err != nil {
+			r.report(fmt.Errorf("schedule tool record persistence: %w", err))
+		}
 		return
 	}
-	go task()
+	if r.RunAsync != nil {
+		if err := r.RunAsync(task); err != nil {
+			r.report(fmt.Errorf("schedule tool record persistence: %w", err))
+		}
+		return
+	}
+	task()
+}
+
+func toolSessionID(entries []domaintool.ExecutionEntry, assets []domaintool.SharedAsset) string {
+	for _, entry := range entries {
+		if entry.SessionID != "" {
+			return entry.SessionID
+		}
+	}
+	for _, asset := range assets {
+		if asset.SessionID != "" {
+			return asset.SessionID
+		}
+	}
+	return ""
 }
 
 func (r Recorder) saveRecords(ctx context.Context, entries []domaintool.ExecutionEntry, assets []domaintool.SharedAsset) error {

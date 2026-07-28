@@ -77,7 +77,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	// 先把整体计划置为 running 并持久化，手机端会立即收到状态更新。
 	currentPlan = s.State.Start(currentPlan)
 	if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-		return planresult.Execution{}, err
+		return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
 	}
 
 	combined := planresult.Execution{SessionID: current.ID}
@@ -88,21 +88,19 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 		}
 		// 每个步骤都是独立生成任务；中途取消时保留已完成步骤，并把整体计划标记为 canceled。
 		if err := ctx.Err(); err != nil {
-			currentPlan = s.State.MarkCanceled(currentPlan)
-			_, _ = s.savePlanState(context.Background(), current, currentPlan, updates)
-			return planresult.Execution{}, err
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
 
 		currentPlan = s.State.MarkStepRunning(currentPlan, index)
 		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-			return planresult.Execution{}, err
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
 
 		// 把目标、当前步骤和完整计划转换成一条明确的用户消息，保证模型只处理当前步骤。
 		input := s.Inputs.BuildStepInput(currentPlan, currentPlan.Steps[index], index, len(currentPlan.Steps))
 		prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
 		if err != nil {
-			return planresult.Execution{}, err
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
 		current = prepared.Session
 		title := ""
@@ -113,6 +111,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 				SessionID: current.ID, Model: current.Model, Title: title, Input: input,
 				RuntimeInstruction: prepared.RuntimeInstruction,
+				SessionSnapshot:    session.Clone(current),
 			})
 		}
 
@@ -121,18 +120,12 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			Session: current, LatestInput: input, Title: title, Reason: "execute plan step", Stream: command.Stream, ForceChatMode: true,
 		})
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-				currentPlan = s.State.MarkCanceled(currentPlan)
-			} else {
-				currentPlan = s.State.MarkStepFailed(currentPlan, index)
-			}
-			_, _ = s.savePlanState(context.Background(), current, currentPlan, updates)
-			return planresult.Execution{}, err
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
 
 		currentPlan = s.State.MarkStepDone(currentPlan, index)
 		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-			return planresult.Execution{}, err
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
 		combined = s.combine(combined, response)
 		executedSteps++
@@ -140,10 +133,34 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 
 	currentPlan = s.State.MarkDone(currentPlan)
 	if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-		return planresult.Execution{}, err
+		return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
 	}
 	combined.Plan = agentplan.Clone(currentPlan)
 	return combined, nil
+}
+
+func (s ExecutionService) finishWithError(current *session.Session, currentPlan *agentplan.Plan, stepIndex int, cause error, updates planport.UpdateSink) error {
+	if errors.Is(cause, context.Canceled) {
+		currentPlan = s.State.MarkCanceled(currentPlan)
+	} else {
+		currentPlan = s.State.MarkStepFailed(currentPlan, stepIndex)
+	}
+	if _, err := s.savePlanState(context.Background(), current, currentPlan, updates); err == nil {
+		return cause
+	} else {
+		// A failed persistence call must not leave the live aggregate showing a
+		// running Plan. Publish the terminal snapshot and report both failures.
+		if current != nil {
+			current.CurrentPlan = agentplan.Clone(currentPlan)
+		}
+		if updates != nil {
+			updates.PlanUpdated(agentplan.Clone(currentPlan))
+		}
+		if s.Events != nil && current != nil {
+			s.Events.SessionChanged(context.Background(), current.ID, "plan")
+		}
+		return errors.Join(cause, fmt.Errorf("save terminal plan state: %w", err))
+	}
 }
 
 func (s ExecutionService) savePlanState(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, updates planport.UpdateSink) (*agentplan.Plan, error) {
@@ -151,11 +168,11 @@ func (s ExecutionService) savePlanState(ctx context.Context, current *session.Se
 		return nil, errors.New("session is nil")
 	}
 	if s.PlanStates != nil {
-		var err error
-		currentPlan, err = s.PlanStates.Save(ctx, plancommandapp.SaveState{SessionID: current.ID, Model: current.Model, Plan: currentPlan})
+		saved, err := s.PlanStates.Save(ctx, plancommandapp.SaveState{SessionID: current.ID, Model: current.Model, Plan: currentPlan})
 		if err != nil {
-			return nil, err
+			return currentPlan, err
 		}
+		currentPlan = saved
 	}
 	// 每次状态变化同时更新内存、持久层、手机推送和 Hook，四处看到的是同一份 Plan 快照。
 	current.CurrentPlan = agentplan.Clone(currentPlan)

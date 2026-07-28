@@ -12,3 +12,10 @@ type DocumentObjectStore interface {
 	Open(ctx context.Context, objectKey string) (io.ReadCloser, error)
 	Stat(ctx context.Context, objectKey string) (domainknowledge.ObjectInfo, error)
 }
+
+// UncommittedDocumentObjectCleaner removes an uploaded object only when no
+// Document record was ever committed for it. Business deletion remains a
+// logical deletion and must not use this port.
+type UncommittedDocumentObjectCleaner interface {
+	DeleteUncommitted(ctx context.Context, objectKey string) error
+}

@@ -7,6 +7,7 @@ import (
 	openaiembedding "myai/core/adapter/embedding/openaicompatible"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
 	minioadapter "myai/core/adapter/objectstorage/minio"
+	opensandboxadapter "myai/core/adapter/sandbox/opensandbox"
 	milvusadapter "myai/core/adapter/vectorstore/milvus"
 	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
 	"myai/core/asset"
@@ -153,6 +154,21 @@ func (Mapper) DocumentProcessorConfig(properties DocumentProcessorProperties) gr
 		ChunkBatchSize:      properties.ChunkBatchSize,
 		GRPCMaxMessageBytes: properties.GRPCMaxMessageMB * 1024 * 1024,
 		TempDir:             properties.TempDirectory,
+	}
+}
+
+func (Mapper) OpenSandboxConfig(properties OpenSandboxProperties) opensandboxadapter.Config {
+	return opensandboxadapter.Config{
+		Endpoint:         properties.Endpoint,
+		APIKey:           properties.APIKey,
+		UseServerProxy:   properties.UseServerProxy,
+		Image:            properties.Image,
+		CPU:              properties.CPU,
+		Memory:           properties.Memory,
+		SandboxTimeout:   time.Duration(properties.SandboxTimeoutSeconds) * time.Second,
+		CommandTimeout:   time.Duration(properties.CommandTimeoutSeconds) * time.Second,
+		RequestTimeout:   time.Duration(properties.RequestTimeoutSeconds) * time.Second,
+		MaxDownloadBytes: properties.MaxDownloadMB * 1024 * 1024,
 	}
 }
 

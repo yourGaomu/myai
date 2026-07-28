@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,7 +18,12 @@ import (
 )
 
 func newTestServer() *Server {
-	return NewServer("", memoryauthorization.NewStore())
+	return NewServer(
+		"",
+		memoryauthorization.NewStore(),
+		WithAgentCredentials(AgentCredential{UserID: "local", DeviceID: "pc-local", Token: "test-agent-token"}),
+		WithAllowedOrigins("http://localhost:19006"),
+	)
 }
 
 func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
@@ -487,6 +493,83 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 	}
 }
 
+func TestRelayForwardsRAGAndKnowledgeMessages(t *testing.T) {
+	testCases := []struct {
+		request  protocol.MessageType
+		response protocol.MessageType
+	}{
+		{protocol.TypeSessionRAGSet, protocol.TypeSessionRAGSetResult},
+		{protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCatalogListResult},
+		{protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeCatalogMutationResult},
+		{protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentListResult},
+		{protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentMutationResult},
+		{protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentMutationResult},
+		{protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeDocumentMutationResult},
+		{protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeProfileListResult},
+		{protocol.TypeKnowledgeSearchPreview, protocol.TypeKnowledgeSearchPreviewResult},
+	}
+
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	for index, testCase := range testCases {
+		requestID := fmt.Sprintf("knowledge-%d", index)
+		writeTestMessage(t, clientConn, protocol.Message{
+			Type:        testCase.request,
+			RequestID:   requestID,
+			UserID:      "local",
+			DeviceID:    "pc-local",
+			SessionID:   "session-1",
+			ClientToken: clientToken,
+		})
+
+		forwardedRequest := readTestMessage(t, agentConn, testCase.request)
+		if forwardedRequest.RequestID != requestID {
+			t.Fatalf("%s request id = %s, want %s", testCase.request, forwardedRequest.RequestID, requestID)
+		}
+		readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+		writeTestMessage(t, agentConn, protocol.Message{
+			Type:      testCase.response,
+			RequestID: requestID,
+			UserID:    "local",
+			DeviceID:  "pc-local",
+			SessionID: "session-1",
+		})
+
+		forwardedResponse := readTestMessage(t, clientConn, testCase.response)
+		if forwardedResponse.RequestID != requestID {
+			t.Fatalf("%s response id = %s, want %s", testCase.response, forwardedResponse.RequestID, requestID)
+		}
+		readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+		if !isTerminalResponseForRequest(testCase.request, testCase.response) {
+			t.Fatalf("%s must be terminal for %s", testCase.response, testCase.request)
+		}
+	}
+}
+
+func TestSessionContextQueryResultIsTerminal(t *testing.T) {
+	if !isTerminalResponseForRequest(protocol.TypeSessionContextQuery, protocol.TypeSessionContextQueryResult) {
+		t.Fatal("session context query result must complete its request route")
+	}
+}
+
 func TestRelayForwardsModelMessages(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
@@ -627,6 +710,48 @@ func TestRelayForwardsSkillMessages(t *testing.T) {
 	if forwardedReloadToClient.RequestID != "skill-reload-1" {
 		t.Fatalf("expected request id skill-reload-1, got %s", forwardedReloadToClient.RequestID)
 	}
+}
+
+func TestRelayForwardsSubagentEventAfterOriginalRequestCompletes(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskList, RequestID: "subagent-list-1",
+		UserID: "local", DeviceID: "pc-local", ClientToken: clientToken,
+	})
+	readTestMessage(t, agentConn, protocol.TypeSubagentTaskList)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskListResult, RequestID: "subagent-list-1",
+		UserID: "local", DeviceID: "pc-local",
+	})
+	readTestMessage(t, clientConn, protocol.TypeSubagentTaskListResult)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	if server.getClient("subagent-list-1") != nil {
+		t.Fatal("expected terminal task-list response to release its request route")
+	}
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskEvent, RequestID: "background-event-1",
+		UserID: "local", DeviceID: "pc-local", SessionID: "parent-session-1",
+	})
+	event := readTestMessage(t, clientConn, protocol.TypeSubagentTaskEvent)
+	if event.RequestID != "background-event-1" || event.SessionID != "parent-session-1" {
+		t.Fatalf("unexpected subagent event: %#v", event)
+	}
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
 }
 
 func TestRelayForwardsFileMessages(t *testing.T) {
@@ -858,6 +983,194 @@ func TestRelayRejectsClientWithoutToken(t *testing.T) {
 	}
 }
 
+func TestRelayRejectsAgentWebSocketWithoutSharedToken(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/ws/agent"
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected unauthenticated agent websocket to be rejected")
+	}
+	if response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %#v", http.StatusUnauthorized, response)
+	}
+}
+
+func TestRelayRejectsAgentCredentialForDifferentIdentity(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/ws/agent"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer test-agent-token")
+	headers.Set(protocol.HeaderAgentUserID, "local")
+	headers.Set(protocol.HeaderAgentDeviceID, "other-device")
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected identity-bound credential to reject a different device")
+	}
+	if response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %#v", http.StatusUnauthorized, response)
+	}
+}
+
+func TestRelayRejectsAgentRegistrationThatDoesNotMatchCredential(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+
+	writeAgentOnline(t, agentConn, "other-user", "other-device", "123456")
+	errorMessage := readTestMessage(t, agentConn, protocol.TypeError)
+	payload, err := protocol.DecodePayload[protocol.ErrorPayload](errorMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Message != "agent registration identity does not match its credential" {
+		t.Fatalf("unexpected error message: %s", payload.Message)
+	}
+}
+
+func TestRelayRejectsUntrustedWebSocketOrigin(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/ws/agent"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer test-agent-token")
+	headers.Set(protocol.HeaderAgentUserID, "local")
+	headers.Set(protocol.HeaderAgentDeviceID, "pc-local")
+	headers.Set("Origin", "https://attacker.example")
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected untrusted websocket origin to be rejected")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %#v", http.StatusForbidden, response)
+	}
+}
+
+func TestRelayProtectsAgentInventory(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	response, err := testServer.Client().Get(testServer.URL + "/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.StatusCode)
+	}
+
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/agents", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-agent-token")
+	request.Header.Set(protocol.HeaderAgentUserID, "local")
+	request.Header.Set(protocol.HeaderAgentDeviceID, "pc-local")
+	response, err = testServer.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.StatusCode)
+	}
+}
+
+func TestRelayLimitsPairedClientInventoryToItsAgent(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/agents?user_id=local&device_id=pc-local", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+clientToken)
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.StatusCode)
+	}
+	var payload agentsResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Agents) != 1 || payload.Agents[0].UserID != "local" || payload.Agents[0].DeviceID != "pc-local" {
+		t.Fatalf("unexpected client-visible agents: %#v", payload.Agents)
+	}
+
+	otherRequest, err := http.NewRequest(http.MethodGet, testServer.URL+"/agents?user_id=other&device_id=other", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRequest.Header.Set("Authorization", "Bearer "+clientToken)
+	otherResponse, err := testServer.Client().Do(otherRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherResponse.Body.Close()
+	if otherResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected cross-identity inventory status %d, got %d", http.StatusUnauthorized, otherResponse.StatusCode)
+	}
+}
+
+func TestRelayRejectsUnsupportedClientMessage(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:      protocol.MessageType("unknown_request"),
+		RequestID: "unknown-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+
+	errorMessage := readTestMessage(t, clientConn, protocol.TypeError)
+	payload, err := protocol.DecodePayload[protocol.ErrorPayload](errorMessage)
+	if err != nil {
+		t.Fatalf("decode error payload failed: %v", err)
+	}
+	if payload.Message != "unsupported client message type: unknown_request" {
+		t.Fatalf("unexpected error message: %s", payload.Message)
+	}
+}
+
 func TestRelayPairsAgentByBindCode(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
@@ -1060,7 +1373,11 @@ func revokeTestAuthorization(t *testing.T, server *httptest.Server, userID strin
 func dialTestWebSocket(t *testing.T, url string) *websocket.Conn {
 	t.Helper()
 
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer test-agent-token")
+	headers.Set(protocol.HeaderAgentUserID, "local")
+	headers.Set(protocol.HeaderAgentDeviceID, "pc-local")
+	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
 	if err != nil {
 		t.Fatalf("dial websocket %s failed: %v", url, err)
 	}

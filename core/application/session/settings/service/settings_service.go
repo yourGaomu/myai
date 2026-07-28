@@ -50,8 +50,7 @@ func (s SettingsService) SwitchModel(ctx context.Context, command settingscomman
 	if err := s.Memory.SwitchModelForSession(current.ID, modelID); err != nil {
 		return nil, err
 	}
-	current.Model = modelID
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetPermissionMode(ctx context.Context, command settingscommand.SetPermissionMode) (*session.Session, error) {
@@ -71,8 +70,7 @@ func (s SettingsService) SetPermissionMode(ctx context.Context, command settings
 	if err := s.Memory.SetPermissionModeForSession(current.ID, permissionMode); err != nil {
 		return nil, err
 	}
-	current.PermissionMode = permissionMode
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetAgentMode(ctx context.Context, command settingscommand.SetAgentMode) (*session.Session, error) {
@@ -92,8 +90,7 @@ func (s SettingsService) SetAgentMode(ctx context.Context, command settingscomma
 	if err := s.Memory.SetAgentModeForSession(current.ID, agentMode); err != nil {
 		return nil, err
 	}
-	current.AgentMode = session.NormalizeAgentMode(agentMode)
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetContextWindow(ctx context.Context, command settingscommand.SetContextWindow) (*session.Session, error) {
@@ -111,8 +108,7 @@ func (s SettingsService) SetContextWindow(ctx context.Context, command settingsc
 	if err := s.Memory.SetContextWindowKForSession(current.ID, command.WindowK); err != nil {
 		return nil, err
 	}
-	current.ContextWindowK = contextmgr.NormalizeWindowK(command.WindowK)
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetGenerationSettings(ctx context.Context, command settingscommand.SetGenerationSettings) (*session.Session, error) {
@@ -131,8 +127,7 @@ func (s SettingsService) SetGenerationSettings(ctx context.Context, command sett
 	if err := s.Memory.SetGenerationSettingsForSession(current.ID, settings); err != nil {
 		return nil, err
 	}
-	current.GenerationSettings = settings
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetStyleInstruction(ctx context.Context, command settingscommand.SetStyleInstruction) (*session.Session, error) {
@@ -151,8 +146,7 @@ func (s SettingsService) SetStyleInstruction(ctx context.Context, command settin
 	if err := s.Memory.SetStyleInstructionForSession(current.ID, instruction); err != nil {
 		return nil, err
 	}
-	current.StyleInstruction = instruction
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) SetRAGSettings(ctx context.Context, command settingscommand.SetRAGSettings) (*session.Session, error) {
@@ -171,8 +165,7 @@ func (s SettingsService) SetRAGSettings(ctx context.Context, command settingscom
 	if err := s.Memory.SetRAGSettingsForSession(current.ID, settings); err != nil {
 		return nil, err
 	}
-	current.RAGSettings = session.CloneRAGSettings(settings)
-	return current, nil
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s SettingsService) ensureInMemory(ctx context.Context, sessionID string) (*session.Session, error) {

@@ -1,7 +1,7 @@
 package threadpool
 
 import (
-	"errors"
+	asyncport "myai/core/port/async"
 )
 
 type Executor struct {
@@ -10,7 +10,7 @@ type Executor struct {
 
 func (e Executor) Submit(task func()) error {
 	if e.Pool == nil {
-		return errors.New("thread pool is nil")
+		return asyncport.ErrExecutorUnavailable
 	}
 	return e.Pool.Submit(task)
 }

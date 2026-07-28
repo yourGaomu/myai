@@ -32,13 +32,13 @@ func TestCompactServiceCompactSessionSummarizesAndSaves(t *testing.T) {
 	if summarizer.existingSummary != "old summary" {
 		t.Fatalf("expected existing summary to be forwarded, got %q", summarizer.existingSummary)
 	}
-	if len(summarizer.messages) != 4 {
-		t.Fatalf("expected four compacted messages, got %d", len(summarizer.messages))
+	if len(summarizer.messages) != 2 {
+		t.Fatalf("expected one complete turn to be compacted, got %d messages", len(summarizer.messages))
 	}
-	if store.summary != "new summary" || store.compactedMessages != 5 {
+	if store.summary != "new summary" || store.compactedMessages != 3 {
 		t.Fatalf("expected saved summary and cutoff, got summary=%q cutoff=%d", store.summary, store.compactedMessages)
 	}
-	if current.Summary != "new summary" || current.CompactedMessages != 5 {
+	if current.Summary != "new summary" || current.CompactedMessages != 3 {
 		t.Fatalf("expected store to update session state, got summary=%q compacted=%d", current.Summary, current.CompactedMessages)
 	}
 }

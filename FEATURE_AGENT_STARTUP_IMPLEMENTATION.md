@@ -36,6 +36,7 @@ cd D:\Go_All\myai
 
 go run . agent `
   --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user local `
   --device pc-local `
   --bind-code 123456 `
@@ -45,7 +46,7 @@ go run . agent `
 其中 Relay 应当已经启动：
 
 ```powershell
-go run . relay --addr 0.0.0.0:18080
+go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 ```
 
 ### 2.1 参数含义
@@ -53,6 +54,7 @@ go run . relay --addr 0.0.0.0:18080
 | 参数 | 绑定变量 | 默认值 | 作用 |
 |---|---|---|---|
 | `--server` | `agentServerURL` | 空 | Relay 的 Agent WebSocket 地址，必须包含 `/ws/agent` |
+| `--relay-token` | `agentRelayToken` | `MYAI_RELAY_AGENT_TOKEN` | Agent 在 WebSocket Upgrade 前提交的设备凭据；Relay 同时校验 `--user/--device` |
 | `--user` | `agentUserID` | `local` | Relay 中的用户路由标识 |
 | `--device` | `agentDeviceID` | `pc-local` | Relay 中的设备路由标识 |
 | `--bind-code` | `agentBindCode` | 空 | 手机配对码；为空时由 `Agent.New` 生成六位码 |
@@ -379,7 +381,7 @@ type Application struct {
 	skillManager   *skill.Manager
 	hookManager    *hook.Manager
 	mcpManager     *mcp.Manager
-	sandbox        sandbox.Sandbox
+	localCommandExecutor executionport.CommandExecutor
 	defaultModelID string
 	workspace      string
 }
@@ -390,7 +392,7 @@ type Application struct {
 | 分组 | 字段 | 含义 |
 |---|---|---|
 | 配置 | `properties`、`workspace` | 其他对象的创建参数 |
-| 基础设施 | `mongoDb`、`redisDb`、`threadPool`、`sandbox` | 技术资源 |
+| 基础设施 | `mongoDb`、`redisDb`、`threadPool`、`localCommandExecutor` | 技术资源；`localCommandExecutor` 在宿主机执行命令，不提供沙箱隔离 |
 | Adapter | `store`、`cache`、`assetClient`、`client` | 对应用层接口的具体实现 |
 | 应用入口 | `chatService`、`toolRegister`、`skillManager`、`hookManager`、`mcpManager` | 业务门面与扩展能力 |
 
@@ -575,13 +577,13 @@ app.threadPool = adapterthreadpool.New(
 
 线程池创建固定数量的 worker goroutine，负责异步持久化消息、工具记录等任务。它不是模型推理线程池。
 
-### 10.4 Sandbox
+### 10.4 本地命令执行器与 OpenSandbox
 
 ```go
-localSandbox, err := sandbox.NewLocalSandbox(app.workspace)
+localExecutor, err := localexecutor.New(app.workspace)
 ```
 
-Sandbox 在这里把 workspace 规范化为绝对路径并检查目录存在。之后 Shell Tool 的 `work_dir` 必须位于这个目录内。
+本地命令执行器会把 workspace 规范化为绝对路径并检查目录存在，Shell Tool 的 `work_dir` 必须位于这个目录内。它运行在宿主机上，不提供 OS 或容器隔离；只有会话工作区使用 `opensandbox` 模式时，命令才会路由到真正隔离的 OpenSandbox 环境。
 
 ## 11. 模型是如何注册的
 
@@ -1109,7 +1111,8 @@ Application.cache = Redis CurrentSessionCache adapter
 Application.client = model registry with >= 1 model
 Application.defaultModelID = 当前默认模型
 Application.sessionMemory = current Session in memory
-Application.sandbox = LocalSandbox(workspace)
+Application.localCommandExecutor = local host CommandExecutor(workspace, isolated=false)
+Application.isolatedSandboxManager = OpenSandbox manager（仅 provider=opensandbox）
 Application.toolRegister = local tools + MCP tools
 Application.chatService = fully composed ChatService
 
@@ -1193,6 +1196,7 @@ Relay 收到 `agent_offline` 后调用 `unregisterAgent`，删除 `agents` 和 `
 ```powershell
 go run . agent `
   --server ws://192.168.1.10:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user gaomu `
   --device office-pc `
   --workspace D:\Projects\demo
@@ -1203,6 +1207,7 @@ go run . agent `
 ```text
 1. Cobra:
    agentServerURL = ws://192.168.1.10:18080/ws/agent
+   agentRelayToken = replace-with-a-strong-token
    agentUserID = gaomu
    agentDeviceID = office-pc
    agentBindCode = ""
@@ -1336,18 +1341,23 @@ go test ./...
 
 ```powershell
 # Terminal 1
-go run . relay --addr 127.0.0.1:18080
+go run . relay --addr 127.0.0.1:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 
 # Terminal 2
 go run . agent `
   --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user local `
   --device pc-local `
   --bind-code 123456 `
   --workspace D:\Go_All\myai
 
 # Terminal 3
-Invoke-RestMethod http://127.0.0.1:18080/agents
+Invoke-RestMethod http://127.0.0.1:18080/agents -Headers @{
+  Authorization = "Bearer replace-with-a-strong-token"
+  "X-MyAI-Agent-User-ID" = "local"
+  "X-MyAI-Agent-Device-ID" = "pc-local"
+}
 ```
 
 验收点：

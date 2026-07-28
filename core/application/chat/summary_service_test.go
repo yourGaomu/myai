@@ -53,6 +53,9 @@ func TestSummaryServiceBuildsPromptAndReturnsTrimmedSummary(t *testing.T) {
 	if strings.Contains(prompt, "system should be ignored") {
 		t.Fatalf("expected system messages to be excluded, got:\n%s", prompt)
 	}
+	if model.request.Settings.MaxOutputTokens != 768 || model.request.Settings.Temperature != 0.2 {
+		t.Fatalf("expected bounded summary settings, got %#v", model.request.Settings)
+	}
 }
 
 func TestSummaryServiceRejectsEmptyInput(t *testing.T) {

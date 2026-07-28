@@ -31,6 +31,8 @@ import { useSessionModelActions } from "../hooks/useSessionModelActions";
 import { useSessionModelState } from "../hooks/useSessionModelState";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
 import { useSkillState } from "../hooks/useSkillState";
+import { useSubagentActions } from "../hooks/useSubagentActions";
+import { useSubagentState } from "../hooks/useSubagentState";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -111,6 +113,16 @@ export function MobileAppScreen() {
     setMessage: setKnowledgeMessage,
     setSelectedKnowledgeBaseID,
   } = useKnowledgeState();
+  const {
+    applyDefinitionList: applySubagentDefinitionList,
+    applyDefinitionMutation: applySubagentDefinitionMutation,
+    applyTaskList: applySubagentTaskList,
+    applyTaskResult: applySubagentTaskResult,
+    definitions: subagentDefinitions,
+    message: subagentMessage,
+    setMessage: setSubagentMessage,
+    tasks: subagentTasks,
+  } = useSubagentState();
   const {
     changeDiff,
     changes,
@@ -217,6 +229,24 @@ export function MobileAppScreen() {
     userID,
   });
   const activeKnowledgeBase = knowledgeBases.find((base) => base.id === selectedKnowledgeBaseID);
+  const {
+    applyTask: applySubagentTask,
+    cancelTask: cancelSubagentTask,
+    checkTask: checkSubagentTask,
+    createDefinition: createSubagentDefinition,
+    deleteDefinition: deleteSubagentDefinition,
+    discardTask: discardSubagentTask,
+    requestDefinitions: requestSubagentDefinitions,
+    requestTasks: requestSubagentTasks,
+    updateDefinition: updateSubagentDefinition,
+  } = useSubagentActions({
+    clientToken,
+    onError: setSubagentMessage,
+    sendEnvelope,
+    sessionID,
+    startPending,
+    stopPending,
+  });
 
   const {
     refreshRemoteState,
@@ -291,6 +321,7 @@ export function MobileAppScreen() {
   const {
     compactSession,
     executePlan,
+    requestContextInfo,
     setAgentMode,
     setContextWindowK,
     setPermissionMode,
@@ -474,6 +505,10 @@ export function MobileAppScreen() {
     applyModelList,
     applyModelSwitch,
     applySkillList,
+    applySubagentDefinitionList,
+    applySubagentDefinitionMutation,
+    applySubagentTaskList,
+    applySubagentTaskResult,
     applySessionChanged,
     applySessionHistoryDelta,
     applySessionHistoryMeta,
@@ -511,7 +546,9 @@ export function MobileAppScreen() {
     refreshRemoteState();
     requestCatalog();
     requestProfiles();
-  }, [refreshRemoteState, requestCatalog, requestProfiles]);
+    requestSubagentDefinitions();
+    requestSubagentTasks();
+  }, [refreshRemoteState, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
@@ -702,6 +739,7 @@ export function MobileAppScreen() {
           onExecutePlan: executePlan,
           onOpenPlan: openPlan,
           onRefreshModels: requestModels,
+          onRequestContextInfo: requestContextInfo,
           onRefreshSessions: requestSessions,
           onRefreshSkills: requestSkills,
           onReloadSkills: reloadSkills,
@@ -711,6 +749,14 @@ export function MobileAppScreen() {
           onSetContextWindowK: setContextWindowK,
           onSetPermissionMode: setPermissionMode,
           onSwitchModel: switchModel,
+          onApplySubagentTask: applySubagentTask,
+          onCancelSubagentTask: cancelSubagentTask,
+          onCheckSubagentTask: checkSubagentTask,
+          onCreateSubagentDefinition: createSubagentDefinition,
+          onDeleteSubagentDefinition: deleteSubagentDefinition,
+          onDiscardSubagentTask: discardSubagentTask,
+          onRefreshSubagents: () => { requestSubagentDefinitions(); requestSubagentTasks(); },
+          onUpdateSubagentDefinition: updateSubagentDefinition,
           onUserIDChange: setUserID,
           relayURL,
           sessionID,
@@ -719,6 +765,9 @@ export function MobileAppScreen() {
           skillMessage,
           skillRoot,
           skills,
+          subagentDefinitions,
+          subagentMessage,
+          subagentTasks,
           userID,
         }}
       />

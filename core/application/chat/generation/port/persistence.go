@@ -10,7 +10,6 @@ import (
 
 type Persistence interface {
 	PersistAssistant(current *session.Session, result modelport.ChatResult)
-	PersistCurrentSession(sessionID string)
 }
 
 type AutoCompactor interface {

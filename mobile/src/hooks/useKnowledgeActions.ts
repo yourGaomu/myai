@@ -217,13 +217,20 @@ export function useKnowledgeActions({
   }, [clientToken, sendEnvelope, startPending, stopPending]);
 
   const setRAGSettings = useCallback((settings: RAGSettings) => {
-    if (!clientToken || !sessionID) return false;
+    if (!clientToken) {
+      onError("请先完成配对");
+      return false;
+    }
+    if (!sessionID) {
+      onError("请先加载会话");
+      return false;
+    }
     startPending("settings");
     const payload: SessionRAGSetPayload = { session_id: sessionID, ...settings };
     const sent = sendEnvelope("session_rag_set", { request_id: newRequestID(), session_id: sessionID, payload });
     if (!sent) stopPending("settings");
     return sent;
-  }, [clientToken, sendEnvelope, sessionID, startPending, stopPending]);
+  }, [clientToken, onError, sendEnvelope, sessionID, startPending, stopPending]);
 
   return {
     createCategory,

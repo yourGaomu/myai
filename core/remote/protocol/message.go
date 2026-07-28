@@ -5,96 +5,117 @@ import (
 	"time"
 )
 
+const (
+	HeaderAgentUserID   = "X-MyAI-Agent-User-ID"
+	HeaderAgentDeviceID = "X-MyAI-Agent-Device-ID"
+)
+
 type MessageType string
 
 const (
-	TypeAgentOnline                     MessageType = "agent_online"
-	TypeAgentOffline                    MessageType = "agent_offline"
-	TypeUserMessage                     MessageType = "user_message"
-	TypeAssistantDelta                  MessageType = "assistant_delta"
-	TypeAssistantDone                   MessageType = "assistant_done"
-	TypeToolCall                        MessageType = "tool_call"
-	TypeToolResult                      MessageType = "tool_result"
-	TypePermissionAsk                   MessageType = "permission_ask"
-	TypePermissionResult                MessageType = "permission_result"
-	TypeSessionList                     MessageType = "session_list"
-	TypeSessionListResult               MessageType = "session_list_result"
-	TypeSessionNew                      MessageType = "session_new"
-	TypeSessionLoad                     MessageType = "session_load"
-	TypeSessionDelete                   MessageType = "session_delete"
-	TypeSessionDeleteResult             MessageType = "session_delete_result"
-	TypeSessionRestore                  MessageType = "session_restore"
-	TypeSessionRestoreResult            MessageType = "session_restore_result"
-	TypeSessionChanged                  MessageType = "session_changed"
-	TypeSessionHistory                  MessageType = "session_history"
-	TypeSessionHistoryResult            MessageType = "session_history_result"
-	TypeSessionHistoryMeta              MessageType = "session_history_meta"
-	TypeSessionHistoryMetaResult        MessageType = "session_history_meta_result"
-	TypeSessionHistoryDelta             MessageType = "session_history_delta"
-	TypeSessionHistoryDeltaResult       MessageType = "session_history_delta_result"
-	TypeSessionPermissionSet            MessageType = "session_permission_set"
-	TypeSessionPermissionSetResult      MessageType = "session_permission_set_result"
-	TypeSessionModeSet                  MessageType = "session_mode_set"
-	TypeSessionModeSetResult            MessageType = "session_mode_set_result"
-	TypeSessionPlanExecute              MessageType = "session_plan_execute"
-	TypeSessionPlanExecuteUpdate        MessageType = "session_plan_update"
-	TypeSessionPlanExecuteResult        MessageType = "session_plan_execute_result"
-	TypeSessionContextSet               MessageType = "session_context_set"
-	TypeSessionContextSetResult         MessageType = "session_context_set_result"
-	TypeSessionRAGSet                   MessageType = "session_rag_set"
-	TypeSessionRAGSetResult             MessageType = "session_rag_set_result"
-	TypeSessionCompact                  MessageType = "session_compact"
-	TypeSessionCompactResult            MessageType = "session_compact_result"
-	TypeSessionPause                    MessageType = "session_pause"
-	TypeSessionPauseResult              MessageType = "session_pause_result"
-	TypeSessionRegenerate               MessageType = "session_regenerate"
-	TypeModelList                       MessageType = "model_list"
-	TypeModelListResult                 MessageType = "model_list_result"
-	TypeModelSwitch                     MessageType = "model_switch"
-	TypeModelSwitchResult               MessageType = "model_switch_result"
-	TypeSkillList                       MessageType = "skill_list"
-	TypeSkillListResult                 MessageType = "skill_list_result"
-	TypeSkillReload                     MessageType = "skill_reload"
-	TypeSkillReloadResult               MessageType = "skill_reload_result"
-	TypeAssetList                       MessageType = "asset_list"
-	TypeAssetListResult                 MessageType = "asset_list_result"
-	TypeKnowledgeCatalogList            MessageType = "knowledge_catalog_list"
-	TypeKnowledgeCatalogListResult      MessageType = "knowledge_catalog_list_result"
-	TypeKnowledgeCategoryCreate         MessageType = "knowledge_category_create"
-	TypeKnowledgeCategoryMove           MessageType = "knowledge_category_move"
-	TypeKnowledgeCategoryDelete         MessageType = "knowledge_category_delete"
-	TypeKnowledgeBaseCreate             MessageType = "knowledge_base_create"
-	TypeKnowledgeBaseUpdate             MessageType = "knowledge_base_update"
-	TypeKnowledgeBaseDelete             MessageType = "knowledge_base_delete"
-	TypeKnowledgeCatalogMutationResult  MessageType = "knowledge_catalog_mutation_result"
-	TypeKnowledgeDocumentList           MessageType = "knowledge_document_list"
-	TypeKnowledgeDocumentListResult     MessageType = "knowledge_document_list_result"
-	TypeKnowledgeDocumentIngest         MessageType = "knowledge_document_ingest"
-	TypeKnowledgeDocumentRetry          MessageType = "knowledge_document_retry"
-	TypeKnowledgeDocumentDelete         MessageType = "knowledge_document_delete"
-	TypeKnowledgeDocumentMutationResult MessageType = "knowledge_document_mutation_result"
-	TypeKnowledgeProfileList            MessageType = "knowledge_profile_list"
-	TypeKnowledgeProfileListResult      MessageType = "knowledge_profile_list_result"
-	TypeKnowledgeSearchPreview          MessageType = "knowledge_search_preview"
-	TypeKnowledgeSearchPreviewResult    MessageType = "knowledge_search_preview_result"
-	TypeFileList                        MessageType = "file_list"
-	TypeFileListResult                  MessageType = "file_list_result"
-	TypeFileRead                        MessageType = "file_read"
-	TypeFileReadResult                  MessageType = "file_read_result"
-	TypeChangesList                     MessageType = "changes_list"
-	TypeChangesListResult               MessageType = "changes_list_result"
-	TypeChangeDiff                      MessageType = "change_diff"
-	TypeChangeDiffResult                MessageType = "change_diff_result"
-	TypeChangeRevert                    MessageType = "change_revert"
-	TypeChangeRevertResult              MessageType = "change_revert_result"
-	TypeHistoryList                     MessageType = "history_list"
-	TypeHistoryListResult               MessageType = "history_list_result"
-	TypeHistoryDiff                     MessageType = "history_diff"
-	TypeHistoryDiffResult               MessageType = "history_diff_result"
-	TypeHistoryRevert                   MessageType = "history_revert"
-	TypeHistoryRevertResult             MessageType = "history_revert_result"
-	TypeError                           MessageType = "error"
-	TypeHeartbeat                       MessageType = "heartbeat"
+	TypeAgentOnline                      MessageType = "agent_online"
+	TypeAgentOffline                     MessageType = "agent_offline"
+	TypeUserMessage                      MessageType = "user_message"
+	TypeAssistantDelta                   MessageType = "assistant_delta"
+	TypeAssistantDone                    MessageType = "assistant_done"
+	TypeToolCall                         MessageType = "tool_call"
+	TypeToolResult                       MessageType = "tool_result"
+	TypePermissionAsk                    MessageType = "permission_ask"
+	TypePermissionResult                 MessageType = "permission_result"
+	TypeSessionList                      MessageType = "session_list"
+	TypeSessionListResult                MessageType = "session_list_result"
+	TypeSessionNew                       MessageType = "session_new"
+	TypeSessionLoad                      MessageType = "session_load"
+	TypeSessionDelete                    MessageType = "session_delete"
+	TypeSessionDeleteResult              MessageType = "session_delete_result"
+	TypeSessionRestore                   MessageType = "session_restore"
+	TypeSessionRestoreResult             MessageType = "session_restore_result"
+	TypeSessionChanged                   MessageType = "session_changed"
+	TypeSessionHistory                   MessageType = "session_history"
+	TypeSessionHistoryResult             MessageType = "session_history_result"
+	TypeSessionHistoryMeta               MessageType = "session_history_meta"
+	TypeSessionHistoryMetaResult         MessageType = "session_history_meta_result"
+	TypeSessionHistoryDelta              MessageType = "session_history_delta"
+	TypeSessionHistoryDeltaResult        MessageType = "session_history_delta_result"
+	TypeSessionPermissionSet             MessageType = "session_permission_set"
+	TypeSessionPermissionSetResult       MessageType = "session_permission_set_result"
+	TypeSessionModeSet                   MessageType = "session_mode_set"
+	TypeSessionModeSetResult             MessageType = "session_mode_set_result"
+	TypeSessionPlanExecute               MessageType = "session_plan_execute"
+	TypeSessionPlanExecuteUpdate         MessageType = "session_plan_update"
+	TypeSessionPlanExecuteResult         MessageType = "session_plan_execute_result"
+	TypeSessionContextQuery              MessageType = "session_context_query"
+	TypeSessionContextQueryResult        MessageType = "session_context_query_result"
+	TypeSessionContextSet                MessageType = "session_context_set"
+	TypeSessionContextSetResult          MessageType = "session_context_set_result"
+	TypeSessionRAGSet                    MessageType = "session_rag_set"
+	TypeSessionRAGSetResult              MessageType = "session_rag_set_result"
+	TypeSessionCompact                   MessageType = "session_compact"
+	TypeSessionCompactResult             MessageType = "session_compact_result"
+	TypeSessionPause                     MessageType = "session_pause"
+	TypeSessionPauseResult               MessageType = "session_pause_result"
+	TypeSessionRegenerate                MessageType = "session_regenerate"
+	TypeModelList                        MessageType = "model_list"
+	TypeModelListResult                  MessageType = "model_list_result"
+	TypeModelSwitch                      MessageType = "model_switch"
+	TypeModelSwitchResult                MessageType = "model_switch_result"
+	TypeSkillList                        MessageType = "skill_list"
+	TypeSkillListResult                  MessageType = "skill_list_result"
+	TypeSkillReload                      MessageType = "skill_reload"
+	TypeSkillReloadResult                MessageType = "skill_reload_result"
+	TypeAssetList                        MessageType = "asset_list"
+	TypeAssetListResult                  MessageType = "asset_list_result"
+	TypeKnowledgeCatalogList             MessageType = "knowledge_catalog_list"
+	TypeKnowledgeCatalogListResult       MessageType = "knowledge_catalog_list_result"
+	TypeKnowledgeCategoryCreate          MessageType = "knowledge_category_create"
+	TypeKnowledgeCategoryMove            MessageType = "knowledge_category_move"
+	TypeKnowledgeCategoryDelete          MessageType = "knowledge_category_delete"
+	TypeKnowledgeBaseCreate              MessageType = "knowledge_base_create"
+	TypeKnowledgeBaseUpdate              MessageType = "knowledge_base_update"
+	TypeKnowledgeBaseDelete              MessageType = "knowledge_base_delete"
+	TypeKnowledgeCatalogMutationResult   MessageType = "knowledge_catalog_mutation_result"
+	TypeKnowledgeDocumentList            MessageType = "knowledge_document_list"
+	TypeKnowledgeDocumentListResult      MessageType = "knowledge_document_list_result"
+	TypeKnowledgeDocumentIngest          MessageType = "knowledge_document_ingest"
+	TypeKnowledgeDocumentRetry           MessageType = "knowledge_document_retry"
+	TypeKnowledgeDocumentDelete          MessageType = "knowledge_document_delete"
+	TypeKnowledgeDocumentMutationResult  MessageType = "knowledge_document_mutation_result"
+	TypeKnowledgeProfileList             MessageType = "knowledge_profile_list"
+	TypeKnowledgeProfileListResult       MessageType = "knowledge_profile_list_result"
+	TypeKnowledgeSearchPreview           MessageType = "knowledge_search_preview"
+	TypeKnowledgeSearchPreviewResult     MessageType = "knowledge_search_preview_result"
+	TypeSubagentDefinitionList           MessageType = "subagent_definition_list"
+	TypeSubagentDefinitionListResult     MessageType = "subagent_definition_list_result"
+	TypeSubagentDefinitionCreate         MessageType = "subagent_definition_create"
+	TypeSubagentDefinitionUpdate         MessageType = "subagent_definition_update"
+	TypeSubagentDefinitionDelete         MessageType = "subagent_definition_delete"
+	TypeSubagentDefinitionMutationResult MessageType = "subagent_definition_mutation_result"
+	TypeSubagentTaskList                 MessageType = "subagent_task_list"
+	TypeSubagentTaskListResult           MessageType = "subagent_task_list_result"
+	TypeSubagentTaskCheck                MessageType = "subagent_task_check"
+	TypeSubagentTaskCancel               MessageType = "subagent_task_cancel"
+	TypeSubagentTaskApply                MessageType = "subagent_task_apply"
+	TypeSubagentTaskDiscard              MessageType = "subagent_task_discard"
+	TypeSubagentTaskResult               MessageType = "subagent_task_result"
+	TypeSubagentTaskEvent                MessageType = "subagent_task_event"
+	TypeFileList                         MessageType = "file_list"
+	TypeFileListResult                   MessageType = "file_list_result"
+	TypeFileRead                         MessageType = "file_read"
+	TypeFileReadResult                   MessageType = "file_read_result"
+	TypeChangesList                      MessageType = "changes_list"
+	TypeChangesListResult                MessageType = "changes_list_result"
+	TypeChangeDiff                       MessageType = "change_diff"
+	TypeChangeDiffResult                 MessageType = "change_diff_result"
+	TypeChangeRevert                     MessageType = "change_revert"
+	TypeChangeRevertResult               MessageType = "change_revert_result"
+	TypeHistoryList                      MessageType = "history_list"
+	TypeHistoryListResult                MessageType = "history_list_result"
+	TypeHistoryDiff                      MessageType = "history_diff"
+	TypeHistoryDiffResult                MessageType = "history_diff_result"
+	TypeHistoryRevert                    MessageType = "history_revert"
+	TypeHistoryRevertResult              MessageType = "history_revert_result"
+	TypeError                            MessageType = "error"
+	TypeHeartbeat                        MessageType = "heartbeat"
 )
 
 type Message struct {
@@ -105,6 +126,97 @@ type Message struct {
 	SessionID   string          `json:"session_id,omitempty"`
 	ClientToken string          `json:"client_token,omitempty"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
+}
+
+type SubagentDefinitionListPayload struct{}
+
+type SubagentDefinitionPayload struct {
+	ID             string    `json:"id,omitempty"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	SystemPrompt   string    `json:"system_prompt"`
+	ModelID        string    `json:"model_id,omitempty"`
+	AllowedTools   []string  `json:"allowed_tools,omitempty"`
+	CapabilityMode string    `json:"capability_mode"`
+	IsolationMode  string    `json:"isolation_mode"`
+	MaxTurns       int       `json:"max_turns"`
+	TimeoutSeconds int       `json:"timeout_seconds"`
+	Enabled        *bool     `json:"enabled,omitempty"`
+	Version        int64     `json:"version,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
+
+type SubagentDefinitionDeletePayload struct {
+	DefinitionID string `json:"definition_id"`
+}
+
+type SubagentDefinitionListResultPayload struct {
+	Definitions []SubagentDefinitionPayload `json:"definitions"`
+}
+
+type SubagentDefinitionMutationResultPayload struct {
+	Definition  *SubagentDefinitionPayload  `json:"definition,omitempty"`
+	Definitions []SubagentDefinitionPayload `json:"definitions,omitempty"`
+	DeletedID   string                      `json:"deleted_id,omitempty"`
+	Message     string                      `json:"message,omitempty"`
+}
+
+type SubagentTaskListPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type SubagentTaskPayload struct {
+	TaskID string `json:"task_id"`
+}
+
+type SubagentTaskSummary struct {
+	ID                string            `json:"id"`
+	ParentSessionID   string            `json:"parent_session_id"`
+	DefinitionID      string            `json:"definition_id"`
+	DefinitionVersion int64             `json:"definition_version"`
+	Title             string            `json:"title"`
+	Instruction       string            `json:"instruction,omitempty"`
+	Status            string            `json:"status"`
+	Result            string            `json:"result,omitempty"`
+	ErrorMessage      string            `json:"error_message,omitempty"`
+	ChangeSet         SubagentChangeSet `json:"change_set"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	StartedAt         *time.Time        `json:"started_at,omitempty"`
+	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
+}
+
+type SubagentFileChange struct {
+	Path       string `json:"path"`
+	ChangeType string `json:"change_type"`
+	BeforeHash string `json:"before_hash,omitempty"`
+	AfterHash  string `json:"after_hash,omitempty"`
+	BeforeSize int64  `json:"before_size,omitempty"`
+	AfterSize  int64  `json:"after_size,omitempty"`
+}
+
+type SubagentChangeSet struct {
+	WorkspaceID  string               `json:"workspace_id,omitempty"`
+	Status       string               `json:"status,omitempty"`
+	Files        []SubagentFileChange `json:"files,omitempty"`
+	CheckpointID string               `json:"checkpoint_id,omitempty"`
+	Message      string               `json:"message,omitempty"`
+	CreatedAt    time.Time            `json:"created_at,omitempty"`
+	AppliedAt    *time.Time           `json:"applied_at,omitempty"`
+	DiscardedAt  *time.Time           `json:"discarded_at,omitempty"`
+}
+
+type SubagentTaskListResultPayload struct {
+	SessionID string                `json:"session_id"`
+	Tasks     []SubagentTaskSummary `json:"tasks"`
+}
+
+type SubagentTaskResultPayload struct {
+	Task    SubagentTaskSummary `json:"task"`
+	Message string              `json:"message,omitempty"`
 }
 
 type AgentOnlinePayload struct {
@@ -321,6 +433,10 @@ type SessionContextSetPayload struct {
 	WindowK   int    `json:"window_k"`
 }
 
+type SessionContextQueryPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
 type SessionRAGSetPayload struct {
 	SessionID        string   `json:"session_id,omitempty"`
 	Mode             string   `json:"mode"`
@@ -362,6 +478,7 @@ type ContextInfo struct {
 	SummaryVersion    int    `json:"summary_version"`
 	SummaryHash       string `json:"summary_hash,omitempty"`
 	PrefixHash        string `json:"prefix_hash,omitempty"`
+	Summary           string `json:"summary,omitempty"`
 }
 
 type CompactInfo struct {
@@ -384,6 +501,11 @@ type SessionSettingsResultPayload struct {
 	Sessions         []SessionSummary `json:"sessions"`
 	Context          ContextInfo      `json:"context,omitempty"`
 	Message          string           `json:"message,omitempty"`
+}
+
+type SessionContextQueryResultPayload struct {
+	SessionID string      `json:"session_id"`
+	Context   ContextInfo `json:"context"`
 }
 
 type ModelSummary struct {

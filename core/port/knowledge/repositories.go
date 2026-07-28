@@ -58,6 +58,12 @@ type IndexingJobRepository interface {
 	ListPending(ctx context.Context, limit int) ([]domainknowledge.IndexingJob, error)
 }
 
+// IndexingStateRepository persists the document and its indexing job as one
+// state transition. Implementations must not commit only one side.
+type IndexingStateRepository interface {
+	SaveDocumentAndJob(ctx context.Context, document domainknowledge.Document, job domainknowledge.IndexingJob) error
+}
+
 type IndexingJobQueryRepository interface {
 	ListByKnowledgeBase(ctx context.Context, knowledgeBaseID string, limit int) ([]domainknowledge.IndexingJob, error)
 }

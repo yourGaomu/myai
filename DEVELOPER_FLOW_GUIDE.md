@@ -135,12 +135,13 @@ thread:
 ```powershell
 # 终端 1：Relay
 cd D:\Go_All\myai
-go run . relay --addr 0.0.0.0:18080
+go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 
 # 终端 2：PC Agent
 cd D:\Go_All\myai
 go run . agent `
   --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user local `
   --device pc-local `
   --workspace D:\Go_All\myai
@@ -159,6 +160,7 @@ npm start
 ```powershell
 go run . agent `
   --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user local `
   --device pc-local `
   --bind-code 123456 `
@@ -168,6 +170,7 @@ go run . agent `
 | 参数 | 默认值 | 作用 | 失败条件 |
 |---|---|---|---|
 | `--server` | 空 | Relay 的 Agent WebSocket 地址 | 空值直接返回 `server url is empty` |
+| `--relay-token` | `MYAI_RELAY_AGENT_TOKEN` | 当前 `user/device` 对应的 Agent 凭据 | 空值、身份或 Token 与 Relay 配置不一致时连接失败 |
 | `--user` | `local` | Relay 路由中的用户标识 | 空值启动失败 |
 | `--device` | `pc-local` | 同一用户下的电脑标识 | 空值启动失败 |
 | `--bind-code` | 空 | 固定配对码；为空时 Agent 自动生成 6 位码 | 不是启动失败条件 |
@@ -266,12 +269,17 @@ Agent 断开时 `unregisterAgent` 会移除对应绑定码，因此配对码只�
 ### 5.1 Relay 命令
 
 ```powershell
-go run . relay --addr 0.0.0.0:18080 --urlConfig .\resource\application.yaml
+go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local --urlConfig .\resource\application.yaml
 ```
 
 | 参数 | 默认值 | 作用 |
 |---|---|---|
 | `--addr` | `:8080` | HTTP 和 WebSocket 监听地址 |
+| `--agent-token` | `MYAI_RELAY_AGENT_TOKEN` | 主 Agent 的 Token，必须与 `--agent-user/--agent-device` 一起绑定 |
+| `--agent-user` | `MYAI_RELAY_AGENT_USER` 或 `local` | `--agent-token` 允许声明的用户身份 |
+| `--agent-device` | `MYAI_RELAY_AGENT_DEVICE` 或 `pc-local` | `--agent-token` 允许声明的设备身份 |
+| `--agent-credential` | `MYAI_RELAY_AGENT_CREDENTIALS` | 额外凭据，可重复设置，格式为 `user/device=token` |
+| `--allowed-origin` | 空 | 允许跨域访问 Relay 的额外浏览器 Origin，可重复指定 |
 | `--urlConfig` | `./resource/application.yaml` | Relay 读取 Mongo 授权仓库的配置文件 |
 
 注意：参数名当前是 `urlConfig`，这是代码中的实际命名，不是文档笔误。
@@ -280,7 +288,7 @@ Relay 启动路径：
 
 ```text
 cmd.relayCmd.RunE
-  -> relay.NewServer(addr, memoryauthorization.NewStore())
+  -> relay.NewServer(addr, memoryauthorization.NewStore(), WithAgentCredentials(...), WithAllowedOrigins(...))
   -> configureRelayAuthStore
      -> config.ViperLoader.LoadOptional
      -> Mongo 存在时 server.SetAuthStore(mongoauthorization.New(...))
@@ -295,7 +303,7 @@ cmd.relayCmd.RunE
 | 路由 | 用途 |
 |---|---|
 | `GET /health` | 返回 `{"status":"ok"}` |
-| `GET /agents` | 查看在线 Agent |
+| `GET /agents` | Agent 凭据可查看全部在线 Agent；已配对客户端只能查看自己的 `user/device` |
 | `POST /pair` | 使用绑定码配对手机 |
 | `GET /authorizations` | 查询授权记录 |
 | `POST /authorizations/revoke` | 撤销授权 |

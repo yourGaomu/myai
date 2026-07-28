@@ -59,19 +59,28 @@ func (s PersistenceService) SaveRecord(ctx context.Context, record repository.Se
 	if s.Sessions == nil {
 		return nil
 	}
-	existing, err := s.Sessions.GetSession(ctx, record.ID)
-	hasExisting := err == nil
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return err
-	}
-	record, err = PrepareSessionRecordForSave(persistencecommand.PrepareRecord{
-		Record: record, Existing: existing, HasExisting: hasExisting,
-		DefaultModel: s.DefaultModel, Now: s.now(),
-	})
+	prepared, err := s.PrepareRecord(ctx, record)
 	if err != nil {
 		return err
 	}
-	return s.Sessions.SaveSession(ctx, record)
+	return s.Sessions.SaveSession(ctx, prepared)
+}
+
+func (s PersistenceService) PrepareRecord(ctx context.Context, record repository.SessionRecord) (repository.SessionRecord, error) {
+	if s.Sessions == nil {
+		return PrepareSessionRecordForSave(persistencecommand.PrepareRecord{
+			Record: record, DefaultModel: s.DefaultModel, Now: s.now(),
+		})
+	}
+	existing, err := s.Sessions.GetSession(ctx, record.ID)
+	hasExisting := err == nil
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return repository.SessionRecord{}, err
+	}
+	return PrepareSessionRecordForSave(persistencecommand.PrepareRecord{
+		Record: record, Existing: existing, HasExisting: hasExisting,
+		DefaultModel: s.DefaultModel, Now: s.now(),
+	})
 }
 
 func (s PersistenceService) memorySession(sessionID string) *session.Session {
@@ -108,9 +117,20 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 	}
 	record := repository.SessionRecord{
 		ID: command.SessionID, Model: model, AgentMode: string(session.AgentModeChat),
-		PermissionMode: string(session.PermissionModeAsk), ContextWindowK: contextmgr.DefaultWindowK, Title: title,
+		Kind: string(session.KindUser), PermissionMode: string(session.PermissionModeAsk), ContextWindowK: contextmgr.DefaultWindowK, Title: title,
 	}
 	if current := command.Current; current != nil && current.ID == command.SessionID {
+		record.Kind = string(session.NormalizeKind(current.Kind))
+		record.ParentSessionID = current.ParentSessionID
+		record.ParentTaskID = current.ParentTaskID
+		record.AgentDefinitionID = current.AgentDefinitionID
+		record.AgentDefinitionVer = current.AgentDefinitionVer
+		record.SystemInstruction = current.SystemInstruction
+		record.AllowedTools = append([]string(nil), current.AllowedTools...)
+		record.EnforceToolAllowlist = current.EnforceToolAllowlist
+		record.WorkspaceRoot = current.WorkspaceRoot
+		record.WorkspaceSandboxID = current.WorkspaceSandboxID
+		record.MaxToolRounds = current.MaxToolRounds
 		record.AgentMode = string(session.NormalizeAgentMode(current.AgentMode))
 		record.PermissionMode = string(session.NormalizePermissionMode(current.PermissionMode))
 		record.ContextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
@@ -129,6 +149,17 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 	}
 	if command.HasExisting {
 		existing := command.Existing
+		record.Kind = existing.Kind
+		record.ParentSessionID = existing.ParentSessionID
+		record.ParentTaskID = existing.ParentTaskID
+		record.AgentDefinitionID = existing.AgentDefinitionID
+		record.AgentDefinitionVer = existing.AgentDefinitionVer
+		record.SystemInstruction = existing.SystemInstruction
+		record.AllowedTools = append([]string(nil), existing.AllowedTools...)
+		record.EnforceToolAllowlist = existing.EnforceToolAllowlist
+		record.WorkspaceRoot = existing.WorkspaceRoot
+		record.WorkspaceSandboxID = existing.WorkspaceSandboxID
+		record.MaxToolRounds = existing.MaxToolRounds
 		if existing.PermissionMode != "" {
 			record.PermissionMode = existing.PermissionMode
 		}
@@ -159,6 +190,7 @@ func PrepareSessionRecordForSave(command persistencecommand.PrepareRecord) (repo
 	if record.Model == "" {
 		record.Model = command.DefaultModel
 	}
+	record.Kind = string(session.NormalizeKind(session.Kind(record.Kind)))
 	if record.AgentMode == "" {
 		record.AgentMode = string(session.AgentModeChat)
 	}

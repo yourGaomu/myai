@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -102,7 +103,7 @@ func (t *SearchFilesTool) Permission() tooldef.Permission {
 }
 
 func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}

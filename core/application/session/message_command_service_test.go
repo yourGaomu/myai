@@ -2,6 +2,7 @@ package sessionapp
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	memorysession "myai/core/adapter/session/memory"
@@ -101,6 +102,40 @@ func TestMessageCommandServicePrepareRegeneration(t *testing.T) {
 	}
 }
 
+func TestMessageCommandServiceRestoresMemoryWhenRegenerationPersistenceFails(t *testing.T) {
+	memory := memorysession.NewStore("gpt-5")
+	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.AddUserMessageTo("session-1", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.AddAssistantMessageTo("session-1", "first answer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.AddUsageTo("session-1", llm.TokenUsage{TotalTokens: 12}); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := errors.New("transaction failed")
+	service := newMessageCommandService(memory)
+	service.Regeneration = failingRegenerationPersistence{err: expected}
+	if _, err := service.PrepareRegeneration(context.Background(), PrepareRegenerationCommand{SessionID: "session-1"}); !errors.Is(err, expected) {
+		t.Fatalf("expected persistence failure, got %v", err)
+	}
+
+	current, err := memory.GetSession("session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Messages) != 3 || current.Messages[2].Text() != "first answer" {
+		t.Fatalf("expected original transcript to be restored: %#v", current.Messages)
+	}
+	if current.LastUsage.TotalTokens != 12 {
+		t.Fatalf("expected last usage to be restored: %#v", current.LastUsage)
+	}
+}
+
 func newMessageCommandService(memory *memorysession.Store) MessageCommandService {
 	return MessageCommandService{
 		Loader: LoadService{Memory: memory},
@@ -112,6 +147,14 @@ type messageRuntimeProvider struct {
 	prompt        string
 	input         string
 	forceChatMode bool
+}
+
+type failingRegenerationPersistence struct {
+	err error
+}
+
+func (p failingRegenerationPersistence) PersistRegeneratedSession(context.Context, *session.Session) error {
+	return p.err
 }
 
 func (p *messageRuntimeProvider) Prompt(_ context.Context, _ *session.Session, input string, forceChatMode bool) string {

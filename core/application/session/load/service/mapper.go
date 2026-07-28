@@ -19,10 +19,15 @@ func TokenUsageFromRecord(record *repository.TokenUsageRecord) llm.TokenUsage {
 	}
 }
 
-func MessagesFromRecords(records []repository.MessageRecord) []domainmessage.Message {
+func MessagesFromRecords(records []repository.MessageRecord, systemInstruction ...string) []domainmessage.Message {
 	messages := make([]domainmessage.Message, 0, len(records)+1)
-	messages = append(messages, domainmessage.Text(domainmessage.RoleSystem, session.SystemPrompt()))
-	for _, record := range records {
+	instruction := ""
+	if len(systemInstruction) > 0 {
+		instruction = systemInstruction[0]
+	}
+	messages = append(messages, domainmessage.Text(domainmessage.RoleSystem, session.SystemPromptWithInstruction(instruction)))
+	for index := 0; index < len(records); index++ {
+		record := records[index]
 		switch record.Role {
 		case repository.RoleSystem:
 			reason := domainmessage.SyntheticReason(record.SyntheticReason)
@@ -34,9 +39,16 @@ func MessagesFromRecords(records []repository.MessageRecord) []domainmessage.Mes
 		case repository.RoleAssistant:
 			messages = append(messages, domainmessage.Text(domainmessage.RoleAssistant, record.Content))
 		case repository.RoleToolCall:
-			messages = append(messages, domainmessage.ToolCallMessage([]domainmessage.ToolCall{{
-				ID: record.ToolCallID, Type: "function", Name: record.ToolName, Arguments: record.ToolArguments,
-			}}))
+			calls := make([]domainmessage.ToolCall, 0, 1)
+			for index < len(records) && records[index].Role == repository.RoleToolCall {
+				callRecord := records[index]
+				calls = append(calls, domainmessage.ToolCall{
+					ID: callRecord.ToolCallID, Type: "function", Name: callRecord.ToolName, Arguments: callRecord.ToolArguments,
+				})
+				index++
+			}
+			index--
+			messages = append(messages, domainmessage.ToolCallMessage(calls))
 		case repository.RoleTool:
 			messages = append(messages, domainmessage.ToolResultMessage(domainmessage.ToolResult{
 				ToolCallID: record.ToolCallID, Name: record.ToolName, Content: record.Content,

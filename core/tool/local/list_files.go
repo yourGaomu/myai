@@ -1,13 +1,16 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -90,7 +93,7 @@ func (t *ListFilesTool) Permission() tooldef.Permission {
 }
 
 func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -128,8 +131,10 @@ func normalizeListFilesArgs(workspace string, args json.RawMessage) (listFilesAr
 		MaxDepth: defaultListFilesMaxDepth,
 		Limit:    defaultListFilesLimit,
 	}
-	if len(args) > 0 {
-		_ = json.Unmarshal(args, &input)
+	if len(bytes.TrimSpace(args)) > 0 {
+		if err := json.Unmarshal(args, &input); err != nil {
+			return listFilesArgs{}, fmt.Errorf("decode list_files arguments: %w", err)
+		}
 	}
 
 	input.Path = strings.TrimSpace(input.Path)

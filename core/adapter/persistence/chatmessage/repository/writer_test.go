@@ -8,6 +8,7 @@ import (
 
 	generationcommand "myai/core/application/chat/generation/command"
 	sessioncommand "myai/core/application/session/command"
+	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	repository "myai/core/port/repository"
 	"myai/core/session"
@@ -72,7 +73,7 @@ func TestWriterSavesAssistantMessageAndSessionSnapshot(t *testing.T) {
 		Content:   "answer",
 		Reasoning: "reasoning",
 		Usage:     modelport.TokenUsage{TotalTokens: 3, Available: true},
-	})
+	}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +85,36 @@ func TestWriterSavesAssistantMessageAndSessionSnapshot(t *testing.T) {
 	}
 	if sessions.record.Usage != nil {
 		t.Fatalf("session snapshot should use accumulated session usage, got %#v", sessions.record.Usage)
+	}
+}
+
+func TestWriterReplacesRegeneratedTranscriptThroughAtomicRepository(t *testing.T) {
+	transcripts := &recordingTranscriptRepository{}
+	writer := Writer{
+		Transcripts: transcripts,
+		Sessions:    &recordingSessionPersistence{},
+		IDs:         &sequentialIDs{},
+	}
+	current := &session.Session{
+		ID:    "session-1",
+		Model: "gpt-5",
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleUser, "hello"),
+			domainmessage.ToolCallMessage([]domainmessage.ToolCall{
+				{ID: "call-1", Name: "read_file", Arguments: `{"path":"a"}`},
+				{ID: "call-2", Name: "read_file", Arguments: `{"path":"b"}`},
+			}),
+		},
+	}
+
+	if err := writer.ReplaceSessionMessages(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	if transcripts.snapshot.Session.ID != "session-1" || len(transcripts.snapshot.Messages) != 3 {
+		t.Fatalf("unexpected transcript snapshot: %#v", transcripts.snapshot)
+	}
+	if transcripts.snapshot.Messages[1].ToolCallID != "call-1" || transcripts.snapshot.Messages[2].ToolCallID != "call-2" {
+		t.Fatalf("batch tool calls were not preserved: %#v", transcripts.snapshot.Messages)
 	}
 }
 
@@ -101,6 +132,15 @@ type recordingSessionPersistence struct {
 	record  repository.SessionRecord
 }
 
+type recordingTranscriptRepository struct {
+	snapshot repository.TranscriptSnapshot
+}
+
+func (r *recordingTranscriptRepository) ReplaceSessionTranscript(_ context.Context, snapshot repository.TranscriptSnapshot) error {
+	r.snapshot = snapshot
+	return nil
+}
+
 func (s *recordingSessionPersistence) Save(_ context.Context, command sessioncommand.SaveSession) error {
 	s.command = command
 	return nil
@@ -109,6 +149,11 @@ func (s *recordingSessionPersistence) Save(_ context.Context, command sessioncom
 func (s *recordingSessionPersistence) SaveRecord(_ context.Context, record repository.SessionRecord) error {
 	s.record = record
 	return nil
+}
+
+func (s *recordingSessionPersistence) PrepareRecord(_ context.Context, record repository.SessionRecord) (repository.SessionRecord, error) {
+	s.record = record
+	return record, nil
 }
 
 type sequentialIDs struct {

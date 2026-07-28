@@ -26,13 +26,30 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		permissionMode = session.NormalizePermissionMode(current.PermissionMode)
 		agentMode = session.NormalizeAgentMode(current.AgentMode)
 	}
-	return s.Catalog.LLMToolsByPermission(func(permission tooldef.Permission) bool {
+	tools := s.Catalog.LLMToolsByPermission(func(permission tooldef.Permission) bool {
 		// Plan 生成阶段由 ModePolicy 禁止写操作；执行批准计划时 forceChatMode 会解除该限制。
 		if s.ModePolicy != nil && !s.ModePolicy.AllowsToolPermission(permission, agentMode, forceChatMode) {
 			return false
 		}
 		return allowsPermissionMode(permission, permissionMode)
 	})
+	if current == nil || !current.EnforceToolAllowlist && current.AllowedTools == nil {
+		return tools
+	}
+	allowed := make(map[string]struct{}, len(current.AllowedTools))
+	for _, name := range current.AllowedTools {
+		allowed[name] = struct{}{}
+	}
+	filtered := make([]modelport.Tool, 0, len(tools))
+	for _, candidate := range tools {
+		if candidate.Function == nil {
+			continue
+		}
+		if _, ok := allowed[candidate.Function.Name]; ok {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return filtered
 }
 
 func allowsPermissionMode(permission tooldef.Permission, mode session.PermissionMode) bool {

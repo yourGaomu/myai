@@ -18,11 +18,8 @@ func (service *IndexingService) saveProgress(ctx context.Context, job *domainkno
 	if err := job.Validate(); err != nil {
 		return fmt.Errorf("validate indexing job progress: %w", err)
 	}
-	if err := service.configuration.Documents.Save(ctx, *document); err != nil {
-		return fmt.Errorf("save indexing document progress: %w", err)
-	}
-	if err := service.configuration.Jobs.Save(ctx, *job); err != nil {
-		return fmt.Errorf("save indexing job progress: %w", err)
+	if err := service.configuration.States.SaveDocumentAndJob(ctx, *document, *job); err != nil {
+		return fmt.Errorf("save indexing progress: %w", err)
 	}
 	return nil
 }
@@ -47,14 +44,10 @@ func (service *IndexingService) fail(ctx context.Context, job *domainknowledge.I
 
 	now := service.now()
 	message := cause.Error()
-	var persistenceErrors []error
 	if document != nil {
 		document.Status = domainknowledge.DocumentStatusFailed
 		document.FailureReason = message
 		document.UpdatedAt = now
-		if err := service.configuration.Documents.Save(persistenceContext, *document); err != nil {
-			persistenceErrors = append(persistenceErrors, fmt.Errorf("save failed document state: %w", err))
-		}
 	}
 	if job != nil {
 		job.Status = domainknowledge.IndexingJobStatusFailed
@@ -66,11 +59,27 @@ func (service *IndexingService) fail(ctx context.Context, job *domainknowledge.I
 		} else {
 			job.FailedChunks = 0
 		}
-		if err := service.configuration.Jobs.Save(persistenceContext, *job); err != nil {
-			persistenceErrors = append(persistenceErrors, fmt.Errorf("save failed indexing job state: %w", err))
+	}
+
+	var persistenceErr error
+	switch {
+	case document != nil && job != nil:
+		persistenceErr = service.configuration.States.SaveDocumentAndJob(persistenceContext, *document, *job)
+		if persistenceErr != nil {
+			persistenceErr = fmt.Errorf("save failed indexing state: %w", persistenceErr)
+		}
+	case document != nil:
+		persistenceErr = service.configuration.Documents.Save(persistenceContext, *document)
+		if persistenceErr != nil {
+			persistenceErr = fmt.Errorf("save failed document state: %w", persistenceErr)
+		}
+	case job != nil:
+		persistenceErr = service.configuration.Jobs.Save(persistenceContext, *job)
+		if persistenceErr != nil {
+			persistenceErr = fmt.Errorf("save failed indexing job state: %w", persistenceErr)
 		}
 	}
-	return errors.Join(append([]error{cause}, persistenceErrors...)...)
+	return errors.Join(cause, persistenceErr)
 }
 
 func (service *IndexingService) indexKeywords(ctx context.Context, document domainknowledge.Document, profiles loadedProfiles, totalChunks int) error {

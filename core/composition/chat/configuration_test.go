@@ -25,6 +25,15 @@ func TestBuildDependenciesWiresStableSessionServices(t *testing.T) {
 	if current == nil || current.ID == "" {
 		t.Fatalf("Create() = %#v", result)
 	}
+	loaded, err := dependencies.SessionLifecycle.Load(context.Background(), lifecyclecommand.LoadSession{
+		SessionID: current.ID,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Current == nil || loaded.Current.ID != current.ID {
+		t.Fatalf("Load() = %#v, want session %q", loaded, current.ID)
+	}
 	initialMessageCount := len(current.Messages)
 
 	prepared, err := dependencies.MessageCommands.AppendUserMessage(context.Background(), messagecommand.AppendUserMessage{

@@ -1,15 +1,17 @@
 package config
 
 type Properties struct {
-	Model  ModelProperties
-	Mongo  MongoProperties
-	Redis  RedisProperties
-	RAG    RAGProperties
-	Thread ThreadProperties
-	Asset  AssetProperties
-	Skill  SkillProperties
-	Hooks  HookProperties
-	MCP    MCPProperties
+	Model    ModelProperties
+	Mongo    MongoProperties
+	Redis    RedisProperties
+	RAG      RAGProperties
+	Thread   ThreadProperties
+	Asset    AssetProperties
+	Skill    SkillProperties
+	Sandbox  SandboxProperties
+	Subagent SubagentProperties
+	Hooks    HookProperties
+	MCP      MCPProperties
 }
 
 type ModelProperties struct {
@@ -135,6 +137,30 @@ type AssetProperties struct {
 type SkillProperties struct {
 	Root     string
 	Registry string
+}
+
+type SandboxProperties struct {
+	Provider    string
+	OpenSandbox OpenSandboxProperties
+}
+
+type OpenSandboxProperties struct {
+	Endpoint              string
+	APIKey                string
+	UseServerProxy        bool
+	Image                 string
+	CPU                   string
+	Memory                string
+	SandboxTimeoutSeconds int
+	CommandTimeoutSeconds int
+	RequestTimeoutSeconds int
+	MaxDownloadMB         int64
+}
+
+type SubagentProperties struct {
+	WorkerCount  int
+	QueueSize    int
+	SnapshotRoot string
 }
 
 type HookProperties struct {

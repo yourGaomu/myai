@@ -6,6 +6,7 @@ import (
 )
 
 type ToolExecution struct {
+	Calls    []domainmessage.ToolCall
 	Messages []domainmessage.Message
 	Entries  []domaintool.ExecutionEntry
 	Assets   []domaintool.SharedAsset

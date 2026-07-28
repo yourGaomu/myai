@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"myai/core/asset"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -93,7 +94,7 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 		return tooldef.ToolOutput{}, errors.New("asset short-link service is not configured; set asset.shortener_base_url")
 	}
 
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}

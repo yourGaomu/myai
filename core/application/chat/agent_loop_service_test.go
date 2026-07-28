@@ -223,6 +223,22 @@ func TestAgentLoopServiceFinalGenerationOmitsToolsAfterMaxRounds(t *testing.T) {
 	}
 }
 
+func TestAgentLoopServiceRejectsOversizedCurrentTurn(t *testing.T) {
+	model := &scriptedModel{results: []modelport.ChatResult{{Content: "must not run"}}}
+	contexts := &fixedContextProvider{snapshot: contextmgr.Snapshot{
+		Info: contextmgr.Info{WindowK: 4, SelectedTokens: 4001},
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleUser, "oversized"),
+		},
+	}}
+	_, err := (AgentLoopService{Contexts: contexts}).Run(context.Background(), RunCommand{
+		Model: model, Session: testSession(),
+	})
+	if err == nil || len(model.requests) != 0 {
+		t.Fatalf("expected oversized context to be rejected before model call, err=%v requests=%d", err, len(model.requests))
+	}
+}
+
 type scriptedModel struct {
 	requests []modelport.GenerateRequest
 	results  []modelport.ChatResult
@@ -244,6 +260,14 @@ func (m *scriptedModel) Generate(ctx context.Context, request modelport.Generate
 
 type recordingContextProvider struct {
 	calls int
+}
+
+type fixedContextProvider struct {
+	snapshot contextmgr.Snapshot
+}
+
+func (p *fixedContextProvider) Snapshot(*session.Session) contextmgr.Snapshot {
+	return p.snapshot
 }
 
 func (p *recordingContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {

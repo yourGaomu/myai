@@ -7,15 +7,21 @@ import (
 	"strings"
 	"time"
 
+	localexecutor "myai/core/adapter/execution/local"
+	domainexecution "myai/core/domain/execution"
 	domainhistory "myai/core/domain/history"
+	domainsandbox "myai/core/domain/sandbox"
 	domaintool "myai/core/domain/tool"
 	"myai/core/history"
-	"myai/core/sandbox"
+	executionport "myai/core/port/execution"
+	workspaceport "myai/core/port/workspace"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
 type ShellTool struct {
-	sandbox   sandbox.Sandbox
+	local     executionport.CommandExecutor
+	remote    workspaceport.CommandRunner
 	workspace string
 }
 
@@ -26,8 +32,27 @@ type shellArgs struct {
 	MaxOutputBytes int    `json:"max_output_bytes"`
 }
 
-func NewShellToolWithWorkspace(workspace string, sandbox sandbox.Sandbox) *ShellTool {
-	return &ShellTool{workspace: workspace, sandbox: sandbox}
+type shellResultPayload struct {
+	Command              string `json:"command"`
+	WorkDir              string `json:"work_dir"`
+	ExitCode             int    `json:"exit_code"`
+	Stdout               string `json:"stdout"`
+	Stderr               string `json:"stderr"`
+	TimedOut             bool   `json:"timed_out"`
+	Truncated            bool   `json:"truncated"`
+	DurationMS           int64  `json:"duration_ms"`
+	ExecutionEnvironment string `json:"execution_environment"`
+	Isolated             bool   `json:"isolated"`
+	Shell                string `json:"shell"`
+	ErrorMessage         string `json:"error,omitempty"`
+}
+
+func NewShellToolWithWorkspace(workspace string, local executionport.CommandExecutor) *ShellTool {
+	return &ShellTool{workspace: workspace, local: local}
+}
+
+func NewShellToolWithWorkspaceAndRemote(workspace string, local executionport.CommandExecutor, remote workspaceport.CommandRunner) *ShellTool {
+	return &ShellTool{workspace: workspace, local: local, remote: remote}
 }
 
 func (t *ShellTool) Name() string {
@@ -35,7 +60,7 @@ func (t *ShellTool) Name() string {
 }
 
 func (t *ShellTool) Description() string {
-	return "Run a shell command inside the configured local sandbox workspace and return stdout, stderr, exit code, timeout, and truncation status."
+	return "Run a shell command in the session execution environment. Local-host execution is not OS-isolated; OpenSandbox sessions are isolated."
 }
 
 func (t *ShellTool) Schema() any {
@@ -52,11 +77,11 @@ func (t *ShellTool) Schema() any {
 			},
 			"timeout_ms": map[string]any{
 				"type":        "integer",
-				"description": "Command timeout in milliseconds. Defaults to 30000 and is capped by the sandbox.",
+				"description": "Command timeout in milliseconds. Defaults to 30000 and is capped by the executor.",
 			},
 			"max_output_bytes": map[string]any{
 				"type":        "integer",
-				"description": "Maximum bytes captured for stdout and stderr. Defaults to the sandbox limit.",
+				"description": "Maximum bytes captured for stdout and stderr. Defaults to the executor limit.",
 			},
 		},
 		"required": []string{"command"},
@@ -68,8 +93,9 @@ func (t *ShellTool) Permission() tooldef.Permission {
 }
 
 func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	if t.sandbox == nil {
-		return tooldef.ToolOutput{}, errors.New("sandbox is nil")
+	execution, _ := toolruntime.CurrentExecution(ctx)
+	if t.local == nil && (execution.SandboxID == "" || t.remote == nil) {
+		return tooldef.ToolOutput{}, errors.New("command executor is nil")
 	}
 
 	input, err := normalizeShellArgs(args)
@@ -79,12 +105,11 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.Too
 
 	// Shell 可能修改任意数量文件，因此执行前后扫描 workspace 并归入同一个任务检查点。
 	recorder, before, historyErr := t.snapshotBeforeShell(ctx)
-	result, err := t.sandbox.Run(ctx, sandbox.RunRequest{
-		Command:        input.Command,
-		WorkDir:        input.WorkDir,
-		Timeout:        time.Duration(input.TimeoutMS) * time.Millisecond,
-		MaxOutputBytes: input.MaxOutputBytes,
-	})
+	request := domainexecution.RunRequest{
+		Command: input.Command, WorkDir: input.WorkDir,
+		Timeout: time.Duration(input.TimeoutMS) * time.Millisecond, MaxOutputBytes: input.MaxOutputBytes,
+	}
+	result, err := t.run(ctx, execution, request)
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -100,7 +125,7 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.Too
 		result.ErrorMessage = appendShellHistoryError(result.ErrorMessage, historyErr)
 	}
 
-	output, err := json.MarshalIndent(result, "", "  ")
+	output, err := json.MarshalIndent(shellPayload(result), "", "  ")
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -118,13 +143,63 @@ func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.Too
 	return resultOutput, nil
 }
 
+func shellPayload(result domainexecution.RunResult) shellResultPayload {
+	return shellResultPayload{
+		Command: result.Command, WorkDir: result.WorkDir, ExitCode: result.ExitCode,
+		Stdout: result.Stdout, Stderr: result.Stderr, TimedOut: result.TimedOut,
+		Truncated: result.Truncated, DurationMS: result.DurationMS,
+		ExecutionEnvironment: result.ExecutionEnvironment, Isolated: result.Isolated,
+		Shell: result.Shell, ErrorMessage: result.ErrorMessage,
+	}
+}
+
+func (t *ShellTool) run(ctx context.Context, execution toolruntime.Execution, request domainexecution.RunRequest) (domainexecution.RunResult, error) {
+	if execution.SandboxID != "" {
+		if t.remote == nil {
+			return domainexecution.RunResult{}, errors.New("remote workspace command runner is not configured")
+		}
+		started := time.Now()
+		result, err := t.remote.Run(ctx, execution.SandboxID, execution.WorkspaceRoot, domainsandbox.CommandRequest{
+			Command: request.Command, WorkDir: request.WorkDir, Timeout: request.Timeout,
+		})
+		return domainexecution.RunResult{
+			Command: request.Command, WorkDir: request.WorkDir, ExitCode: result.ExitCode,
+			Stdout: result.Stdout, Stderr: result.Stderr, TimedOut: result.TimedOut,
+			DurationMS: time.Since(started).Milliseconds(), ExecutionEnvironment: "opensandbox", Isolated: true, Shell: "remote",
+			ErrorMessage: joinRemoteError(result.ErrorName, result.ErrorValue),
+		}, err
+	}
+	runner := t.local
+	if execution.WorkspaceRoot != "" {
+		var err error
+		runner, err = localexecutor.New(execution.WorkspaceRoot)
+		if err != nil {
+			return domainexecution.RunResult{}, err
+		}
+	}
+	return runner.Run(ctx, request)
+}
+
+func joinRemoteError(name string, value string) string {
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+	switch {
+	case name == "":
+		return value
+	case value == "":
+		return name
+	default:
+		return name + ": " + value
+	}
+}
+
 func (t *ShellTool) snapshotBeforeShell(ctx context.Context) (*history.TaskWorkspaceRecorder, map[string]domainhistory.FileSnapshot, error) {
 	task := history.TaskRecorderFromContext(ctx)
 	if task == nil {
 		return nil, nil, nil
 	}
 
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return nil, nil, err
 	}

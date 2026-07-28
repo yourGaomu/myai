@@ -95,6 +95,7 @@ func (s *fakeHistoryStore) SaveCheckpoint(_ context.Context, checkpoint domainhi
 	s.changes = append([]domainhistory.FileChange(nil), changes...)
 	return "checkpoint-1", nil
 }
+func (*fakeHistoryStore) DeleteCheckpoint(context.Context, string, string) error { return nil }
 
 func (*fakeHistoryStore) ListCheckpoints(context.Context, string, int) ([]domainhistory.CheckpointSummary, error) {
 	return nil, nil

@@ -75,6 +75,10 @@ func (operations *sdkOperations) StatObject(ctx context.Context, bucket string, 
 	}, nil
 }
 
+func (operations *sdkOperations) RemoveObject(ctx context.Context, bucket string, objectKey string) error {
+	return operations.client.RemoveObject(ctx, bucket, objectKey, miniosdk.RemoveObjectOptions{})
+}
+
 func (operations *sdkOperations) BucketExists(ctx context.Context, bucket string) (bool, error) {
 	return operations.client.BucketExists(ctx, bucket)
 }

@@ -7,9 +7,16 @@ import (
 	"strings"
 
 	compactionport "myai/core/application/chat/compaction/port"
+	"myai/core/contextmgr"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
+)
+
+const (
+	maxExistingSummaryTokens  = 600
+	maxNewHistoryTokens       = 1800
+	maxGeneratedSummaryTokens = 768
 )
 
 type SummaryService struct{}
@@ -24,17 +31,22 @@ func (SummaryService) Summarize(ctx context.Context, model modelport.ChatModelPo
 	if strings.TrimSpace(text) == "" {
 		return "", errors.New("no messages to compact")
 	}
+	existingSummary = contextmgr.TruncateTextToTokens(existingSummary, maxExistingSummaryTokens)
+	text = contextmgr.TruncateTextToTokens(text, maxNewHistoryTokens)
 	prompt := "Compress the conversation history for a local coding agent.\n\nKeep durable information only:\n- User goals and preferences.\n- Architecture and implementation decisions.\n- Important files, tools, permissions, and configuration.\n- Completed work and verification results.\n- Open tasks, blockers, and next steps.\n- Any safety constraints or user instructions.\n\nDo not include secrets, API keys, or credentials.\nWrite a concise but useful summary in Chinese unless the source content is mostly English."
 	if strings.TrimSpace(existingSummary) != "" {
 		prompt += "\n\nExisting summary:\n" + existingSummary
 	}
 	prompt += "\n\nNew history to compact:\n" + text
+	settings := generation.SystemDefaults()
+	settings.Temperature = 0.2
+	settings.MaxOutputTokens = maxGeneratedSummaryTokens
 	generated, err := model.Generate(ctx, modelport.GenerateRequest{
 		Messages: []domainmessage.Message{
 			domainmessage.Text(domainmessage.RoleSystem, "You are a context compression model for a coding assistant."),
 			domainmessage.Text(domainmessage.RoleUser, prompt),
 		},
-		Settings: generation.SystemDefaults(),
+		Settings: settings,
 	})
 	if err != nil {
 		return "", err
@@ -43,7 +55,7 @@ func (SummaryService) Summarize(ctx context.Context, model modelport.ChatModelPo
 	if summary == "" {
 		return "", errors.New("compact summary is empty")
 	}
-	return summary, nil
+	return contextmgr.TruncateTextToTokens(summary, maxGeneratedSummaryTokens), nil
 }
 
 func messagesForSummary(messages []domainmessage.Message) string {

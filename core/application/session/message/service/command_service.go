@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	messageapi "myai/core/application/session/message/api"
@@ -18,6 +19,7 @@ type CommandService struct {
 	Loader              messageport.SessionLoader
 	Memory              messageport.CommandMemory
 	RuntimeInstructions messageport.RuntimeInstructionProvider
+	Regeneration        messageport.RegenerationPersistence
 }
 
 var _ messageapi.CommandService = CommandService{}
@@ -46,6 +48,7 @@ func (s CommandService) PrepareRegeneration(ctx context.Context, command message
 	if err != nil {
 		return messageresult.Command{}, err
 	}
+	beforeRegeneration := session.Clone(current)
 	// 重新生成会删除最后一条 user 之后的 assistant/tool 消息，再用同一输入调用模型。
 	input, err := s.Memory.TrimAfterLastUserMessage(current.ID)
 	if err != nil {
@@ -54,6 +57,14 @@ func (s CommandService) PrepareRegeneration(ctx context.Context, command message
 	current, err = s.Memory.GetSession(current.ID)
 	if err != nil {
 		return messageresult.Command{}, err
+	}
+	if s.Regeneration != nil {
+		if err := s.Regeneration.PersistRegeneratedSession(ctx, current); err != nil {
+			if restoreErr := s.Memory.RestoreSession(beforeRegeneration); restoreErr != nil {
+				return messageresult.Command{}, errors.Join(err, fmt.Errorf("restore session after regeneration persistence failure: %w", restoreErr))
+			}
+			return messageresult.Command{}, err
+		}
 	}
 	return messageresult.Command{Session: current, Input: input, RuntimeInstruction: latestRuntimeInstruction(current.Messages)}, nil
 }

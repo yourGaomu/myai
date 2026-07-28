@@ -86,6 +86,7 @@ func (s *fakeHistoryStore) ReplaceBaseline(context.Context, string, map[string]d
 func (*fakeHistoryStore) SaveCheckpoint(context.Context, domainhistory.Checkpoint, []domainhistory.FileChange) (string, error) {
 	return "", nil
 }
+func (*fakeHistoryStore) DeleteCheckpoint(context.Context, string, string) error { return nil }
 
 func (*fakeHistoryStore) ListCheckpoints(context.Context, string, int) ([]domainhistory.CheckpointSummary, error) {
 	return nil, nil

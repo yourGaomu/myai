@@ -10,6 +10,7 @@ type HookDecision string
 const (
 	HookDecisionContinue HookDecision = "continue"
 	HookDecisionAllow    HookDecision = "allow"
+	HookDecisionAsk      HookDecision = "ask"
 	HookDecisionDeny     HookDecision = "deny"
 )
 
@@ -25,6 +26,7 @@ type PermissionDecision struct {
 }
 
 type Execution struct {
+	Calls    []domainmessage.ToolCall
 	Messages []domainmessage.Message
 	Entries  []domaintool.ExecutionEntry
 	Assets   []domaintool.SharedAsset

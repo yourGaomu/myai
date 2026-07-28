@@ -85,15 +85,18 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 
 	// 第一组：会话加载、生命周期、查询和设置用例。
 	loader := loadservice.LoadService{
+		Memory:   configuration.Sessions,
 		Sessions: configuration.Store,
 		Messages: configuration.Store,
 	}
 	lifecycle := lifecycleservice.LifecycleService{
+		Memory:   configuration.Sessions,
 		Loader:   loader,
 		Sessions: configuration.Store,
 		Messages: configuration.Store,
 	}
 	settings := settingsservice.SettingsService{
+		Memory: configuration.Sessions,
 		Loader: loader,
 		Models: configuration.Models,
 	}
@@ -103,24 +106,23 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	}
 	messageQueries := queryservice.MessageQueryService{
 		Store:         configuration.Store,
+		Memory:        configuration.Sessions,
 		MemoryRecords: chatmessagemapper.Mapper{IDs: uuidadapter.Generator{}},
 	}
 	runtimePrompts := runtimeservice.NewSessionPromptProvider(configuration.Skills)
-	messageCommands := messageservice.CommandService{RuntimeInstructions: runtimePrompts}
-	currentState := currentservice.StateQueryService{DefaultModel: configuration.DefaultModel}
-	sessionPersistence := persistenceservice.PersistenceService{
-		Sessions:     configuration.Store,
+	messageCommands := messageservice.CommandService{
+		Loader:              loader,
+		Memory:              configuration.Sessions,
+		RuntimeInstructions: runtimePrompts,
+	}
+	currentState := currentservice.StateQueryService{
+		Memory:       configuration.Sessions,
 		DefaultModel: configuration.DefaultModel,
 	}
-	if configuration.Sessions != nil {
-		loader.Memory = configuration.Sessions
-		lifecycle.Memory = configuration.Sessions
-		settings.Memory = configuration.Sessions
-		messageQueries.Memory = configuration.Sessions
-		messageCommands.Loader = loader
-		messageCommands.Memory = configuration.Sessions
-		currentState.Memory = configuration.Sessions
-		sessionPersistence.Memory = configuration.Sessions
+	sessionPersistence := persistenceservice.PersistenceService{
+		Sessions:     configuration.Store,
+		Memory:       configuration.Sessions,
+		DefaultModel: configuration.DefaultModel,
 	}
 
 	currentSession := currentservice.SessionService{
@@ -130,13 +132,26 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	}
 	// 第二组：把应用层消息写入请求适配为具体仓库写入，并通过线程池异步落库。
 	messageWriter := chatmessagerepository.Writer{
-		Messages: configuration.Store,
-		Sessions: sessionPersistence,
-		IDs:      uuidadapter.Generator{},
+		Messages:    configuration.Store,
+		Sessions:    sessionPersistence,
+		Transcripts: configuration.Store,
+		IDs:         uuidadapter.Generator{},
 	}
 	asyncTasks := runtimeservice.AsyncTaskService{Executor: configuration.Async}
+	sessionQueue := generationadapter.NewSessionQueue(asyncTasks)
+	sessionQueue.OnPanic = func(err error) {
+		log.Print(err)
+	}
+	messageCommands.Regeneration = generationadapter.RegenerationPersistence{
+		Messages: messageWriter,
+		Queue:    sessionQueue,
+		OnError: func(err error) {
+			log.Print(err)
+		},
+	}
 	userMessages := generationadapter.UserMessagePersistence{
 		Messages: messageWriter,
+		Queue:    sessionQueue,
 		Async:    asyncTasks,
 		OnError: func(err error) {
 			log.Print(err)
@@ -158,11 +173,11 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	}
 	summaryStore := generationadapter.SummaryStore{
 		Sessions: sessionPersistence,
+		Memory:   configuration.Sessions,
 	}
-	responseCommit := generationservice.ResponseCommitService{PlanCapturer: planserviceapp.CaptureService{}}
-	if configuration.Sessions != nil {
-		summaryStore.Memory = configuration.Sessions
-		responseCommit.Memory = configuration.Sessions
+	responseCommit := generationservice.ResponseCommitService{
+		Memory:       configuration.Sessions,
+		PlanCapturer: planserviceapp.CaptureService{},
 	}
 	compactor := compactionservice.CompactService{
 		Contexts:   contexts,
@@ -185,18 +200,19 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Tools:        toolcatalog.Catalog{Tools: configuration.Tools},
 		ToolExecutor: toolExecutor,
 		ToolRecords: toolrecordsrepository.Recorder{
-			Persistence: configuration.Store,
-			IDs:         uuidadapter.Generator{},
-			RunAsync:    asyncTasks.Submit,
+			Persistence:        configuration.Store,
+			IDs:                uuidadapter.Generator{},
+			RunAsync:           asyncTasks.Submit,
+			RunAsyncForSession: sessionQueue.Submit,
 			OnError: func(err error) {
 				log.Printf("save tool execution records failed: %v", err)
 			},
 		},
 	}
 	generationPersistence := generationadapter.Persistence{
-		Messages:       messageWriter,
-		CurrentSession: currentSession,
-		Async:          asyncTasks,
+		Messages: messageWriter,
+		Queue:    sessionQueue,
+		Async:    asyncTasks,
 		OnError: func(err error) {
 			log.Print(err)
 		},

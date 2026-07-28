@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"myai/core/history"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -84,7 +85,7 @@ func (t *WriteFileTool) Schema() any {
 }
 
 func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -199,8 +200,12 @@ func cleanWorkspacePath(workspace string, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	resolvedPath, err := resolveExistingPath(absPath)
+	if err != nil {
+		return "", err
+	}
 
-	rel, err := filepath.Rel(workspace, absPath)
+	rel, err := filepath.Rel(workspace, resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("path is outside workspace: %s", path)
 	}
@@ -208,7 +213,7 @@ func cleanWorkspacePath(workspace string, path string) (string, error) {
 		return "", fmt.Errorf("path is outside workspace: %s", path)
 	}
 
-	return absPath, nil
+	return resolvedPath, nil
 }
 
 func toolWorkspace(workspace string) (string, error) {
@@ -220,7 +225,37 @@ func toolWorkspace(workspace string) (string, error) {
 		}
 		workspace = current
 	}
-	return filepath.Abs(filepath.Clean(workspace))
+	abs, err := filepath.Abs(filepath.Clean(workspace))
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// resolveExistingPath evaluates the existing portion of a path and appends
+// non-existent components afterward. This rejects symlinks that point outside
+// the workspace even when the final file has not been created yet.
+func resolveExistingPath(path string) (string, error) {
+	current := filepath.Clean(path)
+	missing := make([]string, 0, 4)
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return filepath.Abs(filepath.Clean(resolved))
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 func appendFile(path string, content string) error {

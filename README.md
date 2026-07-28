@@ -33,14 +33,16 @@ go run . chat
 Start the relay:
 
 ```powershell
-go run . relay --addr 0.0.0.0:18080
+go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 ```
 
 Start the PC agent and choose the workspace that clients can preview:
 
 ```powershell
-go run . agent --server ws://127.0.0.1:18080/ws/agent --user local --device pc-local --workspace D:\Go_All\myai
+go run . agent --server ws://127.0.0.1:18080/ws/agent --relay-token "replace-with-a-strong-token" --user local --device pc-local --workspace D:\Go_All\myai
 ```
+
+The Relay binds each Agent token to its configured `user/device` identity. For multiple Agents, repeat `--agent-credential "user/device=token"` instead of sharing one token across devices.
 
 After pairing the Android app, open `Files` to browse and preview files from that workspace, or open `Changes` to inspect changes compared with the SQLite workspace history baseline, preview diffs, and revert restorable files.
 

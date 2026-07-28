@@ -3557,6 +3557,7 @@
 /.gocache/README
 /.gocache/trim.txt
 /.gocache/
+/.myai/
 deploy/minio/data/
 deploy/kafka/data/
 __pycache__/

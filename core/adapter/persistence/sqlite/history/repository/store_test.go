@@ -64,4 +64,14 @@ func TestStorePersistsBaselineAndCheckpoint(t *testing.T) {
 	if len(changes) != 1 || changes[0].Path != "main.go" {
 		t.Fatalf("unexpected changes: %#v", changes)
 	}
+	if err := store.DeleteCheckpoint(context.Background(), workspace, checkpointID); err != nil {
+		t.Fatal(err)
+	}
+	checkpoints, err := store.ListCheckpoints(context.Background(), workspace, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checkpoints) != 0 {
+		t.Fatalf("expected checkpoint deletion, got %#v", checkpoints)
+	}
 }

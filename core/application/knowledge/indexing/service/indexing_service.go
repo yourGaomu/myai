@@ -75,8 +75,8 @@ func (service *IndexingService) Submit(ctx context.Context, command indexingcomm
 	if err := job.Validate(); err != nil {
 		return indexingresult.Submit{}, fmt.Errorf("build indexing job: %w", err)
 	}
-	if err := service.configuration.Jobs.Save(ctx, job); err != nil {
-		return indexingresult.Submit{}, err
+	if err := service.configuration.States.SaveDocumentAndJob(ctx, document, job); err != nil {
+		return indexingresult.Submit{}, fmt.Errorf("save submitted indexing state: %w", err)
 	}
 	return indexingresult.Submit{Job: job}, nil
 }

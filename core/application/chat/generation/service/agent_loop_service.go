@@ -9,6 +9,7 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -39,11 +40,16 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	}
 
 	totalUsage := modelport.TokenUsage{}
-	reasoningParts := make([]string, 0, s.maxToolRounds())
-	for round := 0; round < s.maxToolRounds(); round++ {
+	maxToolRounds := s.maxToolRounds(command.Session)
+	reasoningParts := make([]string, 0, maxToolRounds)
+	for round := 0; round < maxToolRounds; round++ {
+		snapshot := s.Contexts.Snapshot(command.Session)
+		if err := validateContextWindow(snapshot); err != nil {
+			return modelport.ChatResult{}, err
+		}
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
 		result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-			Messages: s.Contexts.Snapshot(command.Session).Messages,
+			Messages: snapshot.Messages,
 			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
 			Stream:   command.Stream,
 			Settings: command.Settings,
@@ -63,18 +69,32 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			Session: command.Session, Calls: result.ToolCalls, Stream: command.Stream, RequestID: command.RequestID,
 			ForceChatMode: command.ForceChatMode,
 		})
-		if err != nil {
-			return modelport.ChatResult{}, err
-		}
 		s.recordToolExecution(ctx, toolResult)
 		// 工具调用与结果都进入会话，下一轮模型才能基于真实执行结果继续推理。
-		command.Session.Messages = append(command.Session.Messages, domainmessage.ToolCallMessage(result.ToolCalls))
+		// Calls 来自执行层，Hook 改写参数后的值与真实调用、持久化记录完全一致。
+		calls := toolResult.Calls
+		// 兼容外部 ToolExecutor：旧实现未提供 Calls 时仍保留模型调用消息；正式执行器返回非 nil 的实际调用列表。
+		if calls == nil {
+			calls = result.ToolCalls
+		}
+		if len(calls) > 0 {
+			command.Session.Messages = append(command.Session.Messages, domainmessage.ToolCallMessage(calls))
+		}
 		command.Session.Messages = append(command.Session.Messages, toolResult.Messages...)
+		if err != nil {
+			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
+			return modelport.ChatResult{}, err
+		}
+	}
+
+	snapshot := s.Contexts.Snapshot(command.Session)
+	if err := validateContextWindow(snapshot); err != nil {
+		return modelport.ChatResult{}, err
 	}
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
 	result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-		Messages: s.Contexts.Snapshot(command.Session).Messages,
+		Messages: snapshot.Messages,
 		Stream:   command.Stream,
 		Settings: command.Settings,
 	})
@@ -86,7 +106,20 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	return finalizeResult(result, totalUsage, reasoningParts), nil
 }
 
-func (s AgentLoopService) maxToolRounds() int {
+func validateContextWindow(snapshot contextmgr.Snapshot) error {
+	if snapshot.Info.WindowK <= 0 {
+		return nil
+	}
+	if snapshot.Info.SelectedTokens <= snapshot.Info.WindowK*1000 {
+		return nil
+	}
+	return errors.New("current conversation turn exceeds the configured context window; shorten the request or tool output, or increase the session context window")
+}
+
+func (s AgentLoopService) maxToolRounds(current *session.Session) int {
+	if current != nil && current.MaxToolRounds > 0 {
+		return current.MaxToolRounds
+	}
 	if s.MaxToolRounds > 0 {
 		return s.MaxToolRounds
 	}

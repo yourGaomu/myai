@@ -66,6 +66,40 @@ type ToolResult struct {
 	Truncated    bool
 }
 
+// Clone returns an independent copy of a message, including pointer-backed
+// tool parts. Persistence and background work must not retain the live Session
+// message graph.
+func Clone(message Message) Message {
+	cloned := message
+	if len(message.Parts) == 0 {
+		return cloned
+	}
+	cloned.Parts = make([]Part, len(message.Parts))
+	for index, part := range message.Parts {
+		cloned.Parts[index] = part
+		if part.ToolCall != nil {
+			call := *part.ToolCall
+			cloned.Parts[index].ToolCall = &call
+		}
+		if part.ToolResult != nil {
+			result := *part.ToolResult
+			cloned.Parts[index].ToolResult = &result
+		}
+	}
+	return cloned
+}
+
+func CloneAll(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	cloned := make([]Message, len(messages))
+	for index, message := range messages {
+		cloned[index] = Clone(message)
+	}
+	return cloned
+}
+
 func Text(role Role, text string) Message {
 	return Message{
 		Role: role,

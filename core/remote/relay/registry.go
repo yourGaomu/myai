@@ -46,6 +46,13 @@ type clientEntry struct {
 	peer        *peer
 }
 
+type clientConnection struct {
+	UserID     string
+	DeviceID   string
+	RemoteAddr string
+	LastSeenAt time.Time
+}
+
 type AgentInfo struct {
 	UserID      string    `json:"user_id"`
 	DeviceID    string    `json:"device_id"`
@@ -171,6 +178,23 @@ func (s *Server) listAgents() []AgentInfo {
 	return agents
 }
 
+func (s *Server) agentInfo(userID string, deviceID string) (AgentInfo, bool) {
+	s.agentLock.RLock()
+	defer s.agentLock.RUnlock()
+
+	agent := s.agents[agentKey(userID, deviceID)]
+	if agent == nil {
+		return AgentInfo{}, false
+	}
+	return AgentInfo{
+		UserID:      agent.UserID,
+		DeviceID:    agent.DeviceID,
+		RemoteAddr:  agent.RemoteAddr,
+		ConnectedAt: agent.ConnectedAt,
+		LastSeenAt:  agent.LastSeenAt,
+	}, true
+}
+
 func (s *Server) registerClient(requestID string, requestType protocol.MessageType, p *peer, userID string, deviceID string, remoteAddr string) {
 	if requestID == "" {
 		return
@@ -226,6 +250,7 @@ func (s *Server) unregisterClientPeer(p *peer) {
 			delete(s.clients, requestID)
 		}
 	}
+	delete(s.connections, p)
 }
 
 func (s *Server) getClient(requestID string) *clientEntry {
@@ -237,4 +262,30 @@ func (s *Server) getClient(requestID string) *clientEntry {
 	defer s.clientLock.RUnlock()
 
 	return s.clients[requestID]
+}
+
+func (s *Server) registerClientConnection(p *peer, userID string, deviceID string, remoteAddr string) {
+	if p == nil || userID == "" || deviceID == "" {
+		return
+	}
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	if s.connections == nil {
+		s.connections = make(map[*peer]*clientConnection)
+	}
+	s.connections[p] = &clientConnection{
+		UserID: userID, DeviceID: deviceID, RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
+	}
+}
+
+func (s *Server) getClientConnections(userID string, deviceID string) []*peer {
+	s.clientLock.RLock()
+	defer s.clientLock.RUnlock()
+	result := make([]*peer, 0)
+	for peer, connection := range s.connections {
+		if connection.UserID == userID && connection.DeviceID == deviceID {
+			result = append(result, peer)
+		}
+	}
+	return result
 }

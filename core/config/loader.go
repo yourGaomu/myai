@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	DefaultConfigFile = "./resource/application.yaml"
-	DefaultModelID    = "gpt-5.5"
-	DefaultSkillRoot  = "skills"
+	DefaultConfigFile           = "./resource/application.yaml"
+	DefaultModelID              = "gpt-5.5"
+	DefaultSkillRoot            = "skills"
+	DefaultSubagentSnapshotRoot = ".myai/subagent-snapshots"
 )
 
 type ViperLoader struct {
@@ -57,6 +58,10 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	cacheRemoteResults := true
 	if v.IsSet("rag.retrieval.cache_remote_results") {
 		cacheRemoteResults = v.GetBool("rag.retrieval.cache_remote_results")
+	}
+	useSandboxServerProxy := true
+	if v.IsSet("sandbox.opensandbox.use_server_proxy") {
+		useSandboxServerProxy = v.GetBool("sandbox.opensandbox.use_server_proxy")
 	}
 	properties := Properties{
 		Model: ModelProperties{
@@ -145,12 +150,68 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			Root:     strings.TrimSpace(v.GetString("skill.root")),
 			Registry: strings.TrimSpace(v.GetString("skill.registry")),
 		},
+		Sandbox: SandboxProperties{
+			Provider: strings.ToLower(strings.TrimSpace(v.GetString("sandbox.provider"))),
+			OpenSandbox: OpenSandboxProperties{
+				Endpoint:              strings.TrimSpace(v.GetString("sandbox.opensandbox.endpoint")),
+				APIKey:                strings.TrimSpace(v.GetString("sandbox.opensandbox.api_key")),
+				UseServerProxy:        useSandboxServerProxy,
+				Image:                 strings.TrimSpace(v.GetString("sandbox.opensandbox.image")),
+				CPU:                   strings.TrimSpace(v.GetString("sandbox.opensandbox.cpu")),
+				Memory:                strings.TrimSpace(v.GetString("sandbox.opensandbox.memory")),
+				SandboxTimeoutSeconds: v.GetInt("sandbox.opensandbox.sandbox_timeout_seconds"),
+				CommandTimeoutSeconds: v.GetInt("sandbox.opensandbox.command_timeout_seconds"),
+				RequestTimeoutSeconds: v.GetInt("sandbox.opensandbox.request_timeout_seconds"),
+				MaxDownloadMB:         v.GetInt64("sandbox.opensandbox.max_download_mb"),
+			},
+		},
+		Subagent: SubagentProperties{
+			WorkerCount:  v.GetInt("subagent.worker_count"),
+			QueueSize:    v.GetInt("subagent.queue_size"),
+			SnapshotRoot: strings.TrimSpace(v.GetString("subagent.snapshot_root")),
+		},
 	}
 	if properties.Model.ID == "" {
 		properties.Model.ID = DefaultModelID
 	}
 	if properties.Skill.Root == "" {
 		properties.Skill.Root = DefaultSkillRoot
+	}
+	if properties.Sandbox.Provider == "" {
+		properties.Sandbox.Provider = "local"
+	}
+	if properties.Sandbox.OpenSandbox.Endpoint == "" {
+		properties.Sandbox.OpenSandbox.Endpoint = "http://127.0.0.1:8090"
+	}
+	if properties.Sandbox.OpenSandbox.Image == "" {
+		properties.Sandbox.OpenSandbox.Image = "python:3.12-slim"
+	}
+	if properties.Sandbox.OpenSandbox.CPU == "" {
+		properties.Sandbox.OpenSandbox.CPU = "500m"
+	}
+	if properties.Sandbox.OpenSandbox.Memory == "" {
+		properties.Sandbox.OpenSandbox.Memory = "512Mi"
+	}
+	if properties.Sandbox.OpenSandbox.SandboxTimeoutSeconds == 0 {
+		properties.Sandbox.OpenSandbox.SandboxTimeoutSeconds = 300
+	}
+	if properties.Sandbox.OpenSandbox.CommandTimeoutSeconds == 0 {
+		properties.Sandbox.OpenSandbox.CommandTimeoutSeconds = 60
+	}
+	if properties.Sandbox.OpenSandbox.RequestTimeoutSeconds == 0 {
+		properties.Sandbox.OpenSandbox.RequestTimeoutSeconds = 30
+	}
+	if properties.Sandbox.OpenSandbox.MaxDownloadMB == 0 {
+		properties.Sandbox.OpenSandbox.MaxDownloadMB = 16
+	}
+	if properties.Subagent.WorkerCount <= 0 {
+		properties.Subagent.WorkerCount = 2
+	}
+	if properties.Subagent.QueueSize <= 0 {
+		properties.Subagent.QueueSize = 32
+	}
+	if properties.Subagent.SnapshotRoot == "" {
+		properties.Subagent.SnapshotRoot = DefaultSubagentSnapshotRoot
 	}
 	if properties.RAG.DocumentProcessor.TimeoutSeconds == 0 {
 		properties.RAG.DocumentProcessor.TimeoutSeconds = 120
@@ -220,6 +281,7 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 		}
 	}
 	properties.Skill.Root = resolveWorkspacePath(workspace, properties.Skill.Root)
+	properties.Subagent.SnapshotRoot = resolveWorkspacePath(workspace, properties.Subagent.SnapshotRoot)
 
 	if err := v.UnmarshalKey("hooks.commands", &properties.Hooks.Commands); err != nil {
 		return Properties{}, err

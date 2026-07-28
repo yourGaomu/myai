@@ -212,6 +212,18 @@ func TestStoreOpenWrapsOperationError(t *testing.T) {
 	}
 }
 
+func TestStoreDeletesOnlyExplicitlyUncommittedObject(t *testing.T) {
+	operations := &fakeOperations{}
+	store := newWithOperations(operations, Config{Bucket: "knowledge"})
+
+	if err := store.DeleteUncommitted(context.Background(), "documents/1/source.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if operations.removeCalls != 1 || operations.removeKey != "documents/1/source.txt" {
+		t.Fatalf("unexpected remove call: %#v", operations)
+	}
+}
+
 type readerOnly struct {
 	io.Reader
 }
@@ -232,6 +244,9 @@ type fakeOperations struct {
 	openErr     error
 	statInfo    storedObjectInfo
 	statErr     error
+	removeCalls int
+	removeKey   string
+	removeErr   error
 
 	bucketExists     bool
 	bucketExistsErr  error
@@ -275,6 +290,12 @@ func (operations *fakeOperations) OpenObject(context.Context, string, string) (i
 
 func (operations *fakeOperations) StatObject(context.Context, string, string) (storedObjectInfo, error) {
 	return operations.statInfo, operations.statErr
+}
+
+func (operations *fakeOperations) RemoveObject(_ context.Context, _ string, objectKey string) error {
+	operations.removeCalls++
+	operations.removeKey = objectKey
+	return operations.removeErr
 }
 
 func (operations *fakeOperations) BucketExists(context.Context, string) (bool, error) {

@@ -18,6 +18,7 @@ export type PendingAction =
   | "models"
   | "skills"
   | "settings"
+  | "context"
   | "plan"
   | "assets"
   | "files"
@@ -27,4 +28,5 @@ export type PendingAction =
   | "revert"
   | "upload"
 	| "pause"
-	| "knowledge";
+	| "knowledge"
+	| "subagents";

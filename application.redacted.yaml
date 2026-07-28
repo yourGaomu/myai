@@ -79,5 +79,26 @@ asset:
   ttl_seconds: 604800
   max_visits: 0
 
+sandbox:
+  # local runs commands on the host without OS isolation. Use opensandbox for isolated subagent workspaces.
+  provider: local
+  opensandbox:
+    endpoint: http://127.0.0.1:8090
+    api_key: "***REDACTED***"
+    use_server_proxy: true
+    image: python:3.12-slim
+    cpu: 500m
+    memory: 512Mi
+    sandbox_timeout_seconds: 300
+    command_timeout_seconds: 60
+    request_timeout_seconds: 30
+    max_download_mb: 16
+
+subagent:
+  worker_count: 2
+  queue_size: 32
+  # Relative paths are resolved from the agent workspace.
+  snapshot_root: .myai/subagent-snapshots
+
 mcp:
   servers: []

@@ -4,4 +4,5 @@ type Store interface {
 	SessionRepository
 	MessageRepository
 	AssetRepository
+	TranscriptRepository
 }

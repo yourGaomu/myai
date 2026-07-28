@@ -1,4 +1,4 @@
-package sandbox
+package local
 
 import (
 	"bytes"
@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	domainexecution "myai/core/domain/execution"
+	executionport "myai/core/port/execution"
 )
 
 const (
@@ -20,36 +23,15 @@ const (
 	maxOutputBytes        = 256 * 1024
 )
 
-type RunRequest struct {
-	Command        string
-	WorkDir        string
-	Timeout        time.Duration
-	MaxOutputBytes int
-}
-
-type RunResult struct {
-	Command      string `json:"command"`
-	WorkDir      string `json:"work_dir"`
-	ExitCode     int    `json:"exit_code"`
-	Stdout       string `json:"stdout"`
-	Stderr       string `json:"stderr"`
-	TimedOut     bool   `json:"timed_out"`
-	Truncated    bool   `json:"truncated"`
-	DurationMS   int64  `json:"duration_ms"`
-	Sandbox      string `json:"sandbox"`
-	Shell        string `json:"shell"`
-	ErrorMessage string `json:"error,omitempty"`
-}
-
-type Sandbox interface {
-	Run(ctx context.Context, request RunRequest) (RunResult, error)
-}
-
-type LocalSandbox struct {
+// Executor runs on the host OS. Workspace path checks and the destructive
+// command denylist are safeguards, not an OS or container isolation boundary.
+type Executor struct {
 	workspace string
 }
 
-func NewLocalSandbox(workspace string) (*LocalSandbox, error) {
+var _ executionport.CommandExecutor = (*Executor)(nil)
+
+func New(workspace string) (*Executor, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		current, err := os.Getwd()
@@ -58,12 +40,10 @@ func NewLocalSandbox(workspace string) (*LocalSandbox, error) {
 		}
 		workspace = current
 	}
-
 	absWorkspace, err := filepath.Abs(filepath.Clean(workspace))
 	if err != nil {
 		return nil, err
 	}
-
 	info, err := os.Stat(absWorkspace)
 	if err != nil {
 		return nil, err
@@ -71,24 +51,21 @@ func NewLocalSandbox(workspace string) (*LocalSandbox, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace is not a directory: %s", absWorkspace)
 	}
-
-	return &LocalSandbox{workspace: absWorkspace}, nil
+	return &Executor{workspace: absWorkspace}, nil
 }
 
-func (s *LocalSandbox) Run(ctx context.Context, request RunRequest) (RunResult, error) {
+func (executor *Executor) Run(ctx context.Context, request domainexecution.RunRequest) (domainexecution.RunResult, error) {
 	command := strings.TrimSpace(request.Command)
 	if command == "" {
-		return RunResult{}, errors.New("command is empty")
+		return domainexecution.RunResult{}, errors.New("command is empty")
 	}
 	if err := rejectDangerousCommand(command); err != nil {
-		return RunResult{}, err
+		return domainexecution.RunResult{}, err
 	}
-
-	workDir, err := s.cleanWorkDir(request.WorkDir)
+	workDir, err := executor.cleanWorkDir(request.WorkDir)
 	if err != nil {
-		return RunResult{}, err
+		return domainexecution.RunResult{}, err
 	}
-
 	timeout := normalizeTimeout(request.Timeout)
 	outputLimit := normalizeOutputLimit(request.MaxOutputBytes)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -96,7 +73,6 @@ func (s *LocalSandbox) Run(ctx context.Context, request RunRequest) (RunResult, 
 
 	cmd, shellName := shellCommand(runCtx, command)
 	cmd.Dir = workDir
-
 	stdout := newLimitedBuffer(outputLimit)
 	stderr := newLimitedBuffer(outputLimit)
 	cmd.Stdout = stdout
@@ -104,59 +80,44 @@ func (s *LocalSandbox) Run(ctx context.Context, request RunRequest) (RunResult, 
 
 	start := time.Now()
 	err = cmd.Run()
-	duration := time.Since(start)
-
-	result := RunResult{
-		Command:    command,
-		WorkDir:    filepath.ToSlash(relativePath(s.workspace, workDir)),
-		ExitCode:   0,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
-		TimedOut:   runCtx.Err() == context.DeadlineExceeded,
-		Truncated:  stdout.Truncated() || stderr.Truncated(),
-		DurationMS: duration.Milliseconds(),
-		Sandbox:    "local",
-		Shell:      shellName,
+	result := domainexecution.RunResult{
+		Command: command, WorkDir: filepath.ToSlash(relativePath(executor.workspace, workDir)),
+		ExitCode: 0, Stdout: stdout.String(), Stderr: stderr.String(),
+		TimedOut: runCtx.Err() == context.DeadlineExceeded, Truncated: stdout.Truncated() || stderr.Truncated(),
+		DurationMS: time.Since(start).Milliseconds(), ExecutionEnvironment: "local-host", Isolated: false, Shell: shellName,
 	}
-
 	if err == nil {
 		return result, nil
 	}
-
 	if result.TimedOut {
 		result.ExitCode = -1
 		result.ErrorMessage = "command timed out"
 		return result, nil
 	}
-
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
 		result.ExitCode = exitError.ExitCode()
 		result.ErrorMessage = err.Error()
 		return result, nil
 	}
-
-	return RunResult{}, err
+	return domainexecution.RunResult{}, err
 }
 
-func (s *LocalSandbox) cleanWorkDir(workDir string) (string, error) {
+func (executor *Executor) cleanWorkDir(workDir string) (string, error) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
-		return s.workspace, nil
+		return executor.workspace, nil
 	}
-
 	if !filepath.IsAbs(workDir) {
-		workDir = filepath.Join(s.workspace, workDir)
+		workDir = filepath.Join(executor.workspace, workDir)
 	}
-
 	absWorkDir, err := filepath.Abs(filepath.Clean(workDir))
 	if err != nil {
 		return "", err
 	}
-	if !isInside(s.workspace, absWorkDir) {
+	if !isInside(executor.workspace, absWorkDir) {
 		return "", fmt.Errorf("work_dir is outside workspace: %s", workDir)
 	}
-
 	info, err := os.Stat(absWorkDir)
 	if err != nil {
 		return "", err
@@ -164,57 +125,28 @@ func (s *LocalSandbox) cleanWorkDir(workDir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("work_dir is not a directory: %s", workDir)
 	}
-
 	return absWorkDir, nil
 }
 
 func shellCommand(ctx context.Context, command string) (*exec.Cmd, string) {
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(
-			ctx,
-			"powershell",
-			"-NoLogo",
-			"-NoProfile",
-			"-NonInteractive",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-Command",
-			command,
-		), "powershell"
+		return exec.CommandContext(ctx, "powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command), "powershell"
 	}
-
 	return exec.CommandContext(ctx, "sh", "-c", command), "sh"
 }
 
 func rejectDangerousCommand(command string) error {
 	normalized := strings.ToLower(strings.Join(strings.Fields(command), " "))
 	blocked := []string{
-		"rm -rf /",
-		"rm -fr /",
-		"remove-item -recurse",
-		"remove-item -r",
-		"del /s",
-		"erase /s",
-		"rd /s",
-		"rmdir /s",
-		"format ",
-		"diskpart",
-		"mkfs",
-		"dd if=",
-		"shutdown",
-		"reboot",
-		"halt",
-		"poweroff",
-		"bcdedit",
-		"reg delete",
+		"rm -rf /", "rm -fr /", "remove-item -recurse", "remove-item -r", "del /s", "erase /s",
+		"rd /s", "rmdir /s", "format ", "diskpart", "mkfs", "dd if=", "shutdown", "reboot",
+		"halt", "poweroff", "bcdedit", "reg delete",
 	}
-
 	for _, pattern := range blocked {
 		if strings.Contains(normalized, pattern) {
-			return fmt.Errorf("command blocked by local sandbox policy: %s", pattern)
+			return fmt.Errorf("command blocked by local executor policy: %s", pattern)
 		}
 	}
-
 	return nil
 }
 
@@ -240,10 +172,7 @@ func normalizeOutputLimit(limit int) int {
 
 func isInside(root string, path string) bool {
 	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func relativePath(root string, path string) string {
@@ -263,35 +192,22 @@ type limitedBuffer struct {
 	truncated bool
 }
 
-func newLimitedBuffer(limit int) *limitedBuffer {
-	return &limitedBuffer{limit: limit}
-}
+func newLimitedBuffer(limit int) *limitedBuffer { return &limitedBuffer{limit: limit} }
 
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.limit <= 0 {
-		b.truncated = true
-		return len(p), nil
+func (buffer *limitedBuffer) Write(content []byte) (int, error) {
+	remaining := buffer.limit - buffer.buffer.Len()
+	if buffer.limit <= 0 || remaining <= 0 {
+		buffer.truncated = true
+		return len(content), nil
 	}
-
-	remaining := b.limit - b.buffer.Len()
-	if remaining <= 0 {
-		b.truncated = true
-		return len(p), nil
+	if len(content) > remaining {
+		buffer.truncated = true
+		_, _ = buffer.buffer.Write(content[:remaining])
+		return len(content), nil
 	}
-	if len(p) > remaining {
-		b.truncated = true
-		_, _ = b.buffer.Write(p[:remaining])
-		return len(p), nil
-	}
-
-	_, _ = b.buffer.Write(p)
-	return len(p), nil
+	_, _ = buffer.buffer.Write(content)
+	return len(content), nil
 }
 
-func (b *limitedBuffer) String() string {
-	return b.buffer.String()
-}
-
-func (b *limitedBuffer) Truncated() bool {
-	return b.truncated
-}
+func (buffer *limitedBuffer) String() string  { return buffer.buffer.String() }
+func (buffer *limitedBuffer) Truncated() bool { return buffer.truncated }

@@ -63,22 +63,33 @@ func (s LoadService) EnsureInMemory(ctx context.Context, command loadcommand.Ens
 	if err != nil {
 		return nil, err
 	}
-	messages := MessagesFromRecords(messageRecords)
+	messages := MessagesFromRecords(messageRecords, record.SystemInstruction)
 
 	err = s.Memory.PutSessionState(session.InitialState{
-		ID:                 record.ID,
-		Model:              record.Model,
-		AgentMode:          session.AgentMode(record.AgentMode),
-		PermissionMode:     session.PermissionMode(record.PermissionMode),
-		ContextWindowK:     record.ContextWindowK,
-		Summary:            record.Summary,
-		CompactedMessages:  record.CompactedMessages,
-		Usage:              TokenUsageFromRecord(record.Usage),
-		LastUsage:          TokenUsageFromRecord(record.LastUsage),
-		RAGSettings:        record.RAGSettings,
-		GenerationSettings: record.GenerationSettings,
-		StyleInstruction:   record.StyleInstruction,
-		Messages:           messages,
+		ID:                   record.ID,
+		Kind:                 session.Kind(record.Kind),
+		ParentSessionID:      record.ParentSessionID,
+		ParentTaskID:         record.ParentTaskID,
+		AgentDefinitionID:    record.AgentDefinitionID,
+		AgentDefinitionVer:   record.AgentDefinitionVer,
+		SystemInstruction:    record.SystemInstruction,
+		AllowedTools:         append([]string(nil), record.AllowedTools...),
+		EnforceToolAllowlist: record.EnforceToolAllowlist,
+		WorkspaceRoot:        record.WorkspaceRoot,
+		WorkspaceSandboxID:   record.WorkspaceSandboxID,
+		MaxToolRounds:        record.MaxToolRounds,
+		Model:                record.Model,
+		AgentMode:            session.AgentMode(record.AgentMode),
+		PermissionMode:       session.PermissionMode(record.PermissionMode),
+		ContextWindowK:       record.ContextWindowK,
+		Summary:              record.Summary,
+		CompactedMessages:    record.CompactedMessages,
+		Usage:                TokenUsageFromRecord(record.Usage),
+		LastUsage:            TokenUsageFromRecord(record.LastUsage),
+		RAGSettings:          record.RAGSettings,
+		GenerationSettings:   record.GenerationSettings,
+		StyleInstruction:     record.StyleInstruction,
+		Messages:             messages,
 	}, command.SetCurrent)
 	if err != nil {
 		return nil, err

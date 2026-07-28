@@ -74,6 +74,60 @@ func TestSelectionServicePassesForceChatModeToModePolicy(t *testing.T) {
 	}
 }
 
+func TestSelectionServiceLeavesGlobalToolsAvailableForOrdinarySession(t *testing.T) {
+	catalog := recordingCatalog{permissions: []tooldef.Permission{
+		tooldef.PermissionRead,
+		tooldef.PermissionWrite,
+	}}
+
+	tools := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+		Kind:           session.KindUser,
+		PermissionMode: session.PermissionModeFull,
+		AllowedTools:   nil,
+	}, false)
+
+	if len(tools) != 2 {
+		t.Fatalf("expected ordinary session to inherit all globally available tools, got %#v", tools)
+	}
+}
+
+func TestSelectionServiceHidesAllToolsForEnforcedEmptyAllowlist(t *testing.T) {
+	catalog := recordingCatalog{permissions: []tooldef.Permission{
+		tooldef.PermissionRead,
+		tooldef.PermissionWrite,
+	}}
+
+	tools := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+		Kind:                 session.KindSubagent,
+		PermissionMode:       session.PermissionModeFull,
+		AllowedTools:         []string{},
+		EnforceToolAllowlist: true,
+	}, false)
+
+	if len(tools) != 0 {
+		t.Fatalf("expected enforced empty allowlist to expose no tools, got %#v", tools)
+	}
+}
+
+func TestSelectionServiceFiltersToolsUsingEnforcedAllowlist(t *testing.T) {
+	catalog := recordingCatalog{permissions: []tooldef.Permission{
+		tooldef.PermissionRead,
+		tooldef.PermissionWrite,
+		tooldef.PermissionExecute,
+	}}
+
+	tools := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+		Kind:                 session.KindSubagent,
+		PermissionMode:       session.PermissionModeFull,
+		AllowedTools:         []string{"write"},
+		EnforceToolAllowlist: true,
+	}, false)
+
+	if len(tools) != 1 || tools[0].Function == nil || tools[0].Function.Name != "write" {
+		t.Fatalf("expected allowlist to expose only write, got %#v", tools)
+	}
+}
+
 type recordingCatalog struct {
 	permissions []tooldef.Permission
 }

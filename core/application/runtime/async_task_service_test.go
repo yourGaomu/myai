@@ -3,43 +3,52 @@ package runtime
 import (
 	"errors"
 	"testing"
+
+	asyncport "myai/core/port/async"
 )
 
 func TestAsyncTaskServiceUsesExecutor(t *testing.T) {
 	executor := &fakeAsyncExecutor{}
-	fallbackCalled := false
 
-	(AsyncTaskService{
-		Executor: executor,
-		Fallback: func(func()) { fallbackCalled = true },
-	}).Submit(func() {})
+	err := (AsyncTaskService{Executor: executor}).Submit(func() {})
 
-	if executor.task == nil || fallbackCalled {
-		t.Fatalf("expected executor submission without fallback: executor=%#v fallback=%v", executor, fallbackCalled)
+	if err != nil || executor.task == nil {
+		t.Fatalf("expected executor submission: executor=%#v err=%v", executor, err)
 	}
 }
 
-func TestAsyncTaskServiceFallsBackWhenSubmissionFails(t *testing.T) {
-	executor := &fakeAsyncExecutor{err: errors.New("queue full")}
-	fallbackCalled := false
+func TestAsyncTaskServiceRunsInCallerWhenQueueIsFull(t *testing.T) {
+	executor := &fakeAsyncExecutor{err: asyncport.ErrQueueFull}
 	taskCalled := false
 
-	(AsyncTaskService{
-		Executor: executor,
-		Fallback: func(task func()) {
-			fallbackCalled = true
-			task()
-		},
-	}).Submit(func() { taskCalled = true })
+	err := (AsyncTaskService{Executor: executor}).Submit(func() { taskCalled = true })
 
-	if !fallbackCalled || !taskCalled {
-		t.Fatalf("expected fallback task execution: fallback=%v task=%v", fallbackCalled, taskCalled)
+	if err != nil || !taskCalled {
+		t.Fatalf("expected caller-runs task execution: task=%v err=%v", taskCalled, err)
+	}
+}
+
+func TestAsyncTaskServiceDoesNotRunAfterExecutorClosed(t *testing.T) {
+	executor := &fakeAsyncExecutor{err: asyncport.ErrExecutorClosed}
+	taskCalled := false
+	err := (AsyncTaskService{Executor: executor}).Submit(func() { taskCalled = true })
+	if !errors.Is(err, asyncport.ErrExecutorClosed) || taskCalled {
+		t.Fatalf("expected closed executor rejection without execution: task=%v err=%v", taskCalled, err)
+	}
+}
+
+func TestAsyncTaskServiceRejectsMissingExecutor(t *testing.T) {
+	err := (AsyncTaskService{}).Submit(func() {})
+	if !errors.Is(err, asyncport.ErrExecutorUnavailable) {
+		t.Fatalf("expected unavailable executor error, got %v", err)
 	}
 }
 
 func TestAsyncTaskServiceIgnoresNilTask(t *testing.T) {
 	executor := &fakeAsyncExecutor{}
-	(AsyncTaskService{Executor: executor}).Submit(nil)
+	if err := (AsyncTaskService{Executor: executor}).Submit(nil); err != nil {
+		t.Fatal(err)
+	}
 	if executor.task != nil {
 		t.Fatal("expected nil task to be ignored")
 	}

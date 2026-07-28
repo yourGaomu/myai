@@ -190,6 +190,73 @@ func TestExecutionServiceHookAllowStillAsksForPermission(t *testing.T) {
 	}
 }
 
+func TestExecutionServiceHookAskRequiresConfirmationInFullMode(t *testing.T) {
+	asked := false
+	executed := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": recordingExecutableTool{onCall: func() { executed = true }},
+		}},
+		Hooks: &fakeHookBridge{before: HookResult{Decision: HookDecisionAsk}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
+		Callbacks: ExecutionCallbacks{OnToolAsk: func(PermissionRequest) bool {
+			asked = true
+			return false
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked || executed || result.Entries[1].ErrorCode != "permission_denied" {
+		t.Fatalf("expected hook ask to require confirmation: %#v", result)
+	}
+}
+
+func TestExecutionServiceReturnsPartialResultAfterLaterLookupFailure(t *testing.T) {
+	executed := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": recordingExecutableTool{onCall: func() { executed = true }},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{
+			{ID: "call-1", Name: "write_file", Arguments: `{"path":"a.txt"}`},
+			{ID: "call-2", Name: "missing_tool", Arguments: `{}`},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing tool error")
+	}
+	if !executed || len(result.Calls) != 2 || len(result.Messages) != 2 || len(result.Entries) != 4 {
+		t.Fatalf("expected completed call and failed lookup to be preserved: %#v", result)
+	}
+	if result.Entries[3].ErrorCode != "tool_not_found" {
+		t.Fatalf("expected missing-tool record, got %#v", result.Entries[3])
+	}
+}
+
+func TestExecutionServiceUsesHookRewrittenArgumentsForSessionCall(t *testing.T) {
+	arguments := ""
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": argumentRecordingTool{onCall: func(value string) { arguments = value }},
+		}},
+		Hooks: &fakeHookBridge{before: HookResult{Decision: HookDecisionContinue, Arguments: `{"path":"rewritten.txt"}`}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{{ID: "call-1", Name: "write_file", Arguments: `{"path":"original.txt"}`}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if arguments != `{"path":"rewritten.txt"}` || result.Calls[0].Arguments != arguments || result.Entries[0].Arguments != arguments {
+		t.Fatalf("expected rewritten arguments throughout execution result: %#v", result)
+	}
+}
+
 func TestExecutionServicePlanModeBlocksWriteEvenWithFullPermission(t *testing.T) {
 	executed := false
 	result, err := (ExecutionService{
@@ -210,8 +277,67 @@ func TestExecutionServicePlanModeBlocksWriteEvenWithFullPermission(t *testing.T)
 	}
 }
 
+func TestExecutionServiceRejectsToolOutsideEnforcedAllowlist(t *testing.T) {
+	executed := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": recordingExecutableTool{onCall: func() { executed = true }},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:            "subagent-session-1",
+		PermissionMode:       session.PermissionModeFull,
+		AllowedTools:         []string{},
+		EnforceToolAllowlist: true,
+		Calls:                []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed {
+		t.Fatal("expected execution allowlist to block the tool before invocation")
+	}
+	if len(result.Entries) != 2 || result.Entries[1].Status != domaintool.ResultStatusDenied || result.Entries[1].ErrorCode != "subagent_tool_denied" {
+		t.Fatalf("expected structured subagent allowlist denial, got %#v", result)
+	}
+}
+
+func TestExecutionServiceAllowsGlobalToolForOrdinarySession(t *testing.T) {
+	executed := false
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"write_file": recordingExecutableTool{onCall: func() { executed = true }},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:      "session-1",
+		PermissionMode: session.PermissionModeFull,
+		AllowedTools:   nil,
+		Calls:          []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executed || len(result.Entries) != 2 || result.Entries[1].Status != domaintool.ResultStatusSuccess {
+		t.Fatalf("expected ordinary session to execute globally registered tool, got %#v", result)
+	}
+}
+
 type recordingExecutableTool struct {
 	onCall func()
+}
+
+type argumentRecordingTool struct {
+	onCall func(string)
+}
+
+func (argumentRecordingTool) Name() string                   { return "write_file" }
+func (argumentRecordingTool) Description() string            { return "write" }
+func (argumentRecordingTool) Schema() any                    { return nil }
+func (argumentRecordingTool) Permission() tooldef.Permission { return tooldef.PermissionWrite }
+func (t argumentRecordingTool) Call(_ context.Context, arguments json.RawMessage) (tooldef.ToolOutput, error) {
+	if t.onCall != nil {
+		t.onCall(string(arguments))
+	}
+	return tooldef.SuccessOutput("written"), nil
 }
 
 func (recordingExecutableTool) Name() string                   { return "write_file" }

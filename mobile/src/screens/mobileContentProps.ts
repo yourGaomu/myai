@@ -21,6 +21,8 @@ import type {
   KnowledgeIndexingJob,
   KnowledgeSearchPreviewResultPayload,
   RAGSettings,
+  SubagentDefinition,
+  SubagentTask,
 } from "../protocol";
 import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
@@ -58,6 +60,7 @@ export type SettingsContentProps = {
   onExecutePlan: () => void;
   onOpenPlan: () => void;
   onRefreshModels: () => void;
+  onRequestContextInfo: () => void;
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
@@ -67,6 +70,14 @@ export type SettingsContentProps = {
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
+  onApplySubagentTask: (taskID: string) => void;
+  onCancelSubagentTask: (taskID: string) => void;
+  onCheckSubagentTask: (taskID: string) => void;
+  onCreateSubagentDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
+  onDeleteSubagentDefinition: (definitionID: string) => void;
+  onDiscardSubagentTask: (taskID: string) => void;
+  onRefreshSubagents: () => void;
+  onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
   relayURL: string;
   sessionID: string;
@@ -74,6 +85,9 @@ export type SettingsContentProps = {
   skillMessage: string;
   skillRoot: string;
   skills: SkillSummary[];
+  subagentDefinitions: SubagentDefinition[];
+  subagentMessage: string;
+  subagentTasks: SubagentTask[];
   setupVisible: boolean;
   userID: string;
 };

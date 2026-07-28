@@ -1,0 +1,73 @@
+name: myai-opensandbox
+
+services:
+  opensandbox-server:
+    image: ${OPENSANDBOX_SERVER_IMAGE:-opensandbox/server:v0.2.2}
+    container_name: myai-opensandbox-server
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${OPENSANDBOX_API_BIND:-127.0.0.1}:${OPENSANDBOX_API_PORT:-8090}:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/root/.opensandbox
+    configs:
+      - source: opensandbox-config
+        target: /etc/opensandbox/config.toml
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+      OPENSANDBOX_INSECURE_SERVER: "NO"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+configs:
+  opensandbox-config:
+    content: |
+      [server]
+      host = "0.0.0.0"
+      port = 8090
+      api_key = "${OPENSANDBOX_API_KEY:?set OPENSANDBOX_API_KEY in .env}"
+      max_sandbox_timeout_seconds = 3600
+      limit_concurrency = 128
+      thread_pool_size = 64
+
+      [log]
+      level = "INFO"
+
+      [runtime]
+      type = "docker"
+      execd_image = "${OPENSANDBOX_EXECD_IMAGE:-opensandbox/execd:v1.0.21}"
+
+      [docker]
+      network_mode = "bridge"
+      # Use 127.0.0.1 when the Go agent runs on this same server.
+      # Set this to the server LAN/public IP when a remote agent must connect.
+      host_ip = "${OPENSANDBOX_HOST_IP:-127.0.0.1}"
+      port_range_min = 40000
+      port_range_max = 40199
+      drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+      no_new_privileges = true
+      pids_limit = 4096
+
+      [ingress]
+      mode = "direct"
+
+      # The egress sidecar is used only when the Go client sends networkPolicy.
+      [egress]
+      image = "${OPENSANDBOX_EGRESS_IMAGE:-opensandbox/egress:v1.1.4}"
+      mode = "dns"
+      disable_ipv6 = true
+
+      [store]
+      type = "sqlite"
+      path = "/root/.opensandbox/opensandbox.db"

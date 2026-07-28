@@ -1,29 +1,38 @@
 package service
 
-import asyncport "myai/core/port/async"
+import (
+	"errors"
+	"fmt"
+
+	asyncport "myai/core/port/async"
+)
 
 type AsyncTaskService struct {
 	Executor asyncport.Executor
-	Fallback func(task func())
 }
 
-func (s AsyncTaskService) Submit(task func()) {
+func (s AsyncTaskService) Submit(task func()) error {
 	if task == nil {
-		return
+		return nil
 	}
 	if s.Executor == nil {
-		s.runFallback(task)
-		return
+		return asyncport.ErrExecutorUnavailable
 	}
 	if err := s.Executor.Submit(task); err != nil {
-		s.runFallback(task)
+		if errors.Is(err, asyncport.ErrQueueFull) {
+			return runInCaller(task)
+		}
+		return err
 	}
+	return nil
 }
 
-func (s AsyncTaskService) runFallback(task func()) {
-	if s.Fallback != nil {
-		s.Fallback(task)
-		return
-	}
-	go task()
+func runInCaller(task func()) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("async caller-runs task panicked: %v", recovered)
+		}
+	}()
+	task()
+	return nil
 }

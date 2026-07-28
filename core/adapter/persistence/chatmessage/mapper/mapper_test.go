@@ -50,6 +50,27 @@ func TestMapperConvertsMemoryMessagesAtPersistenceBoundary(t *testing.T) {
 	}
 }
 
+func TestMapperPersistsEveryToolCallPart(t *testing.T) {
+	mapper := Mapper{IDs: &sequentialIDs{}}
+	current := &session.Session{
+		ID: "session-1",
+		Messages: []domainmessage.Message{
+			domainmessage.ToolCallMessage([]domainmessage.ToolCall{
+				{ID: "call-1", Name: "read_file", Arguments: `{"path":"a"}`},
+				{ID: "call-2", Name: "read_file", Arguments: `{"path":"b"}`},
+			}),
+		},
+	}
+
+	records := mapper.MemoryMessages(current)
+	if len(records) != 2 {
+		t.Fatalf("record count = %d, want 2", len(records))
+	}
+	if records[0].ToolCallID != "call-1" || records[1].ToolCallID != "call-2" {
+		t.Fatalf("unexpected tool call records: %#v", records)
+	}
+}
+
 type sequentialIDs struct {
 	next int
 }

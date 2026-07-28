@@ -6,16 +6,41 @@ import (
 	"myai/core/session"
 )
 
-type key struct{}
+type ragSettingsKey struct{}
+type executionKey struct{}
+
+type Execution struct {
+	SessionID     string
+	RequestID     string
+	WorkspaceRoot string
+	SandboxID     string
+	ModelID       string
+}
 
 func WithRAGSettings(ctx context.Context, settings session.RAGSettings) context.Context {
-	return context.WithValue(ctx, key{}, session.CloneRAGSettings(settings))
+	return context.WithValue(ctx, ragSettingsKey{}, session.CloneRAGSettings(settings))
 }
 
 func RAGSettings(ctx context.Context) (session.RAGSettings, bool) {
-	settings, ok := ctx.Value(key{}).(session.RAGSettings)
+	settings, ok := ctx.Value(ragSettingsKey{}).(session.RAGSettings)
 	if !ok {
 		return session.RAGSettings{}, false
 	}
 	return session.CloneRAGSettings(settings), true
+}
+
+func WithExecution(ctx context.Context, execution Execution) context.Context {
+	return context.WithValue(ctx, executionKey{}, execution)
+}
+
+func CurrentExecution(ctx context.Context) (Execution, bool) {
+	execution, ok := ctx.Value(executionKey{}).(Execution)
+	return execution, ok
+}
+
+func WorkspaceRoot(ctx context.Context, fallback string) string {
+	if execution, ok := CurrentExecution(ctx); ok && execution.WorkspaceRoot != "" {
+		return execution.WorkspaceRoot
+	}
+	return fallback
 }

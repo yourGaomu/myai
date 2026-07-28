@@ -66,7 +66,7 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 	if !committer.command.CapturePlan || committer.command.Result.Content != "answer" {
 		t.Fatalf("expected commit command to include result and plan flag, got %#v", committer.command)
 	}
-	if !persistence.assistantPersisted || persistence.currentSessionID != "session-1" {
+	if !persistence.assistantPersisted {
 		t.Fatalf("expected persistence sink to be called, got %#v", persistence)
 	}
 }
@@ -237,16 +237,11 @@ func (c *assistantCommitter) Commit(command CommitCommand) (CommitResult, error)
 type assistantPersistence struct {
 	assistantPersisted bool
 	result             modelport.ChatResult
-	currentSessionID   string
 }
 
 func (p *assistantPersistence) PersistAssistant(current *session.Session, result modelport.ChatResult) {
 	p.assistantPersisted = true
 	p.result = result
-}
-
-func (p *assistantPersistence) PersistCurrentSession(sessionID string) {
-	p.currentSessionID = sessionID
 }
 
 func assistantGenerationSession() *session.Session {

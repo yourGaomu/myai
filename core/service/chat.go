@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	compactioncommand "myai/core/application/chat/compaction/command"
 	compactionresult "myai/core/application/chat/compaction/result"
@@ -34,10 +35,17 @@ import (
 
 type ChatService struct {
 	// ChatService 是 CLI 与远程 Agent 共用的 Facade；业务实现由 dependencies 中的应用用例完成。
-	dependencies ChatDependencies
+	dependencies  ChatDependencies
+	operationInit sync.Once
+	operations    *sessionOperationCoordinator
 }
 
 type ContextInfo = contextmgr.Info
+
+type ContextState struct {
+	Info    ContextInfo
+	Summary string
+}
 
 type CompactInfo = compactionresult.CompactInfo
 
@@ -102,6 +110,11 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		}
 		sessionID = s.CurrentSessionID()
 	}
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer unlock()
 
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
 	var retrievalInfo chatretrievalresult.Context
@@ -140,6 +153,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 			Input:              input,
 			RuntimeInstruction: prepared.RuntimeInstruction,
 			RAGContext:         prepared.RAGContext,
+			SessionSnapshot:    session.Clone(current),
 		})
 	}
 
@@ -160,6 +174,15 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
 	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer unlock()
 
 	prepared, err := s.dependencies.MessageCommands.PrepareRegeneration(ctx, messagecommand.PrepareRegeneration{
 		SessionID: sessionID,
@@ -176,6 +199,11 @@ func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID
 	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
 	}
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer unlock()
 
 	// UpdateSink 把步骤 running/done/failed 状态实时桥接到远程协议层。
 	var updates planport.UpdateSink
@@ -233,27 +261,52 @@ func (s *ChatService) contextInfo(ctx context.Context, current *session.Session)
 }
 
 func (s *ChatService) NewSession(ctx context.Context) error {
-	_, err := s.dependencies.SessionLifecycle.Create(ctx, lifecyclecommand.CreateSession{Title: "New chat"})
+	unlock, err := s.lockSessionOperation(ctx, "")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = s.dependencies.SessionLifecycle.Create(ctx, lifecyclecommand.CreateSession{Title: "New chat"})
 	return err
 }
 
 func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
-	_, err := s.dependencies.SessionLifecycle.Load(ctx, lifecyclecommand.LoadSession{SessionID: sessionID})
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = s.dependencies.SessionLifecycle.Load(ctx, lifecyclecommand.LoadSession{SessionID: sessionID})
 	return err
 }
 
 func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
-	_, err := s.dependencies.SessionLifecycle.Delete(ctx, lifecyclecommand.DeleteSession{SessionID: sessionID})
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = s.dependencies.SessionLifecycle.Delete(ctx, lifecyclecommand.DeleteSession{SessionID: sessionID})
 	return err
 }
 
 func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) error {
-	_, err := s.dependencies.SessionLifecycle.Restore(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID})
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = s.dependencies.SessionLifecycle.Restore(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID})
 	return err
 }
 
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
-	_, err := s.dependencies.SessionLifecycle.Clear(ctx, lifecyclecommand.ClearSession{Title: "New chat"})
+	unlock, err := s.lockSessionOperation(ctx, s.CurrentSessionID())
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = s.dependencies.SessionLifecycle.Clear(ctx, lifecyclecommand.ClearSession{Title: "New chat"})
 	return err
 }
 
@@ -343,9 +396,11 @@ func (s *ChatService) SwitchModel(ctx context.Context, modelID string) error {
 }
 
 func (s *ChatService) SwitchModelForSession(ctx context.Context, sessionID string, modelID string) error {
-	return s.dependencies.SessionSettings.SwitchModel(ctx, settingscommand.SwitchModel{
-		SessionID: sessionID,
-		ModelID:   modelID,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SwitchModel(ctx, settingscommand.SwitchModel{
+			SessionID: sessionID,
+			ModelID:   modelID,
+		})
 	})
 }
 
@@ -354,9 +409,11 @@ func (s *ChatService) SetPermissionMode(ctx context.Context, mode string) error 
 }
 
 func (s *ChatService) SetPermissionModeForSession(ctx context.Context, sessionID string, mode string) error {
-	return s.dependencies.SessionSettings.SetPermissionMode(ctx, settingscommand.SetPermissionMode{
-		SessionID: sessionID,
-		Mode:      mode,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetPermissionMode(ctx, settingscommand.SetPermissionMode{
+			SessionID: sessionID,
+			Mode:      mode,
+		})
 	})
 }
 
@@ -365,9 +422,11 @@ func (s *ChatService) SetAgentMode(ctx context.Context, mode string) error {
 }
 
 func (s *ChatService) SetAgentModeForSession(ctx context.Context, sessionID string, mode string) error {
-	return s.dependencies.SessionSettings.SetAgentMode(ctx, settingscommand.SetAgentMode{
-		SessionID: sessionID,
-		Mode:      mode,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetAgentMode(ctx, settingscommand.SetAgentMode{
+			SessionID: sessionID,
+			Mode:      mode,
+		})
 	})
 }
 
@@ -376,9 +435,11 @@ func (s *ChatService) SetContextWindowK(ctx context.Context, windowK int) error 
 }
 
 func (s *ChatService) SetContextWindowKForSession(ctx context.Context, sessionID string, windowK int) error {
-	return s.dependencies.SessionSettings.SetContextWindow(ctx, settingscommand.SetContextWindow{
-		SessionID: sessionID,
-		WindowK:   windowK,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetContextWindow(ctx, settingscommand.SetContextWindow{
+			SessionID: sessionID,
+			WindowK:   windowK,
+		})
 	})
 }
 
@@ -387,9 +448,11 @@ func (s *ChatService) SetGenerationSettings(ctx context.Context, settings genera
 }
 
 func (s *ChatService) SetGenerationSettingsForSession(ctx context.Context, sessionID string, settings generation.Settings) error {
-	return s.dependencies.SessionSettings.SetGenerationSettings(ctx, settingscommand.SetGenerationSettings{
-		SessionID: sessionID,
-		Settings:  settings,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetGenerationSettings(ctx, settingscommand.SetGenerationSettings{
+			SessionID: sessionID,
+			Settings:  settings,
+		})
 	})
 }
 
@@ -398,9 +461,11 @@ func (s *ChatService) SetStyleInstruction(ctx context.Context, instruction strin
 }
 
 func (s *ChatService) SetStyleInstructionForSession(ctx context.Context, sessionID string, instruction string) error {
-	return s.dependencies.SessionSettings.SetStyleInstruction(ctx, settingscommand.SetStyleInstruction{
-		SessionID:   sessionID,
-		Instruction: instruction,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetStyleInstruction(ctx, settingscommand.SetStyleInstruction{
+			SessionID:   sessionID,
+			Instruction: instruction,
+		})
 	})
 }
 
@@ -409,9 +474,11 @@ func (s *ChatService) SetRAGSettings(ctx context.Context, settings session.RAGSe
 }
 
 func (s *ChatService) SetRAGSettingsForSession(ctx context.Context, sessionID string, settings session.RAGSettings) error {
-	return s.dependencies.SessionSettings.SetRAGSettings(ctx, settingscommand.SetRAGSettings{
-		SessionID: sessionID,
-		Settings:  settings,
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		return s.dependencies.SessionSettings.SetRAGSettings(ctx, settingscommand.SetRAGSettings{
+			SessionID: sessionID,
+			Settings:  settings,
+		})
 	})
 }
 
@@ -424,6 +491,11 @@ func (s *ChatService) SessionPreferencesForSession(ctx context.Context, sessionI
 	if sessionID == "" {
 		return SessionPreferencesView{}, errors.New("session id is empty")
 	}
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return SessionPreferencesView{}, err
+	}
+	defer unlock()
 	current, err := s.dependencies.SessionLoader.Load(ctx, sessionID)
 	if err != nil {
 		return SessionPreferencesView{}, err
@@ -466,6 +538,11 @@ func (s *ChatService) CompactCurrentSession(ctx context.Context) (ContextInfo, e
 }
 
 func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (ContextInfo, error) {
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ContextInfo{}, err
+	}
+	defer unlock()
 	return s.dependencies.SessionCompaction.Compact(ctx, compactioncommand.CompactSession{SessionID: sessionID})
 }
 
@@ -516,11 +593,24 @@ func (s *ChatService) CurrentContextInfo() ContextInfo {
 }
 
 func (s *ChatService) ContextInfoForSession(ctx context.Context, sessionID string) (ContextInfo, error) {
+	state, err := s.ContextStateForSession(ctx, sessionID)
+	return state.Info, err
+}
+
+func (s *ChatService) ContextStateForSession(ctx context.Context, sessionID string) (ContextState, error) {
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ContextState{Info: ContextInfo{WindowK: contextmgr.DefaultWindowK}}, err
+	}
+	defer unlock()
 	current, err := s.ensureSessionInMemory(ctx, sessionID, false)
 	if err != nil {
-		return ContextInfo{WindowK: contextmgr.DefaultWindowK}, err
+		return ContextState{Info: ContextInfo{WindowK: contextmgr.DefaultWindowK}}, err
 	}
-	return s.contextInfo(ctx, current), nil
+	return ContextState{
+		Info:    s.contextInfo(ctx, current),
+		Summary: current.Summary,
+	}, nil
 }
 
 func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID string, setCurrent bool) (*session.Session, error) {
@@ -528,6 +618,20 @@ func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID strin
 		SessionID:  sessionID,
 		SetCurrent: setCurrent,
 	})
+}
+
+func (s *ChatService) withSessionOperation(ctx context.Context, sessionID string, operation func() error) error {
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return operation()
+}
+
+func (s *ChatService) lockSessionOperation(ctx context.Context, sessionID string) (func(), error) {
+	s.operationInit.Do(func() { s.operations = newSessionOperationCoordinator() })
+	return s.operations.lock(ctx, sessionID)
 }
 
 func titleFromInput(input string) string {

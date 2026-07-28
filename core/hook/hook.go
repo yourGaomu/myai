@@ -73,15 +73,19 @@ type Manager struct {
 	handlers []Handler
 }
 
-func NewManager(config Config) *Manager {
+func NewManager(config Config) (*Manager, error) {
 	manager := &Manager{}
-	for _, command := range config.CommandHooks {
-		handler, err := NewCommandHook(command, config.Workspace)
-		if err == nil {
-			manager.Register(handler)
+	for index, command := range config.CommandHooks {
+		if command.Enabled != nil && !*command.Enabled {
+			continue
 		}
+		handler, err := NewCommandHook(command, config.Workspace)
+		if err != nil {
+			return nil, fmt.Errorf("configure command hook %d: %w", index+1, err)
+		}
+		manager.Register(handler)
 	}
-	return manager
+	return manager, nil
 }
 
 func (m *Manager) Register(handler Handler) {
@@ -151,9 +155,7 @@ func aggregatePreToolUse(results []Result) Result {
 			final.Decision = DecisionDeny
 			return final
 		case DecisionAsk:
-			if final.Decision != DecisionAllow {
-				final.Decision = DecisionAsk
-			}
+			final.Decision = DecisionAsk
 		case DecisionAllow:
 			if final.Decision == DecisionContinue {
 				final.Decision = DecisionAllow

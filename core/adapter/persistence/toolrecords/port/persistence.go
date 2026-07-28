@@ -11,4 +11,6 @@ type Persistence interface {
 	SaveAsset(ctx context.Context, record repository.AssetRecord) error
 }
 
-type AsyncRunner func(task func())
+type AsyncRunner func(task func()) error
+
+type SessionAsyncRunner func(sessionID string, task func()) error

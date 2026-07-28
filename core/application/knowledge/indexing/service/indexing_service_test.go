@@ -167,6 +167,7 @@ type indexingFixtures struct {
 	documents  *fakeDocumentRepository
 	profiles   *fakeProfileRepository
 	jobs       *fakeJobRepository
+	states     *fakeIndexingStateRepository
 	chunks     *fakeChunkRepository
 	objects    *fakeObjectStore
 	processor  *fakeDocumentProcessor
@@ -193,6 +194,7 @@ func newIndexingFixtures() *indexingFixtures {
 	}
 	fixtures.chunks.events = &fixtures.events
 	fixtures.vectors.events = &fixtures.events
+	fixtures.states = &fakeIndexingStateRepository{documents: fixtures.documents, jobs: fixtures.jobs}
 	return fixtures
 }
 
@@ -201,6 +203,7 @@ func (fixtures *indexingFixtures) configuration() Configuration {
 		Documents:  fixtures.documents,
 		Profiles:   fixtures.profiles,
 		Jobs:       fixtures.jobs,
+		States:     fixtures.states,
 		Chunks:     fixtures.chunks,
 		Objects:    fixtures.objects,
 		Processor:  fixtures.processor,
@@ -325,6 +328,24 @@ type fakeJobRepository struct {
 	items   map[string]domainknowledge.IndexingJob
 	current domainknowledge.IndexingJob
 	mu      sync.Mutex
+}
+
+type fakeIndexingStateRepository struct {
+	documents *fakeDocumentRepository
+	jobs      *fakeJobRepository
+	err       error
+	saves     int
+}
+
+func (repository *fakeIndexingStateRepository) SaveDocumentAndJob(ctx context.Context, document domainknowledge.Document, job domainknowledge.IndexingJob) error {
+	if repository.err != nil {
+		return repository.err
+	}
+	repository.saves++
+	if err := repository.documents.Save(ctx, document); err != nil {
+		return err
+	}
+	return repository.jobs.Save(ctx, job)
 }
 
 func (repository *fakeJobRepository) Get(_ context.Context, jobID string) (domainknowledge.IndexingJob, error) {

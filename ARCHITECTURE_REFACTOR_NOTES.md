@@ -64,7 +64,7 @@ myai
 ├─ core/asset
 ├─ core/history
 ├─ core/hook
-├─ core/sandbox
+├─ core/adapter/execution/local
 ├─ mobile
 ├─ skills
 └─ resource
@@ -1437,29 +1437,33 @@ hook 不应该被 `ChatService` 到处直接调用。更合理的是 application
 
 ### 21.4 sandbox 模块
 
-当前：
+当前已整理为：
 
 ```text
-core/sandbox
+core/domain/execution
+core/port/execution
+core/adapter/execution/local
+core/domain/sandbox
+core/port/sandbox
+core/adapter/sandbox/opensandbox
 ```
 
-它承担：
+职责已经拆分：
 
-- shell command 执行
-- workspace 限制
-- stdout/stderr 截断
-- destructive command 基础防护
+- `execution` 负责命令请求、结果和本地宿主执行；本地执行不声明隔离能力。
+- `sandbox` 只表示真正的 OpenSandbox 隔离环境与生命周期。
+- Shell 结果使用 `execution_environment` 和 `isolated` 明确告诉调用方实际边界。
 
-目标归属：
+实现归属：
 
 ```text
-port/sandbox
-  Sandbox
+port/execution
+  CommandExecutor
 
-adapter/sandbox/local
-  LocalSandbox
+adapter/execution/local
+  Executor
 
-domain/sandbox
+domain/execution
   RunRequest
   RunResult
 ```

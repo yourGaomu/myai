@@ -59,8 +59,8 @@ flowchart LR
 | 进程 | 启动命令 | 主要职责 |
 |---|---|---|
 | CLI Chat | `go run . chat` | 在当前电脑终端直接聊天，不经过 Relay 和手机 |
-| Relay | `go run . relay --addr 0.0.0.0:18080` | 配对、鉴权、维护 WebSocket 连接、转发消息 |
-| PC Agent | `go run . agent ...` | 真正执行聊天、模型调用、工具调用、文件与历史操作 |
+| Relay | `go run . relay --addr 0.0.0.0:18080 --agent-token ... --agent-user ... --agent-device ...` | 配对、身份绑定鉴权、维护 WebSocket 连接、转发消息 |
+| PC Agent | `go run . agent --relay-token ...` | 真正执行聊天、模型调用、工具调用、文件与历史操作 |
 | Mobile | `cd mobile && npm start` | 手机 UI，通过 Relay 控制 PC Agent |
 
 一个重要结论：**Relay 不是业务后端，PC Agent 才是业务执行端。** Relay 不应该依赖 ChatService、Mongo 会话仓库或工具执行器。
@@ -488,7 +488,7 @@ Plan 指令要求模型输出：
 
 Plan 生成阶段额外限制为只读工具；批准执行时通过 `ForceChatMode` 恢复正常工具策略。权限审批消息通过 `permission_ask` / `permission_result` 在手机与 Agent 间往返。
 
-Shell 命令由 `core/sandbox` 约束在工作区内；文件工具也应使用工作区归一化路径，不能任意访问工作区之外。
+本地 Shell 通过 `core/port/execution.CommandExecutor` 和 `core/adapter/execution/local` 在宿主机执行，`work_dir` 只做工作区路径约束，不代表 OS 隔离。需要安全边界时，会话工作区必须选择 OpenSandbox；Shell 结果会明确返回 `execution_environment` 和 `isolated`。文件工具仍使用工作区真实路径校验，禁止通过普通路径或符号链接越界。
 
 ## 12. 上下文、压缩与缓存
 
@@ -752,7 +752,7 @@ go run . chat
 
 ```powershell
 cd D:\Go_All\myai
-go run . relay --addr 0.0.0.0:18080
+go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 ```
 
 终端 2：
@@ -761,6 +761,7 @@ go run . relay --addr 0.0.0.0:18080
 cd D:\Go_All\myai
 go run . agent `
   --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
   --user local `
   --device pc-local `
   --workspace D:\Go_All\myai

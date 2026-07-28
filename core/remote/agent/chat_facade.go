@@ -32,6 +32,7 @@ type SessionQueryFacade interface {
 	ListSessionMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]sessionresult.MessageListItem, bool, error)
 	ListAssets(ctx context.Context, sessionID string, limit int) ([]sessionresult.AssetListItem, error)
 	ContextInfoForSession(ctx context.Context, sessionID string) (service.ContextInfo, error)
+	ContextStateForSession(ctx context.Context, sessionID string) (service.ContextState, error)
 }
 
 type SessionSettingsFacade interface {

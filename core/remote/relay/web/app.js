@@ -76,8 +76,22 @@ function connect() {
 }
 
 async function loadAgents() {
+  if (!state.clientToken) {
+    renderAgents([]);
+    return;
+  }
   try {
-    const response = await fetch("/agents");
+    const params = new URLSearchParams({
+      user_id: el.userId.value.trim(),
+      device_id: el.deviceId.value.trim(),
+    });
+    const response = await fetch(`/agents?${params.toString()}`, {
+      headers: authorizationHeaders(),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text.trim() || response.statusText);
+    }
     const data = await response.json();
     renderAgents(data.agents || []);
   } catch (err) {

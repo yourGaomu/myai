@@ -35,6 +35,13 @@ func TestUniqueToolNameAddsSuffix(t *testing.T) {
 	}
 }
 
+func TestUniqueToolNameSkipsReservedSuffix(t *testing.T) {
+	used := map[string]int{"mcp_server_tool": 1, "mcp_server_tool_2": 1}
+	if got := uniqueToolName("mcp_server_tool", used); got != "mcp_server_tool_3" {
+		t.Fatalf("name = %q, want mcp_server_tool_3", got)
+	}
+}
+
 func TestFormatCallResultCombinesContentAndStructuredContent(t *testing.T) {
 	result := CallResult{
 		Content: []ContentItem{

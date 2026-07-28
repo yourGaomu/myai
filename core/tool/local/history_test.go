@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	localexecutor "myai/core/adapter/execution/local"
 	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	domainhistory "myai/core/domain/history"
 	"myai/core/history"
-	"myai/core/sandbox"
 )
 
 func TestWriteFileRecordsCheckpoint(t *testing.T) {
@@ -196,11 +196,11 @@ func main() {
 	}, store)
 	defer task.Close()
 
-	localSandbox, err := sandbox.NewLocalSandbox(root)
+	localExecutor, err := localexecutor.New(root)
 	if err != nil {
-		t.Fatalf("new local sandbox failed: %v", err)
+		t.Fatalf("new local command executor failed: %v", err)
 	}
-	tool := NewShellToolWithWorkspace(root, localSandbox)
+	tool := NewShellToolWithWorkspace(root, localExecutor)
 	ctx := history.WithTaskRecorder(context.Background(), task)
 
 	output, err := tool.Call(ctx, mustJSON(t, map[string]any{

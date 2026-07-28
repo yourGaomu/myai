@@ -18,7 +18,10 @@ import (
 	"time"
 )
 
-const maxStdioMessageSize = 16 * 1024 * 1024
+const (
+	maxStdioMessageSize = 16 * 1024 * 1024
+	maxToolListPages    = 100
+)
 
 type Client struct {
 	// Client 通过子进程 stdin/stdout 实现 JSON-RPC；pending 用请求 ID 关联并发响应。
@@ -29,9 +32,9 @@ type Client struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 
-	writeMu  sync.Mutex
-	stderrMu sync.Mutex
-	stderr   []string
+	writeGate chan struct{}
+	stderrMu  sync.Mutex
+	stderr    []string
 
 	nextID    atomic.Int64
 	pendingMu sync.Mutex
@@ -108,13 +111,16 @@ func (err *rpcError) Error() string {
 }
 
 func NewClient(config ServerConfig) *Client {
-	return &Client{
+	client := &Client{
 		config:          config,
 		timeout:         config.timeout(),
 		protocolVersion: config.ProtocolVersion,
 		pending:         make(map[int64]chan rpcResult),
 		closed:          make(chan struct{}),
+		writeGate:       make(chan struct{}, 1),
 	}
+	client.writeGate <- struct{}{}
+	return client
 }
 
 func (c *Client) Start(ctx context.Context) error {
@@ -169,7 +175,8 @@ func (c *Client) Start(ctx context.Context) error {
 func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 	tools := make([]ToolInfo, 0)
 	cursor := ""
-	for {
+	seenCursors := make(map[string]struct{})
+	for page := 0; page < maxToolListPages; page++ {
 		params := map[string]any{}
 		if cursor != "" {
 			params["cursor"] = cursor
@@ -180,11 +187,17 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 			return nil, err
 		}
 		tools = append(tools, result.Tools...)
-		if strings.TrimSpace(result.NextCursor) == "" {
+		nextCursor := strings.TrimSpace(result.NextCursor)
+		if nextCursor == "" {
 			return tools, nil
 		}
-		cursor = result.NextCursor
+		if _, exists := seenCursors[nextCursor]; exists {
+			return nil, fmt.Errorf("mcp tools/list returned repeated cursor %q", nextCursor)
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
 	}
+	return nil, fmt.Errorf("mcp tools/list exceeded %d pages", maxToolListPages)
 }
 
 func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMessage) (CallResult, error) {
@@ -315,11 +328,39 @@ func (c *Client) writeJSON(ctx context.Context, value any) error {
 	}
 	payload = append(payload, '\n')
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.closed:
+		if c.closeErr != nil {
+			return c.closeErr
+		}
+		return errors.New("mcp client closed")
+	case <-c.writeGate:
+	}
+	defer func() { c.writeGate <- struct{}{} }()
 
-	_, err = c.stdin.Write(payload)
-	return err
+	if c.stdin == nil {
+		return errors.New("mcp stdin is not initialized")
+	}
+	writeResult := make(chan error, 1)
+	go func() {
+		_, writeErr := c.stdin.Write(payload)
+		writeResult <- writeErr
+	}()
+	select {
+	case err := <-writeResult:
+		return err
+	case <-ctx.Done():
+		_ = c.stdin.Close()
+		c.markClosed(ctx.Err())
+		return ctx.Err()
+	case <-c.closed:
+		if c.closeErr != nil {
+			return c.closeErr
+		}
+		return errors.New("mcp client closed")
+	}
 }
 
 func (c *Client) readLoop(stdout io.Reader) {

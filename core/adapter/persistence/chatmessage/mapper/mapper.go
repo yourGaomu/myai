@@ -75,20 +75,31 @@ func (m Mapper) Session(current *session.Session, title string) repository.Sessi
 		return repository.SessionRecord{}
 	}
 	return repository.SessionRecord{
-		ID:                 current.ID,
-		Model:              current.Model,
-		AgentMode:          string(session.NormalizeAgentMode(current.AgentMode)),
-		PermissionMode:     string(session.NormalizePermissionMode(current.PermissionMode)),
-		ContextWindowK:     contextmgr.NormalizeWindowK(current.ContextWindowK),
-		Summary:            current.Summary,
-		CompactedMessages:  current.CompactedMessages,
-		Title:              title,
-		Usage:              tokenUsage(current.Usage),
-		LastUsage:          tokenUsage(current.LastUsage),
-		CurrentPlan:        agentplan.Clone(current.CurrentPlan),
-		RAGSettings:        session.CloneRAGSettings(current.RAGSettings),
-		GenerationSettings: generation.Clone(current.GenerationSettings),
-		StyleInstruction:   current.StyleInstruction,
+		ID:                   current.ID,
+		Kind:                 string(session.NormalizeKind(current.Kind)),
+		ParentSessionID:      current.ParentSessionID,
+		ParentTaskID:         current.ParentTaskID,
+		AgentDefinitionID:    current.AgentDefinitionID,
+		AgentDefinitionVer:   current.AgentDefinitionVer,
+		SystemInstruction:    current.SystemInstruction,
+		AllowedTools:         append([]string(nil), current.AllowedTools...),
+		EnforceToolAllowlist: current.EnforceToolAllowlist,
+		WorkspaceRoot:        current.WorkspaceRoot,
+		WorkspaceSandboxID:   current.WorkspaceSandboxID,
+		MaxToolRounds:        current.MaxToolRounds,
+		Model:                current.Model,
+		AgentMode:            string(session.NormalizeAgentMode(current.AgentMode)),
+		PermissionMode:       string(session.NormalizePermissionMode(current.PermissionMode)),
+		ContextWindowK:       contextmgr.NormalizeWindowK(current.ContextWindowK),
+		Summary:              current.Summary,
+		CompactedMessages:    current.CompactedMessages,
+		Title:                title,
+		Usage:                tokenUsage(current.Usage),
+		LastUsage:            tokenUsage(current.LastUsage),
+		CurrentPlan:          agentplan.Clone(current.CurrentPlan),
+		RAGSettings:          session.CloneRAGSettings(current.RAGSettings),
+		GenerationSettings:   generation.Clone(current.GenerationSettings),
+		StyleInstruction:     current.StyleInstruction,
 	}
 }
 
@@ -98,45 +109,62 @@ func (m Mapper) MemoryMessages(current *session.Session) []repository.MessageRec
 	}
 
 	records := make([]repository.MessageRecord, 0, len(current.Messages))
-	createdAt := m.now().Add(-time.Duration(len(current.Messages)) * time.Nanosecond)
-	for index, message := range current.Messages {
-		record, ok := m.messageRecord(current.ID, message, createdAt.Add(time.Duration(index)*time.Nanosecond))
-		if ok {
-			records = append(records, record)
-		}
+	for _, message := range current.Messages {
+		records = append(records, m.messageRecords(current.ID, message)...)
+	}
+	createdAt := m.now().Add(-time.Duration(len(records)) * time.Nanosecond)
+	for index := range records {
+		records[index].CreatedAt = createdAt.Add(time.Duration(index) * time.Nanosecond)
 	}
 	return records
 }
 
-func (m Mapper) messageRecord(sessionID string, message domainmessage.Message, createdAt time.Time) (repository.MessageRecord, bool) {
-	record := repository.MessageRecord{
-		SessionID: sessionID,
-		CreatedAt: createdAt,
+func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) []repository.MessageRecord {
+	newRecord := func(role string) repository.MessageRecord {
+		return repository.MessageRecord{ID: m.newID(), SessionID: sessionID, Role: role}
 	}
 	switch message.Role {
 	case domainmessage.RoleSystem:
 		if !message.IsSynthetic() {
-			return repository.MessageRecord{}, false
+			return nil
 		}
-		record.Role = repository.RoleSystem
+		record := newRecord(repository.RoleSystem)
 		record.Content = message.Text()
 		record.SyntheticReason = string(message.SyntheticReason)
+		return []repository.MessageRecord{record}
 	case domainmessage.RoleUser:
-		record.Role = repository.RoleUser
+		record := newRecord(repository.RoleUser)
 		record.Content = message.Text()
+		return []repository.MessageRecord{record}
 	case domainmessage.RoleAssistant:
-		if call, ok := message.FirstToolCall(); ok {
-			record.Role = repository.RoleToolCall
-			record.ToolCallID = call.ID
-			record.ToolName = call.Name
-			record.ToolArguments = call.Arguments
-		} else {
-			record.Role = repository.RoleAssistant
-			record.Content = message.Text()
+		records := make([]repository.MessageRecord, 0, len(message.Parts)+1)
+		if text := message.Text(); text != "" {
+			record := newRecord(repository.RoleAssistant)
+			record.Content = text
+			records = append(records, record)
 		}
+		for _, part := range message.Parts {
+			if part.Type != domainmessage.PartToolCall || part.ToolCall == nil {
+				continue
+			}
+			record := newRecord(repository.RoleToolCall)
+			record.ToolCallID = part.ToolCall.ID
+			record.ToolName = part.ToolCall.Name
+			record.ToolArguments = part.ToolCall.Arguments
+			records = append(records, record)
+		}
+		if len(records) == 0 {
+			records = append(records, newRecord(repository.RoleAssistant))
+		}
+		return records
 	case domainmessage.RoleTool:
-		record.Role = repository.RoleTool
-		if result, ok := message.FirstToolResult(); ok {
+		records := make([]repository.MessageRecord, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			if part.Type != domainmessage.PartToolResult || part.ToolResult == nil {
+				continue
+			}
+			result := part.ToolResult
+			record := newRecord(repository.RoleTool)
 			status := result.Status
 			if status == "" {
 				status = domaintool.ResultStatusSuccess
@@ -148,14 +176,17 @@ func (m Mapper) messageRecord(sessionID string, message domainmessage.Message, c
 			record.ToolError = result.ErrorMessage
 			record.ToolErrorCode = result.ErrorCode
 			record.ToolTruncated = result.Truncated
-		} else {
-			record.Content = message.Text()
+			records = append(records, record)
 		}
+		if len(records) == 0 {
+			record := newRecord(repository.RoleTool)
+			record.Content = message.Text()
+			records = append(records, record)
+		}
+		return records
 	default:
-		return repository.MessageRecord{}, false
+		return nil
 	}
-	record.ID = m.newID()
-	return record, true
 }
 
 func (m Mapper) newID() string {

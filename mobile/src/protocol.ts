@@ -30,6 +30,8 @@ export type MessageType =
   | "session_plan_execute"
   | "session_plan_update"
   | "session_plan_execute_result"
+  | "session_context_query"
+  | "session_context_query_result"
   | "session_context_set"
   | "session_context_set_result"
   | "session_rag_set"
@@ -68,6 +70,20 @@ export type MessageType =
   | "knowledge_profile_list_result"
   | "knowledge_search_preview"
   | "knowledge_search_preview_result"
+  | "subagent_definition_list"
+  | "subagent_definition_list_result"
+  | "subagent_definition_create"
+  | "subagent_definition_update"
+  | "subagent_definition_delete"
+  | "subagent_definition_mutation_result"
+  | "subagent_task_list"
+  | "subagent_task_list_result"
+  | "subagent_task_check"
+  | "subagent_task_cancel"
+  | "subagent_task_apply"
+  | "subagent_task_discard"
+  | "subagent_task_result"
+  | "subagent_task_event"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -95,6 +111,82 @@ export type RelayMessage<TPayload = unknown> = {
   session_id?: string;
   client_token?: string;
   payload?: TPayload;
+};
+
+export type SubagentDefinition = {
+  id: string;
+  name: string;
+  description?: string;
+  system_prompt: string;
+  model_id?: string;
+  allowed_tools?: string[];
+  capability_mode: "read_only" | "read_write" | "execute" | "all";
+  isolation_mode: "direct" | "snapshot" | "git_worktree" | "opensandbox";
+  max_turns: number;
+  timeout_seconds: number;
+  enabled: boolean;
+  version?: number;
+  source?: "builtin" | "user";
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type SubagentDefinitionListResultPayload = {
+  definitions?: SubagentDefinition[];
+};
+
+export type SubagentDefinitionMutationResultPayload = {
+  definition?: SubagentDefinition;
+  definitions?: SubagentDefinition[];
+  deleted_id?: string;
+  message?: string;
+};
+
+export type SubagentFileChange = {
+  path: string;
+  change_type: "added" | "modified" | "deleted";
+  before_hash?: string;
+  after_hash?: string;
+  before_size?: number;
+  after_size?: number;
+};
+
+export type SubagentChangeSet = {
+  workspace_id?: string;
+  status?: "none" | "pending" | "applied" | "discarded" | "conflict";
+  files?: SubagentFileChange[];
+  checkpoint_id?: string;
+  message?: string;
+  created_at?: string;
+  applied_at?: string;
+  discarded_at?: string;
+};
+
+export type SubagentTask = {
+  id: string;
+  parent_session_id: string;
+  definition_id: string;
+  definition_version: number;
+  title: string;
+  instruction?: string;
+  status: "queued" | "running" | "waiting_subagents" | "waiting_permission" | "succeeded" | "failed" | "canceled";
+  result?: string;
+  error_message?: string;
+  change_set: SubagentChangeSet;
+  created_at: string;
+  updated_at: string;
+  started_at?: string;
+  completed_at?: string;
+};
+
+export type SubagentTaskListResultPayload = {
+  session_id: string;
+  tasks?: SubagentTask[];
+};
+
+export type SubagentTaskResultPayload = {
+  task: SubagentTask;
+  message?: string;
 };
 
 export type PairResponse = {
@@ -306,6 +398,10 @@ export type SessionContextSetPayload = {
   window_k: number;
 };
 
+export type SessionContextQueryPayload = {
+  session_id?: string;
+};
+
 export type SessionCompactPayload = {
   session_id?: string;
 };
@@ -339,6 +435,7 @@ export type ContextInfo = {
   summary_version?: number;
   summary_hash?: string;
   prefix_hash?: string;
+  summary?: string;
 };
 
 export type CompactInfo = {
@@ -361,6 +458,11 @@ export type SessionSettingsResultPayload = {
   sessions?: SessionSummary[];
   context?: ContextInfo;
   message?: string;
+};
+
+export type SessionContextQueryResultPayload = {
+  session_id: string;
+  context?: ContextInfo;
 };
 
 export type ModelSummary = {

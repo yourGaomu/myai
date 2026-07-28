@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -50,7 +51,7 @@ func (t *ReadFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.
 	if err := json.Unmarshal(args, &input); err != nil {
 		return tooldef.ToolOutput{}, err
 	}
-	path, err := cleanWorkspacePath(t.workspace, input.Path)
+	path, err := cleanWorkspacePath(toolruntime.WorkspaceRoot(ctx, t.workspace), input.Path)
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}

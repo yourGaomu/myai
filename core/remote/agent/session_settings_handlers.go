@@ -32,9 +32,10 @@ func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, in
 		}
 	}
 
+	contextPayload := contextInfoPayload(info)
 	if current.ID != "" {
-		if session, err := a.chatService.ContextInfoForSession(ctx, current.ID); err == nil {
-			info = session
+		if state, err := a.chatService.ContextStateForSession(ctx, current.ID); err == nil {
+			contextPayload = contextStatePayload(state)
 		}
 	}
 
@@ -42,9 +43,35 @@ func (a *Agent) sessionSettingsPayload(ctx context.Context, sessionID string, in
 		CurrentSessionID: list.CurrentSessionID,
 		Session:          current,
 		Sessions:         list.Sessions,
-		Context:          contextInfoPayload(info),
+		Context:          contextPayload,
 		Message:          message,
 	}, nil
+}
+
+func (a *Agent) handleSessionContextQuery(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionContextQueryPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session context query failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	state, err := a.chatService.ContextStateForSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionContextQueryResult, message.RequestID, sessionID, protocol.SessionContextQueryResultPayload{
+		SessionID: sessionID,
+		Context:   contextStatePayload(state),
+	})
 }
 
 func (a *Agent) handleSessionPermissionSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {

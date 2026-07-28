@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,33 +19,73 @@ import (
 
 type Server struct {
 	// Relay 只管理连接、配对和消息路由，不依赖 ChatService，也不执行模型或工具逻辑。
-	addr       string
-	upgrader   websocket.Upgrader
-	agentLock  sync.RWMutex
-	agents     map[string]*agentEntry
-	bindings   map[string]string
-	authStore  authorizationport.Store
-	clientLock sync.RWMutex
-	clients    map[string]*clientEntry
+	addr             string
+	upgrader         websocket.Upgrader
+	agentLock        sync.RWMutex
+	agents           map[string]*agentEntry
+	bindings         map[string]string
+	authStore        authorizationport.Store
+	clientLock       sync.RWMutex
+	clients          map[string]*clientEntry
+	connections      map[*peer]*clientConnection
+	agentCredentials map[string]string
+	origins          map[string]struct{}
 }
 
-func NewServer(addr string, authStore authorizationport.Store) *Server {
+type Option func(*Server)
+
+type AgentCredential struct {
+	UserID   string
+	DeviceID string
+	Token    string
+}
+
+func WithAgentCredentials(credentials ...AgentCredential) Option {
+	return func(server *Server) {
+		for _, credential := range credentials {
+			userID := strings.TrimSpace(credential.UserID)
+			deviceID := strings.TrimSpace(credential.DeviceID)
+			token := strings.TrimSpace(credential.Token)
+			if userID == "" || deviceID == "" || token == "" {
+				continue
+			}
+			server.agentCredentials[agentKey(userID, deviceID)] = token
+		}
+	}
+}
+
+func WithAllowedOrigins(origins ...string) Option {
+	return func(server *Server) {
+		for _, origin := range origins {
+			if normalized, ok := normalizeOrigin(origin); ok {
+				server.origins[normalized] = struct{}{}
+			}
+		}
+	}
+}
+
+func NewServer(addr string, authStore authorizationport.Store, options ...Option) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
 
-	return &Server{
-		addr:      addr,
-		agents:    make(map[string]*agentEntry),
-		bindings:  make(map[string]string),
-		authStore: authStore,
-		clients:   make(map[string]*clientEntry),
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
-		},
+	server := &Server{
+		addr:             addr,
+		agents:           make(map[string]*agentEntry),
+		bindings:         make(map[string]string),
+		authStore:        authStore,
+		clients:          make(map[string]*clientEntry),
+		connections:      make(map[*peer]*clientConnection),
+		agentCredentials: make(map[string]string),
+		origins:          make(map[string]struct{}),
 	}
+	for _, option := range options {
+		if option != nil {
+			option(server)
+		}
+	}
+	server.upgrader = websocket.Upgrader{CheckOrigin: server.originAllowed}
+	return server
 }
 
 func (s *Server) SetAuthStore(store authorizationport.Store) {
@@ -93,21 +134,23 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/ws/agent", s.handleAgent)
 	mux.HandleFunc("/ws/client", s.handleClient)
 	mux.Handle("/", s.webHandler())
-	return corsMiddleware(mux)
+	return s.corsMiddleware(mux)
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
-		} else {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" {
+			if !s.originAllowed(r) {
+				http.Error(w, "origin is not allowed", http.StatusForbidden)
+				return
+			}
 			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 
-		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-MyAI-Agent-User-ID, X-MyAI-Agent-Device-ID")
 		w.Header().Set("Access-Control-Max-Age", "600")
 
 		if r.Method == http.MethodOptions {
@@ -134,9 +177,22 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	agents := s.listAgents()
+	if _, ok := s.authenticateAgentRequest(r); !ok {
+		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+		deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+		if !s.validateClientToken(userID, deviceID, clientTokenFromRequest(r)) {
+			http.Error(w, "agent or paired client authentication required", http.StatusUnauthorized)
+			return
+		}
+		agents = nil
+		if agent, found := s.agentInfo(userID, deviceID); found {
+			agents = []AgentInfo{agent}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(agentsResponse{Agents: s.listAgents()}); err != nil {
+	if err := json.NewEncoder(w).Encode(agentsResponse{Agents: agents}); err != nil {
 		log.Printf("write agents response failed: %v", err)
 	}
 }
@@ -150,6 +206,15 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role string) {
+	authenticatedAgent := agentIdentity{}
+	if role == "agent" {
+		var ok bool
+		authenticatedAgent, ok = s.authenticateAgentRequest(r)
+		if !ok {
+			http.Error(w, "agent authentication required", http.StatusUnauthorized)
+			return
+		}
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("%s websocket upgrade failed: %v", role, err)
@@ -185,7 +250,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		}
 
 		log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
-		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, &agentUserID, &agentDeviceID); err != nil {
+		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, authenticatedAgent, &agentUserID, &agentDeviceID); err != nil {
 			log.Printf("%s handle message failed: %v", role, err)
 			if writeErr := writeError(peer, message, err.Error()); writeErr != nil {
 				log.Printf("%s error response failed: %v", role, writeErr)
@@ -201,10 +266,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 	}
 }
 
-func (s *Server) handleRemoteMessage(p *peer, role string, remoteAddr string, message protocol.Message, agentUserID *string, agentDeviceID *string) error {
+func (s *Server) handleRemoteMessage(p *peer, role string, remoteAddr string, message protocol.Message, authenticatedAgent agentIdentity, agentUserID *string, agentDeviceID *string) error {
 	switch role {
 	case "agent":
-		return s.handleAgentMessage(p, remoteAddr, message, agentUserID, agentDeviceID)
+		return s.handleAgentMessage(p, remoteAddr, message, authenticatedAgent, agentUserID, agentDeviceID)
 	case "client":
 		return s.handleClientMessage(p, remoteAddr, message)
 	default:
@@ -212,13 +277,30 @@ func (s *Server) handleRemoteMessage(p *peer, role string, remoteAddr string, me
 	}
 }
 
-func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol.Message, agentUserID *string, agentDeviceID *string) error {
+func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol.Message, authenticatedAgent agentIdentity, agentUserID *string, agentDeviceID *string) error {
+	if message.Type != protocol.TypeAgentOnline {
+		if *agentUserID == "" || *agentDeviceID == "" {
+			return errors.New("agent must register before sending messages")
+		}
+		if message.UserID != *agentUserID || message.DeviceID != *agentDeviceID {
+			return errors.New("agent message identity does not match the authenticated connection")
+		}
+	}
 	switch message.Type {
 	case protocol.TypeAgentOnline:
 		// AgentOnline 建立 user/device 到连接的路由，之后手机请求才能定位到这台电脑。
 		payload, err := protocol.DecodePayload[protocol.AgentOnlinePayload](message)
 		if err != nil {
 			return fmt.Errorf("decode agent online failed: %w", err)
+		}
+		if strings.TrimSpace(message.UserID) == "" || strings.TrimSpace(message.DeviceID) == "" {
+			return errors.New("agent user and device ids are required")
+		}
+		if message.UserID != authenticatedAgent.UserID || message.DeviceID != authenticatedAgent.DeviceID {
+			return errors.New("agent registration identity does not match its credential")
+		}
+		if *agentUserID != "" && (*agentUserID != message.UserID || *agentDeviceID != message.DeviceID) {
+			return errors.New("agent connection cannot change identity")
 		}
 		*agentUserID = message.UserID
 		*agentDeviceID = message.DeviceID
@@ -231,8 +313,12 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeSubagentTaskEvent:
+		return s.forwardEventToClients(message)
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
+	default:
+		return fmt.Errorf("unsupported agent message type: %s", message.Type)
 	}
 
 	return nil
@@ -250,16 +336,20 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		if client == nil || client.peer != p {
 			return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 		}
+		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
-	case protocol.TypeUserMessage, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeFileList, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
 		s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, remoteAddr)
+		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeHeartbeat:
 		s.touchClient(message.RequestID)
+	default:
+		return fmt.Errorf("unsupported client message type: %s", message.Type)
 	}
 
 	return nil
@@ -285,6 +375,20 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 		defer s.unregisterClient(message.RequestID)
 	}
 	return client.peer.writeJSON(message)
+}
+
+func (s *Server) forwardEventToClients(message protocol.Message) error {
+	peers := s.getClientConnections(message.UserID, message.DeviceID)
+	if len(peers) == 0 {
+		return nil
+	}
+	var errs []error
+	for _, peer := range peers {
+		if err := peer.writeJSON(message); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func isTerminalResponseForRequest(requestType protocol.MessageType, responseType protocol.MessageType) bool {
@@ -315,8 +419,12 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSessionModeSetResult
 	case protocol.TypeSessionPlanExecute:
 		return responseType == protocol.TypeSessionPlanExecuteResult
+	case protocol.TypeSessionContextQuery:
+		return responseType == protocol.TypeSessionContextQueryResult
 	case protocol.TypeSessionContextSet:
 		return responseType == protocol.TypeSessionContextSetResult
+	case protocol.TypeSessionRAGSet:
+		return responseType == protocol.TypeSessionRAGSetResult
 	case protocol.TypeSessionCompact:
 		return responseType == protocol.TypeSessionCompactResult
 	case protocol.TypeSessionPause:
@@ -331,6 +439,33 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSkillReloadResult
 	case protocol.TypeAssetList:
 		return responseType == protocol.TypeAssetListResult
+	case protocol.TypeKnowledgeCatalogList:
+		return responseType == protocol.TypeKnowledgeCatalogListResult
+	case protocol.TypeKnowledgeCategoryCreate,
+		protocol.TypeKnowledgeCategoryMove,
+		protocol.TypeKnowledgeCategoryDelete,
+		protocol.TypeKnowledgeBaseCreate,
+		protocol.TypeKnowledgeBaseUpdate,
+		protocol.TypeKnowledgeBaseDelete:
+		return responseType == protocol.TypeKnowledgeCatalogMutationResult
+	case protocol.TypeKnowledgeDocumentList:
+		return responseType == protocol.TypeKnowledgeDocumentListResult
+	case protocol.TypeKnowledgeDocumentIngest,
+		protocol.TypeKnowledgeDocumentRetry,
+		protocol.TypeKnowledgeDocumentDelete:
+		return responseType == protocol.TypeKnowledgeDocumentMutationResult
+	case protocol.TypeKnowledgeProfileList:
+		return responseType == protocol.TypeKnowledgeProfileListResult
+	case protocol.TypeKnowledgeSearchPreview:
+		return responseType == protocol.TypeKnowledgeSearchPreviewResult
+	case protocol.TypeSubagentDefinitionList:
+		return responseType == protocol.TypeSubagentDefinitionListResult
+	case protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete:
+		return responseType == protocol.TypeSubagentDefinitionMutationResult
+	case protocol.TypeSubagentTaskList:
+		return responseType == protocol.TypeSubagentTaskListResult
+	case protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard:
+		return responseType == protocol.TypeSubagentTaskResult
 	case protocol.TypeFileList:
 		return responseType == protocol.TypeFileListResult
 	case protocol.TypeFileRead:

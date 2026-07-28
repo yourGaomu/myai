@@ -212,6 +212,18 @@ func (sm *Store) TrimAfterLastUserMessage(sessionID string) (string, error) {
 	return input, nil
 }
 
+func (sm *Store) RestoreSession(snapshot *domainsession.Session) error {
+	cloned := domainsession.Clone(snapshot)
+	if cloned == nil || strings.TrimSpace(cloned.ID) == "" {
+		return errors.New("session snapshot is invalid")
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.session[cloned.ID] = cloned
+	return nil
+}
+
 func (sm *Store) AddUsage(usage llm.TokenUsage) error {
 	return sm.AddUsageTo(sm.CurrentSessionId(), usage)
 }

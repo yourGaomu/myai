@@ -14,10 +14,11 @@ import (
 
 type Manager struct {
 	// Manager 管理 MCP 子进程生命周期，并把远程工具包装成项目统一的 Tool 接口。
-	config  Config
-	mu      sync.Mutex
-	clients []*Client
-	sources []string
+	config   Config
+	mu       sync.Mutex
+	clients  []*Client
+	sources  []string
+	registry *tool.RegisterTools
 }
 
 func NewManager(config Config) *Manager {
@@ -28,16 +29,25 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 	if registry == nil {
 		return errors.New("tool registry is nil")
 	}
+	m.mu.Lock()
+	m.registry = registry
+	m.mu.Unlock()
 
+	usedNames := make(map[string]int)
+	for _, registered := range registry.List() {
+		if registered != nil {
+			usedNames[registered.Name()] = 1
+		}
+	}
 	for _, server := range m.config.Servers {
 		if server.Disabled {
 			continue
 		}
 		if strings.TrimSpace(server.Name) == "" {
-			return errors.New("mcp server name is empty")
+			return m.rollbackRegistration(errors.New("mcp server name is empty"))
 		}
 		if strings.TrimSpace(server.Command) == "" {
-			return fmt.Errorf("mcp server %s command is empty", server.Name)
+			return m.rollbackRegistration(fmt.Errorf("mcp server %s command is empty", server.Name))
 		}
 
 		// required 服务启动失败会阻止应用启动；可选服务只记录警告并继续。
@@ -45,7 +55,7 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 		if err := client.Start(ctx); err != nil {
 			err = fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
 			if server.Required {
-				return err
+				return m.rollbackRegistration(err)
 			}
 			log.Printf("warning: %v", err)
 			continue
@@ -56,14 +66,13 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 			_ = client.Close()
 			err = fmt.Errorf("list mcp tools for %s failed: %w", server.Name, err)
 			if server.Required {
-				return err
+				return m.rollbackRegistration(err)
 			}
 			log.Printf("warning: %v", err)
 			continue
 		}
 
 		wrapped := make([]tooldef.Tool, 0, len(infos))
-		usedNames := make(map[string]int)
 		for _, info := range infos {
 			// 工具名加入 server 前缀并处理冲突，避免多个 MCP 暴露同名工具。
 			if strings.TrimSpace(info.Name) == "" {
@@ -87,37 +96,62 @@ func uniqueToolName(base string, used map[string]int) string {
 		return base
 	}
 
-	count := used[base]
-	used[base] = count + 1
-	if count == 0 {
+	count, exists := used[base]
+	if !exists {
+		used[base] = 1
 		return base
 	}
 
-	suffix := fmt.Sprintf("_%d", count+1)
-	maxBaseLength := 64 - len(suffix)
-	if len(base) > maxBaseLength {
-		base = strings.Trim(base[:maxBaseLength], "_-")
+	for sequence := count + 1; ; sequence++ {
+		suffix := fmt.Sprintf("_%d", sequence)
+		candidateBase := base
+		maxBaseLength := 64 - len(suffix)
+		if len(candidateBase) > maxBaseLength {
+			candidateBase = strings.Trim(candidateBase[:maxBaseLength], "_-")
+		}
+		candidate := candidateBase + suffix
+		if _, candidateExists := used[candidate]; candidateExists {
+			continue
+		}
+		used[base] = sequence
+		used[candidate] = 1
+		return candidate
 	}
-	return base + suffix
 }
 
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	clients := append([]*Client(nil), m.clients...)
+	sources := append([]string(nil), m.sources...)
+	registry := m.registry
 	m.clients = nil
 	m.sources = nil
+	m.registry = nil
 	m.mu.Unlock()
 
-	var closeErr error
-	for _, client := range clients {
+	if registry != nil {
+		for _, source := range sources {
+			registry.UnregisterSource(source)
+		}
+	}
+	var closeErrors []error
+	for index := len(clients) - 1; index >= 0; index-- {
+		client := clients[index]
 		if client == nil {
 			continue
 		}
-		if err := client.Close(); err != nil && closeErr == nil {
-			closeErr = err
+		if err := client.Close(); err != nil {
+			closeErrors = append(closeErrors, err)
 		}
 	}
-	return closeErr
+	return errors.Join(closeErrors...)
+}
+
+func (m *Manager) rollbackRegistration(cause error) error {
+	if closeErr := m.Close(); closeErr != nil {
+		return errors.Join(cause, fmt.Errorf("rollback mcp registration: %w", closeErr))
+	}
+	return cause
 }
 
 func (m *Manager) addRuntime(client *Client, source string) {

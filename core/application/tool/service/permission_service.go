@@ -18,23 +18,44 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	// Hook 决策在本服务之前处理，任何 Hook 结果都不能提升会话权限。
 	permission := tooldef.NormalizePermission(command.Permission)
 	mode := session.NormalizePermissionMode(command.Mode)
+	if mode == session.PermissionModeReadonly {
+		if permission == tooldef.PermissionRead && !command.RequireConfirmation {
+			return toolresult.PermissionDecision{Allowed: true}
+		}
+		if permission == tooldef.PermissionRead {
+			return askForPermission(command, permission, mode, "hook requires confirmation")
+		}
+		return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, command.Name, permission)}
+	}
+	if command.RequireConfirmation {
+		return askForPermission(command, permission, mode, "hook requires confirmation")
+	}
 	if permission == tooldef.PermissionRead {
 		return toolresult.PermissionDecision{Allowed: true}
-	}
-	if mode == session.PermissionModeReadonly {
-		return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, command.Name, permission)}
 	}
 	switch mode {
 	case session.PermissionModeFull:
 		return toolresult.PermissionDecision{Allowed: true}
 	default:
-		if command.Ask == nil {
-			return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: tool %s requires %s but no permission handler is configured", command.Name, permission)}
-		}
-		allowed := command.Ask(toolcommand.PermissionRequest{Name: command.Name, Arguments: command.Arguments, Permission: permission, Mode: mode})
-		if !allowed {
-			return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied by user: tool %s requires %s", command.Name, permission)}
-		}
-		return toolresult.PermissionDecision{Allowed: true}
+		return askForPermission(command, permission, mode, "")
 	}
+}
+
+func askForPermission(command toolcommand.Permission, permission tooldef.Permission, mode session.PermissionMode, reason string) toolresult.PermissionDecision {
+	if command.Ask == nil {
+		message := fmt.Sprintf("permission denied: tool %s requires %s but no permission handler is configured", command.Name, permission)
+		if reason != "" {
+			message += ": " + reason
+		}
+		return toolresult.PermissionDecision{Message: message}
+	}
+	allowed := command.Ask(toolcommand.PermissionRequest{Name: command.Name, Arguments: command.Arguments, Permission: permission, Mode: mode})
+	if !allowed {
+		message := fmt.Sprintf("permission denied by user: tool %s requires %s", command.Name, permission)
+		if reason != "" {
+			message += ": " + reason
+		}
+		return toolresult.PermissionDecision{Message: message}
+	}
+	return toolresult.PermissionDecision{Allowed: true}
 }

@@ -4,10 +4,22 @@ import (
 	"testing"
 
 	sessionresult "myai/core/application/session/result"
+	"myai/core/contextmgr"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
+	"myai/core/service"
 )
+
+func TestContextStatePayloadIncludesSummary(t *testing.T) {
+	payload := contextStatePayload(service.ContextState{
+		Info:    contextmgr.Info{WindowK: 16, HasSummary: true},
+		Summary: "saved summary",
+	})
+	if payload.WindowK != 16 || !payload.HasSummary || payload.Summary != "saved summary" {
+		t.Fatalf("unexpected context state payload: %#v", payload)
+	}
+}
 
 func TestResolveSessionIDUsesPayloadMessageAndCurrentOrder(t *testing.T) {
 	cases := []struct {

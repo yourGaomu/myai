@@ -12,6 +12,7 @@ type Store interface {
 	LoadBaseline(ctx context.Context, workspace string) (map[string]domainhistory.FileSnapshot, error)
 	ReplaceBaseline(ctx context.Context, workspace string, files map[string]domainhistory.FileSnapshot) error
 	SaveCheckpoint(ctx context.Context, checkpoint domainhistory.Checkpoint, changes []domainhistory.FileChange) (string, error)
+	DeleteCheckpoint(ctx context.Context, workspace string, checkpointID string) error
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]domainhistory.CheckpointSummary, error)
 	LoadCheckpointChanges(ctx context.Context, workspace string, checkpointID string) ([]domainhistory.StoredFileChange, error)
 }

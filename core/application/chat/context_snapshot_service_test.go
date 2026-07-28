@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	domainmessage "myai/core/domain/message"
+	agentplan "myai/core/plan"
 	"myai/core/session"
 )
 
@@ -49,5 +50,29 @@ func TestContextSnapshotServiceNilSessionReturnsEmptySnapshot(t *testing.T) {
 	snapshot := ContextSnapshotService{}.Snapshot(nil)
 	if len(snapshot.Messages) != 0 || snapshot.Info.WindowK != 0 {
 		t.Fatalf("expected empty snapshot for nil session, got %#v", snapshot)
+	}
+}
+
+func TestContextSnapshotServiceIncludesCurrentPlanState(t *testing.T) {
+	current := &session.Session{
+		ContextWindowK: 16,
+		CurrentPlan: &agentplan.Plan{
+			ID: "plan-1", Goal: "Implement context safety", Status: agentplan.StatusRunning,
+			Steps: []agentplan.Step{{Order: 1, Title: "Inspect", Status: agentplan.StepStatusDone}, {Order: 2, Title: "Fix", Status: agentplan.StepStatusRunning}},
+		},
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleSystem, "system"),
+			domainmessage.Text(domainmessage.RoleUser, "continue"),
+		},
+	}
+	snapshot := ContextSnapshotService{}.Snapshot(current)
+	joined := ""
+	for _, message := range snapshot.Messages {
+		joined += message.Text() + "\n"
+	}
+	for _, expected := range []string{"Current execution plan snapshot", "plan_id: plan-1", "status: running", "title: Fix"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected snapshot to contain %q, got:\n%s", expected, joined)
+		}
 	}
 }

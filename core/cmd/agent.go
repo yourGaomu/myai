@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	agentServerURL string
-	agentUserID    string
-	agentDeviceID  string
-	agentBindCode  string
-	agentWorkspace string
+	agentServerURL  string
+	agentRelayToken string
+	agentUserID     string
+	agentDeviceID   string
+	agentBindCode   string
+	agentWorkspace  string
 )
 
 var agentCmd = &cobra.Command{
@@ -47,11 +48,12 @@ var agentCmd = &cobra.Command{
 		// Relay 只接收这个窄 Facade，不直接持有 Application 或数据库对象。
 		a := remoteagent.New(remoteagent.Config{
 			ServerURL:   agentServerURL,
+			RelayToken:  agentRelayToken,
 			UserID:      agentUserID,
 			DeviceID:    agentDeviceID,
 			BindingCode: agentBindCode,
 			Workspace:   agentWorkspace,
-		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService())
+		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents())
 
 		return a.Run(ctx)
 	},
@@ -61,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(agentCmd)
 
 	agentCmd.Flags().StringVar(&agentServerURL, "server", "", "relay server websocket url")
+	agentCmd.Flags().StringVar(&agentRelayToken, "relay-token", os.Getenv("MYAI_RELAY_AGENT_TOKEN"), "identity-bound token used to authenticate this agent to the relay")
 	agentCmd.Flags().StringVar(&agentUserID, "user", "local", "user id")
 	agentCmd.Flags().StringVar(&agentDeviceID, "device", "pc-local", "device id")
 	agentCmd.Flags().StringVar(&agentBindCode, "bind-code", "", "fixed pairing code")

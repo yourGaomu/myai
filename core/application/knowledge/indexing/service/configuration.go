@@ -12,6 +12,7 @@ type Configuration struct {
 	Documents  knowledgeport.DocumentRepository
 	Profiles   knowledgeport.ProfileRepository
 	Jobs       knowledgeport.IndexingJobRepository
+	States     knowledgeport.IndexingStateRepository
 	Chunks     knowledgeport.ChunkRepository
 	Objects    knowledgeport.DocumentObjectStore
 	Processor  documentprocessorport.DocumentProcessor
@@ -42,6 +43,7 @@ func (configuration Configuration) validate() error {
 		{"document repository", configuration.Documents},
 		{"profile repository", configuration.Profiles},
 		{"indexing job repository", configuration.Jobs},
+		{"indexing state repository", configuration.States},
 		{"chunk repository", configuration.Chunks},
 		{"document object store", configuration.Objects},
 		{"document processor", configuration.Processor},

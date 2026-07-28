@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -16,16 +17,29 @@ import (
 	assetsource "myai/core/adapter/documentsource/asset"
 	embeddingmemory "myai/core/adapter/embedding/memory"
 	openaiembedding "myai/core/adapter/embedding/openaicompatible"
+	localexecutor "myai/core/adapter/execution/local"
 	contenthashid "myai/core/adapter/id/contenthash"
 	snowflakeid "myai/core/adapter/id/snowflake"
+	uuidadapter "myai/core/adapter/id/uuid"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
 	adaptermodel "myai/core/adapter/model/langchaingo"
 	minioadapter "myai/core/adapter/objectstorage/minio"
 	knowledgemongo "myai/core/adapter/persistence/mongo/knowledge/repository"
 	adaptermongo "myai/core/adapter/persistence/mongo/repository"
+	subagentmongo "myai/core/adapter/persistence/mongo/subagent/repository"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
+	opensandboxadapter "myai/core/adapter/sandbox/opensandbox"
 	memorysession "myai/core/adapter/session/memory"
+	subagentchat "myai/core/adapter/subagent/chat"
+	subagentevents "myai/core/adapter/subagent/events"
+	subagentlocal "myai/core/adapter/subagent/local"
+	subagentmemory "myai/core/adapter/subagent/memory"
+	subagentsession "myai/core/adapter/subagent/session"
 	milvusadapter "myai/core/adapter/vectorstore/milvus"
 	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
+	opensandboxworkspace "myai/core/adapter/workspace/opensandbox"
+	workspaceRouter "myai/core/adapter/workspace/router"
+	snapshotworkspace "myai/core/adapter/workspace/snapshot"
 	catalogapi "myai/core/application/knowledge/catalog/api"
 	catalogservice "myai/core/application/knowledge/catalog/service"
 	documentapi "myai/core/application/knowledge/document/api"
@@ -41,6 +55,10 @@ import (
 	searchservice "myai/core/application/knowledge/search/service"
 	modelcommand "myai/core/application/model/command"
 	modelservice "myai/core/application/model/service"
+	sessionpersistenceservice "myai/core/application/session/persistence/service"
+	subagentapi "myai/core/application/subagent/api"
+	subagentcommand "myai/core/application/subagent/command"
+	subagentservice "myai/core/application/subagent/service"
 	"myai/core/asset"
 	chatcomposition "myai/core/composition/chat"
 	appconfig "myai/core/config"
@@ -49,10 +67,13 @@ import (
 	"myai/core/llm"
 	"myai/core/mcp"
 	cacheport "myai/core/port/cache"
+	executionport "myai/core/port/execution"
 	knowledgeport "myai/core/port/knowledge"
 	documentprocessorport "myai/core/port/knowledge/documentprocessor"
 	persistenceport "myai/core/port/persistence"
-	"myai/core/sandbox"
+	sandboxport "myai/core/port/sandbox"
+	subagentport "myai/core/port/subagent"
+	workspaceport "myai/core/port/workspace"
 	"myai/core/service"
 	"myai/core/skill"
 	"myai/core/tool"
@@ -78,6 +99,7 @@ type Application struct {
 	chunkRepository             knowledgeport.ChunkRepository
 	profileRepository           knowledgeport.ProfileRepository
 	indexingJobRepository       knowledgeport.IndexingJobRepository
+	indexingStateRepository     knowledgeport.IndexingStateRepository
 	syncChangeRepository        knowledgeport.SyncChangeRepository
 	documentObjectStore         knowledgeport.DocumentObjectStore
 	documentProcessor           documentprocessorport.DocumentProcessor
@@ -102,7 +124,15 @@ type Application struct {
 	skillManager                *skill.Manager
 	hookManager                 *hook.Manager
 	mcpManager                  *mcp.Manager
-	sandbox                     sandbox.Sandbox
+	localCommandExecutor        executionport.CommandExecutor
+	isolatedSandboxManager      sandboxport.Manager
+	subagentService             subagentapi.Service
+	subagentScheduler           *subagentlocal.Scheduler
+	subagentRegistry            *subagentmemory.Registry
+	subagentEvents              *subagentevents.Bus
+	workspaceIsolationManager   workspaceport.Manager
+	workspaceCommandRunner      workspaceport.CommandRunner
+	workspaceCloser             interface{ Close() error }
 	defaultModelID              string
 	workspace                   string
 }
@@ -132,11 +162,13 @@ func InitApp() {
 		instance.InitClient()
 		instance.InitSessionMemory()
 		instance.InitSandbox()
+		instance.InitWorkspaceIsolation()
 		instance.InitSkillManager()
 		instance.InitHookManager()
 		instance.InitRegister()
 		instance.InitMCP()
 		instance.InitChatService()
+		instance.InitSubagents()
 	})
 }
 
@@ -241,6 +273,7 @@ func (app *Application) InitKnowledgeStorage() {
 		app.chunkRepository = knowledgemongo.NewChunkRepository(app.mongoDb, database)
 		app.profileRepository = knowledgemongo.NewProfileRepository(app.mongoDb, database)
 		app.indexingJobRepository = knowledgemongo.NewIndexingJobRepository(app.mongoDb, database)
+		app.indexingStateRepository = knowledgemongo.NewIndexingStateRepository(app.mongoDb, database)
 		app.syncChangeRepository = knowledgemongo.NewSyncChangeRepository(app.mongoDb, database)
 	}
 
@@ -309,23 +342,33 @@ func (app *Application) InitKnowledgeStorage() {
 }
 
 func (app *Application) initKnowledgeDocumentService() {
-	if app.indexingService == nil || app.assetClient == nil || app.documentObjectStore == nil || app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.chunkRepository == nil || app.indexingJobRepository == nil {
+	objectCleanup, _ := app.documentObjectStore.(knowledgeport.UncommittedDocumentObjectCleaner)
+	if app.indexingService == nil || app.assetClient == nil || app.documentObjectStore == nil || objectCleanup == nil || app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.chunkRepository == nil || app.indexingJobRepository == nil || app.indexingStateRepository == nil {
 		return
 	}
 	ids, err := snowflakeid.New(app.properties.RAG.IDNode)
 	if err != nil {
 		panic(fmt.Errorf("init knowledge document id generator failed: %w", err))
 	}
-	app.knowledgeDocumentService = documentservice.DocumentService{
+	documents := &documentservice.DocumentService{
 		KnowledgeBases: app.knowledgeBaseRepository,
 		Documents:      app.documentRepository,
 		Chunks:         app.chunkRepository,
 		Objects:        app.documentObjectStore,
+		ObjectCleanup:  objectCleanup,
 		Sources:        assetsource.Source{Client: app.assetClient},
 		Indexing:       app.indexingService,
 		Jobs:           app.indexingJobRepository,
+		States:         app.indexingStateRepository,
 		IDs:            ids,
 		Async:          adapterthreadpool.Executor{Pool: app.threadPool},
+		OnAsyncError: func(err error) {
+			log.Printf("knowledge indexing background operation failed: %v", err)
+		},
+	}
+	app.knowledgeDocumentService = documents
+	if err := documents.RecoverPending(context.Background(), 1000); err != nil {
+		log.Printf("recover knowledge indexing jobs failed: %v", err)
 	}
 }
 
@@ -393,7 +436,7 @@ func (app *Application) initKnowledgeFacade() {
 }
 
 func (app *Application) initIndexingService() {
-	if app.documentRepository == nil || app.profileRepository == nil || app.indexingJobRepository == nil || app.chunkRepository == nil || app.documentObjectStore == nil || app.documentProcessor == nil || app.embeddingModelResolver == nil || app.vectorStore == nil || app.keywordStore == nil {
+	if app.documentRepository == nil || app.profileRepository == nil || app.indexingJobRepository == nil || app.indexingStateRepository == nil || app.chunkRepository == nil || app.documentObjectStore == nil || app.documentProcessor == nil || app.embeddingModelResolver == nil || app.vectorStore == nil || app.keywordStore == nil {
 		return
 	}
 	jobIDs, err := snowflakeid.New(app.properties.RAG.IDNode)
@@ -404,6 +447,7 @@ func (app *Application) initIndexingService() {
 		Documents:  app.documentRepository,
 		Profiles:   app.profileRepository,
 		Jobs:       app.indexingJobRepository,
+		States:     app.indexingStateRepository,
 		Chunks:     app.chunkRepository,
 		Objects:    app.documentObjectStore,
 		Processor:  app.documentProcessor,
@@ -503,11 +547,44 @@ func (app *Application) InitSessionMemory() {
 }
 
 func (app *Application) InitSandbox() {
-	localSandbox, err := sandbox.NewLocalSandbox(app.workspace)
+	localExecutor, err := localexecutor.New(app.workspace)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("init local command executor failed: %w", err))
 	}
-	app.sandbox = localSandbox
+	app.localCommandExecutor = localExecutor
+
+	provider := strings.ToLower(strings.TrimSpace(app.properties.Sandbox.Provider))
+	switch provider {
+	case "", "local":
+		return
+	case "opensandbox":
+		manager, err := opensandboxadapter.New((appconfig.Mapper{}).OpenSandboxConfig(app.properties.Sandbox.OpenSandbox))
+		if err != nil {
+			panic(fmt.Errorf("init OpenSandbox manager failed: %w", err))
+		}
+		app.isolatedSandboxManager = manager
+	default:
+		panic(fmt.Errorf("unsupported sandbox provider %q", provider))
+	}
+}
+
+func (app *Application) InitWorkspaceIsolation() {
+	snapshotManager, err := snapshotworkspace.New(app.properties.Subagent.SnapshotRoot, sqlitehistory.Factory{})
+	if err != nil {
+		panic(fmt.Errorf("init snapshot workspace manager failed: %w", err))
+	}
+	router := &workspaceRouter.Manager{Snapshot: snapshotManager}
+	if app.isolatedSandboxManager != nil {
+		openSandboxManager, err := opensandboxworkspace.New(snapshotManager, app.isolatedSandboxManager)
+		if err != nil {
+			panic(fmt.Errorf("init OpenSandbox workspace manager failed: %w", err))
+		}
+		router.OpenSandbox = openSandboxManager
+		router.Remote = openSandboxManager
+	}
+	app.workspaceIsolationManager = router
+	app.workspaceCommandRunner = router
+	app.workspaceCloser = router
 }
 
 func (app *Application) InitChatService() {
@@ -530,13 +607,87 @@ func (app *Application) InitChatService() {
 	}
 }
 
+func (app *Application) InitSubagents() {
+	registry := subagentmemory.NewRegistry()
+	scheduler := subagentlocal.NewScheduler(
+		app.properties.Subagent.WorkerCount,
+		app.properties.Subagent.QueueSize,
+	)
+
+	var definitions subagentport.DefinitionRepository
+	var tasks subagentport.TaskRepository
+	var runs subagentport.RunRepository
+	if app.mongoDb != nil {
+		repository := subagentmongo.New(app.mongoDb, app.properties.Mongo.Database)
+		definitions = repository
+		tasks = repository
+		runs = repository
+	} else {
+		repository := subagentmemory.NewRepository()
+		definitions = repository
+		tasks = repository
+		runs = repository
+	}
+
+	sessionPersistence := sessionpersistenceservice.PersistenceService{
+		Sessions:     app.store,
+		Memory:       app.sessionMemory,
+		DefaultModel: app.defaultModelID,
+	}
+	applicationService := &subagentservice.Service{
+		Definitions: definitions,
+		Registry:    registry,
+		Tasks:       tasks,
+		Runs:        runs,
+		TaskRuns:    tasks.(subagentport.TaskRunRepository),
+		Scheduler:   scheduler,
+		Sessions: subagentsession.Factory{
+			Memory: app.sessionMemory, Persistence: sessionPersistence,
+		},
+		Runner:               subagentchat.Runner{Chat: app.chatService},
+		IDs:                  uuidadapter.Generator{},
+		DefaultWorkspaceRoot: app.workspace,
+		OnError: func(err error) {
+			log.Printf("subagent background operation failed: %v", err)
+		},
+	}
+	eventBus := subagentevents.NewBus()
+	applicationService.Events = eventBus
+	applicationService.Workspaces = app.workspaceIsolationManager
+	if _, err := applicationService.Bootstrap(context.Background(), subagentcommand.BootstrapDefinitions{}); err != nil {
+		scheduler.Close()
+		panic(fmt.Errorf("init subagents failed: %w", err))
+	}
+	if err := applicationService.RecoverInterruptedTasks(context.Background()); err != nil {
+		scheduler.Close()
+		panic(fmt.Errorf("recover interrupted subagent tasks failed: %w", err))
+	}
+
+	app.toolRegister.RegisterSource("subagent", local.NewSubagentTools(applicationService))
+	app.subagentRegistry = registry
+	app.subagentScheduler = scheduler
+	app.subagentService = applicationService
+	app.subagentEvents = eventBus
+}
+
 func (app *Application) Close() error {
 	if app == nil {
 		return nil
 	}
 	var errs []error
+	// Stop task producers and drain workers before closing the resources used
+	// by subagent, chat persistence, and knowledge indexing jobs.
+	if app.subagentScheduler != nil {
+		app.subagentScheduler.Close()
+	}
+	if app.threadPool != nil {
+		app.threadPool.Shutdown()
+	}
 	if app.mcpManager != nil {
 		errs = append(errs, app.mcpManager.Close())
+	}
+	if app.workspaceCloser != nil {
+		errs = append(errs, app.workspaceCloser.Close())
 	}
 	if app.documentProcessorCloser != nil {
 		errs = append(errs, app.documentProcessorCloser.Close())
@@ -550,14 +701,23 @@ func (app *Application) Close() error {
 	if app.keywordStoreCloser != nil {
 		errs = append(errs, app.keywordStoreCloser.Close())
 	}
-	if app.threadPool != nil {
-		app.threadPool.Shutdown()
-	}
 	return errors.Join(errs...)
 }
 
 func (app *Application) GetChatService() *service.ChatService {
 	return app.chatService
+}
+
+func (app *Application) GetSandboxManager() sandboxport.Manager {
+	return app.isolatedSandboxManager
+}
+
+func (app *Application) GetSubagentService() subagentapi.Service {
+	return app.subagentService
+}
+
+func (app *Application) GetSubagentEvents() *subagentevents.Bus {
+	return app.subagentEvents
 }
 
 func (app *Application) GetKnowledgeBaseRepository() knowledgeport.KnowledgeBaseRepository {
@@ -645,7 +805,7 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewSearchFilesToolWithWorkspace(app.workspace),
 		local.NewWriteFileToolWithWorkspace(app.workspace),
 		local.NewEditFileToolWithWorkspace(app.workspace),
-		local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
+		local.NewShellToolWithWorkspaceAndRemote(app.workspace, app.localCommandExecutor, app.workspaceCommandRunner),
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 	}
 	if app.assetClient != nil {
@@ -680,7 +840,11 @@ func (app *Application) InitSkillManager() *skill.Manager {
 }
 
 func (app *Application) InitHookManager() *hook.Manager {
-	app.hookManager = hook.NewManager((appconfig.Mapper{}).HookConfig(app.workspace, app.properties.Hooks))
+	manager, err := hook.NewManager((appconfig.Mapper{}).HookConfig(app.workspace, app.properties.Hooks))
+	if err != nil {
+		panic(fmt.Errorf("init hooks failed: %w", err))
+	}
+	app.hookManager = manager
 	return app.hookManager
 }
 

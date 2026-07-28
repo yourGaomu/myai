@@ -1,6 +1,8 @@
 package command
 
 import (
+	"time"
+
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	modelport "myai/core/port/model"
@@ -14,6 +16,8 @@ type PersistUserMessage struct {
 	Input              string
 	RuntimeInstruction string
 	RAGContext         string
+	SessionSnapshot    *session.Session
+	CreatedAt          time.Time
 }
 
 type ToolExecution struct {

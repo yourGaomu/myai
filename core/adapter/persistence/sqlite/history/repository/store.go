@@ -7,15 +7,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
 
 	domainhistory "myai/core/domain/history"
-	"myai/core/infra/sqliteruntime"
 )
 
 type Store struct {
@@ -30,12 +31,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	sqliteruntime.Configure()
-	dsn, err := sqliteruntime.DataSourceName(path)
+	dsn, err := dataSourceName(path)
 	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +46,19 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func dataSourceName(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve SQLite history path: %w", err)
+	}
+	query := url.Values{}
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "journal_mode(WAL)")
+	query.Add("_pragma", "synchronous(NORMAL)")
+	query.Add("_pragma", "foreign_keys(ON)")
+	return filepath.ToSlash(absolute) + "?" + query.Encode(), nil
 }
 
 func DefaultPath(workspace string) (string, error) {
@@ -273,6 +286,19 @@ func (s *Store) SaveCheckpoint(ctx context.Context, checkpoint domainhistory.Che
 		return "", err
 	}
 	return checkpoint.ID, nil
+}
+
+func (s *Store) DeleteCheckpoint(ctx context.Context, workspace string, checkpointID string) error {
+	workspace = strings.TrimSpace(workspace)
+	checkpointID = strings.TrimSpace(checkpointID)
+	if workspace == "" || checkpointID == "" {
+		return errors.New("checkpoint workspace and id are required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM checkpoints
+		WHERE workspace = ? AND id = ?
+	`, workspace, checkpointID)
+	return err
 }
 
 func (s *Store) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]domainhistory.CheckpointSummary, error) {

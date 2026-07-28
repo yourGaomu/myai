@@ -12,7 +12,7 @@ func TestAggregatePreToolUse(t *testing.T) {
 		{Decision: DecisionAllow},
 		{Decision: DecisionAsk, Message: "confirm"},
 	})
-	if got.Decision != DecisionAllow || got.Message != "confirm" {
+	if got.Decision != DecisionAsk || got.Message != "confirm" {
 		t.Fatalf("unexpected aggregate result: %+v", got)
 	}
 
@@ -107,5 +107,24 @@ func TestEventJSON(t *testing.T) {
 	data, err := json.Marshal(normalizeEvent(Event{Type: EventSessionChanged}))
 	if err != nil || len(data) == 0 {
 		t.Fatalf("marshal event failed: %v", err)
+	}
+}
+
+func TestNewManagerRejectsInvalidEnabledHook(t *testing.T) {
+	_, err := NewManager(Config{CommandHooks: []CommandHookConfig{{
+		Event: string(EventPreToolUse), Command: "echo ok", Timeout: "not-a-duration",
+	}}})
+	if err == nil {
+		t.Fatal("expected invalid hook configuration to fail")
+	}
+}
+
+func TestNewManagerSkipsDisabledHook(t *testing.T) {
+	disabled := false
+	manager, err := NewManager(Config{CommandHooks: []CommandHookConfig{{
+		Event: string(EventPreToolUse), Command: "", Enabled: &disabled,
+	}}})
+	if err != nil || manager == nil || len(manager.handlers) != 0 {
+		t.Fatalf("expected disabled hook to be skipped, manager=%#v err=%v", manager, err)
 	}
 }

@@ -32,7 +32,7 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 	if s.Registry == nil {
 		return toolresult.Execution{}, errors.New("tool registry is nil")
 	}
-	result := toolresult.Execution{Messages: make([]domainmessage.Message, 0, len(command.Calls)), Entries: make([]domaintool.ExecutionEntry, 0, len(command.Calls)*2), Assets: make([]domaintool.SharedAsset, 0)}
+	result := toolresult.Execution{Calls: make([]domainmessage.ToolCall, 0, len(command.Calls)), Messages: make([]domainmessage.Message, 0, len(command.Calls)), Entries: make([]domaintool.ExecutionEntry, 0, len(command.Calls)*2), Assets: make([]domaintool.SharedAsset, 0)}
 	createdAt := s.now()
 	for index, call := range command.Calls {
 		if strings.TrimSpace(call.Name) == "" {
@@ -40,23 +40,35 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 		}
 		registeredTool, err := s.Registry.GetTool(call.Name)
 		if err != nil {
-			return toolresult.Execution{}, err
+			return s.failBeforeExecution(result, command, call, index, "tool_not_found", err)
 		}
 		permission := tooldef.NormalizePermission(registeredTool.Permission())
 		// PreToolUse 可拒绝调用或重写参数；Allow 只表示 Hook 放行，不能绕过权限检查。
 		hookResult, err := s.beforeToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission})
 		if err != nil {
-			return toolresult.Execution{}, err
+			return s.failBeforeExecution(result, command, call, index, "hook_pre_failed", err)
 		}
 		if strings.TrimSpace(hookResult.Arguments) != "" {
 			call.Arguments = hookResult.Arguments
 		}
+		result.Calls = append(result.Calls, call)
 		if command.Callbacks.OnToolCall != nil {
 			command.Callbacks.OnToolCall(call.Name, call.Arguments)
 		}
 		callCreatedAt := createdAt.Add(time.Duration(index*2) * time.Nanosecond)
 		resultCreatedAt := createdAt.Add(time.Duration(index*2+1) * time.Nanosecond)
 		result.Entries = append(result.Entries, ToolCallEntry(toolcommand.ToolCallEntry{SessionID: command.SessionID, Call: call, CreatedAt: callCreatedAt}))
+		if !toolAllowed(command.AllowedTools, command.EnforceToolAllowlist, call.Name) {
+			message := fmt.Sprintf("tool %s is not allowed for this subagent", call.Name)
+			output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "subagent_tool_denied", message)
+			if command.Callbacks.OnToolResult != nil {
+				command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
+			}
+			s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: output.Content, Err: outputError(output, nil)})
+			result.Messages = append(result.Messages, ToolResultMessage(call, output))
+			result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}))
+			continue
+		}
 
 		if hookResult.Decision == toolresult.HookDecisionDeny {
 			err = fmt.Errorf("tool denied by hook: %s", hookResult.Message)
@@ -81,7 +93,11 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 			continue
 		}
 
-		permissionDecision := s.permissionService().Allow(toolcommand.Permission{Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode, Ask: command.Callbacks.OnToolAsk})
+		permissionDecision := s.permissionService().Allow(toolcommand.Permission{
+			Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode,
+			RequireConfirmation: hookResult.Decision == toolresult.HookDecisionAsk,
+			Ask:                 command.Callbacks.OnToolAsk,
+		})
 		output := domaintool.ToolOutput{}
 		var toolErr error
 		if permissionDecision.Allowed {
@@ -107,6 +123,38 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 		result.Entries = append(result.Entries, ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}))
 	}
 	return result, nil
+}
+
+func (s ExecutionService) failBeforeExecution(result toolresult.Execution, command toolcommand.Execution, call domainmessage.ToolCall, index int, code string, err error) (toolresult.Execution, error) {
+	createdAt := s.now()
+	callCreatedAt := createdAt.Add(time.Duration(index*2) * time.Nanosecond)
+	resultCreatedAt := createdAt.Add(time.Duration(index*2+1) * time.Nanosecond)
+	output := domaintool.FailedOutput(domaintool.ResultStatusFailed, code, "tool error: "+err.Error())
+	result.Calls = append(result.Calls, call)
+	if command.Callbacks.OnToolCall != nil {
+		command.Callbacks.OnToolCall(call.Name, call.Arguments)
+	}
+	if command.Callbacks.OnToolResult != nil {
+		command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
+	}
+	result.Messages = append(result.Messages, ToolResultMessage(call, output))
+	result.Entries = append(result.Entries,
+		ToolCallEntry(toolcommand.ToolCallEntry{SessionID: command.SessionID, Call: call, CreatedAt: callCreatedAt}),
+		ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}),
+	)
+	return result, err
+}
+
+func toolAllowed(allowed []string, enforced bool, name string) bool {
+	if !enforced && allowed == nil {
+		return true
+	}
+	for _, candidate := range allowed {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }
 
 func allowsExecutionInMode(permission tooldef.Permission, agentMode session.AgentMode, forceChatMode bool) bool {

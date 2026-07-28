@@ -25,21 +25,24 @@ type ExecutionCallbacks struct {
 }
 
 type Execution struct {
-	SessionID      string
-	AgentMode      session.AgentMode
-	PermissionMode session.PermissionMode
-	ForceChatMode  bool
-	RequestID      string
-	Calls          []domainmessage.ToolCall
-	Callbacks      ExecutionCallbacks
+	SessionID            string
+	AgentMode            session.AgentMode
+	PermissionMode       session.PermissionMode
+	ForceChatMode        bool
+	RequestID            string
+	Calls                []domainmessage.ToolCall
+	AllowedTools         []string
+	EnforceToolAllowlist bool
+	Callbacks            ExecutionCallbacks
 }
 
 type Permission struct {
-	Name       string
-	Arguments  string
-	Permission tooldef.Permission
-	Mode       session.PermissionMode
-	Ask        PermissionAskFunc
+	Name                string
+	Arguments           string
+	Permission          tooldef.Permission
+	Mode                session.PermissionMode
+	RequireConfirmation bool
+	Ask                 PermissionAskFunc
 }
 
 type AssetExtraction struct {

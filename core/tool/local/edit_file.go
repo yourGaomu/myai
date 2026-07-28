@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"myai/core/history"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -80,7 +81,7 @@ func (t *EditFileTool) Permission() tooldef.Permission {
 }
 
 func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	workspace, err := toolWorkspace(t.workspace)
+	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}

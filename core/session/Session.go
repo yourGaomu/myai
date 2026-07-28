@@ -1,6 +1,8 @@
 package session
 
 import (
+	"strings"
+
 	"myai/core/contextmgr"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
@@ -44,8 +46,25 @@ Final response:
 - Mention verification results or say when verification was not run.
 - Keep the response focused and easy to scan.`
 
+const subagentSystemPrompt = `You are a myai background subagent responsible for completing one assigned task independently.
+
+Execution behavior:
+- Treat the assigned user message as a complete task and begin immediately.
+- Analysis, research, explanation, and review are concrete tasks even when no code change is requested.
+- Do not ask what the user wants, wait for another message, or return a generic greeting.
+- When the task depends on workspace facts, use the allowed inspection tools before making claims.
+- Use only the tools available to this subagent and respect its read-only or isolated-workspace limits.
+- If blocked, return the specific blocker, supporting evidence, and the next actionable step.
+
+Final response:
+- Directly answer every requested point.
+- Support workspace conclusions with exact file paths and relevant functions, types, or configuration keys.
+- Distinguish verified facts from assumptions.
+- Report changes and verification only when they actually occurred.`
+
 type PermissionMode string
 type AgentMode string
+type Kind string
 
 const (
 	PermissionModeReadonly PermissionMode = "readonly"
@@ -54,24 +73,38 @@ const (
 
 	AgentModeChat AgentMode = "chat"
 	AgentModePlan AgentMode = "plan"
+
+	KindUser     Kind = "user"
+	KindSubagent Kind = "subagent"
 )
 
 type Session struct {
 	// Session 是聊天聚合根：消息、模式、上下文摘要、用量和当前 Plan 必须作为一致状态更新。
-	ID                 string
-	Model              string
-	AgentMode          AgentMode
-	PermissionMode     PermissionMode
-	ContextWindowK     int
-	Summary            string
-	CompactedMessages  int
-	Usage              llm.TokenUsage
-	LastUsage          llm.TokenUsage
-	CurrentPlan        *agentplan.Plan
-	RAGSettings        RAGSettings
-	GenerationSettings generation.Settings
-	StyleInstruction   string
-	Messages           []domainmessage.Message
+	ID                   string
+	Kind                 Kind
+	ParentSessionID      string
+	ParentTaskID         string
+	AgentDefinitionID    string
+	AgentDefinitionVer   int64
+	SystemInstruction    string
+	AllowedTools         []string
+	EnforceToolAllowlist bool
+	WorkspaceRoot        string
+	WorkspaceSandboxID   string
+	MaxToolRounds        int
+	Model                string
+	AgentMode            AgentMode
+	PermissionMode       PermissionMode
+	ContextWindowK       int
+	Summary              string
+	CompactedMessages    int
+	Usage                llm.TokenUsage
+	LastUsage            llm.TokenUsage
+	CurrentPlan          *agentplan.Plan
+	RAGSettings          RAGSettings
+	GenerationSettings   generation.Settings
+	StyleInstruction     string
+	Messages             []domainmessage.Message
 }
 
 func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, ragSettings RAGSettings, generationSettings generation.Settings, styleInstruction string, messages []domainmessage.Message) *Session {
@@ -132,7 +165,7 @@ func (s *Session) AddUsage(usage llm.TokenUsage) {
 
 func (s *Session) Clear() {
 	// 清空会话时恢复固定 system 消息，同时移除摘要、用量和未完成计划。
-	s.Messages = defaultMessages()
+	s.Messages = defaultMessages(s.SystemInstruction)
 	s.Summary = ""
 	s.CompactedMessages = 0
 	s.Usage = llm.TokenUsage{}
@@ -140,14 +173,31 @@ func (s *Session) Clear() {
 	s.CurrentPlan = nil
 }
 
-func defaultMessages() []domainmessage.Message {
+func defaultMessages(systemInstruction ...string) []domainmessage.Message {
+	prompt := systemPrompt
+	if len(systemInstruction) > 0 {
+		if instruction := strings.TrimSpace(systemInstruction[0]); instruction != "" {
+			prompt = subagentSystemPrompt + "\n\nRole-specific instructions:\n" + instruction
+		}
+	}
 	return []domainmessage.Message{
-		domainmessage.Text(domainmessage.RoleSystem, systemPrompt),
+		domainmessage.Text(domainmessage.RoleSystem, prompt),
 	}
 }
 
 func SystemPrompt() string {
 	return systemPrompt
+}
+
+func SystemPromptWithInstruction(instruction string) string {
+	return defaultMessages(instruction)[0].Text()
+}
+
+func NormalizeKind(kind Kind) Kind {
+	if kind == KindSubagent {
+		return KindSubagent
+	}
+	return KindUser
 }
 
 func NormalizePermissionMode(mode PermissionMode) PermissionMode {

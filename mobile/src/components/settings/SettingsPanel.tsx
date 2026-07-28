@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { ButtonContent } from "../common/ButtonContent";
-import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary, SkillSummary } from "../../protocol";
+import { SubagentPanel } from "../subagents/SubagentPanel";
+import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask } from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { shortID } from "../../utils/ids";
@@ -36,6 +37,7 @@ type Props = {
   onOpenPlan: () => void;
   onPair: () => void;
   onRefreshModels: () => void;
+  onRequestContextInfo: () => void;
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
@@ -45,6 +47,14 @@ type Props = {
   onSetContextWindowK: (windowK: number) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
+  onApplySubagentTask: (taskID: string) => void;
+  onCancelSubagentTask: (taskID: string) => void;
+  onCheckSubagentTask: (taskID: string) => void;
+  onCreateSubagentDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
+  onDeleteSubagentDefinition: (definitionID: string) => void;
+  onDiscardSubagentTask: (taskID: string) => void;
+  onRefreshSubagents: () => void;
+  onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
   pendingActions: Record<PendingAction, boolean>;
   relayURL: string;
@@ -53,6 +63,9 @@ type Props = {
   skillMessage: string;
   skillRoot: string;
   skills: SkillSummary[];
+  subagentDefinitions: SubagentDefinition[];
+  subagentMessage: string;
+  subagentTasks: SubagentTask[];
   userID: string;
 };
 
@@ -66,9 +79,10 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "Plan", mode: "plan", meta: "read-only planning" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "skill" | "session" | "permission" | "context";
+type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context";
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
+  { icon: "AG", key: "subagent", label: "子智能体", meta: "配置与后台任务" },
   { icon: "G", key: "general", label: "常规", meta: "状态总览" },
   { icon: "WS", key: "connection", label: "连接", meta: "Relay 与配对" },
   { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
@@ -104,6 +118,7 @@ export function SettingsPanel({
   onOpenPlan,
   onPair,
   onRefreshModels,
+  onRequestContextInfo,
   onRefreshSessions,
   onRefreshSkills,
   onReloadSkills,
@@ -113,6 +128,14 @@ export function SettingsPanel({
   onSetContextWindowK,
   onSetPermissionMode,
   onSwitchModel,
+  onApplySubagentTask,
+  onCancelSubagentTask,
+  onCheckSubagentTask,
+  onCreateSubagentDefinition,
+  onDeleteSubagentDefinition,
+  onDiscardSubagentTask,
+  onRefreshSubagents,
+  onUpdateSubagentDefinition,
   onUserIDChange,
   pendingActions,
   relayURL,
@@ -121,6 +144,9 @@ export function SettingsPanel({
   skillMessage,
   skillRoot,
   skills,
+  subagentDefinitions,
+  subagentMessage,
+  subagentTasks,
   userID,
 }: Props) {
   const { width } = useWindowDimensions();
@@ -130,12 +156,24 @@ export function SettingsPanel({
   const currentWindowK = context?.window_k || activeSession?.context_window_k || 16;
   const [windowInput, setWindowInput] = useState(String(currentWindowK));
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const requestContextInfoRef = useRef(onRequestContextInfo);
 
   useEffect(() => {
     setWindowInput(String(currentWindowK));
   }, [currentWindowK]);
 
+  useEffect(() => {
+    requestContextInfoRef.current = onRequestContextInfo;
+  }, [onRequestContextInfo]);
+
+  useEffect(() => {
+    if (activeSection === "context" && connected && clientToken && sessionID) {
+      requestContextInfoRef.current();
+    }
+  }, [activeSection, clientToken, connected, sessionID]);
+
   const settingsBusy = pendingActions.settings;
+  const contextBusy = pendingActions.context;
   const planBusy = pendingActions.plan;
   const canUseSessionSettings = Boolean(clientToken && sessionID);
   const wideLayout = width >= 760;
@@ -516,13 +554,18 @@ export function SettingsPanel({
             <Text style={styles.settingMeta}>{currentWindowK}K active window</Text>
           </View>
           <Pressable
-            disabled={!canUseSessionSettings || settingsBusy}
+            disabled={!canUseSessionSettings || settingsBusy || contextBusy}
             onPress={onCompactSession}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || settingsBusy || contextBusy) && styles.disabledButton], pressed)}
           >
             <ButtonContent loading={settingsBusy} text={settingsBusy ? "处理中" : "压缩"} />
           </Pressable>
         </View>
+        {contextBusy ? (
+          <View style={styles.contextLoadingRow}>
+            <ButtonContent loading text="正在读取上下文" />
+          </View>
+        ) : null}
         <View style={styles.row}>
           <TextInput
             keyboardType="number-pad"
@@ -533,9 +576,9 @@ export function SettingsPanel({
             value={windowInput}
           />
           <Pressable
-            disabled={!canUseSessionSettings || settingsBusy}
+            disabled={!canUseSessionSettings || settingsBusy || contextBusy}
             onPress={submitWindow}
-            style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || settingsBusy || contextBusy) && styles.disabledButton], pressed)}
           >
             <ButtonContent loading={settingsBusy} text="应用" />
           </Pressable>
@@ -543,11 +586,11 @@ export function SettingsPanel({
         <View style={styles.segmentRow}>
           {contextPresets.map((preset) => (
             <Pressable
-              disabled={!canUseSessionSettings || settingsBusy}
+              disabled={!canUseSessionSettings || settingsBusy || contextBusy}
               key={preset}
               onPress={() => onSetContextWindowK(preset)}
               style={({ pressed }) =>
-                buttonFeedback([styles.presetChip, currentWindowK === preset && styles.segmentActive, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)
+                buttonFeedback([styles.presetChip, currentWindowK === preset && styles.segmentActive, (!canUseSessionSettings || settingsBusy || contextBusy) && styles.disabledButton], pressed)
               }
             >
               <Text style={styles.segmentTitle}>{preset}K</Text>
@@ -566,6 +609,19 @@ export function SettingsPanel({
         <View style={styles.hashGrid}>
           <HashPill label="prefix" value={context?.prefix_hash} />
           <HashPill label="summary" value={context?.summary_hash} />
+        </View>
+        <View style={styles.contextSummaryBox}>
+          <View style={styles.contextSummaryHeader}>
+            <Text style={styles.compactTitle}>压缩摘要</Text>
+            <Text style={styles.compactBadge}>{context?.has_summary ? `v${context.summary_version || 0}` : "未生成"}</Text>
+          </View>
+          {context?.summary?.trim() ? (
+            <ScrollView nestedScrollEnabled style={styles.contextSummaryScroll}>
+              <Text selectable style={styles.contextSummaryText}>{context.summary}</Text>
+            </ScrollView>
+          ) : (
+            <Text style={styles.contextSummaryEmpty}>当前还没有压缩摘要。点击“压缩”后会在这里显示实际保存的摘要内容。</Text>
+          )}
         </View>
         <View style={styles.contextNote}>
           <Text style={styles.contextNoteText}>
@@ -641,6 +697,25 @@ export function SettingsPanel({
     </View>
   );
 
+  const subagentSection = (
+    <SubagentPanel
+      buttonFeedback={buttonFeedback}
+      definitions={subagentDefinitions}
+      message={subagentMessage}
+      onApplyTask={onApplySubagentTask}
+      onCancelTask={onCancelSubagentTask}
+      onCheckTask={onCheckSubagentTask}
+      onCreateDefinition={onCreateSubagentDefinition}
+      onDeleteDefinition={onDeleteSubagentDefinition}
+      onDiscardTask={onDiscardSubagentTask}
+      onRefresh={onRefreshSubagents}
+      onUpdateDefinition={onUpdateSubagentDefinition}
+      pending={pendingActions.subagents}
+      sessionID={sessionID}
+      tasks={subagentTasks}
+    />
+  );
+
   const sectionContent: Record<SettingsSection, ReactNode> = {
     connection: relaySection,
     context: contextSection,
@@ -649,6 +724,7 @@ export function SettingsPanel({
     permission: permissionSection,
     session: sessionSection,
     skill: skillSection,
+    subagent: subagentSection,
   };
 
   return (
@@ -1266,6 +1342,37 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  contextSummaryBox: {
+    backgroundColor: "#f5eefc",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    gap: 8,
+    padding: 10,
+  },
+  contextLoadingRow: {
+    minHeight: 24,
+  },
+  contextSummaryHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  contextSummaryScroll: {
+    maxHeight: 220,
+  },
+  contextSummaryText: {
+    color: "#12100e",
+    fontSize: 12,
+    lineHeight: 19,
+  },
+  contextSummaryEmpty: {
+    color: "#6c665f",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18,
   },
   contextNoteText: {
     color: "#4f4942",

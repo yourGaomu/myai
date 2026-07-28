@@ -49,6 +49,7 @@ export function MobileMainContent({
           onExecutePlan={settings.onExecutePlan}
           onOpenPlan={settings.onOpenPlan}
           onRefreshModels={settings.onRefreshModels}
+          onRequestContextInfo={settings.onRequestContextInfo}
           onRefreshSessions={settings.onRefreshSessions}
           onRefreshSkills={settings.onRefreshSkills}
           onReloadSkills={settings.onReloadSkills}
@@ -58,6 +59,14 @@ export function MobileMainContent({
           onSetContextWindowK={settings.onSetContextWindowK}
           onSetPermissionMode={settings.onSetPermissionMode}
           onSwitchModel={settings.onSwitchModel}
+          onApplySubagentTask={settings.onApplySubagentTask}
+          onCancelSubagentTask={settings.onCancelSubagentTask}
+          onCheckSubagentTask={settings.onCheckSubagentTask}
+          onCreateSubagentDefinition={settings.onCreateSubagentDefinition}
+          onDeleteSubagentDefinition={settings.onDeleteSubagentDefinition}
+          onDiscardSubagentTask={settings.onDiscardSubagentTask}
+          onRefreshSubagents={settings.onRefreshSubagents}
+          onUpdateSubagentDefinition={settings.onUpdateSubagentDefinition}
           onUserIDChange={settings.onUserIDChange}
           pendingActions={common.pendingActions}
           relayURL={settings.relayURL}
@@ -66,6 +75,9 @@ export function MobileMainContent({
           skillMessage={settings.skillMessage}
           skillRoot={settings.skillRoot}
           skills={settings.skills}
+          subagentDefinitions={settings.subagentDefinitions}
+          subagentMessage={settings.subagentMessage}
+          subagentTasks={settings.subagentTasks}
           userID={settings.userID}
         />
       ) : null}
@@ -105,6 +117,8 @@ export function MobileMainContent({
           onSetRAG={knowledge.onSetRAG}
           onUpdateKnowledgeBase={knowledge.onUpdateKnowledgeBase}
           onUploadDocument={knowledge.onUploadDocument}
+          pendingKnowledge={common.pendingActions.knowledge}
+          pendingSettings={common.pendingActions.settings}
           profiles={knowledge.profiles}
           searchResult={knowledge.searchResult}
         />

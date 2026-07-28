@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	domainsubagent "myai/core/domain/subagent"
 	"myai/core/remote/protocol"
 )
 
@@ -23,6 +25,8 @@ type Agent struct {
 	fileService       WorkspaceFileFacade
 	changeService     WorkspaceChangeFacade
 	knowledgeService  KnowledgeFacade
+	subagentService   SubagentFacade
+	subagentEvents    SubagentEventSource
 	runtimes          *sessionRuntimeManager
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
@@ -30,7 +34,7 @@ type Agent struct {
 	permissionTimeout time.Duration
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
@@ -41,6 +45,8 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		fileService:       fileService,
 		changeService:     changeService,
 		knowledgeService:  knowledgeService,
+		subagentService:   subagentService,
+		subagentEvents:    subagentEvents,
 		runtimes:          newSessionRuntimeManager(),
 		permissionWaiters: newPermissionWaiterRegistry(),
 		permissionTimeout: 60 * time.Second,
@@ -50,6 +56,9 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 func (a *Agent) Run(ctx context.Context) error {
 	if a.config.ServerURL == "" {
 		return fmt.Errorf("server url is empty")
+	}
+	if strings.TrimSpace(a.config.RelayToken) == "" {
+		return fmt.Errorf("relay agent token is empty")
 	}
 	if a.config.UserID == "" {
 		return fmt.Errorf("user id is empty")
@@ -76,7 +85,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	fmt.Println("workspace:", a.fileService.Root())
 
 	// Agent 主动连接 Relay，适合电脑位于 NAT 或内网中的场景。
-	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, nil)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+strings.TrimSpace(a.config.RelayToken))
+	headers.Set(protocol.HeaderAgentUserID, strings.TrimSpace(a.config.UserID))
+	headers.Set(protocol.HeaderAgentDeviceID, strings.TrimSpace(a.config.DeviceID))
+	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, headers)
 	if err != nil {
 		if response != nil {
 			return fmt.Errorf("connect relay failed: %w, status: %s", err, response.Status)
@@ -91,6 +104,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		BindCode: a.config.BindingCode,
 	}); err != nil {
 		return err
+	}
+	if a.subagentEvents != nil {
+		events, unsubscribe := a.subagentEvents.Subscribe(32)
+		defer unsubscribe()
+		go a.forwardSubagentEvents(ctx, conn, events)
 	}
 
 	readDone := make(chan error, 1)
@@ -113,6 +131,25 @@ func (a *Agent) Run(ctx context.Context) error {
 				return err
 			}
 			fmt.Println("agent heartbeat sent.")
+		}
+	}
+}
+
+func (a *Agent) forwardSubagentEvents(ctx context.Context, conn *websocket.Conn, events <-chan domainsubagent.Task) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), task.ParentSessionID, protocol.SubagentTaskResultPayload{
+				Task: subagentTaskPayload(task),
+			}); err != nil {
+				log.Printf("send subagent task event failed: %v", err)
+				return
+			}
 		}
 	}
 }
@@ -193,6 +230,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionModeSet(ctx, conn, message)
 	case protocol.TypeSessionPlanExecute:
 		go a.processPlanExecuteMessage(ctx, conn, message)
+	case protocol.TypeSessionContextQuery:
+		return a.handleSessionContextQuery(ctx, conn, message)
 	case protocol.TypeSessionContextSet:
 		return a.handleSessionContextSet(ctx, conn, message)
 	case protocol.TypeSessionRAGSet:
@@ -237,6 +276,24 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleKnowledgeProfileList(ctx, conn, message)
 	case protocol.TypeKnowledgeSearchPreview:
 		return a.handleKnowledgeSearchPreview(ctx, conn, message)
+	case protocol.TypeSubagentDefinitionList:
+		return a.handleSubagentDefinitionList(ctx, conn, message)
+	case protocol.TypeSubagentDefinitionCreate:
+		return a.handleSubagentDefinitionCreate(ctx, conn, message)
+	case protocol.TypeSubagentDefinitionUpdate:
+		return a.handleSubagentDefinitionUpdate(ctx, conn, message)
+	case protocol.TypeSubagentDefinitionDelete:
+		return a.handleSubagentDefinitionDelete(ctx, conn, message)
+	case protocol.TypeSubagentTaskList:
+		return a.handleSubagentTaskList(ctx, conn, message)
+	case protocol.TypeSubagentTaskCheck:
+		return a.handleSubagentTaskCheck(ctx, conn, message)
+	case protocol.TypeSubagentTaskCancel:
+		return a.handleSubagentTaskCancel(ctx, conn, message)
+	case protocol.TypeSubagentTaskApply:
+		return a.handleSubagentTaskApply(ctx, conn, message)
+	case protocol.TypeSubagentTaskDiscard:
+		return a.handleSubagentTaskDiscard(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:

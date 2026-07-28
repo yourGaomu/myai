@@ -17,8 +17,9 @@ func TestRecorderSavesToolExecutionRecords(t *testing.T) {
 	recorder := Recorder{
 		Persistence: persistence,
 		IDs:         &sequentialIDs{},
-		RunAsync: func(task func()) {
+		RunAsync: func(task func()) error {
 			task()
+			return nil
 		},
 	}
 
@@ -48,8 +49,9 @@ func TestRecorderReportsPersistenceErrors(t *testing.T) {
 	recorder := Recorder{
 		Persistence: persistence,
 		IDs:         &sequentialIDs{},
-		RunAsync: func(task func()) {
+		RunAsync: func(task func()) error {
 			task()
+			return nil
 		},
 		OnError: func(err error) {
 			reported = err

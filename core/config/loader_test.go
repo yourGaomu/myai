@@ -51,6 +51,8 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 		"model_version": " v1 ", "dimensions": 1024, "batch_size": 16, "enabled": enabled,
 	}})
 	v.Set("thread.core", 4)
+	v.Set("subagent.worker_count", 3)
+	v.Set("subagent.queue_size", 24)
 	v.Set("skill.root", " custom-skills ")
 
 	properties, err := (ViperLoader{}).Map(v, "C:/workspace")
@@ -62,6 +64,12 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	}
 	if properties.Redis.Address != "localhost:6379" || properties.Thread.Core != 4 {
 		t.Fatalf("unexpected infrastructure properties: %#v %#v", properties.Redis, properties.Thread)
+	}
+	if properties.Subagent.WorkerCount != 3 || properties.Subagent.QueueSize != 24 {
+		t.Fatalf("unexpected subagent properties: %#v", properties.Subagent)
+	}
+	if properties.Subagent.SnapshotRoot != filepath.Join("C:/workspace", DefaultSubagentSnapshotRoot) {
+		t.Fatalf("unexpected subagent snapshot root: %q", properties.Subagent.SnapshotRoot)
 	}
 	if properties.RAG.IDNode != 7 {
 		t.Fatalf("unexpected RAG snowflake node: %d", properties.RAG.IDNode)
@@ -122,6 +130,12 @@ func TestViperLoaderAppliesDefaults(t *testing.T) {
 	}
 	if properties.RAG.Local.MaxOpenConnections != 4 {
 		t.Fatalf("unexpected local knowledge defaults: %#v", properties.RAG.Local)
+	}
+	if properties.Subagent.WorkerCount != 2 || properties.Subagent.QueueSize != 32 {
+		t.Fatalf("unexpected subagent defaults: %#v", properties.Subagent)
+	}
+	if properties.Subagent.SnapshotRoot != DefaultSubagentSnapshotRoot {
+		t.Fatalf("unexpected subagent snapshot root default: %q", properties.Subagent.SnapshotRoot)
 	}
 	retrieval := properties.RAG.Retrieval
 	if retrieval.CandidateMultiplier != 3 || retrieval.MaxCandidates != 100 || retrieval.MinLocalResults != 3 || retrieval.MinLocalScore != 0.55 || retrieval.RRFK != 60 || !retrieval.CacheRemoteResults {

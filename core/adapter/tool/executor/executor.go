@@ -28,25 +28,33 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		return generationresult.ToolExecution{}, errors.New("session is nil")
 	}
 	ctx = toolruntime.WithRAGSettings(ctx, command.Session.RAGSettings)
+	ctx = toolruntime.WithExecution(ctx, toolruntime.Execution{
+		SessionID: command.Session.ID, RequestID: command.RequestID,
+		WorkspaceRoot: command.Session.WorkspaceRoot, SandboxID: command.Session.WorkspaceSandboxID,
+		ModelID: command.Session.Model,
+	})
 
 	result, err := toolservice.ExecutionService{
 		Registry: e.Registry,
 		Hooks:    e.Hooks,
 		Assets:   SharedAssetExtractor{},
 	}.Execute(ctx, toolcommand.Execution{
-		SessionID:      command.Session.ID,
-		AgentMode:      session.NormalizeAgentMode(command.Session.AgentMode),
-		PermissionMode: session.NormalizePermissionMode(command.Session.PermissionMode),
-		ForceChatMode:  command.ForceChatMode,
-		RequestID:      command.RequestID,
-		Calls:          command.Calls,
-		Callbacks:      callbacksFromStream(command.Stream),
+		SessionID:            command.Session.ID,
+		AgentMode:            session.NormalizeAgentMode(command.Session.AgentMode),
+		PermissionMode:       session.NormalizePermissionMode(command.Session.PermissionMode),
+		ForceChatMode:        command.ForceChatMode,
+		RequestID:            command.RequestID,
+		Calls:                command.Calls,
+		AllowedTools:         append([]string(nil), command.Session.AllowedTools...),
+		EnforceToolAllowlist: command.Session.EnforceToolAllowlist,
+		Callbacks:            callbacksFromStream(command.Stream),
 	})
 	if err != nil {
 		return generationresult.ToolExecution{}, err
 	}
 
 	return generationresult.ToolExecution{
+		Calls:    result.Calls,
 		Messages: result.Messages,
 		Entries:  result.Entries,
 		Assets:   result.Assets,
@@ -144,6 +152,8 @@ func hookDecisionToToolDecision(decision hook.Decision) toolresult.HookDecision 
 	switch decision {
 	case hook.DecisionAllow:
 		return toolresult.HookDecisionAllow
+	case hook.DecisionAsk:
+		return toolresult.HookDecisionAsk
 	case hook.DecisionDeny:
 		return toolresult.HookDecisionDeny
 	default:

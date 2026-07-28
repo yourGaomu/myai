@@ -14,6 +14,7 @@ import (
 	mongotemplate "myai/core/adapter/persistence/mongo/template"
 	domainmodel "myai/core/domain/model"
 	repository "myai/core/port/repository"
+	"myai/core/session"
 )
 
 const (
@@ -26,13 +27,15 @@ const (
 type Store struct {
 	// Store 实现应用层仓库接口；所有 Mongo 通用 CRUD 通过 template 统一封装。
 	template mongotemplate.Operations
+	database *gomongo.Database
 }
 
 func New(client *gomongo.Client, database string) *Store {
 	if client == nil || database == "" {
 		return NewWithTemplate(mongotemplate.New(nil))
 	}
-	return NewWithTemplate(mongotemplate.New(client.Database(database)))
+	target := client.Database(database)
+	return &Store{template: mongotemplate.New(target), database: target}
 }
 
 func NewWithTemplate(template mongotemplate.Operations) *Store {
@@ -60,18 +63,29 @@ func (m *Store) GetSession(ctx context.Context, sessionID string) (repository.Se
 func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecord) error {
 	document := mongomapper.SessionDocumentFromRecord(session)
 	setValues := bson.M{
-		"model":              document.Model,
-		"agent_mode":         document.AgentMode,
-		"permission_mode":    document.PermissionMode,
-		"context_window_k":   document.ContextWindowK,
-		"summary":            document.Summary,
-		"compacted_messages": document.CompactedMessages,
-		"compacted_at":       document.CompactedAt,
-		"title":              document.Title,
-		"usage":              document.Usage,
-		"last_usage":         document.LastUsage,
-		"current_plan":       document.CurrentPlan,
-		"updated_at":         document.UpdatedAt,
+		"kind":                     document.Kind,
+		"parent_session_id":        document.ParentSessionID,
+		"parent_task_id":           document.ParentTaskID,
+		"agent_definition_id":      document.AgentDefinitionID,
+		"agent_definition_version": document.AgentDefinitionVer,
+		"system_instruction":       document.SystemInstruction,
+		"allowed_tools":            document.AllowedTools,
+		"enforce_tool_allowlist":   document.EnforceToolAllowlist,
+		"workspace_root":           document.WorkspaceRoot,
+		"workspace_sandbox_id":     document.WorkspaceSandboxID,
+		"max_tool_rounds":          document.MaxToolRounds,
+		"model":                    document.Model,
+		"agent_mode":               document.AgentMode,
+		"permission_mode":          document.PermissionMode,
+		"context_window_k":         document.ContextWindowK,
+		"summary":                  document.Summary,
+		"compacted_messages":       document.CompactedMessages,
+		"compacted_at":             document.CompactedAt,
+		"title":                    document.Title,
+		"usage":                    document.Usage,
+		"last_usage":               document.LastUsage,
+		"current_plan":             document.CurrentPlan,
+		"updated_at":               document.UpdatedAt,
 	}
 	update := bson.M{
 		"$set": setValues,
@@ -197,12 +211,18 @@ func (m *Store) ListSessions(ctx context.Context) ([]repository.SessionRecord, e
 }
 
 func (m *Store) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]repository.SessionRecord, error) {
-	filter := bson.M{"$or": bson.A{
+	kindFilter := bson.M{"$or": bson.A{
+		bson.M{"kind": bson.M{"$exists": false}},
+		bson.M{"kind": ""},
+		bson.M{"kind": string(session.KindUser)},
+	}}
+	deletedFilter := bson.M{"$or": bson.A{
 		bson.M{"deleted": bson.M{"$exists": false}},
 		bson.M{"deleted": false},
 	}}
+	filter := bson.M{"$and": bson.A{kindFilter, deletedFilter}}
 	if includeDeleted {
-		filter = bson.M{"deleted": true}
+		filter = bson.M{"$and": bson.A{kindFilter, bson.M{"deleted": true}}}
 	}
 
 	var documents []po.SessionDocument

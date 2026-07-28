@@ -39,6 +39,7 @@ type PermissionServiceAPI = toolapi.PermissionService
 const (
 	HookDecisionContinue = toolresult.HookDecisionContinue
 	HookDecisionAllow    = toolresult.HookDecisionAllow
+	HookDecisionAsk      = toolresult.HookDecisionAsk
 	HookDecisionDeny     = toolresult.HookDecisionDeny
 )
 

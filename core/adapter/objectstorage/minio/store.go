@@ -23,6 +23,7 @@ type Store struct {
 }
 
 var _ knowledgeport.DocumentObjectStore = (*Store)(nil)
+var _ knowledgeport.UncommittedDocumentObjectCleaner = (*Store)(nil)
 
 func New(config Config) (*Store, error) {
 	if err := config.Validate(); err != nil {
@@ -142,6 +143,20 @@ func (store *Store) Stat(ctx context.Context, objectKey string) (domainknowledge
 		Size:        info.Size,
 		ContentType: info.ContentType,
 	}, nil
+}
+
+func (store *Store) DeleteUncommitted(ctx context.Context, objectKey string) error {
+	if store == nil || store.operations == nil {
+		return fmt.Errorf("minio operations are nil")
+	}
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return fmt.Errorf("object key is required")
+	}
+	if err := store.operations.RemoveObject(ctx, store.bucket, objectKey); err != nil {
+		return fmt.Errorf("remove uncommitted minio object %q: %w", objectKey, err)
+	}
+	return nil
 }
 
 type preparedUpload struct {

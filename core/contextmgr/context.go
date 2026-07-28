@@ -56,10 +56,11 @@ func ValidateWindowK(windowK int) error {
 	return nil
 }
 
-func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMessages int, windowK int) Snapshot {
+func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMessages int, windowK int, fixedContext ...string) Snapshot {
 	// base 始终放固定 system 和可选摘要，recent 再按 token 预算从新到旧选择完整消息块。
 	summary = strings.TrimSpace(summary)
-	base, recent := buildBaseAndRecent(messages, summary, compactedMessages)
+	summary = summaryForWindow(summary, windowK)
+	base, recent := buildBaseAndRecent(messages, summary, compactedMessages, fixedContext...)
 	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
 	info.SummaryVersion = info.CompactedMessages
 	info.SummaryHash = StableTextHash(summary)
@@ -145,14 +146,19 @@ func NormalizeCompactedMessages(messages []domainmessage.Message, compactedMessa
 	return compactedMessages
 }
 
-func buildBaseAndRecent(messages []domainmessage.Message, summary string, compactedMessages int) ([]domainmessage.Message, []domainmessage.Message) {
+func buildBaseAndRecent(messages []domainmessage.Message, summary string, compactedMessages int, fixedContext ...string) ([]domainmessage.Message, []domainmessage.Message) {
 	system, rest := splitSystemMessage(messages)
-	base := make([]domainmessage.Message, 0, len(system)+1)
+	base := make([]domainmessage.Message, 0, len(system)+1+len(fixedContext))
 	base = append(base, system...)
 
 	summary = strings.TrimSpace(summary)
 	if summary != "" {
 		base = append(base, domainmessage.Text(domainmessage.RoleSystem, "Previous conversation summary:\n"+summary))
+	}
+	for _, item := range fixedContext {
+		if item = strings.TrimSpace(item); item != "" {
+			base = append(base, domainmessage.Text(domainmessage.RoleSystem, item))
+		}
 	}
 
 	start := NormalizeCompactedMessages(messages, compactedMessages)
@@ -275,31 +281,92 @@ func splitSystemMessage(messages []domainmessage.Message) ([]domainmessage.Messa
 
 func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
 	chunks := make([][]domainmessage.Message, 0, len(messages))
-	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		if message.IsSynthetic() {
-			chunk := []domainmessage.Message{message}
-			for i+1 < len(messages) && messages[i+1].IsSynthetic() {
-				i++
-				chunk = append(chunk, messages[i])
+	for start := 0; start < len(messages); {
+		end := start + 1
+		if messages[start].IsSynthetic() {
+			for end < len(messages) && messages[end].IsSynthetic() {
+				end++
 			}
-			if i+1 < len(messages) && messages[i+1].Role == domainmessage.RoleUser {
-				i++
-				chunk = append(chunk, messages[i])
+			if end < len(messages) && messages[end].Role == domainmessage.RoleUser {
+				end++
 			}
-			chunks = append(chunks, chunk)
-			continue
+			for end < len(messages) && !messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser {
+				end++
+			}
+		} else if messages[start].Role == domainmessage.RoleUser {
+			for end < len(messages) && !messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser {
+				end++
+			}
+		} else if messages[start].Role == domainmessage.RoleAssistant && messages[start].HasToolCall() {
+			for end < len(messages) && messages[end].Role == domainmessage.RoleTool {
+				end++
+			}
 		}
-		chunk := []domainmessage.Message{message}
-		if message.Role == domainmessage.RoleAssistant && message.HasToolCall() {
-			for i+1 < len(messages) && messages[i+1].Role == domainmessage.RoleTool {
-				i++
-				chunk = append(chunk, messages[i])
-			}
-		}
-		chunks = append(chunks, chunk)
+		chunks = append(chunks, messages[start:end])
+		start = end
 	}
 	return chunks
+}
+
+func summaryForWindow(summary string, windowK int) string {
+	windowTokens := NormalizeWindowK(windowK) * 1000
+	limit := windowTokens / 4
+	if limit > 1024 {
+		limit = 1024
+	}
+	if limit < 256 {
+		limit = 256
+	}
+	return TruncateTextToTokens(summary, limit)
+}
+
+// TruncateTextToTokens keeps durable decisions from the beginning and recent
+// open work from the end when a summary must fit a strict context budget.
+func TruncateTextToTokens(text string, maxTokens int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || maxTokens <= 0 {
+		return ""
+	}
+	if EstimateTextTokens(text) <= maxTokens {
+		return text
+	}
+	marker := "\n[...context truncated...]\n"
+	markerTokens := EstimateTextTokens(marker)
+	if maxTokens <= markerTokens+2 {
+		return truncatePrefixToTokens(text, maxTokens)
+	}
+	contentBudget := maxTokens - markerTokens
+	head := truncatePrefixToTokens(text, contentBudget*3/5)
+	tail := truncateSuffixToTokens(text, contentBudget-EstimateTextTokens(head))
+	return strings.TrimSpace(head) + marker + strings.TrimSpace(tail)
+}
+
+func truncatePrefixToTokens(text string, maxTokens int) string {
+	runes := []rune(text)
+	low, high := 0, len(runes)
+	for low < high {
+		middle := (low + high + 1) / 2
+		if EstimateTextTokens(string(runes[:middle])) <= maxTokens {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return string(runes[:low])
+}
+
+func truncateSuffixToTokens(text string, maxTokens int) string {
+	runes := []rune(text)
+	low, high := 0, len(runes)
+	for low < high {
+		middle := (low + high + 1) / 2
+		if EstimateTextTokens(string(runes[len(runes)-middle:])) <= maxTokens {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return string(runes[len(runes)-low:])
 }
 
 func estimatePartTokens(part domainmessage.Part) int {

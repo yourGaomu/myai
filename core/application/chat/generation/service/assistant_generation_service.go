@@ -83,7 +83,6 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	}
 	if s.Persistence != nil {
 		s.Persistence.PersistAssistant(command.Session, result)
-		s.Persistence.PersistCurrentSession(command.Session.ID)
 	}
 	return generationresult.GenerationResponse{
 		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),

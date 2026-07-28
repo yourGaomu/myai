@@ -15,9 +15,14 @@ type CommandMemory interface {
 	AddUserTurnTo(sessionID string, runtimeInstruction string, input string) error
 	AddUserTurnWithContextTo(sessionID string, ragContext string, runtimeInstruction string, input string) error
 	TrimAfterLastUserMessage(sessionID string) (string, error)
+	RestoreSession(snapshot *session.Session) error
 	GetSession(sessionID string) (*session.Session, error)
 }
 
 type RuntimeInstructionProvider interface {
 	Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string
+}
+
+type RegenerationPersistence interface {
+	PersistRegeneratedSession(ctx context.Context, current *session.Session) error
 }

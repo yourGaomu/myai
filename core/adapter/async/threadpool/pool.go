@@ -2,7 +2,11 @@ package threadpool
 
 import (
 	"errors"
+	"log"
+	"runtime/debug"
 	"sync"
+
+	asyncport "myai/core/port/async"
 )
 
 type Pool struct {
@@ -32,13 +36,13 @@ func (p *Pool) Submit(task func()) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
-		return errors.New("thread pool is closed")
+		return asyncport.ErrExecutorClosed
 	}
 	select {
 	case p.tasks <- task:
 		return nil
 	default:
-		return errors.New("task queue is full")
+		return asyncport.ErrQueueFull
 	}
 }
 
@@ -60,6 +64,15 @@ func (p *Pool) Shutdown() {
 func (p *Pool) worker() {
 	defer p.wg.Done()
 	for task := range p.tasks {
-		task()
+		runTask(task)
 	}
+}
+
+func runTask(task func()) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("thread pool task panicked: %v\n%s", recovered, debug.Stack())
+		}
+	}()
+	task()
 }

@@ -32,6 +32,12 @@ func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
 	}
 }
 
+func contextStatePayload(state service.ContextState) protocol.ContextInfo {
+	payload := contextInfoPayload(state.Info)
+	payload.Summary = state.Summary
+	return payload
+}
+
 func compactInfoPayload(info service.CompactInfo) protocol.CompactInfo {
 	return protocol.CompactInfo{
 		Triggered:         info.Triggered,

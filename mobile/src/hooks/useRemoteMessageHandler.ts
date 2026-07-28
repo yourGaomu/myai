@@ -22,6 +22,7 @@ import type {
   PermissionAskPayload,
   RelayMessage,
   SessionChangedPayload,
+  SessionContextQueryResultPayload,
   SessionHistoryDeltaResultPayload,
   SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
@@ -29,6 +30,10 @@ import type {
   SessionSettingsResultPayload,
   SessionPauseResultPayload,
   SkillListResultPayload,
+  SubagentDefinitionListResultPayload,
+  SubagentDefinitionMutationResultPayload,
+  SubagentTaskListResultPayload,
+  SubagentTaskResultPayload,
   TokenUsage,
   ToolCallPayload,
   ToolResultPayload,
@@ -86,6 +91,10 @@ type Args = {
   applySessionList: (payload?: SessionListResultPayload) => void;
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
+  applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
+  applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
+  applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
+  applySubagentTaskResult: (payload?: SubagentTaskResultPayload) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
   completeAssistant: (
     sessionID: string,
@@ -167,6 +176,10 @@ export function useRemoteMessageHandler({
   applySessionList,
   applySessionSettings,
   applySkillList,
+  applySubagentDefinitionList,
+  applySubagentDefinitionMutation,
+  applySubagentTaskList,
+  applySubagentTaskResult,
   clearSessionPendingRequest,
   completeAssistant,
   currentFilePath,
@@ -371,6 +384,15 @@ export function useRemoteMessageHandler({
           );
           requestSessions();
           break;
+        case "session_context_query_result": {
+          stopPending("context");
+          const payload = message.payload as SessionContextQueryResultPayload | undefined;
+          const targetSessionID = (payload?.session_id || message.session_id || sessionIDRef.current).trim();
+          if (targetSessionID && payload?.context) {
+            setSessionContext(targetSessionID, payload.context);
+          }
+          break;
+        }
         case "session_plan_update":
           // Plan 执行中间态只更新当前 Session，不结束 pending，后续还会继续收到步骤状态。
           applySessionSettings(
@@ -452,6 +474,25 @@ export function useRemoteMessageHandler({
           stopPending("knowledge");
           applyKnowledgeSearch(message.payload as KnowledgeSearchPreviewResultPayload | undefined);
           break;
+        case "subagent_definition_list_result":
+          stopPending("subagents");
+          applySubagentDefinitionList(message.payload as SubagentDefinitionListResultPayload | undefined);
+          break;
+        case "subagent_definition_mutation_result":
+          stopPending("subagents");
+          applySubagentDefinitionMutation(message.payload as SubagentDefinitionMutationResultPayload | undefined);
+          break;
+        case "subagent_task_list_result":
+          stopPending("subagents");
+          applySubagentTaskList(message.payload as SubagentTaskListResultPayload | undefined);
+          break;
+        case "subagent_task_result":
+          stopPending("subagents");
+          applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
+          break;
+        case "subagent_task_event":
+          applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
+          break;
         case "file_list_result":
           stopPending("files");
           applyFileList(message.payload as FileListResultPayload | undefined);
@@ -531,9 +572,11 @@ export function useRemoteMessageHandler({
           stopPending("diff");
           stopPending("revert");
           stopPending("settings");
+          stopPending("context");
           stopPending("plan");
           stopPending("pause");
           stopPending("knowledge");
+          stopPending("subagents");
           if (
             !message.request_id ||
             activeRequestIDRef.current === message.request_id
@@ -579,6 +622,10 @@ export function useRemoteMessageHandler({
       applySessionList,
       applySessionSettings,
       applySkillList,
+      applySubagentDefinitionList,
+      applySubagentDefinitionMutation,
+      applySubagentTaskList,
+      applySubagentTaskResult,
       clearSessionPendingRequest,
       completeAssistant,
       currentFilePath,
