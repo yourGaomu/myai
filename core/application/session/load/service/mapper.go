@@ -35,7 +35,11 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 				messages = append(messages, domainmessage.SyntheticText(reason, record.Content))
 			}
 		case repository.RoleUser:
-			messages = append(messages, domainmessage.Text(domainmessage.RoleUser, record.Content))
+			message := domainmessage.Text(domainmessage.RoleUser, record.Content)
+			if reason := domainmessage.SyntheticReason(record.SyntheticReason); reason != "" {
+				message = domainmessage.SyntheticUserText(reason, record.Content)
+			}
+			messages = append(messages, message)
 		case repository.RoleAssistant:
 			messages = append(messages, domainmessage.Text(domainmessage.RoleAssistant, record.Content))
 		case repository.RoleToolCall:
@@ -50,10 +54,18 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 			index--
 			messages = append(messages, domainmessage.ToolCallMessage(calls))
 		case repository.RoleTool:
+			content := record.Content
+			errorMessage := record.ToolError
+			if record.ToolPromptTruncated {
+				content = record.ToolPromptContent
+				errorMessage = record.ToolPromptError
+			}
 			messages = append(messages, domainmessage.ToolResultMessage(domainmessage.ToolResult{
-				ToolCallID: record.ToolCallID, Name: record.ToolName, Content: record.Content,
+				ToolCallID: record.ToolCallID, Name: record.ToolName, Content: content,
 				Status: domaintool.ResultStatus(record.ToolStatus), ErrorCode: record.ToolErrorCode,
-				ErrorMessage: record.ToolError, Truncated: record.ToolTruncated,
+				ErrorMessage: errorMessage, Truncated: record.ToolTruncated,
+				FullContent: record.Content, FullErrorMessage: record.ToolError,
+				PromptTruncated: record.ToolPromptTruncated,
 			}))
 		}
 	}

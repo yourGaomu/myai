@@ -244,6 +244,26 @@ func EstimateMessagesTokens(messages []domainmessage.Message) int {
 	return total
 }
 
+// CurrentTurnTokens returns the unavoidably selected tail beginning with the
+// latest user message, including synthetic runtime context attached to it.
+func CurrentTurnTokens(messages []domainmessage.Message) int {
+	lastUserIndex := -1
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == domainmessage.RoleUser {
+			lastUserIndex = index
+			break
+		}
+	}
+	if lastUserIndex < 0 {
+		return 0
+	}
+	turnStart := lastUserIndex
+	for turnStart > 0 && messages[turnStart-1].IsSynthetic() {
+		turnStart--
+	}
+	return EstimateMessagesTokens(messages[turnStart:])
+}
+
 func StableMessagesHash(messages []domainmessage.Message) string {
 	var builder strings.Builder
 	for _, message := range messages {
@@ -383,7 +403,7 @@ func estimatePartTokens(part domainmessage.Part) int {
 		if part.ToolResult == nil {
 			return 0
 		}
-		return EstimateTextTokens(part.ToolResult.ToolCallID + " " + part.ToolResult.Name + " " + part.ToolResult.Content)
+		return EstimateTextTokens(part.ToolResult.ToolCallID + " " + part.ToolResult.Name + " " + part.ToolResult.PromptContent())
 	default:
 		return EstimateTextTokens(fmt.Sprint(part))
 	}

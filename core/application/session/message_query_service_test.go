@@ -85,6 +85,7 @@ func TestMessageQueryServiceFallsBackToMemoryWhenStoreMessagesAreEmpty(t *testin
 func TestMessageQueryServiceHidesSyntheticMessagesFromHistory(t *testing.T) {
 	store := &fakeMessageQueryStore{messages: []repository.MessageRecord{
 		{ID: "runtime-1", Role: repository.RoleSystem, SyntheticReason: "runtime_instruction", Content: "plan rules"},
+		{ID: "subagent-1", Role: repository.RoleUser, SyntheticReason: "subagent_result", Content: "hidden report"},
 		{ID: "user-1", Role: repository.RoleUser, Content: "hello"},
 	}}
 	service := MessageQueryService{Store: store}

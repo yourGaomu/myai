@@ -30,3 +30,14 @@ type AgentRunResult struct {
 	Reasoning string
 	Usage     llm.TokenUsage
 }
+
+type ParentContinuationRequest struct {
+	Task   domainsubagent.Task
+	Stream llm.ChatStreamHandler
+}
+
+type ParentContinuationResult struct {
+	Content   string
+	Reasoning string
+	Usage     llm.TokenUsage
+}

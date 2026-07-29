@@ -294,6 +294,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSubagentTaskApply(ctx, conn, message)
 	case protocol.TypeSubagentTaskDiscard:
 		return a.handleSubagentTaskDiscard(ctx, conn, message)
+	case protocol.TypeSubagentTaskResume:
+		go a.processSubagentTaskResume(ctx, conn, message)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:

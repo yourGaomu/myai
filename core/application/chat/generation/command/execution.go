@@ -16,6 +16,7 @@ type PersistUserMessage struct {
 	Input              string
 	RuntimeInstruction string
 	RAGContext         string
+	SyntheticReason    domainmessage.SyntheticReason
 	SessionSnapshot    *session.Session
 	CreatedAt          time.Time
 }

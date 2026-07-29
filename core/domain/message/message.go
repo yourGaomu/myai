@@ -23,6 +23,7 @@ const (
 	SyntheticReasonProjectInstruction SyntheticReason = "project_instruction"
 	SyntheticReasonSkillInstruction   SyntheticReason = "skill_instruction"
 	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
+	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 )
 
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
@@ -57,13 +58,16 @@ type ToolCall struct {
 }
 
 type ToolResult struct {
-	ToolCallID   string
-	Name         string
-	Content      string
-	Status       domaintool.ResultStatus
-	ErrorCode    string
-	ErrorMessage string
-	Truncated    bool
+	ToolCallID       string
+	Name             string
+	Content          string
+	Status           domaintool.ResultStatus
+	ErrorCode        string
+	ErrorMessage     string
+	Truncated        bool
+	FullContent      string
+	FullErrorMessage string
+	PromptTruncated  bool
 }
 
 // Clone returns an independent copy of a message, including pointer-backed
@@ -111,6 +115,12 @@ func Text(role Role, text string) Message {
 
 func SyntheticText(reason SyntheticReason, text string) Message {
 	message := Text(RoleSystem, text)
+	message.SyntheticReason = reason
+	return message
+}
+
+func SyntheticUserText(reason SyntheticReason, text string) Message {
+	message := Text(RoleUser, text)
 	message.SyntheticReason = reason
 	return message
 }
@@ -215,7 +225,7 @@ func (r ToolResult) PromptContent() string {
 	if r.ErrorMessage != "" {
 		payload["error_message"] = r.ErrorMessage
 	}
-	if r.Truncated {
+	if r.Truncated || r.PromptTruncated {
 		payload["truncated"] = true
 	}
 	encoded, err := json.Marshal(payload)

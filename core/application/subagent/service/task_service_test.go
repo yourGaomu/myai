@@ -235,6 +235,95 @@ func TestRecoverInterruptedTasksMarksTaskAndRunFailed(t *testing.T) {
 	}
 }
 
+func TestResumeClaimsUnreadTaskAndContinuesParent(t *testing.T) {
+	repository := memory.NewRepository()
+	task := resumableTask()
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	continuation := &fakeParentContinuation{}
+	service := &Service{Tasks: repository, ParentContinuation: continuation}
+
+	result, err := service.Resume(context.Background(), subagentcommand.ResumeTask{
+		TaskID: task.ID, ParentSessionID: task.ParentSessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continuation.request.Task.ID != task.ID || continuation.request.Task.Unread {
+		t.Fatalf("unexpected continuation request: %#v", continuation.request)
+	}
+	if result.Content != "parent continued" || result.Task.Unread {
+		t.Fatalf("unexpected resume result: %#v", result)
+	}
+	persisted, err := repository.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Unread {
+		t.Fatalf("expected result to be consumed: %#v", persisted)
+	}
+}
+
+func TestResumeRestoresUnreadWhenParentContinuationFails(t *testing.T) {
+	repository := memory.NewRepository()
+	task := resumableTask()
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{
+		Tasks: repository, ParentContinuation: &fakeParentContinuation{err: errors.New("model unavailable")},
+	}
+
+	result, err := service.Resume(context.Background(), subagentcommand.ResumeTask{
+		TaskID: task.ID, ParentSessionID: task.ParentSessionID,
+	})
+	if err == nil || result.Task.ID != task.ID || !result.Task.Unread {
+		t.Fatalf("expected retryable failure, result=%#v err=%v", result, err)
+	}
+	persisted, getErr := repository.GetTask(context.Background(), task.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if !persisted.Unread {
+		t.Fatalf("expected unread result to be restored: %#v", persisted)
+	}
+}
+
+func TestResumeRejectsInvalidTaskStateParentAndConsumedResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		task     domainsubagent.Task
+		parentID string
+	}{
+		{name: "running", task: domainsubagent.Task{ID: "task-running", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusRunning, Unread: true}, parentID: "parent-1"},
+		{name: "wrong parent", task: resumableTask(), parentID: "parent-2"},
+		{name: "consumed", task: func() domainsubagent.Task { value := resumableTask(); value.Unread = false; return value }(), parentID: "parent-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := memory.NewRepository()
+			if err := repository.SaveTask(context.Background(), test.task); err != nil {
+				t.Fatal(err)
+			}
+			continuation := &fakeParentContinuation{}
+			_, err := (&Service{Tasks: repository, ParentContinuation: continuation}).Resume(context.Background(), subagentcommand.ResumeTask{
+				TaskID: test.task.ID, ParentSessionID: test.parentID,
+			})
+			if err == nil || continuation.called {
+				t.Fatalf("expected resume rejection before continuation, err=%v called=%v", err, continuation.called)
+			}
+		})
+	}
+}
+
+func resumableTask() domainsubagent.Task {
+	return domainsubagent.Task{
+		ID: "task-1", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusSucceeded,
+		Title: "Inspect implementation", Result: "inspection complete", Unread: true,
+	}
+}
+
 func writableDefinition() domainsubagent.Definition {
 	return domainsubagent.Definition{
 		ID: "coder", Name: "Coder", SystemPrompt: "Implement changes in the isolated workspace.",
@@ -291,6 +380,21 @@ type panicRunner struct{}
 
 func (panicRunner) Run(context.Context, subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
 	panic("runner panic")
+}
+
+type fakeParentContinuation struct {
+	called  bool
+	request subagentport.ParentContinuationRequest
+	err     error
+}
+
+func (continuation *fakeParentContinuation) Continue(_ context.Context, request subagentport.ParentContinuationRequest) (subagentport.ParentContinuationResult, error) {
+	continuation.called = true
+	continuation.request = request
+	if continuation.err != nil {
+		return subagentport.ParentContinuationResult{}, continuation.err
+	}
+	return subagentport.ParentContinuationResult{Content: "parent continued"}, nil
 }
 
 type fakeWorkspaceManager struct{ conflict bool }

@@ -4,6 +4,7 @@
 >
 > - 架构职责与目录说明见 [PROJECT_ARCHITECTURE_GUIDE.md](PROJECT_ARCHITECTURE_GUIDE.md)。
 > - 动态概览见 [PROJECT_ARCHITECTURE_INTRO.html](PROJECT_ARCHITECTURE_INTRO.html)。
+> - 已落地功能与修复的时间线见 [DEVELOPMENT_CHANGELOG.md](DEVELOPMENT_CHANGELOG.md)。
 > - 本文只回答运行细节：一个命令或消息从哪里进入、经过哪些函数、改变哪些状态、最终如何返回。
 
 需要按功能结合真实源码逐段学习时，阅读：
@@ -91,6 +92,12 @@ Relay **不调用模型、不读写会话、不执行工具**。Agent 才是远�
 | SQLite | 工作区变更基线和任务检查点 | Agent 自动使用 |
 | Asset 服务 | 手机上传文件、`share_file` | 可选 |
 | MCP 服务 | 外部工具 | 可选 |
+
+启用 MongoDB 时必须使用副本集模式，单节点副本集即可。子智能体通过事务原子保存
+`Task + Run`，重新生成也通过事务替换 transcript；standalone MongoDB 会返回
+`Transaction numbers are only allowed on a replica set member or mongos`。Agent 在
+MongoDB Docker 网络外连接单节点副本集时，URI 需要包含
+`replicaSet=rs0&directConnection=true`。
 
 ### 3.2 配置文件
 
@@ -941,6 +948,10 @@ CompactService.CompactIfNeeded
 ```
 
 `tool call` 与 `tool result` 被视为同一消息块，不会被摘要算法拆开。
+
+Mobile 打开“上下文”设置时会发送 `session_context_query` 主动查询当前 Session，查询期间显示加载状态。上下文面板会展示 token 数、消息数、版本、哈希和后端实际保存的完整 `Session.Summary` 字符串，但不会展示模型请求的全部正文：固定 system prompt、被选中的消息正文、cacheable prefix 正文和 Plan snapshot 当前只参与后端快照构建。
+
+因此，`summary_tokens=0`、`summary_version=0`、`has_summary=false` 表示尚未生成摘要；有摘要时所谓“完整”是指 UI 完整显示持久化摘要，而不是无损还原压缩前的全部历史。`SummaryService` 还会分别限制旧摘要输入、新历史输入和摘要输出的 token 数，避免压缩请求本身超过上下文窗口。
 
 ## 12. 场景八：文件浏览、上传、Changes 和恢复
 

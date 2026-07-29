@@ -53,6 +53,7 @@ type Props = {
   onCreateSubagentDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
   onDeleteSubagentDefinition: (definitionID: string) => void;
   onDiscardSubagentTask: (taskID: string) => void;
+  onResumeSubagentTask: (taskID: string) => void;
   onRefreshSubagents: () => void;
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
@@ -134,6 +135,7 @@ export function SettingsPanel({
   onCreateSubagentDefinition,
   onDeleteSubagentDefinition,
   onDiscardSubagentTask,
+  onResumeSubagentTask,
   onRefreshSubagents,
   onUpdateSubagentDefinition,
   onUserIDChange,
@@ -708,6 +710,7 @@ export function SettingsPanel({
       onCreateDefinition={onCreateSubagentDefinition}
       onDeleteDefinition={onDeleteSubagentDefinition}
       onDiscardTask={onDiscardSubagentTask}
+      onResumeTask={onResumeSubagentTask}
       onRefresh={onRefreshSubagents}
       onUpdateDefinition={onUpdateSubagentDefinition}
       pending={pendingActions.subagents}

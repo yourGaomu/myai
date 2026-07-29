@@ -96,6 +96,8 @@ const (
 	TypeSubagentTaskCancel               MessageType = "subagent_task_cancel"
 	TypeSubagentTaskApply                MessageType = "subagent_task_apply"
 	TypeSubagentTaskDiscard              MessageType = "subagent_task_discard"
+	TypeSubagentTaskResume               MessageType = "subagent_task_resume"
+	TypeSubagentTaskResumeResult         MessageType = "subagent_task_resume_result"
 	TypeSubagentTaskResult               MessageType = "subagent_task_result"
 	TypeSubagentTaskEvent                MessageType = "subagent_task_event"
 	TypeFileList                         MessageType = "file_list"
@@ -180,6 +182,7 @@ type SubagentTaskSummary struct {
 	Title             string            `json:"title"`
 	Instruction       string            `json:"instruction,omitempty"`
 	Status            string            `json:"status"`
+	Unread            bool              `json:"unread"`
 	Result            string            `json:"result,omitempty"`
 	ErrorMessage      string            `json:"error_message,omitempty"`
 	ChangeSet         SubagentChangeSet `json:"change_set"`

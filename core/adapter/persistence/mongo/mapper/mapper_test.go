@@ -79,7 +79,9 @@ func TestRecordDocumentMappersRoundTrip(t *testing.T) {
 	message := repository.MessageRecord{
 		ID: "message-1", SessionID: "session-1", Role: repository.RoleTool,
 		Content: "done", ToolName: "shell", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero",
-		ToolError: "exit code 1", ToolTruncated: true, TotalTokens: 12, CreatedAt: now,
+		ToolError: "exit code 1", ToolTruncated: true,
+		ToolPromptContent: "bounded", ToolPromptError: "bounded error", ToolPromptTruncated: true,
+		TotalTokens: 12, CreatedAt: now,
 	}
 	if got := MessageRecordFromDocument(MessageDocumentFromRecord(message)); !reflect.DeepEqual(got, message) {
 		t.Fatalf("message round trip mismatch: got %#v want %#v", got, message)

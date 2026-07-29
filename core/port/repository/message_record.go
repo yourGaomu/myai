@@ -11,25 +11,28 @@ const (
 )
 
 type MessageRecord struct {
-	ID                 string
-	SessionID          string
-	Role               string
-	Content            string
-	Reasoning          string
-	ToolCallID         string
-	ToolName           string
-	ToolArguments      string
-	ToolError          string
-	ToolStatus         string
-	ToolErrorCode      string
-	ToolTruncated      bool
-	SyntheticReason    string
-	PromptTokens       int
-	CompletionTokens   int
-	TotalTokens        int
-	ReasoningTokens    int
-	PromptCachedTokens int
-	CreatedAt          time.Time
+	ID                  string
+	SessionID           string
+	Role                string
+	Content             string
+	Reasoning           string
+	ToolCallID          string
+	ToolName            string
+	ToolArguments       string
+	ToolError           string
+	ToolStatus          string
+	ToolErrorCode       string
+	ToolTruncated       bool
+	ToolPromptContent   string
+	ToolPromptError     string
+	ToolPromptTruncated bool
+	SyntheticReason     string
+	PromptTokens        int
+	CompletionTokens    int
+	TotalTokens         int
+	ReasoningTokens     int
+	PromptCachedTokens  int
+	CreatedAt           time.Time
 }
 
 type MessageHistoryMeta struct {

@@ -32,16 +32,19 @@ func TestMapperConvertsDomainEntriesToMessageRecords(t *testing.T) {
 			CreatedAt:  createdAt,
 		},
 		{
-			Kind:       domaintool.ExecutionEntryToolResult,
-			SessionID:  "session-1",
-			ToolCallID: "call-1",
-			ToolName:   "read_file",
-			Content:    "content",
-			Error:      "warning",
-			Status:     domaintool.ResultStatusFailed,
-			ErrorCode:  "tool_failed",
-			Truncated:  true,
-			CreatedAt:  createdAt.Add(time.Nanosecond),
+			Kind:            domaintool.ExecutionEntryToolResult,
+			SessionID:       "session-1",
+			ToolCallID:      "call-1",
+			ToolName:        "read_file",
+			Content:         "content",
+			Error:           "warning",
+			Status:          domaintool.ResultStatusFailed,
+			ErrorCode:       "tool_failed",
+			Truncated:       true,
+			PromptContent:   "bounded content",
+			PromptError:     "bounded warning",
+			PromptTruncated: true,
+			CreatedAt:       createdAt.Add(time.Nanosecond),
 		},
 		{Kind: "unknown"},
 	})
@@ -54,6 +57,9 @@ func TestMapperConvertsDomainEntriesToMessageRecords(t *testing.T) {
 	}
 	if records[1].ID != "id-2" || records[1].Role != repository.RoleTool || records[1].Content != "content" || records[1].ToolError != "warning" || records[1].ToolStatus != "failed" || records[1].ToolErrorCode != "tool_failed" || !records[1].ToolTruncated {
 		t.Fatalf("unexpected tool result record: %#v", records[1])
+	}
+	if records[1].ToolPromptContent != "bounded content" || records[1].ToolPromptError != "bounded warning" || !records[1].ToolPromptTruncated {
+		t.Fatalf("unexpected prompt-limited tool result record: %#v", records[1])
 	}
 }
 

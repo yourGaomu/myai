@@ -36,25 +36,28 @@ type SessionDocument struct {
 }
 
 type MessageDocument struct {
-	ID                 string    `bson:"_id"`
-	SessionID          string    `bson:"session_id"`
-	Role               string    `bson:"role"`
-	Content            string    `bson:"content"`
-	Reasoning          string    `bson:"reasoning,omitempty"`
-	ToolCallID         string    `bson:"tool_call_id,omitempty"`
-	ToolName           string    `bson:"tool_name,omitempty"`
-	ToolArguments      string    `bson:"tool_arguments,omitempty"`
-	ToolError          string    `bson:"tool_error,omitempty"`
-	ToolStatus         string    `bson:"tool_status,omitempty"`
-	ToolErrorCode      string    `bson:"tool_error_code,omitempty"`
-	ToolTruncated      bool      `bson:"tool_truncated,omitempty"`
-	SyntheticReason    string    `bson:"synthetic_reason,omitempty"`
-	PromptTokens       int       `bson:"prompt_tokens,omitempty"`
-	CompletionTokens   int       `bson:"completion_tokens,omitempty"`
-	TotalTokens        int       `bson:"total_tokens,omitempty"`
-	ReasoningTokens    int       `bson:"reasoning_tokens,omitempty"`
-	PromptCachedTokens int       `bson:"prompt_cached_tokens,omitempty"`
-	CreatedAt          time.Time `bson:"created_at"`
+	ID                  string    `bson:"_id"`
+	SessionID           string    `bson:"session_id"`
+	Role                string    `bson:"role"`
+	Content             string    `bson:"content"`
+	Reasoning           string    `bson:"reasoning,omitempty"`
+	ToolCallID          string    `bson:"tool_call_id,omitempty"`
+	ToolName            string    `bson:"tool_name,omitempty"`
+	ToolArguments       string    `bson:"tool_arguments,omitempty"`
+	ToolError           string    `bson:"tool_error,omitempty"`
+	ToolStatus          string    `bson:"tool_status,omitempty"`
+	ToolErrorCode       string    `bson:"tool_error_code,omitempty"`
+	ToolTruncated       bool      `bson:"tool_truncated,omitempty"`
+	ToolPromptContent   string    `bson:"tool_prompt_content,omitempty"`
+	ToolPromptError     string    `bson:"tool_prompt_error,omitempty"`
+	ToolPromptTruncated bool      `bson:"tool_prompt_truncated,omitempty"`
+	SyntheticReason     string    `bson:"synthetic_reason,omitempty"`
+	PromptTokens        int       `bson:"prompt_tokens,omitempty"`
+	CompletionTokens    int       `bson:"completion_tokens,omitempty"`
+	TotalTokens         int       `bson:"total_tokens,omitempty"`
+	ReasoningTokens     int       `bson:"reasoning_tokens,omitempty"`
+	PromptCachedTokens  int       `bson:"prompt_cached_tokens,omitempty"`
+	CreatedAt           time.Time `bson:"created_at"`
 }
 
 type ToolCallReferenceDocument struct {

@@ -82,6 +82,8 @@ export type MessageType =
   | "subagent_task_cancel"
   | "subagent_task_apply"
   | "subagent_task_discard"
+  | "subagent_task_resume"
+  | "subagent_task_resume_result"
   | "subagent_task_result"
   | "subagent_task_event"
   | "file_list"
@@ -170,6 +172,7 @@ export type SubagentTask = {
   title: string;
   instruction?: string;
   status: "queued" | "running" | "waiting_subagents" | "waiting_permission" | "succeeded" | "failed" | "canceled";
+  unread: boolean;
   result?: string;
   error_message?: string;
   change_set: SubagentChangeSet;

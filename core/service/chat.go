@@ -157,7 +157,50 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		})
 	}
 
-	return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream)
+	return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream, true, false)
+}
+
+func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessionID string, input string, syntheticReason domainmessage.SyntheticReason, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	if s.dependencies.Models == nil {
+		return ChatResponse{}, errors.New("llm client is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ChatResponse{}, errors.New("session id is empty")
+	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ChatResponse{}, errors.New("continuation input is empty")
+	}
+	if syntheticReason == "" {
+		return ChatResponse{}, errors.New("continuation synthetic reason is empty")
+	}
+
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer unlock()
+
+	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
+		SessionID: sessionID, Input: input, ForceChatMode: true, SyntheticReason: syntheticReason,
+	})
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	current := prepared.Session
+	if s.dependencies.UserMessages != nil {
+		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+			SessionID: current.ID, Model: current.Model, Input: input,
+			RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
+			SyntheticReason: syntheticReason, SessionSnapshot: session.Clone(current),
+		})
+	}
+
+	return s.generateAssistantForSession(
+		ctx, current, input, "", "resume parent session from background subagent",
+		chatretrievalresult.Context{}, stream, false, true,
+	)
 }
 
 func userMessageCount(messages []domainmessage.Message) int {
@@ -191,7 +234,7 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 		return ChatResponse{}, err
 	}
 
-	return s.generateAssistantForSession(ctx, prepared.Session, prepared.Input, "", "regenerate response", chatretrievalresult.Context{}, stream)
+	return s.generateAssistantForSession(ctx, prepared.Session, prepared.Input, "", "regenerate response", chatretrievalresult.Context{}, stream, true, false)
 }
 
 func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, onPlanUpdate func(*agentplan.Plan)) (ChatResponse, error) {
@@ -232,15 +275,16 @@ func (f planUpdateSinkFunc) PlanUpdated(currentPlan *agentplan.Plan) {
 	f(currentPlan)
 }
 
-func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
-	// CapturePlan 始终开启，但只有当前会话处于 Plan 模式时，ResponseCommitService 才会解析计划。
+func (s *ChatService) generateAssistantForSession(ctx context.Context, current *session.Session, latestInput string, title string, reason string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler, capturePlan bool, forceChatMode bool) (ChatResponse, error) {
+	// Normal chat can capture a Plan; internal continuations force Chat mode and skip Plan parsing.
 	response, err := s.dependencies.GenerationTasks.Generate(ctx, generationcommand.GenerationTask{
-		Session:     current,
-		LatestInput: latestInput,
-		Title:       title,
-		Reason:      reason,
-		Stream:      stream,
-		CapturePlan: true,
+		Session:       current,
+		LatestInput:   latestInput,
+		Title:         title,
+		Reason:        reason,
+		Stream:        stream,
+		CapturePlan:   capturePlan,
+		ForceChatMode: forceChatMode,
 	})
 	if err != nil {
 		return ChatResponse{}, err

@@ -33,7 +33,7 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 		return messageresult.Command{}, err
 	}
 	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode)
-	if err := s.Memory.AddUserTurnWithContextTo(current.ID, command.RAGContext, runtimeInstruction, command.Input); err != nil {
+	if err := s.Memory.AddUserTurnWithReasonTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason); err != nil {
 		return messageresult.Command{}, err
 	}
 	current, err = s.Memory.GetSession(current.ID)

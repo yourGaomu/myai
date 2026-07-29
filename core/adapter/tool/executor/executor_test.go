@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	generationcommand "myai/core/application/chat/generation/command"
 	toolcommand "myai/core/application/tool/command"
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	"myai/core/hook"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -45,6 +48,58 @@ func TestExecutorRejectsNilSession(t *testing.T) {
 	_, err := (Executor{}).Execute(context.Background(), generationcommand.ToolExecution{})
 	if err == nil {
 		t.Fatal("expected nil session error")
+	}
+}
+
+func TestLimitToolResultsForPromptKeepsFullAuditEntries(t *testing.T) {
+	firstContent := strings.Repeat("first output ", 3000)
+	secondContent := strings.Repeat("second output ", 3000)
+	messages := []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: "call-1", Name: "read_file", Content: firstContent}),
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: "call-2", Name: "read_file", Content: secondContent}),
+	}
+	entries := []domaintool.ExecutionEntry{
+		{Kind: domaintool.ExecutionEntryToolResult, ToolCallID: "call-1", Content: firstContent},
+		{Kind: domaintool.ExecutionEntryToolResult, ToolCallID: "call-2", Content: secondContent},
+	}
+
+	limited, annotated := limitToolResultsForPrompt(messages, entries, 500)
+	if tokens := contextmgr.EstimateMessagesTokens(limited); tokens > 500 {
+		t.Fatalf("limited tool results use %d tokens, want at most 500", tokens)
+	}
+	for index, message := range limited {
+		result, ok := message.FirstToolResult()
+		if !ok || !result.PromptTruncated || result.FullContent == "" {
+			t.Fatalf("expected limited result %d to be marked truncated: %#v", index, message)
+		}
+	}
+	if annotated[0].Content != firstContent || annotated[1].Content != secondContent {
+		t.Fatal("full audit content was modified")
+	}
+	if !annotated[0].PromptTruncated || annotated[0].PromptContent == "" || annotated[0].PromptContent == firstContent {
+		t.Fatalf("expected separate bounded prompt content: %#v", annotated[0])
+	}
+}
+
+func TestPromptToolResultBudgetShrinksAsCurrentTurnGrows(t *testing.T) {
+	current := &session.Session{
+		ContextWindowK: 4,
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleSystem, "system"),
+			domainmessage.Text(domainmessage.RoleUser, "inspect the project"),
+		},
+	}
+	calls := []domainmessage.ToolCall{{ID: "call-1", Name: "read_file"}}
+	before := promptToolResultBudget(current, calls)
+	current.Messages = append(current.Messages,
+		domainmessage.ToolCallMessage(calls),
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{
+			ToolCallID: "call-1", Name: "read_file", Content: strings.Repeat("x", 4000),
+		}),
+	)
+	after := promptToolResultBudget(current, calls)
+	if before <= 0 || after >= before {
+		t.Fatalf("expected current-turn growth to reduce budget, before=%d after=%d", before, after)
 	}
 }
 

@@ -490,6 +490,10 @@ export function useRemoteMessageHandler({
           stopPending("subagents");
           applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
           break;
+        case "subagent_task_resume_result":
+          stopPending("subagents");
+          applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
+          break;
         case "subagent_task_event":
           applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
           break;

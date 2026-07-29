@@ -141,15 +141,21 @@ func (s *Session) AddUserTurn(runtimeInstruction string, content string) {
 }
 
 func (s *Session) AddUserTurnWithContext(ragContext string, runtimeInstruction string, content string) {
+	s.AddUserTurnWithReason(ragContext, runtimeInstruction, content, "")
+}
+
+func (s *Session) AddUserTurnWithReason(ragContext string, runtimeInstruction string, content string, reason domainmessage.SyntheticReason) {
 	if ragMessage := domainmessage.RAGContext(ragContext); ragMessage.IsSynthetic() {
 		s.Messages = append(s.Messages, ragMessage)
 	}
 	if runtimeMessage := domainmessage.RuntimeInstruction(runtimeInstruction); runtimeMessage.IsSynthetic() {
 		s.Messages = append(s.Messages, runtimeMessage)
 	}
-	s.Messages = append(s.Messages,
-		domainmessage.Text(domainmessage.RoleUser, content),
-	)
+	message := domainmessage.Text(domainmessage.RoleUser, content)
+	if reason != "" {
+		message = domainmessage.SyntheticUserText(reason, content)
+	}
+	s.Messages = append(s.Messages, message)
 }
 
 func (s *Session) AddAssistantMessage(content string) {

@@ -65,6 +65,7 @@ export function MobileMainContent({
           onCreateSubagentDefinition={settings.onCreateSubagentDefinition}
           onDeleteSubagentDefinition={settings.onDeleteSubagentDefinition}
           onDiscardSubagentTask={settings.onDiscardSubagentTask}
+          onResumeSubagentTask={settings.onResumeSubagentTask}
           onRefreshSubagents={settings.onRefreshSubagents}
           onUpdateSubagentDefinition={settings.onUpdateSubagentDefinition}
           onUserIDChange={settings.onUserIDChange}

@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gorilla/websocket"
 
 	subagentcommand "myai/core/application/subagent/command"
+	subagentresult "myai/core/application/subagent/result"
 	domainsubagent "myai/core/domain/subagent"
+	"myai/core/llm"
 	"myai/core/remote/protocol"
+	"myai/core/service"
 )
 
 func (agent *Agent) handleSubagentDefinitionList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -149,6 +153,93 @@ func (agent *Agent) handleSubagentTaskDiscard(ctx context.Context, conn *websock
 		return err
 	}
 	return agent.writeSubagentTaskResult(conn, message, result.Value, "Subagent changes discarded.")
+}
+
+func (agent *Agent) processSubagentTaskResume(ctx context.Context, conn *websocket.Conn, message protocol.Message) {
+	payload, err := protocol.DecodePayload[protocol.SubagentTaskPayload](message)
+	if err != nil {
+		agent.writeSubagentResumeError(conn, message, fmt.Errorf("decode subagent task resume: %w", err))
+		return
+	}
+	sessionID := agent.subagentSessionID(message, "")
+	if sessionID == "" {
+		agent.writeSubagentResumeError(conn, message, errors.New("session id is empty"))
+		return
+	}
+
+	runtime := agent.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runCtx, cancel, ok := runtime.start(ctx)
+	if !ok {
+		agent.writeSubagentResumeError(conn, message, errors.New("session is already running"))
+		return
+	}
+	defer runtime.finish(cancel)
+
+	result, err := agent.handleSubagentTaskResume(runCtx, conn, message, sessionID, payload.TaskID)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
+		if writeErr := agent.writePausedAssistantDone(conn, message.RequestID, sessionID); writeErr != nil {
+			log.Printf("send paused subagent continuation failed: %v", writeErr)
+			return
+		}
+		if result.Task.ID == "" {
+			agent.writeSubagentResumeError(conn, message, err)
+			return
+		}
+		if writeErr := agent.writeSubagentTaskResumeResult(conn, message, result.Task, "Parent continuation paused. The subagent result is available to retry."); writeErr != nil {
+			log.Printf("send paused subagent resume result failed: %v", writeErr)
+		}
+		return
+	}
+	agent.writeSubagentResumeError(conn, message, err)
+}
+
+func (agent *Agent) handleSubagentTaskResume(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, taskID string) (subagentresult.Resume, error) {
+	if agent.subagentService == nil {
+		return subagentresult.Resume{}, errors.New("subagent service is unavailable")
+	}
+	var resumed subagentresult.Resume
+	response, err := agent.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
+		var resumeErr error
+		resumed, resumeErr = agent.subagentService.Resume(ctx, subagentcommand.ResumeTask{
+			TaskID: taskID, ParentSessionID: sessionID, Stream: stream,
+		})
+		return service.ChatResponse{
+			SessionID: resumed.Task.ParentSessionID,
+			Result:    llm.ChatResult{Content: resumed.Content, Reasoning: resumed.Reasoning, Usage: resumed.Usage},
+		}, resumeErr
+	})
+	if err != nil {
+		return resumed, err
+	}
+	if err := agent.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
+		Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: tokenUsagePayload(response.Result.Usage),
+	}); err != nil {
+		return resumed, err
+	}
+	if err := agent.writeSubagentTaskResumeResult(conn, message, resumed.Task, "Parent session continued from the subagent result."); err != nil {
+		return resumed, err
+	}
+	return resumed, nil
+}
+
+func (agent *Agent) writeSubagentResumeError(conn *websocket.Conn, message protocol.Message, err error) {
+	if err == nil {
+		return
+	}
+	if writeErr := agent.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+		log.Printf("send subagent resume error failed: %v", writeErr)
+	}
+}
+
+func (agent *Agent) writeSubagentTaskResumeResult(conn *websocket.Conn, message protocol.Message, task domainsubagent.Task, text string) error {
+	return agent.writeRemoteMessage(conn, protocol.TypeSubagentTaskResumeResult, message.RequestID, task.ParentSessionID, protocol.SubagentTaskResultPayload{
+		Task: subagentTaskPayload(task), Message: text,
+	})
 }
 
 func (agent *Agent) writeSubagentTaskResult(conn *websocket.Conn, message protocol.Message, task domainsubagent.Task, text string) error {

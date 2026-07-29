@@ -645,6 +645,7 @@ func (app *Application) InitSubagents() {
 			Memory: app.sessionMemory, Persistence: sessionPersistence,
 		},
 		Runner:               subagentchat.Runner{Chat: app.chatService},
+		ParentContinuation:   subagentchat.Continuation{Chat: app.chatService},
 		IDs:                  uuidadapter.Generator{},
 		DefaultWorkspaceRoot: app.workspace,
 		OnError: func(err error) {

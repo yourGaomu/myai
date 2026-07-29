@@ -56,18 +56,21 @@ func (m Mapper) messageRecord(entry domaintool.ExecutionEntry) (repository.Messa
 	}
 
 	return repository.MessageRecord{
-		ID:            m.newID(),
-		SessionID:     entry.SessionID,
-		Role:          role,
-		Content:       entry.Content,
-		ToolCallID:    entry.ToolCallID,
-		ToolName:      entry.ToolName,
-		ToolArguments: entry.Arguments,
-		ToolError:     entry.Error,
-		ToolStatus:    string(entry.Status),
-		ToolErrorCode: entry.ErrorCode,
-		ToolTruncated: entry.Truncated,
-		CreatedAt:     entry.CreatedAt,
+		ID:                  m.newID(),
+		SessionID:           entry.SessionID,
+		Role:                role,
+		Content:             entry.Content,
+		ToolCallID:          entry.ToolCallID,
+		ToolName:            entry.ToolName,
+		ToolArguments:       entry.Arguments,
+		ToolError:           entry.Error,
+		ToolStatus:          string(entry.Status),
+		ToolErrorCode:       entry.ErrorCode,
+		ToolTruncated:       entry.Truncated,
+		ToolPromptContent:   entry.PromptContent,
+		ToolPromptError:     entry.PromptError,
+		ToolPromptTruncated: entry.PromptTruncated,
+		CreatedAt:           entry.CreatedAt,
 	}, true
 }
 

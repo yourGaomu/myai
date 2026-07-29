@@ -52,6 +52,11 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 	if err != nil {
 		return generationresult.ToolExecution{}, err
 	}
+	result.Messages, result.Entries = limitToolResultsForPrompt(
+		result.Messages,
+		result.Entries,
+		promptToolResultBudget(command.Session, result.Calls),
+	)
 
 	return generationresult.ToolExecution{
 		Calls:    result.Calls,

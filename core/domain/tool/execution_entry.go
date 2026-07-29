@@ -60,15 +60,18 @@ const (
 )
 
 type ExecutionEntry struct {
-	Kind       ExecutionEntryKind
-	SessionID  string
-	ToolCallID string
-	ToolName   string
-	Arguments  string
-	Content    string
-	Error      string
-	Status     ResultStatus
-	ErrorCode  string
-	Truncated  bool
-	CreatedAt  time.Time
+	Kind            ExecutionEntryKind
+	SessionID       string
+	ToolCallID      string
+	ToolName        string
+	Arguments       string
+	Content         string
+	Error           string
+	Status          ResultStatus
+	ErrorCode       string
+	Truncated       bool
+	PromptContent   string
+	PromptError     string
+	PromptTruncated bool
+	CreatedAt       time.Time
 }

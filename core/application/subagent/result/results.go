@@ -1,6 +1,9 @@
 package result
 
-import domainsubagent "myai/core/domain/subagent"
+import (
+	domainsubagent "myai/core/domain/subagent"
+	modelport "myai/core/port/model"
+)
 
 type Definitions struct {
 	Items []domainsubagent.Definition
@@ -16,4 +19,11 @@ type Task struct {
 
 type Tasks struct {
 	Items []domainsubagent.Task
+}
+
+type Resume struct {
+	Task      domainsubagent.Task
+	Content   string
+	Reasoning string
+	Usage     modelport.TokenUsage
 }

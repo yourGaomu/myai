@@ -2,7 +2,7 @@
 
 MyAI 是一个 Go + Expo React Native 实现的 AI 编程助手，支持命令行聊天、手机远程控制、会话与模型管理、Plan 模式、工具调用、权限审批、文件预览和工作区变更恢复。
 
-可先打开 [PROJECT_ARCHITECTURE_INTRO.html](PROJECT_ARCHITECTURE_INTRO.html) 查看动画导览，再阅读 [PROJECT_ARCHITECTURE_GUIDE.md](PROJECT_ARCHITECTURE_GUIDE.md) 了解完整架构、Spring Boot 对照和调用链。需要维护或排错时，查看 [DEVELOPER_FLOW_GUIDE.md](DEVELOPER_FLOW_GUIDE.md)。
+可先打开 [PROJECT_ARCHITECTURE_INTRO.html](PROJECT_ARCHITECTURE_INTRO.html) 查看动画导览，再阅读 [PROJECT_ARCHITECTURE_GUIDE.md](PROJECT_ARCHITECTURE_GUIDE.md) 了解完整架构、Spring Boot 对照和调用链。需要维护或排错时，查看 [DEVELOPER_FLOW_GUIDE.md](DEVELOPER_FLOW_GUIDE.md)；需要确认近期代码变化时，查看 [DEVELOPMENT_CHANGELOG.md](DEVELOPMENT_CHANGELOG.md)。
 
 准备开发知识库与 RAG 时，阅读 [RAG 架构设计](RAG_ARCHITECTURE_DESIGN.md) 和 [RAG 本地优先检索实现](FEATURE_RAG_RETRIEVAL_IMPLEMENTATION.md)。当前支持分类树、Session 级检索范围、自动/手动/每轮模式、MinIO 原文、Mongo 元数据、Milvus 远程向量和 sqlite-vec 本地热点索引。
 
@@ -27,6 +27,12 @@ MyAI 是一个 Go + Expo React Native 实现的 AI 编程助手，支持命令�
 go run . help
 go run . chat
 ```
+
+When MongoDB persistence is enabled, run MongoDB as a replica set. A single-node
+replica set is sufficient. Subagent `Task + Run` transitions and transcript
+replacement use MongoDB transactions; standalone MongoDB rejects these flows.
+For an Agent outside the MongoDB Docker network, include
+`replicaSet=rs0&directConnection=true` in the connection URI.
 
 ## Remote Agent With Files And Changes
 

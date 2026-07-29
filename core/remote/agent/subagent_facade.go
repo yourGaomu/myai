@@ -16,6 +16,7 @@ type SubagentFacade interface {
 	Check(ctx context.Context, command subagentcommand.CheckTask) (subagentresult.Task, error)
 	List(ctx context.Context, command subagentcommand.ListTasks) (subagentresult.Tasks, error)
 	Cancel(ctx context.Context, command subagentcommand.CancelTask) (subagentresult.Task, error)
+	Resume(ctx context.Context, command subagentcommand.ResumeTask) (subagentresult.Resume, error)
 	ApplyChanges(ctx context.Context, command subagentcommand.ApplyTaskChanges) (subagentresult.Task, error)
 	DiscardChanges(ctx context.Context, command subagentcommand.DiscardTaskChanges) (subagentresult.Task, error)
 }

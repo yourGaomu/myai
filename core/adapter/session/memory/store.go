@@ -153,6 +153,10 @@ func (sm *Store) AddUserTurnTo(sessionID string, runtimeInstruction string, inpu
 }
 
 func (sm *Store) AddUserTurnWithContextTo(sessionID string, ragContext string, runtimeInstruction string, input string) error {
+	return sm.AddUserTurnWithReasonTo(sessionID, ragContext, runtimeInstruction, input, "")
+}
+
+func (sm *Store) AddUserTurnWithReasonTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -161,7 +165,7 @@ func (sm *Store) AddUserTurnWithContextTo(sessionID string, ragContext string, r
 		return err
 	}
 
-	session.AddUserTurnWithContext(ragContext, runtimeInstruction, input)
+	session.AddUserTurnWithReason(ragContext, runtimeInstruction, input, reason)
 	return nil
 }
 

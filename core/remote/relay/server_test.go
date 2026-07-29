@@ -754,6 +754,57 @@ func TestRelayForwardsSubagentEventAfterOriginalRequestCompletes(t *testing.T) {
 	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
 }
 
+func TestRelayKeepsSubagentResumeRouteUntilDedicatedResult(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskResume, RequestID: "subagent-resume-1", SessionID: "parent-session-1",
+		UserID: "local", DeviceID: "pc-local", ClientToken: clientToken,
+	})
+	readTestMessage(t, agentConn, protocol.TypeSubagentTaskResume)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeAssistantDelta, RequestID: "subagent-resume-1",
+		UserID: "local", DeviceID: "pc-local", SessionID: "parent-session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDelta)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeAssistantDone, RequestID: "subagent-resume-1",
+		UserID: "local", DeviceID: "pc-local", SessionID: "parent-session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDone)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	registered := server.getClient("subagent-resume-1")
+	if registered == nil || registered.RequestType != protocol.TypeSubagentTaskResume {
+		t.Fatalf("expected resume route after assistant_done, got %#v", registered)
+	}
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskResumeResult, RequestID: "subagent-resume-1",
+		UserID: "local", DeviceID: "pc-local", SessionID: "parent-session-1",
+	})
+	readTestMessage(t, clientConn, protocol.TypeSubagentTaskResumeResult)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	if server.getClient("subagent-resume-1") != nil {
+		t.Fatal("expected dedicated resume result to release its request route")
+	}
+}
+
 func TestRelayForwardsFileMessages(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())

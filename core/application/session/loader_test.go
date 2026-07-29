@@ -101,6 +101,7 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 		Messages: fakeMessageLister{records: []repository.MessageRecord{
 			{Role: repository.RoleSystem, Content: domainmessage.RuntimeInstructionPrefix + "\nplan rules", SyntheticReason: "runtime_instruction"},
 			{Role: repository.RoleUser, Content: "hello"},
+			{Role: repository.RoleUser, Content: "subagent report", SyntheticReason: "subagent_result"},
 			{Role: repository.RoleTool, ToolCallID: "call-1", ToolName: "shell", Content: "exit code 1", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero", ToolError: "exit code 1", ToolTruncated: true},
 		}},
 	}).EnsureInMemory(context.Background(), EnsureInMemoryCommand{
@@ -116,12 +117,12 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 	if memory.putCurrent {
 		t.Fatal("expected hydration without setting current")
 	}
-	if len(current.Messages) != 4 || !current.Messages[1].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || current.Messages[2].Text() != "hello" {
+	if len(current.Messages) != 5 || !current.Messages[1].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || current.Messages[2].Text() != "hello" || !current.Messages[3].IsSyntheticReason(domainmessage.SyntheticReasonSubagentResult) {
 		t.Fatalf("unexpected messages: %#v", current.Messages)
 	}
-	toolResult, ok := current.Messages[3].FirstToolResult()
+	toolResult, ok := current.Messages[4].FirstToolResult()
 	if !ok || toolResult.Status != domaintool.ResultStatusFailed || toolResult.ErrorCode != "command_exit_nonzero" || !toolResult.Truncated {
-		t.Fatalf("unexpected restored tool result: %#v", current.Messages[3])
+		t.Fatalf("unexpected restored tool result: %#v", current.Messages[4])
 	}
 	if current.Usage.TotalTokens != 12 {
 		t.Fatalf("unexpected usage: %#v", current.Usage)

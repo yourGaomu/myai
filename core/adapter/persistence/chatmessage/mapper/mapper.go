@@ -23,11 +23,12 @@ type Mapper struct {
 
 func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, createdAt time.Time) repository.MessageRecord {
 	return repository.MessageRecord{
-		ID:        m.newID(),
-		SessionID: command.SessionID,
-		Role:      repository.RoleUser,
-		Content:   command.Input,
-		CreatedAt: createdAt,
+		ID:              m.newID(),
+		SessionID:       command.SessionID,
+		Role:            repository.RoleUser,
+		Content:         command.Input,
+		SyntheticReason: string(command.SyntheticReason),
+		CreatedAt:       createdAt,
 	}
 }
 
@@ -135,6 +136,7 @@ func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) 
 	case domainmessage.RoleUser:
 		record := newRecord(repository.RoleUser)
 		record.Content = message.Text()
+		record.SyntheticReason = string(message.SyntheticReason)
 		return []repository.MessageRecord{record}
 	case domainmessage.RoleAssistant:
 		records := make([]repository.MessageRecord, 0, len(message.Parts)+1)
@@ -176,6 +178,13 @@ func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) 
 			record.ToolError = result.ErrorMessage
 			record.ToolErrorCode = result.ErrorCode
 			record.ToolTruncated = result.Truncated
+			if result.PromptTruncated {
+				record.Content = result.FullContent
+				record.ToolError = result.FullErrorMessage
+				record.ToolPromptContent = result.Content
+				record.ToolPromptError = result.ErrorMessage
+				record.ToolPromptTruncated = true
+			}
 			records = append(records, record)
 		}
 		if len(records) == 0 {

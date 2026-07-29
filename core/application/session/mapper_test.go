@@ -53,3 +53,20 @@ func TestMessagesFromRecordsRestoresBatchToolCallsAsOneAssistantMessage(t *testi
 		t.Fatalf("unexpected restored tool calls: %#v", messages[1].Parts)
 	}
 }
+
+func TestMessagesFromRecordsUsesBoundedToolPromptContent(t *testing.T) {
+	records := []repository.MessageRecord{{
+		Role: repository.RoleTool, ToolCallID: "call-1", ToolName: "read_file",
+		Content: "full audit output", ToolError: "full audit error",
+		ToolPromptContent: "bounded output", ToolPromptError: "bounded error", ToolPromptTruncated: true,
+	}}
+
+	messages := MessagesFromRecords(records)
+	result, ok := messages[1].FirstToolResult()
+	if !ok || result.Content != "bounded output" || result.ErrorMessage != "bounded error" || !result.PromptTruncated {
+		t.Fatalf("unexpected restored prompt tool result: %#v", messages[1])
+	}
+	if result.FullContent != "full audit output" || result.FullErrorMessage != "full audit error" {
+		t.Fatalf("full audit result was not retained in memory: %#v", result)
+	}
+}

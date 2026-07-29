@@ -15,6 +15,7 @@ type Props = {
   onCreateDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
   onDeleteDefinition: (definitionID: string) => void;
   onDiscardTask: (taskID: string) => void;
+  onResumeTask: (taskID: string) => void;
   onRefresh: () => void;
   onUpdateDefinition: (definition: SubagentDefinition) => boolean;
   pending: boolean;
@@ -60,6 +61,7 @@ export function SubagentPanel({
   onCreateDefinition,
   onDeleteDefinition,
   onDiscardTask,
+  onResumeTask,
   onRefresh,
   onUpdateDefinition,
   pending,
@@ -213,6 +215,7 @@ export function SubagentPanel({
           onCancel={() => onCancelTask(task.id)}
           onCheck={() => onCheckTask(task.id)}
           onDiscard={() => onDiscardTask(task.id)}
+          onResume={() => onResumeTask(task.id)}
           pending={pending}
           task={task}
         />
@@ -225,17 +228,19 @@ function Segment({ label, onPress, selected }: { label: string; onPress: () => v
   return <Pressable onPress={onPress} style={[styles.segment, selected && styles.segmentActive]}><Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{label}</Text></Pressable>;
 }
 
-function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, pending, task }: {
+function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onResume, pending, task }: {
   buttonFeedback: ButtonFeedback;
   onApply: () => void;
   onCancel: () => void;
   onCheck: () => void;
   onDiscard: () => void;
+  onResume: () => void;
   pending: boolean;
   task: SubagentTask;
 }) {
   const running = task.status === "queued" || task.status === "running";
   const pendingChanges = task.change_set?.status === "pending";
+  const canResume = task.unread && (task.status === "succeeded" || task.status === "failed");
   return (
     <View style={styles.item}>
       <View style={styles.rowBetween}>
@@ -260,6 +265,7 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, pendi
       {task.error_message ? <Text style={styles.errorText}>{task.error_message}</Text> : null}
       {(task.change_set?.files || []).map((file) => <Text key={file.path} style={styles.codeText}>{file.change_type}  {file.path}</Text>)}
       <View style={styles.actionRow}>
+        {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
         <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
         {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="取消" /></Pressable> : null}
         {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="应用变更" /></Pressable> : null}

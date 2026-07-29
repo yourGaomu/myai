@@ -151,6 +151,73 @@ func (service *Service) Cancel(ctx context.Context, command subagentcommand.Canc
 	return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, nil
 }
 
+func (service *Service) Resume(ctx context.Context, command subagentcommand.ResumeTask) (subagentresult.Resume, error) {
+	if service == nil || service.Tasks == nil || service.ParentContinuation == nil {
+		return subagentresult.Resume{}, errors.New("subagent parent continuation is not configured")
+	}
+
+	service.mu.Lock()
+	task, err := service.Tasks.GetTask(ctx, strings.TrimSpace(command.TaskID))
+	if err != nil {
+		service.mu.Unlock()
+		return subagentresult.Resume{}, err
+	}
+	if parentID := strings.TrimSpace(command.ParentSessionID); parentID != "" && task.ParentSessionID != parentID {
+		service.mu.Unlock()
+		return subagentresult.Resume{}, subagentport.ErrNotFound
+	}
+	if task.Status != domainsubagent.TaskStatusSucceeded && task.Status != domainsubagent.TaskStatusFailed {
+		service.mu.Unlock()
+		return subagentresult.Resume{Task: domainsubagent.CloneTask(task)}, fmt.Errorf("subagent task cannot resume its parent in status %s", task.Status)
+	}
+	if !task.Unread {
+		service.mu.Unlock()
+		return subagentresult.Resume{Task: domainsubagent.CloneTask(task)}, errors.New("subagent task result has already been consumed")
+	}
+
+	task.Unread = false
+	task.UpdatedAt = service.now()
+	if err := service.Tasks.SaveTask(ctx, task); err != nil {
+		service.mu.Unlock()
+		return subagentresult.Resume{}, err
+	}
+	claimed := domainsubagent.CloneTask(task)
+	service.mu.Unlock()
+	service.publish(ctx, claimed)
+
+	continuation, continueErr := service.ParentContinuation.Continue(ctx, subagentport.ParentContinuationRequest{
+		Task: claimed, Stream: command.Stream,
+	})
+	if continueErr != nil {
+		restored, restoreErr := service.restoreUnreadResult(claimed.ID)
+		return subagentresult.Resume{Task: restored}, errors.Join(continueErr, restoreErr)
+	}
+
+	return subagentresult.Resume{
+		Task: claimed, Content: continuation.Content, Reasoning: continuation.Reasoning, Usage: continuation.Usage,
+	}, nil
+}
+
+func (service *Service) restoreUnreadResult(taskID string) (domainsubagent.Task, error) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	task, err := service.Tasks.GetTask(context.Background(), taskID)
+	if err != nil {
+		return domainsubagent.Task{}, err
+	}
+	if task.Unread {
+		return domainsubagent.CloneTask(task), nil
+	}
+	task.Unread = true
+	task.UpdatedAt = service.now()
+	if err := service.Tasks.SaveTask(context.Background(), task); err != nil {
+		return domainsubagent.CloneTask(task), err
+	}
+	service.publish(context.Background(), task)
+	return domainsubagent.CloneTask(task), nil
+}
+
 func (service *Service) ApplyChanges(ctx context.Context, command subagentcommand.ApplyTaskChanges) (subagentresult.Task, error) {
 	if service == nil || service.Tasks == nil || service.Workspaces == nil {
 		return subagentresult.Task{}, errors.New("subagent workspace service is not configured")

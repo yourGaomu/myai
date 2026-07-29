@@ -17,6 +17,7 @@ type Service struct {
 	Scheduler            subagentport.Scheduler
 	Sessions             subagentport.ChildSessionFactory
 	Runner               subagentport.AgentRunner
+	ParentContinuation   subagentport.ParentContinuation
 	IDs                  subagentport.IDGenerator
 	Events               subagentport.EventPublisher
 	Workspaces           workspaceport.Manager

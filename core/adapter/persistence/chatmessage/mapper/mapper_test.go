@@ -71,6 +71,48 @@ func TestMapperPersistsEveryToolCallPart(t *testing.T) {
 	}
 }
 
+func TestMapperPersistsSyntheticUserReason(t *testing.T) {
+	mapper := Mapper{IDs: &sequentialIDs{}}
+	current := &session.Session{
+		ID: "session-1",
+		Messages: []domainmessage.Message{
+			domainmessage.SyntheticUserText(domainmessage.SyntheticReasonSubagentResult, "subagent report"),
+		},
+	}
+
+	records := mapper.MemoryMessages(current)
+	if len(records) != 1 || records[0].Role != repository.RoleUser || records[0].SyntheticReason != "subagent_result" {
+		t.Fatalf("unexpected synthetic user record: %#v", records)
+	}
+}
+
+func TestMapperSeparatesFullAndPromptLimitedToolResult(t *testing.T) {
+	mapper := Mapper{IDs: &sequentialIDs{}}
+	current := &session.Session{
+		ID: "session-1",
+		Messages: []domainmessage.Message{
+			domainmessage.ToolResultMessage(domainmessage.ToolResult{
+				ToolCallID: "call-1", Name: "read_file",
+				Content: "bounded output", ErrorMessage: "bounded error",
+				FullContent: "full audit output", FullErrorMessage: "full audit error",
+				PromptTruncated: true,
+			}),
+		},
+	}
+
+	records := mapper.MemoryMessages(current)
+	if len(records) != 1 {
+		t.Fatalf("record count = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.Content != "full audit output" || record.ToolError != "full audit error" {
+		t.Fatalf("full audit output was not persisted: %#v", record)
+	}
+	if record.ToolPromptContent != "bounded output" || record.ToolPromptError != "bounded error" || !record.ToolPromptTruncated {
+		t.Fatalf("bounded prompt output was not persisted separately: %#v", record)
+	}
+}
+
 type sequentialIDs struct {
 	next int
 }

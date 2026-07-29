@@ -1,6 +1,9 @@
 package command
 
-import domainsubagent "myai/core/domain/subagent"
+import (
+	domainsubagent "myai/core/domain/subagent"
+	modelport "myai/core/port/model"
+)
 
 type BootstrapDefinitions struct{}
 
@@ -52,4 +55,10 @@ type ApplyTaskChanges struct {
 type DiscardTaskChanges struct {
 	TaskID          string
 	ParentSessionID string
+}
+
+type ResumeTask struct {
+	TaskID          string
+	ParentSessionID string
+	Stream          modelport.ChatStreamHandler
 }

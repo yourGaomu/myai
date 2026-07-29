@@ -109,3 +109,20 @@ func TestBuildSnapshotCapsLongSummary(t *testing.T) {
 		t.Fatalf("expected bounded summary and snapshot, got info=%#v", snapshot.Info)
 	}
 }
+
+func TestCurrentTurnTokensStartsAtAttachedRuntimeContext(t *testing.T) {
+	messages := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system"),
+		domainmessage.Text(domainmessage.RoleUser, "old question"),
+		domainmessage.Text(domainmessage.RoleAssistant, "old answer"),
+		domainmessage.RuntimeInstruction("current rules"),
+		domainmessage.Text(domainmessage.RoleUser, "current question"),
+		domainmessage.ToolCallMessage([]domainmessage.ToolCall{{ID: "call-1", Name: "read_file"}}),
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: "call-1", Name: "read_file", Content: "result"}),
+	}
+
+	want := EstimateMessagesTokens(messages[3:])
+	if got := CurrentTurnTokens(messages); got != want {
+		t.Fatalf("current turn tokens = %d, want %d", got, want)
+	}
+}
