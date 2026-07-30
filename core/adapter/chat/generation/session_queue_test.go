@@ -1,8 +1,10 @@
 package generation
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	runtimeservice "myai/core/application/runtime/service"
 	asyncport "myai/core/port/async"
@@ -55,9 +57,53 @@ func TestSessionQueueRejectsSubmissionAfterExecutorCloses(t *testing.T) {
 	}
 }
 
+func TestSessionQueueSubmitAndWaitIgnoresCancellationAfterAcceptance(t *testing.T) {
+	executor := &signalingExecutor{tasks: make(chan func(), 1)}
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
+	ctx, cancel := context.WithCancel(context.Background())
+	completed := make(chan error, 1)
+	go func() {
+		completed <- queue.SubmitAndWait(ctx, "session-1", func() error { return nil })
+	}()
+
+	scheduled := <-executor.tasks
+	cancel()
+	select {
+	case err := <-completed:
+		t.Fatalf("wait returned before accepted persistence completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	scheduled()
+	if err := <-completed; err != nil {
+		t.Fatalf("unexpected persistence result: %v", err)
+	}
+}
+
+func TestSessionQueueSubmitAndWaitRejectsAlreadyCanceledContext(t *testing.T) {
+	executor := &signalingExecutor{tasks: make(chan func(), 1)}
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := queue.SubmitAndWait(ctx, "session-1", func() error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled submission, got %v", err)
+	}
+	if len(executor.tasks) != 0 {
+		t.Fatal("canceled context scheduled persistence")
+	}
+}
+
 type queuedExecutor struct {
 	tasks []func()
 	err   error
+}
+
+type signalingExecutor struct {
+	tasks chan func()
+}
+
+func (e *signalingExecutor) Submit(task func()) error {
+	e.tasks <- task
+	return nil
 }
 
 func (e *queuedExecutor) Submit(task func()) error {

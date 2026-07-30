@@ -184,12 +184,13 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 		SessionID: sessionID, Input: input, ForceChatMode: true, SyntheticReason: syntheticReason,
+		DeduplicateSynthetic: true,
 	})
 	if err != nil {
 		return ChatResponse{}, err
 	}
 	current := prepared.Session
-	if s.dependencies.UserMessages != nil {
+	if prepared.Appended && s.dependencies.UserMessages != nil {
 		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 			SessionID: current.ID, Model: current.Model, Input: input,
 			RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,

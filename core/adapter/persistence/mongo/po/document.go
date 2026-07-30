@@ -57,6 +57,7 @@ type MessageDocument struct {
 	TotalTokens         int       `bson:"total_tokens,omitempty"`
 	ReasoningTokens     int       `bson:"reasoning_tokens,omitempty"`
 	PromptCachedTokens  int       `bson:"prompt_cached_tokens,omitempty"`
+	Sequence            int64     `bson:"sequence,omitempty"`
 	CreatedAt           time.Time `bson:"created_at"`
 }
 

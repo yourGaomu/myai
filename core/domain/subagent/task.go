@@ -144,7 +144,7 @@ func (task *Task) MarkCanceled(message string, now time.Time) error {
 	}
 	task.Status = TaskStatusCanceled
 	task.ErrorMessage = strings.TrimSpace(message)
-	task.Unread = true
+	task.Unread = false
 	task.CompletedAt = timePointer(now)
 	task.UpdatedAt = now
 	return nil

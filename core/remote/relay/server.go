@@ -285,6 +285,9 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		if message.UserID != *agentUserID || message.DeviceID != *agentDeviceID {
 			return errors.New("agent message identity does not match the authenticated connection")
 		}
+		if !s.isCurrentAgentPeer(p, *agentUserID, *agentDeviceID) {
+			return errors.New("agent connection has been superseded")
+		}
 	}
 	switch message.Type {
 	case protocol.TypeAgentOnline:
@@ -304,7 +307,12 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		}
 		*agentUserID = message.UserID
 		*agentDeviceID = message.DeviceID
-		s.registerAgent(p, message.UserID, message.DeviceID, payload.BindCode, remoteAddr)
+		superseded := s.registerAgent(p, message.UserID, message.DeviceID, payload.BindCode, remoteAddr)
+		if superseded != nil {
+			if err := superseded.close(); err != nil {
+				log.Printf("close superseded agent connection failed: %v", err)
+			}
+		}
 		log.Printf("agent registered: user=%s device=%s", message.UserID, message.DeviceID)
 	case protocol.TypeHeartbeat:
 		s.touchAgent(message.UserID, message.DeviceID)

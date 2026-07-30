@@ -32,6 +32,9 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if err != nil {
 		return messageresult.Command{}, err
 	}
+	if command.DeduplicateSynthetic && hasSyntheticMessage(current.Messages, command.SyntheticReason, command.Input) {
+		return messageresult.Command{Session: current, Input: command.Input, Appended: false}, nil
+	}
 	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode)
 	if err := s.Memory.AddUserTurnWithReasonTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason); err != nil {
 		return messageresult.Command{}, err
@@ -40,7 +43,7 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext)}, nil
+	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext), Appended: true}, nil
 }
 
 func (s CommandService) PrepareRegeneration(ctx context.Context, command messagecommand.PrepareRegeneration) (messageresult.Command, error) {
@@ -89,6 +92,19 @@ func latestRuntimeInstruction(messages []domainmessage.Message) string {
 		return ""
 	}
 	return ""
+}
+
+func hasSyntheticMessage(messages []domainmessage.Message, reason domainmessage.SyntheticReason, input string) bool {
+	if reason == "" {
+		return false
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		if message.IsSyntheticReason(reason) && message.Text() == input {
+			return true
+		}
+	}
+	return false
 }
 
 func (s CommandService) loadSession(ctx context.Context, sessionID string) (*session.Session, error) {

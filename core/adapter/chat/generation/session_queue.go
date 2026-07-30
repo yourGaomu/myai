@@ -75,6 +75,9 @@ func (q *SessionQueue) SubmitAndWait(ctx context.Context, sessionID string, task
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	result := make(chan error, 1)
 	if err := q.Submit(sessionID, func() {
 		var taskErr error
@@ -88,12 +91,10 @@ func (q *SessionQueue) SubmitAndWait(ctx context.Context, sessionID string, task
 	}); err != nil {
 		return err
 	}
-	select {
-	case err := <-result:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Once accepted, the mutation must reach a definite persistence outcome.
+	// Returning ctx.Err here would let the caller restore stale memory while the
+	// queued transaction can still commit afterward.
+	return <-result
 }
 
 func (q *SessionQueue) drain(sessionID string, queue *sessionTaskQueue) {

@@ -7,4 +7,5 @@ type Command struct {
 	Input              string
 	RuntimeInstruction string
 	RAGContext         string
+	Appended           bool
 }

@@ -28,6 +28,7 @@ func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, create
 		Role:            repository.RoleUser,
 		Content:         command.Input,
 		SyntheticReason: string(command.SyntheticReason),
+		Sequence:        messageSequence(createdAt),
 		CreatedAt:       createdAt,
 	}
 }
@@ -50,8 +51,12 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 			CreatedAt:       createdAt,
 		})
 	}
-	userCreatedAt := createdAt.Add(time.Duration(len(records)) * time.Nanosecond)
-	records = append(records, m.UserMessage(command, userCreatedAt))
+	records = append(records, m.UserMessage(command, createdAt))
+	for index := range records {
+		messageCreatedAt := createdAt.Add(time.Duration(index) * time.Nanosecond)
+		records[index].CreatedAt = messageCreatedAt
+		records[index].Sequence = messageSequence(messageCreatedAt)
+	}
 	return records
 }
 
@@ -67,6 +72,7 @@ func (m Mapper) AssistantMessage(sessionID string, result modelport.ChatResult, 
 		TotalTokens:        result.Usage.TotalTokens,
 		ReasoningTokens:    result.Usage.ReasoningTokens,
 		PromptCachedTokens: result.Usage.PromptCachedTokens,
+		Sequence:           messageSequence(createdAt),
 		CreatedAt:          createdAt,
 	}
 }
@@ -115,7 +121,9 @@ func (m Mapper) MemoryMessages(current *session.Session) []repository.MessageRec
 	}
 	createdAt := m.now().Add(-time.Duration(len(records)) * time.Nanosecond)
 	for index := range records {
-		records[index].CreatedAt = createdAt.Add(time.Duration(index) * time.Nanosecond)
+		messageCreatedAt := createdAt.Add(time.Duration(index) * time.Nanosecond)
+		records[index].CreatedAt = messageCreatedAt
+		records[index].Sequence = messageSequence(messageCreatedAt)
 	}
 	return records
 }
@@ -210,6 +218,13 @@ func (m Mapper) now() time.Time {
 		return m.Now()
 	}
 	return time.Now()
+}
+
+func messageSequence(createdAt time.Time) int64 {
+	if createdAt.IsZero() {
+		return 0
+	}
+	return createdAt.UnixNano()
 }
 
 func tokenUsage(usage modelport.TokenUsage) *repository.TokenUsageRecord {

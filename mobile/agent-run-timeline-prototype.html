@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 执行记录原型</title>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --surface: #ffffff;
+      --surface-muted: #f0f2f3;
+      --text: #202326;
+      --text-muted: #71767b;
+      --line: #dfe2e4;
+      --line-strong: #c8cdd0;
+      --green: #287a50;
+      --green-soft: #e7f3ec;
+      --blue: #2868a9;
+      --blue-soft: #e9f1f9;
+      --amber: #95631c;
+      --amber-soft: #f8f0df;
+      --danger: #b23c3c;
+      --code: #17191b;
+      --code-text: #e8eaec;
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .app {
+      width: min(100%, 880px);
+      min-height: 100vh;
+      margin: 0 auto;
+      background: var(--surface);
+      border-inline: 1px solid var(--line);
+    }
+
+    .topbar {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 58px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(10px);
+    }
+
+    .title-wrap {
+      min-width: 0;
+    }
+
+    .title {
+      margin: 0;
+      overflow: hidden;
+      font-size: 16px;
+      font-weight: 650;
+      line-height: 22px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .run-state {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 2px;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .running-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 0 rgba(40, 122, 80, 0.35);
+      animation: pulse 1.8s infinite;
+    }
+
+    .running-dot.paused {
+      background: var(--amber);
+      animation: none;
+    }
+
+    .running-dot.stopped {
+      background: var(--danger);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(40, 122, 80, 0.35); }
+      65% { box-shadow: 0 0 0 6px rgba(40, 122, 80, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(40, 122, 80, 0); }
+    }
+
+    .top-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 6px;
+    }
+
+    .icon-button,
+    .action-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 36px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .icon-button {
+      width: 36px;
+      padding: 0;
+    }
+
+    .action-button {
+      gap: 7px;
+      padding: 0 11px;
+      font-size: 13px;
+    }
+
+    .icon-button:hover,
+    .action-button:hover {
+      background: var(--surface-muted);
+    }
+
+    .icon-button.danger {
+      color: var(--danger);
+    }
+
+    .summary-band {
+      padding: 18px 18px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfc;
+    }
+
+    .summary-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .summary-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+      line-height: 22px;
+    }
+
+    .summary-copy {
+      margin: 5px 0 0;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .step-count {
+      flex: 0 0 auto;
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 4px;
+      margin-top: 14px;
+      overflow: hidden;
+      border-radius: 2px;
+      background: #e5e8ea;
+    }
+
+    .progress-value {
+      width: 54%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+      transition: width 300ms ease;
+    }
+
+    .view-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .control-label {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: min(100%, 250px);
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface-muted);
+    }
+
+    .segment {
+      min-width: 0;
+      height: 30px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .segment.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(32, 35, 38, 0.12);
+    }
+
+    .timeline {
+      position: relative;
+      padding: 20px 18px 110px 18px;
+    }
+
+    .timeline::before {
+      position: absolute;
+      top: 22px;
+      bottom: 112px;
+      left: 32px;
+      width: 1px;
+      background: var(--line);
+      content: "";
+    }
+
+    .event {
+      position: relative;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 12px;
+      padding-bottom: 22px;
+    }
+
+    .event-icon {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 29px;
+      height: 29px;
+      border: 1px solid var(--line-strong);
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--text-muted);
+    }
+
+    .event-icon.reasoning {
+      border-color: #abc7e2;
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .event-icon.success {
+      border-color: #a9cfb9;
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .event-icon.waiting {
+      border-color: #dbc494;
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .event-body {
+      min-width: 0;
+      padding-top: 2px;
+    }
+
+    .event-meta {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .event-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 24px;
+    }
+
+    .event-time {
+      flex: 0 0 auto;
+      color: #989da1;
+      font-size: 11px;
+    }
+
+    .event-copy {
+      margin: 5px 0 0;
+      font-size: 14px;
+      line-height: 23px;
+    }
+
+    .reasoning-block {
+      margin-top: 9px;
+      padding: 10px 12px;
+      border-left: 3px solid #abc7e2;
+      background: #f7fafc;
+      color: #3d464e;
+      font-size: 13px;
+      line-height: 21px;
+      white-space: pre-wrap;
+    }
+
+    .reasoning-block::after {
+      display: inline-block;
+      width: 6px;
+      height: 15px;
+      margin-left: 3px;
+      vertical-align: -2px;
+      background: var(--blue);
+      content: "";
+      animation: blink 1s steps(1) infinite;
+    }
+
+    .paused .reasoning-block::after {
+      display: none;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    details.tool-group {
+      margin-top: 7px;
+      border-block: 1px solid var(--line);
+    }
+
+    details.tool-group summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      color: var(--text-muted);
+      font-size: 13px;
+      list-style: none;
+      cursor: pointer;
+    }
+
+    details.tool-group summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .chevron {
+      margin-left: auto;
+      transition: transform 160ms ease;
+    }
+
+    details[open] .chevron {
+      transform: rotate(180deg);
+    }
+
+    .tool-count {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    .command-list {
+      display: grid;
+      gap: 1px;
+      margin: 0 0 10px;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #2a2d30;
+    }
+
+    .command {
+      padding: 10px 12px;
+      background: var(--code);
+      color: var(--code-text);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      line-height: 19px;
+      overflow-wrap: anywhere;
+    }
+
+    .command-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      color: #9fcbad;
+      font-family: Inter, "Segoe UI", sans-serif;
+      font-size: 11px;
+    }
+
+    .file-list {
+      display: grid;
+      gap: 6px;
+      margin-top: 9px;
+    }
+
+    .file-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      color: #41474c;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .file-path {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .diff-stat {
+      color: var(--green);
+    }
+
+    .next-step {
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 21px;
+    }
+
+    .bottom-status {
+      position: fixed;
+      z-index: 20;
+      right: max(12px, calc((100vw - 880px) / 2 + 12px));
+      bottom: 14px;
+      left: max(12px, calc((100vw - 880px) / 2 + 12px));
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 64px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 26px rgba(30, 35, 38, 0.13);
+      backdrop-filter: blur(10px);
+    }
+
+    .step-ring {
+      position: relative;
+      display: grid;
+      flex: 0 0 auto;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      border-radius: 50%;
+      background: conic-gradient(var(--blue) 0 54%, #e3e7e9 54% 100%);
+    }
+
+    .step-ring::after {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: var(--surface);
+      content: "";
+    }
+
+    .step-ring span {
+      position: relative;
+      z-index: 1;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .bottom-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .bottom-title {
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 19px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bottom-subtitle {
+      overflow: hidden;
+      margin-top: 2px;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 17px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .reasoning-hidden .reasoning-event {
+      display: none;
+    }
+
+    .reasoning-collapsed .reasoning-block {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .reasoning-collapsed .reasoning-block::after {
+      display: none;
+    }
+
+    @media (max-width: 560px) {
+      .app {
+        border: 0;
+      }
+
+      .topbar {
+        padding-inline: 12px;
+      }
+
+      .action-button span {
+        display: none;
+      }
+
+      .action-button {
+        width: 36px;
+        padding: 0;
+      }
+
+      .summary-band,
+      .view-controls,
+      .timeline {
+        padding-inline: 14px;
+      }
+
+      .timeline::before {
+        left: 28px;
+      }
+
+      .view-controls {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .segmented {
+        width: 100%;
+      }
+
+      .summary-copy,
+      .event-copy {
+        font-size: 13px;
+      }
+
+      .event-time {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="app">
+    <header class="topbar">
+      <div class="title-wrap">
+        <h1 class="title">修复会话一致性问题</h1>
+        <div class="run-state">
+          <span class="running-dot" id="runningDot"></span>
+          <span id="stateText">正在执行</span>
+          <span>·</span>
+          <span>已处理 <strong id="elapsed">4m 48s</strong></span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="action-button" id="pauseButton" type="button" title="暂停任务">
+          <i data-lucide="pause" width="16" height="16"></i>
+          <span>暂停</span>
+        </button>
+        <button class="icon-button danger" id="stopButton" type="button" title="停止任务" aria-label="停止任务">
+          <i data-lucide="square" width="15" height="15"></i>
+        </button>
+      </div>
+    </header>
+
+    <section class="summary-band" aria-labelledby="run-summary-title">
+      <div class="summary-head">
+        <div>
+          <h2 class="summary-title" id="run-summary-title">正在处理消息顺序与任务恢复</h2>
+          <p class="summary-copy">已完成问题核对和持久化排序修复，正在验证子任务恢复流程。</p>
+        </div>
+        <div class="step-count">第 3/5 步</div>
+      </div>
+      <div class="progress-track" aria-label="任务进度 54%">
+        <div class="progress-value"></div>
+      </div>
+    </section>
+
+    <section class="view-controls" aria-label="推理显示设置">
+      <span class="control-label">推理内容</span>
+      <div class="segmented" role="group" aria-label="推理内容显示方式">
+        <button class="segment active" type="button" data-mode="raw">原始</button>
+        <button class="segment" type="button" data-mode="collapsed">折叠</button>
+        <button class="segment" type="button" data-mode="hidden">隐藏</button>
+      </div>
+    </section>
+
+    <section class="timeline" aria-label="Agent 执行时间线">
+      <article class="event reasoning-event">
+        <div class="event-icon reasoning"><i data-lucide="brain" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">原始推理</h3>
+            <time class="event-time">14:32:08</time>
+          </div>
+          <div class="reasoning-block">我需要先核对用户截图中的五个问题是否仍然存在。消息顺序和子任务恢复会直接影响会话一致性，因此先读取相关领域对象、Mongo Mapper 和恢复服务，再确认现有测试覆盖范围。</div>
+        </div>
+      </article>
+
+      <article class="event">
+        <div class="event-icon success"><i data-lucide="terminal" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">检查消息持久化链路</h3>
+            <time class="event-time">14:32:22</time>
+          </div>
+          <details class="tool-group">
+            <summary>
+              <i data-lucide="chevrons-right" width="15" height="15"></i>
+              运行了 <span class="tool-count">3 个命令</span>
+              <span>· 1.8s</span>
+              <i class="chevron" data-lucide="chevron-down" width="15" height="15"></i>
+            </summary>
+            <div class="command-list">
+              <div class="command">
+                rg "MessageRecord|sequence" core/adapter core/domain
+                <div class="command-status"><i data-lucide="circle-check" width="13" height="13"></i>完成 · 找到 28 处匹配</div>
+              </div>
+              <div class="command">
+                go test ./core/adapter/persistence/...
+                <div class="command-status"><i data-lucide="circle-check" width="13" height="13"></i>通过 · 12 packages</div>
+              </div>
+              <div class="command">
+                git diff --check
+                <div class="command-status"><i data-lucide="circle-check" width="13" height="13"></i>通过 · 无格式错误</div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </article>
+
+      <article class="event reasoning-event">
+        <div class="event-icon reasoning"><i data-lucide="brain" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">原始推理</h3>
+            <time class="event-time">14:33:01</time>
+          </div>
+          <div class="reasoning-block">检查结果确认 created_at 不能承担唯一排序职责。同一批写入可能具有相同时间，因此需要独立的 sequence 字段。新消息使用纳秒级递增序列，旧文档继续回退到 created_at 和 _id 排序。</div>
+        </div>
+      </article>
+
+      <article class="event">
+        <div class="event-icon success"><i data-lucide="file-pen-line" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">完成持久化顺序修复</h3>
+            <time class="event-time">14:34:37</time>
+          </div>
+          <p class="event-copy">新增消息序列字段，并保持旧 Mongo 文档兼容。</p>
+          <div class="file-list">
+            <div class="file-row">
+              <i data-lucide="file-code-2" width="15" height="15"></i>
+              <span class="file-path">core/port/repository/message_record.go</span>
+              <span class="diff-stat">+3</span>
+            </div>
+            <div class="file-row">
+              <i data-lucide="file-code-2" width="15" height="15"></i>
+              <span class="file-path">core/adapter/persistence/mongo/repository/store.go</span>
+              <span class="diff-stat">+18 -4</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="event">
+        <div class="event-icon success"><i data-lucide="list-checks" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">计划已更新</h3>
+            <time class="event-time">14:35:14</time>
+          </div>
+          <p class="event-copy">第 2 步已完成，开始验证子任务恢复和未读状态。</p>
+        </div>
+      </article>
+
+      <article class="event reasoning-event">
+        <div class="event-icon reasoning"><i data-lucide="brain" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">原始推理 · 正在生成</h3>
+            <time class="event-time">刚刚</time>
+          </div>
+          <div class="reasoning-block">现在检查取消任务的恢复语义。重点确认 canceled 状态是否仍会生成 unread 标记，以及重复报告是否可能再次写入会话。</div>
+        </div>
+      </article>
+
+      <article class="event">
+        <div class="event-icon waiting"><i data-lucide="loader-circle" width="15" height="15"></i></div>
+        <div class="event-body">
+          <div class="event-meta">
+            <h3 class="event-title">验证子任务恢复</h3>
+            <time class="event-time">进行中</time>
+          </div>
+          <p class="next-step">正在运行相关单元测试，完成后将执行全量回归。</p>
+        </div>
+      </article>
+    </section>
+
+    <aside class="bottom-status" aria-label="当前计划步骤">
+      <div class="step-ring"><span>3/5</span></div>
+      <div class="bottom-copy">
+        <div class="bottom-title">验证子任务恢复和未读状态</div>
+        <div class="bottom-subtitle">下一步：执行全量 Go 测试和移动端类型检查</div>
+      </div>
+      <i data-lucide="activity" width="19" height="19" color="#2868a9"></i>
+    </aside>
+  </main>
+
+  <script>
+    function renderIcons() {
+      if (globalThis.lucide) lucide.createIcons();
+    }
+
+    renderIcons();
+
+    const app = document.getElementById("app");
+    const elapsed = document.getElementById("elapsed");
+    const pauseButton = document.getElementById("pauseButton");
+    const stopButton = document.getElementById("stopButton");
+    const runningDot = document.getElementById("runningDot");
+    const stateText = document.getElementById("stateText");
+    const segments = [...document.querySelectorAll(".segment")];
+    let elapsedSeconds = 4 * 60 + 48;
+    let paused = false;
+    let stopped = false;
+
+    function renderElapsed() {
+      const minutes = Math.floor(elapsedSeconds / 60);
+      const seconds = String(elapsedSeconds % 60).padStart(2, "0");
+      elapsed.textContent = `${minutes}m ${seconds}s`;
+    }
+
+    setInterval(() => {
+      if (!paused && !stopped) {
+        elapsedSeconds += 1;
+        renderElapsed();
+      }
+    }, 1000);
+
+    pauseButton.addEventListener("click", () => {
+      if (stopped) return;
+      paused = !paused;
+      app.classList.toggle("paused", paused);
+      runningDot.classList.toggle("paused", paused);
+      stateText.textContent = paused ? "已暂停" : "正在执行";
+      pauseButton.title = paused ? "继续任务" : "暂停任务";
+      pauseButton.innerHTML = paused
+        ? '<i data-lucide="play" width="16" height="16"></i><span>继续</span>'
+        : '<i data-lucide="pause" width="16" height="16"></i><span>暂停</span>';
+      renderIcons();
+    });
+
+    stopButton.addEventListener("click", () => {
+      stopped = true;
+      paused = false;
+      app.classList.add("paused");
+      runningDot.classList.remove("paused");
+      runningDot.classList.add("stopped");
+      stateText.textContent = "已停止";
+      pauseButton.disabled = true;
+      pauseButton.title = "任务已停止";
+      stopButton.disabled = true;
+    });
+
+    segments.forEach((button) => {
+      button.addEventListener("click", () => {
+        segments.forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        app.classList.remove("reasoning-collapsed", "reasoning-hidden");
+        if (button.dataset.mode === "collapsed") app.classList.add("reasoning-collapsed");
+        if (button.dataset.mode === "hidden") app.classList.add("reasoning-hidden");
+      });
+    });
+  </script>
+</body>
+</html>

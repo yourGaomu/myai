@@ -103,6 +103,7 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 		TotalTokens:         record.TotalTokens,
 		ReasoningTokens:     record.ReasoningTokens,
 		PromptCachedTokens:  record.PromptCachedTokens,
+		Sequence:            record.Sequence,
 		CreatedAt:           record.CreatedAt,
 	}
 }
@@ -130,6 +131,7 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 		TotalTokens:         document.TotalTokens,
 		ReasoningTokens:     document.ReasoningTokens,
 		PromptCachedTokens:  document.PromptCachedTokens,
+		Sequence:            document.Sequence,
 		CreatedAt:           document.CreatedAt,
 	}
 }

@@ -32,6 +32,7 @@ type MessageRecord struct {
 	TotalTokens         int
 	ReasoningTokens     int
 	PromptCachedTokens  int
+	Sequence            int64
 	CreatedAt           time.Time
 }
 

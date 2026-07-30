@@ -70,6 +70,37 @@ func TestMessageCommandServiceAppendsRuntimeInstructionBeforeUser(t *testing.T) 
 	}
 }
 
+func TestMessageCommandServiceDeduplicatesOnlyMatchingSyntheticMessage(t *testing.T) {
+	memory := memorysession.NewStore("gpt-5")
+	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	service := newMessageCommandService(memory)
+	command := AppendUserMessageCommand{
+		SessionID: "session-1", Input: "subagent task task-1 report", SyntheticReason: domainmessage.SyntheticReasonSubagentResult,
+		DeduplicateSynthetic: true,
+	}
+	first, err := service.AppendUserMessage(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.AppendUserMessage(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Appended || second.Appended || len(second.Session.Messages) != len(first.Session.Messages) {
+		t.Fatalf("unexpected deduplication results: first=%#v second=%#v", first, second)
+	}
+	deduplicatedMessageCount := len(second.Session.Messages)
+	ordinary, err := service.AppendUserMessage(context.Background(), AppendUserMessageCommand{SessionID: "session-1", Input: command.Input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ordinary.Appended || len(ordinary.Session.Messages) <= deduplicatedMessageCount {
+		t.Fatalf("ordinary user message was incorrectly deduplicated: %#v", ordinary)
+	}
+}
+
 func TestMessageCommandServicePrepareRegeneration(t *testing.T) {
 	memory := memorysession.NewStore("gpt-5")
 	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {

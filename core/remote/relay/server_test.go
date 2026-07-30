@@ -26,6 +26,25 @@ func newTestServer() *Server {
 	)
 }
 
+func TestAgentRegistrationSupersedesPreviousPeer(t *testing.T) {
+	server := newTestServer()
+	previous := &peer{}
+	current := &peer{}
+	if superseded := server.registerAgent(previous, "local", "pc-local", "111111", "old"); superseded != nil {
+		t.Fatalf("first registration superseded unexpected peer: %#v", superseded)
+	}
+	if superseded := server.registerAgent(current, "local", "pc-local", "222222", "new"); superseded != previous {
+		t.Fatalf("expected previous peer to be superseded, got %#v", superseded)
+	}
+	if server.isCurrentAgentPeer(previous, "local", "pc-local") || !server.isCurrentAgentPeer(current, "local", "pc-local") {
+		t.Fatal("registry did not retain only the latest agent peer")
+	}
+	server.unregisterAgent(previous, "local", "pc-local")
+	if !server.isCurrentAgentPeer(current, "local", "pc-local") {
+		t.Fatal("superseded disconnect removed the current agent")
+	}
+}
+
 func TestRelayForwardsClientAndAgentMessages(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())

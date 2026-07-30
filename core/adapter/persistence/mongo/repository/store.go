@@ -272,7 +272,7 @@ func (m *Store) ListMessages(ctx context.Context, sessionID string) ([]repositor
 		messagesCollection,
 		bson.M{"session_id": sessionID},
 		&documents,
-		options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}),
+		options.Find().SetSort(messageSort(1)),
 	)
 	if err != nil {
 		return nil, err
@@ -306,7 +306,7 @@ func (m *Store) GetMessageHistoryMeta(ctx context.Context, sessionID string) (re
 		messagesCollection,
 		filter,
 		&last,
-		options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}}),
+		options.FindOne().SetSort(messageSort(-1)),
 	)
 	if err != nil {
 		return repository.MessageHistoryMeta{}, err
@@ -315,6 +315,14 @@ func (m *Store) GetMessageHistoryMeta(ctx context.Context, sessionID string) (re
 	meta.LastMessageID = last.ID
 	meta.LastMessageCreatedAt = &last.CreatedAt
 	return meta, nil
+}
+
+func messageSort(direction int) bson.D {
+	return bson.D{
+		{Key: "sequence", Value: direction},
+		{Key: "created_at", Value: direction},
+		{Key: "_id", Value: direction},
+	}
 }
 
 func repositoryError(err error) error {

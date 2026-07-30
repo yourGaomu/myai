@@ -271,6 +271,69 @@ go test ./core/architecture
 git diff --check
 ```
 
+## 2026-07-29：Mobile 子智能体任务抽屉
+
+优化 Mobile 设置页的后台任务展示，避免任务要求、执行结果、变更文件和操作按钮长期占用较大的纵向空间：
+
+- 每个任务默认收起，标题栏固定展示任务名称、Definition ID、中文状态、变更文件数和展开箭头。
+- 收起状态保留最多两行的结果或错误摘要；存在未消费结果时显示提示圆点。
+- 点击整个标题栏可展开或收起详情，Android 和其他平台使用 `LayoutAnimation` 提供抽屉过渡效果。
+- 展开后继续展示完整任务要求、执行结果、错误、变更文件和原有操作按钮，业务协议与后端状态机不变。
+- `waiting_subagents` 和 `waiting_permission` 作为运行中状态处理，仍可在详情中取消任务。
+- 标题栏增加无障碍按钮语义、动态展开状态和操作说明。
+
+涉及文件：
+
+```text
+mobile/src/components/subagents/SubagentPanel.tsx
+```
+
+验证命令：
+
+```powershell
+cd mobile
+npm run typecheck
+
+git diff --check
+```
+
+## 2026-07-29：会话顺序、子任务恢复与 Relay 一致性修复
+
+修复持久化与远程连接链路中的五组一致性问题：
+
+### 1. 持久化消息顺序
+
+- `MessageRecord` 和 Mongo `MessageDocument` 增加 `sequence` 整数顺序字段，避免 BSON datetime 只有毫秒精度时丢失同一批消息的纳秒顺序。
+- 普通用户轮、工具调用、工具结果和 Assistant 消息在持久化 Adapter 边界生成精确顺序；重新生成整份 transcript 时重新生成完整顺序。
+- Mongo 查询按 `sequence -> created_at -> _id` 排序。旧文档没有 `sequence` 时仍可按原时间和 ID 稳定读取，不要求手工迁移。
+
+### 2. 子任务恢复幂等
+
+- `AppendUserMessage` 增加仅用于合成消息的去重选项；同一 `SyntheticReason + 内容` 已存在时复用当前 Session，不重复追加和持久化报告。
+- 普通用户消息不参与去重，用户连续发送相同文本仍会形成不同对话轮次。
+- 子任务报告限制 Result、Error、文件数量和单个路径长度，并在 JSON 中写入截断与省略数量，避免超长报告占满父会话上下文。
+- 新取消任务不再设置 `Unread=true`；历史 Mongo canceled 文档即使保存了错误未读标记，加载时也会自动归一化为已读。
+
+### 3. 重新生成持久化终态
+
+- `SessionQueue.SubmitAndWait` 在入队前尊重取消；任务一旦被执行器接受，就等待数据库写入返回明确成功或失败。
+- transcript 事务使用保留 Context Value、但不继承请求取消的独立超时 Context，防止调用方收到取消后事务仍提交，造成内存回滚和数据库新 transcript 并存。
+
+### 4. Relay 重复 Agent 上线
+
+- 同一 user/device 的新 Agent 上线会替换并主动关闭旧 Peer。
+- Agent 每条非注册消息都必须来自 Registry 当前 Peer；旧连接不能继续转发 delta、done、事件或离线消息。
+- 旧连接退出时仍通过 Peer 身份比较保护新连接，不会误删新 Registry 记录。
+
+验证命令：
+
+```powershell
+go test ./...
+go vet ./...
+go test ./core/architecture
+git diff --check
+```
+
 ## 后续记录约定
 
 后续每次跨模块功能或重要缺陷修复，都应在提交前追加一个日期章节，至少记录：

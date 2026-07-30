@@ -25,6 +25,13 @@ func (p *peer) writeJSON(value any) error {
 	return p.conn.WriteJSON(value)
 }
 
+func (p *peer) close() error {
+	if p == nil || p.conn == nil {
+		return nil
+	}
+	return p.conn.Close()
+}
+
 type agentEntry struct {
 	UserID      string
 	DeviceID    string
@@ -69,19 +76,24 @@ func agentKey(userID string, deviceID string) string {
 	return fmt.Sprintf("%s/%s", userID, deviceID)
 }
 
-func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode string, remoteAddr string) {
+func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode string, remoteAddr string) *peer {
 	if userID == "" || deviceID == "" {
-		return
+		return nil
 	}
 
 	now := time.Now()
 	key := agentKey(userID, deviceID)
 
 	s.agentLock.Lock()
-	defer s.agentLock.Unlock()
 
-	if previous := s.agents[key]; previous != nil && previous.BindCode != "" {
-		delete(s.bindings, previous.BindCode)
+	var superseded *peer
+	if previous := s.agents[key]; previous != nil {
+		if previous.BindCode != "" {
+			delete(s.bindings, previous.BindCode)
+		}
+		if previous.peer != p {
+			superseded = previous.peer
+		}
 	}
 
 	s.agents[key] = &agentEntry{
@@ -97,6 +109,8 @@ func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode
 	if bindCode != "" {
 		s.bindings[bindCode] = key
 	}
+	s.agentLock.Unlock()
+	return superseded
 }
 
 func (s *Server) touchAgent(userID string, deviceID string) {
@@ -143,6 +157,16 @@ func (s *Server) getAgent(userID string, deviceID string) *agentEntry {
 	defer s.agentLock.RUnlock()
 
 	return s.agents[key]
+}
+
+func (s *Server) isCurrentAgentPeer(p *peer, userID string, deviceID string) bool {
+	if p == nil || userID == "" || deviceID == "" {
+		return false
+	}
+	s.agentLock.RLock()
+	defer s.agentLock.RUnlock()
+	agent := s.agents[agentKey(userID, deviceID)]
+	return agent != nil && agent.peer == p
 }
 
 func (s *Server) getAgentByBindCode(bindCode string) *agentEntry {

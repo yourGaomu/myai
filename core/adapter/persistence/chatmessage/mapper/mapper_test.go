@@ -48,6 +48,11 @@ func TestMapperConvertsMemoryMessagesAtPersistenceBoundary(t *testing.T) {
 	if !records[3].CreatedAt.Equal(now.Add(-time.Nanosecond)) {
 		t.Fatalf("unexpected record time: %v", records[3].CreatedAt)
 	}
+	for index := 1; index < len(records); index++ {
+		if records[index].Sequence <= records[index-1].Sequence {
+			t.Fatalf("message sequence is not increasing: %#v", records)
+		}
+	}
 }
 
 func TestMapperPersistsEveryToolCallPart(t *testing.T) {

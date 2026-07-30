@@ -24,6 +24,9 @@ func (p RegenerationPersistence) PersistRegeneratedSession(ctx context.Context, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	snapshot := session.Clone(current)
 	if snapshot == nil {
 		return errors.New("regenerated session snapshot is nil")
@@ -31,8 +34,9 @@ func (p RegenerationPersistence) PersistRegeneratedSession(ctx context.Context, 
 	if p.Messages == nil {
 		return errors.New("regenerated transcript writer is nil")
 	}
+	persistenceBase := context.WithoutCancel(ctx)
 	run := func() error {
-		persistenceContext, cancel := context.WithTimeout(ctx, p.timeout())
+		persistenceContext, cancel := context.WithTimeout(persistenceBase, p.timeout())
 		defer cancel()
 		return p.Messages.ReplaceSessionMessages(persistenceContext, snapshot)
 	}

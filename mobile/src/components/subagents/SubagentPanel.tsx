@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { LayoutAnimation, Platform, Pressable, StyleSheet, Switch, Text, TextInput, UIManager, View } from "react-native";
 
 import type { SubagentDefinition, SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
@@ -49,6 +49,20 @@ const emptyDraft: DefinitionDraft = {
   maxTurns: "8",
   timeoutSeconds: "300",
   enabled: true,
+};
+
+if (Platform.OS === "android") {
+  UIManager.setLayoutAnimationEnabledExperimental?.(true);
+}
+
+const taskStatusLabels: Record<SubagentTask["status"], string> = {
+  queued: "排队中",
+  running: "执行中",
+  waiting_subagents: "等待子任务",
+  waiting_permission: "等待授权",
+  succeeded: "已完成",
+  failed: "失败",
+  canceled: "已取消",
 };
 
 export function SubagentPanel({
@@ -238,39 +252,68 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onRes
   pending: boolean;
   task: SubagentTask;
 }) {
-  const running = task.status === "queued" || task.status === "running";
+  const [expanded, setExpanded] = useState(false);
+  const running = task.status === "queued" || task.status === "running" || task.status === "waiting_subagents" || task.status === "waiting_permission";
   const pendingChanges = task.change_set?.status === "pending";
   const canResume = task.unread && (task.status === "succeeded" || task.status === "failed");
+  const summary = task.error_message || task.result || (running ? "子智能体正在执行。" : "子智能体未返回文本结果。");
+  const toggleExpanded = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((current) => !current);
+  };
   return (
-    <View style={styles.item}>
-      <View style={styles.rowBetween}>
+    <View style={[styles.item, styles.taskItem]}>
+      <Pressable
+        accessibilityLabel={expanded ? "收起任务详情" : "展开任务详情"}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={toggleExpanded}
+        style={({ pressed }) => [styles.taskHeader, pressed && styles.taskHeaderPressed]}
+      >
         <View style={styles.flex}>
-          <Text style={styles.itemTitle}>{task.title}</Text>
-          <Text style={styles.meta}>{task.definition_id} / {task.status}</Text>
+          <View style={styles.taskTitleRow}>
+            <Text numberOfLines={2} style={[styles.itemTitle, styles.taskTitle]}>{task.title}</Text>
+            {canResume ? <View style={styles.unreadDot} /> : null}
+          </View>
+          <Text style={styles.meta}>{task.definition_id} · {taskStatusLabels[task.status]}</Text>
         </View>
-        <Text style={styles.badge}>{task.change_set?.files?.length || 0} 文件</Text>
-      </View>
-      {task.instruction ? (
-        <View style={styles.taskDetail}>
-          <Text style={styles.fieldLabel}>任务要求</Text>
-          <Text style={styles.body}>{task.instruction}</Text>
+        <View style={styles.taskHeaderSide}>
+          <Text style={styles.badge}>{task.change_set?.files?.length || 0} 文件</Text>
+          <View style={styles.drawerIcon}>
+            <Text style={styles.drawerIconText}>{expanded ? "▴" : "▾"}</Text>
+          </View>
         </View>
-      ) : null}
-      <View style={styles.taskDetail}>
-        <Text style={styles.fieldLabel}>执行结果</Text>
-        {task.result ? <Text style={styles.body}>{task.result}</Text> : (
-          <Text style={styles.emptyResult}>{running ? "子智能体正在执行。" : "子智能体未返回文本结果。"}</Text>
-        )}
-      </View>
-      {task.error_message ? <Text style={styles.errorText}>{task.error_message}</Text> : null}
-      {(task.change_set?.files || []).map((file) => <Text key={file.path} style={styles.codeText}>{file.change_type}  {file.path}</Text>)}
-      <View style={styles.actionRow}>
-        {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
-        <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
-        {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="取消" /></Pressable> : null}
-        {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="应用变更" /></Pressable> : null}
-        {pendingChanges ? <Pressable disabled={pending} onPress={onDiscard} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="丢弃" /></Pressable> : null}
-      </View>
+      </Pressable>
+
+      {expanded ? (
+        <View style={styles.taskDrawer}>
+          {task.instruction ? (
+            <View style={styles.taskDetail}>
+              <Text style={styles.fieldLabel}>任务要求</Text>
+              <Text style={styles.body}>{task.instruction}</Text>
+            </View>
+          ) : null}
+          <View style={styles.taskDetail}>
+            <Text style={styles.fieldLabel}>执行结果</Text>
+            {task.result ? <Text style={styles.body}>{task.result}</Text> : (
+              <Text style={styles.emptyResult}>{running ? "子智能体正在执行。" : "子智能体未返回文本结果。"}</Text>
+            )}
+          </View>
+          {task.error_message ? <Text style={styles.errorText}>{task.error_message}</Text> : null}
+          {(task.change_set?.files || []).map((file) => <Text key={file.path} style={styles.codeText}>{file.change_type}  {file.path}</Text>)}
+          <View style={styles.actionRow}>
+            {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
+            <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
+            {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="取消" /></Pressable> : null}
+            {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="应用变更" /></Pressable> : null}
+            {pendingChanges ? <Pressable disabled={pending} onPress={onDiscard} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="丢弃" /></Pressable> : null}
+          </View>
+        </View>
+      ) : (
+        <View style={styles.taskPreview}>
+          <Text numberOfLines={2} style={[styles.taskPreviewText, task.error_message && styles.taskPreviewError]}>{summary}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -284,6 +327,8 @@ const styles = StyleSheet.create({
   dangerButton: { alignItems: "center", borderColor: "#9f352d", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
   dangerText: { color: "#8b2822", fontSize: 12, fontWeight: "800" },
   disabled: { opacity: 0.5 },
+  drawerIcon: { alignItems: "center", backgroundColor: "#eee6da", borderRadius: 4, height: 28, justifyContent: "center", width: 28 },
+  drawerIconText: { color: "#39342e", fontSize: 15, fontWeight: "900", lineHeight: 18 },
   editor: { borderColor: "#1c1916", borderRadius: 6, borderWidth: 2, gap: 9, padding: 12 },
   empty: { color: "#756d64", fontSize: 13, paddingVertical: 12 },
   emptyResult: { color: "#756d64", fontSize: 12, lineHeight: 18, marginTop: 5 },
@@ -310,7 +355,18 @@ const styles = StyleSheet.create({
   segmentText: { color: "#5d554c", fontSize: 11, fontWeight: "800" },
   segmentTextActive: { color: "#173e2e" },
   stack: { gap: 10 },
+  taskDrawer: { borderTopColor: "#ded4c7", borderTopWidth: 1, padding: 12, paddingTop: 3 },
   taskDetail: { marginTop: 9 },
+  taskHeader: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 66, padding: 12 },
+  taskHeaderPressed: { backgroundColor: "#f5efe5" },
+  taskHeaderSide: { alignItems: "center", flexDirection: "row", gap: 7 },
+  taskItem: { overflow: "hidden", padding: 0 },
+  taskPreview: { borderTopColor: "#ede4d8", borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  taskPreviewError: { color: "#9f352d" },
+  taskPreviewText: { color: "#675f56", fontSize: 12, lineHeight: 17 },
+  taskTitle: { flexShrink: 1 },
+  taskTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
   title: { color: "#171411", fontSize: 17, fontWeight: "900" },
   toolbar: { alignItems: "center", flexDirection: "row", gap: 8 },
+  unreadDot: { backgroundColor: "#1d5c45", borderRadius: 4, height: 7, width: 7 },
 });

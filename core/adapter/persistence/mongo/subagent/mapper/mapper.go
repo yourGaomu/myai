@@ -49,6 +49,10 @@ func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
 }
 
 func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
+	unread := document.Unread
+	if domainsubagent.TaskStatus(document.Status) == domainsubagent.TaskStatusCanceled {
+		unread = false
+	}
 	return domainsubagent.Task{
 		ID: document.ID, ParentSessionID: document.ParentSessionID, ChildSessionID: document.ChildSessionID,
 		CreatedRequestID: document.CreatedRequestID, DefinitionID: document.DefinitionID,
@@ -57,7 +61,7 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 		CurrentRunID: document.CurrentRunID, Workspace: workspaceDomain(document.Workspace),
 		ChangeSet: changeSetDomain(document.ChangeSet),
 		Result:    document.Result, Reasoning: document.Reasoning, ErrorMessage: document.ErrorMessage,
-		Unread: document.Unread, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt,
+		Unread: unread, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt,
 		StartedAt: cloneTime(document.StartedAt), CompletedAt: cloneTime(document.CompletedAt),
 	}
 }

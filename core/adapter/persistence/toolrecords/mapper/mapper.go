@@ -1,6 +1,8 @@
 package mapper
 
 import (
+	"time"
+
 	uuidadapter "myai/core/adapter/id/uuid"
 	toolrecordsport "myai/core/adapter/persistence/toolrecords/port"
 	domaintool "myai/core/domain/tool"
@@ -70,8 +72,16 @@ func (m Mapper) messageRecord(entry domaintool.ExecutionEntry) (repository.Messa
 		ToolPromptContent:   entry.PromptContent,
 		ToolPromptError:     entry.PromptError,
 		ToolPromptTruncated: entry.PromptTruncated,
+		Sequence:            messageSequence(entry.CreatedAt),
 		CreatedAt:           entry.CreatedAt,
 	}, true
+}
+
+func messageSequence(createdAt time.Time) int64 {
+	if createdAt.IsZero() {
+		return 0
+	}
+	return createdAt.UnixNano()
 }
 
 func (m Mapper) newID() string {

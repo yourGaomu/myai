@@ -50,6 +50,9 @@ func TestWriterSavesUserMessageAndSession(t *testing.T) {
 	if !messages.records[1].CreatedAt.Equal(now.Add(time.Nanosecond)) {
 		t.Fatalf("unexpected user created time: %#v", messages.records[1].CreatedAt)
 	}
+	if messages.records[0].Sequence != now.UnixNano() || messages.records[1].Sequence != now.Add(time.Nanosecond).UnixNano() {
+		t.Fatalf("unexpected message sequences: %#v", messages.records)
+	}
 }
 
 func TestWriterSavesAssistantMessageAndSessionSnapshot(t *testing.T) {
