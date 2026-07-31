@@ -3,25 +3,32 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
+	agentrunapi "myai/core/application/agentrun/api"
+	agentruncommand "myai/core/application/agentrun/command"
+	agentrunruntime "myai/core/application/agentrun/runtime"
 	generationapi "myai/core/application/chat/generation/api"
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
+	domainagentrun "myai/core/domain/agentrun"
 )
 
 type TaskService struct {
-	// TaskService 为每次生成建立 request_id 和工作区历史记录，再委托真正的生成服务。
+	// TaskService creates the request-scoped checkpoint and Agent run before delegating generation.
 	RequestIDs   generationport.RequestIDGenerator
 	Recorders    generationport.TaskRecorderFactory
 	Generator    generationapi.Generator
+	Runs         agentrunapi.CommandService
 	OnSaveError  func(error)
 	OnCloseError func(error)
+	OnRunError   func(error)
 }
 
 var _ generationapi.TaskService = TaskService{}
 
-func (s TaskService) Generate(ctx context.Context, command generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+func (s TaskService) Generate(ctx context.Context, command generationcommand.GenerationTask) (response generationresult.GenerationResponse, resultErr error) {
 	if command.Session == nil {
 		return generationresult.GenerationResponse{}, errors.New("session is nil")
 	}
@@ -31,9 +38,63 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	if s.Generator == nil {
 		return generationresult.GenerationResponse{}, errors.New("generation handler is nil")
 	}
+
 	requestID := s.RequestIDs.NewRequestID()
-	// Recorder 绑定到 context 后，文件工具可以把本次修改归入同一个可恢复检查点。
-	recorder := s.newRecorder(generationcommand.TaskRecord{Title: command.Title, Reason: command.Reason, SessionID: command.Session.ID, RequestID: requestID})
+	runID := agentrunruntime.RunID(ctx)
+	ownsRun := false
+	if runID == "" && s.Runs != nil {
+		run, err := s.Runs.Start(ctx, agentruncommand.Start{
+			RequestID: command.Stream.CorrelationID,
+			SessionID: command.Session.ID,
+			Kind:      runKind(command.Reason),
+			Title:     runTitle(command.Title, command.Reason),
+			Reason:    command.Reason,
+		})
+		if err != nil {
+			s.reportRunError(err)
+		} else {
+			runID = run.ID
+			ownsRun = true
+			ctx = agentrunruntime.WithRunID(ctx, runID)
+			if command.Stream.OnRunStarted != nil {
+				command.Stream.OnRunStarted(run)
+			}
+		}
+	}
+	if ownsRun {
+		defer func() {
+			status := domainagentrun.StatusSucceeded
+			errorMessage := ""
+			if resultErr != nil {
+				errorMessage = resultErr.Error()
+				status = domainagentrun.StatusFailed
+				if errors.Is(resultErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					status = domainagentrun.StatusPaused
+				}
+			}
+			finished, err := s.Runs.Finish(context.WithoutCancel(ctx), agentruncommand.Finish{
+				RunID: runID, Status: status, ErrorMessage: errorMessage,
+			})
+			if err != nil {
+				s.reportRunError(err)
+				return
+			}
+			if command.Stream.OnRunCompleted != nil {
+				command.Stream.OnRunCompleted(finished)
+			}
+		}()
+	}
+
+	stream := command.Stream
+	if runID != "" && s.Runs != nil {
+		runStream := newRunStreamRecorder(ctx, runID, s.Runs, command.Stream, s.reportRunError)
+		defer runStream.Close()
+		stream = runStream.Handler()
+	}
+
+	recorder := s.newRecorder(generationcommand.TaskRecord{
+		Title: command.Title, Reason: command.Reason, SessionID: command.Session.ID, RequestID: requestID,
+	})
 	if recorder != nil {
 		defer s.closeRecorder(recorder)
 		defer s.saveRecorder(recorder)
@@ -41,8 +102,31 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	}
 	return s.Generator.Generate(ctx, generationcommand.AssistantGeneration{
 		Session: command.Session, LatestInput: command.LatestInput, RequestID: requestID,
-		Stream: command.Stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode,
+		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode,
 	})
+}
+
+func runKind(reason string) domainagentrun.Kind {
+	switch strings.TrimSpace(reason) {
+	case "regenerate response":
+		return domainagentrun.KindRegenerate
+	case "execute plan step":
+		return domainagentrun.KindPlan
+	case "user request":
+		return domainagentrun.KindChat
+	default:
+		return domainagentrun.KindInternal
+	}
+}
+
+func runTitle(title string, reason string) string {
+	if title = strings.TrimSpace(title); title != "" {
+		return title
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		return reason
+	}
+	return "Agent run"
 }
 
 func (s TaskService) newRecorder(record generationcommand.TaskRecord) generationport.TaskRecorder {
@@ -61,5 +145,11 @@ func (s TaskService) saveRecorder(recorder generationport.TaskRecorder) {
 func (s TaskService) closeRecorder(recorder generationport.TaskRecorder) {
 	if err := recorder.Close(); err != nil && s.OnCloseError != nil {
 		s.OnCloseError(err)
+	}
+}
+
+func (s TaskService) reportRunError(err error) {
+	if err != nil && s.OnRunError != nil {
+		s.OnRunError(err)
 	}
 }

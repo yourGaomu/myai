@@ -16,6 +16,8 @@ import (
 	memorysession "myai/core/adapter/session/memory"
 	toolcatalog "myai/core/adapter/tool/catalog"
 	toolexecutor "myai/core/adapter/tool/executor"
+	agentrunapi "myai/core/application/agentrun/api"
+	agentrunservice "myai/core/application/agentrun/service"
 	compactionservice "myai/core/application/chat/compaction/service"
 	chatcontextservice "myai/core/application/chat/context/service"
 	generationservice "myai/core/application/chat/generation/service"
@@ -37,6 +39,7 @@ import (
 	settingsservice "myai/core/application/session/settings/service"
 	skillservice "myai/core/application/skill/service"
 	"myai/core/hook"
+	agentrunport "myai/core/port/agentrun"
 	asyncport "myai/core/port/async"
 	cacheport "myai/core/port/cache"
 	modelport "myai/core/port/model"
@@ -70,6 +73,7 @@ type Configuration struct {
 	DefaultModel    string
 	UserID          string
 	KnowledgeSearch searchapi.Service
+	AgentRuns       agentrunport.Repository
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -81,6 +85,12 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	userID := configuration.UserID
 	if userID == "" {
 		userID = defaultUserID
+	}
+	var runCommands agentrunapi.CommandService
+	var runQueries agentrunapi.QueryService
+	if configuration.AgentRuns != nil {
+		runCommands = agentrunservice.CommandService{Repository: configuration.AgentRuns, IDs: uuidadapter.Generator{}}
+		runQueries = agentrunservice.QueryService{Repository: configuration.AgentRuns}
 	}
 
 	// 第一组：会话加载、生命周期、查询和设置用例。
@@ -233,11 +243,15 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		RequestIDs: uuidadapter.Generator{},
 		Recorders:  taskrecorder.Factory{},
 		Generator:  assistantGeneration,
+		Runs:       runCommands,
 		OnSaveError: func(err error) {
 			log.Printf("save task history checkpoint failed: %v", err)
 		},
 		OnCloseError: func(err error) {
 			log.Printf("close task history recorder failed: %v", err)
+		},
+		OnRunError: func(err error) {
+			log.Printf("record agent run failed: %v", err)
 		},
 	}
 
@@ -291,6 +305,10 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		PlanStates:   planStates,
 		UserMessages: userMessages,
 		Events:       events,
+		Runs:         runCommands,
+		OnRunError: func(err error) {
+			log.Printf("record plan run failed: %v", err)
+		},
 	}
 
 	// ChatService 只拿接口，不知道 Mongo、Redis、LangChainGo 等具体技术实现。
@@ -324,8 +342,9 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 			Registry:   configuration.Models,
 			Factory:    configuration.ModelFactory,
 		},
-		ModelQueries: modelservice.QueryService{Catalog: configuration.Models},
-		SkillCatalog: skillCatalog,
-		Events:       events,
+		ModelQueries:    modelservice.QueryService{Catalog: configuration.Models},
+		SkillCatalog:    skillCatalog,
+		Events:          events,
+		AgentRunQueries: runQueries,
 	}
 }

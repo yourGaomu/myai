@@ -21,6 +21,7 @@ export type ChatMessageStatus =
 export type ChatItem = {
   id: string;
   requestID?: string;
+  createdAt?: string;
   role: "user" | "assistant" | "event" | "error" | "tool_call" | "tool";
   status?: ChatMessageStatus;
   text: string;

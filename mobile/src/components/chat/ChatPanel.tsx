@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 
+import type { AgentRunSnapshot } from "../../protocol";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { groupToolActivity } from "../../utils/chatRenderItems";
+import { groupToolActivity, type ChatRenderItem } from "../../utils/chatRenderItems";
+import { AgentRunTimeline } from "./AgentRunTimeline";
 import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
 import { ChatJumpNav, type ChatJumpAnchor } from "./ChatJumpNav";
 import { MessageBubble } from "./MessageBubble";
@@ -15,6 +17,7 @@ type Props = {
   height: number;
   loadingHistory: boolean;
   messages: ChatItem[];
+  runs: AgentRunSnapshot[];
   onRegenerate: () => void;
   showAssistantLoading: boolean;
 };
@@ -25,10 +28,14 @@ export function ChatPanel({
   height,
   loadingHistory,
   messages,
+  runs,
   onRegenerate,
   showAssistantLoading,
 }: Props) {
-  const renderItems = useMemo(() => groupToolActivity(messages), [messages]);
+  const renderItems = useMemo(() => {
+    const visibleMessages = messages.filter((message) => !isCoveredToolActivity(message, runs));
+    return injectAgentRuns(groupToolActivity(visibleMessages), visibleMessages, runs);
+  }, [messages, runs]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});
   const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
@@ -65,17 +72,26 @@ export function ChatPanel({
             <ActivityIndicator color="#12100e" size="small" />
             <Text style={styles.inlineLoadingText}>Loading session history...</Text>
           </View>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && runs.length === 0 ? (
           <Text style={styles.emptyText}>Messages will appear here.</Text>
         ) : (
           renderItems.map((item) =>
-            item.type === "tool_group" ? (
+            item.type === "run" ? (
+              <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
+                <AgentRunTimeline buttonFeedback={buttonFeedback} snapshot={item.snapshot} />
+              </View>
+            ) : item.type === "tool_group" ? (
               <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
                 <ToolActivityGroup buttonFeedback={buttonFeedback} group={item.group} />
               </View>
             ) : (
               <View key={item.id} onLayout={(event) => rememberItemOffset(item.message.id, event)}>
-                <MessageBubble buttonFeedback={buttonFeedback} message={item.message} onRegenerate={onRegenerate} />
+                <MessageBubble
+                  buttonFeedback={buttonFeedback}
+                  hideReasoning={item.message.role === "assistant" && isCoveredByRun(item.message, runs)}
+                  message={item.message}
+                  onRegenerate={onRegenerate}
+                />
               </View>
             ),
           )
@@ -91,6 +107,77 @@ export function ChatPanel({
       />
     </View>
   );
+}
+
+type PanelRenderItem = ChatRenderItem | { type: "run"; id: string; snapshot: AgentRunSnapshot };
+
+function injectAgentRuns(items: ChatRenderItem[], messages: ChatItem[], runs: AgentRunSnapshot[]): PanelRenderItem[] {
+  if (runs.length === 0) {
+    return items;
+  }
+  const result: PanelRenderItem[] = [];
+  const inserted = new Set<string>();
+  const users = messages.filter((message) => message.role === "user");
+
+  items.forEach((item) => {
+    result.push(item);
+    if (item.type !== "message") {
+      return;
+    }
+    const anchor = item.message;
+    const nextUser = anchor.role === "user" ? users[users.indexOf(anchor) + 1] : undefined;
+    runs.forEach((snapshot) => {
+      if (inserted.has(snapshot.run.id)) {
+        return;
+      }
+      const requestMatch = Boolean(anchor.requestID && snapshot.run.request_id === anchor.requestID);
+      const timeMatch = anchor.role === "user" && runFollowsUser(snapshot, anchor, nextUser);
+      if (requestMatch || timeMatch) {
+        result.push({ type: "run", id: `agent-run-${snapshot.run.id}`, snapshot });
+        inserted.add(snapshot.run.id);
+      }
+    });
+  });
+
+  runs.forEach((snapshot) => {
+    if (!inserted.has(snapshot.run.id)) {
+      result.push({ type: "run", id: `agent-run-${snapshot.run.id}`, snapshot });
+    }
+  });
+  return result;
+}
+
+function runFollowsUser(snapshot: AgentRunSnapshot, user: ChatItem, nextUser?: ChatItem) {
+  const startedAt = Date.parse(snapshot.run.started_at);
+  const userAt = user.createdAt ? Date.parse(user.createdAt) : Number.NaN;
+  const nextUserAt = nextUser?.createdAt ? Date.parse(nextUser.createdAt) : Number.POSITIVE_INFINITY;
+  return Number.isFinite(startedAt) && Number.isFinite(userAt) && startedAt >= userAt - 1000 && startedAt < nextUserAt;
+}
+
+function isCoveredToolActivity(message: ChatItem, runs: AgentRunSnapshot[]) {
+  const permissionEvent = message.role === "event" && /^(Allowed|Denied)\s+\S+/.test(message.text.trim());
+  if (message.role !== "tool_call" && message.role !== "tool" && !permissionEvent) {
+    return false;
+  }
+  return isCoveredByRun(message, runs);
+}
+
+function isCoveredByRun(message: ChatItem, runs: AgentRunSnapshot[]) {
+  if (message.requestID && runs.some((snapshot) => snapshot.run.request_id === message.requestID)) {
+    return true;
+  }
+  if (!message.createdAt) {
+    return false;
+  }
+  const messageAt = Date.parse(message.createdAt);
+  if (!Number.isFinite(messageAt)) {
+    return false;
+  }
+  return runs.some(({ run }) => {
+    const startedAt = Date.parse(run.started_at);
+    const finishedAt = run.finished_at ? Date.parse(run.finished_at) : Date.now();
+    return Number.isFinite(startedAt) && messageAt >= startedAt - 1000 && messageAt <= finishedAt + 30000;
+  });
 }
 
 function userMessageAnchors(messages: ChatItem[]): ChatJumpAnchor[] {

@@ -11,10 +11,11 @@ import { styles } from "./styles";
 type Props = {
   message: ChatItem;
   buttonFeedback: (style: StyleProp<ViewStyle>, active?: boolean) => StyleProp<ViewStyle>;
+  hideReasoning?: boolean;
   onRegenerate: () => void;
 };
 
-export function MessageBubble({ message, buttonFeedback, onRegenerate }: Props) {
+export function MessageBubble({ message, buttonFeedback, hideReasoning = false, onRegenerate }: Props) {
   const sharedAsset = parseSharedAsset(message.toolName, message.text);
   const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || Boolean(sharedAsset)));
   const canRegenerate = message.role === "assistant" && (message.status === "paused" || message.status === "error");
@@ -57,7 +58,7 @@ export function MessageBubble({ message, buttonFeedback, onRegenerate }: Props) 
 
   return (
     <View style={[styles.message, styles[`${message.role}Message`]]}>
-      {message.reasoning ? (
+      {message.reasoning && !hideReasoning ? (
         <View style={styles.reasoningBox}>
           <Text style={styles.reasoningTitle}>Thinking</Text>
           <Text style={styles.reasoningText}>{message.reasoning}</Text>

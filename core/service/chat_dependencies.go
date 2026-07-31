@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	agentrunapi "myai/core/application/agentrun/api"
 	compactionapi "myai/core/application/chat/compaction/api"
 	chatcontextapi "myai/core/application/chat/context/api"
 	generationapi "myai/core/application/chat/generation/api"
@@ -47,8 +48,9 @@ type ChatDependencies struct {
 	CurrentState     currentapi.StateQueryService
 	SessionBootstrap bootstrapapi.Service
 
-	ModelConfig  modelapi.ConfigService
-	ModelQueries modelapi.QueryService
-	SkillCatalog skillapi.CatalogService
-	Events       ChatEventPublisher
+	ModelConfig     modelapi.ConfigService
+	ModelQueries    modelapi.QueryService
+	SkillCatalog    skillapi.CatalogService
+	Events          ChatEventPublisher
+	AgentRunQueries agentrunapi.QueryService
 }

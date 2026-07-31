@@ -26,6 +26,18 @@ func newTestServer() *Server {
 	)
 }
 
+func TestAgentRunMessagesDoNotFinishChatRoute(t *testing.T) {
+	if isTerminalResponseForRequest(protocol.TypeUserMessage, protocol.TypeAgentRunStarted) {
+		t.Fatal("agent_run_started must not finish a chat request")
+	}
+	if isTerminalResponseForRequest(protocol.TypeUserMessage, protocol.TypeAgentRunCompleted) {
+		t.Fatal("agent_run_completed must not finish a chat request before assistant_done")
+	}
+	if !isTerminalResponseForRequest(protocol.TypeAgentRunList, protocol.TypeAgentRunListResult) {
+		t.Fatal("agent_run_list_result must finish an agent_run_list request")
+	}
+}
+
 func TestAgentRegistrationSupersedesPreviousPeer(t *testing.T) {
 	server := newTestServer()
 	previous := &peer{}

@@ -66,10 +66,10 @@ export function useChatMessages() {
   }, []);
 
   const addMessage = useCallback(
-    (sessionID: string, role: ChatItem["role"], text: string) => {
+    (sessionID: string, role: ChatItem["role"], text: string, requestID?: string) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
-        messages: [...current.messages, { id: newRequestID(), role, text }],
+        messages: [...current.messages, { id: newRequestID(), requestID, createdAt: new Date().toISOString(), role, text }],
       }));
     },
     [updateSessionChat],
@@ -95,6 +95,7 @@ export function useChatMessages() {
           {
             id: newRequestID(),
             requestID,
+            createdAt: new Date().toISOString(),
             role: "tool_call",
             text: "",
             toolName: name,
@@ -129,6 +130,7 @@ export function useChatMessages() {
           {
             id: newRequestID(),
             requestID,
+            createdAt: new Date().toISOString(),
             role: "tool",
             text: result,
             toolName: name,
@@ -169,6 +171,7 @@ export function useChatMessages() {
               {
                 id,
                 requestID,
+                createdAt: new Date().toISOString(),
                 role: "assistant",
                 reasoning,
                 status: "streaming",
@@ -226,6 +229,7 @@ export function useChatMessages() {
               {
                 id,
                 requestID,
+                createdAt: new Date().toISOString(),
                 role: "assistant",
                 reasoning: reasoning || undefined,
                 status,
@@ -275,6 +279,7 @@ export function useChatMessages() {
               {
                 id,
                 requestID,
+                createdAt: new Date().toISOString(),
                 role: "assistant",
                 status: "error",
                 text: message || "Request failed.",

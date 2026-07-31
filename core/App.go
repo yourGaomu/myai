@@ -24,6 +24,8 @@ import (
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
 	adaptermodel "myai/core/adapter/model/langchaingo"
 	minioadapter "myai/core/adapter/objectstorage/minio"
+	agentrunmemory "myai/core/adapter/persistence/memory/agentrun"
+	agentrunmongo "myai/core/adapter/persistence/mongo/agentrun/repository"
 	knowledgemongo "myai/core/adapter/persistence/mongo/knowledge/repository"
 	adaptermongo "myai/core/adapter/persistence/mongo/repository"
 	subagentmongo "myai/core/adapter/persistence/mongo/subagent/repository"
@@ -66,6 +68,7 @@ import (
 	"myai/core/infra"
 	"myai/core/llm"
 	"myai/core/mcp"
+	agentrunport "myai/core/port/agentrun"
 	cacheport "myai/core/port/cache"
 	executionport "myai/core/port/execution"
 	knowledgeport "myai/core/port/knowledge"
@@ -91,6 +94,7 @@ type Application struct {
 	mongoDb                     *mongo.Client
 	redisDb                     *redis.Client
 	store                       persistenceport.Store
+	agentRunRepository          agentrunport.Repository
 	cache                       cacheport.CurrentSessionCache
 	assetClient                 *asset.Client
 	knowledgeBaseRepository     knowledgeport.KnowledgeBaseRepository
@@ -223,12 +227,14 @@ func (app *Application) InitRedisDb() {
 
 func (app *Application) InitStore() {
 	if app.mongoDb == nil {
+		app.agentRunRepository = agentrunmemory.New()
 		// Mongo 未配置时允许以内存模式启动，持久化相关适配器会保持为空。
 		return
 	}
 
 	database := app.properties.Mongo.Database
 	app.store = adaptermongo.New(app.mongoDb, database)
+	app.agentRunRepository = agentrunmongo.New(app.mongoDb, database)
 }
 
 func (app *Application) InitKnowledgeStorage() {
@@ -601,6 +607,7 @@ func (app *Application) InitChatService() {
 		Hooks:           app.hookManager,
 		DefaultModel:    app.defaultModelID,
 		KnowledgeSearch: app.knowledgeSearchService,
+		AgentRuns:       app.agentRunRepository,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)

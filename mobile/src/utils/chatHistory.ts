@@ -8,6 +8,7 @@ export function historyMessageToChatItem(
   const role = chatRoleFromHistory(message.role);
   return {
     id: message.id || newRequestID(),
+    createdAt: message.created_at,
     role,
     status: role === "assistant" ? "done" : undefined,
     text: historyMessageText(message),

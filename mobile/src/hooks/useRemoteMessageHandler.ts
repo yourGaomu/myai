@@ -1,6 +1,10 @@
 import { useCallback, type RefObject } from "react";
 
 import type {
+  AgentRunCompletedPayload,
+  AgentRunEventPayload,
+  AgentRunListResultPayload,
+  AgentRunStartedPayload,
   AssetListResultPayload,
   AssistantDeltaPayload,
   AssistantDonePayload,
@@ -60,6 +64,10 @@ type Args = {
     requestID?: string,
     details?: ToolResultPayload,
   ) => void;
+  applyRunCompleted: (payload?: AgentRunCompletedPayload) => void;
+  applyRunEvent: (payload?: AgentRunEventPayload) => void;
+  applyRunList: (payload?: AgentRunListResultPayload) => void;
+  applyRunStarted: (payload?: AgentRunStartedPayload) => void;
   appendAssistant: (
     sessionID: string,
     requestID: string | undefined,
@@ -110,6 +118,7 @@ type Args = {
     pendingRequestID: string;
   };
   historySessionIDRef: RefObject<string>;
+  hasRunForRequest: (sessionID: string, requestID?: string) => boolean;
   isKnowledgeOperationPending: boolean;
   markAssistantError: (
     sessionID: string,
@@ -117,6 +126,7 @@ type Args = {
     message?: string,
   ) => void;
   mergeSessionChats: (fromSessionID: string, toSessionID: string) => void;
+  mergeSessionRuns: (fromSessionID: string, toSessionID: string) => void;
   requestChanges: () => boolean;
   requestAssets: (sessionID?: string) => boolean;
   requestFiles: (path?: string) => boolean;
@@ -152,6 +162,10 @@ export function useRemoteMessageHandler({
   addEventMessage,
   addToolCall,
   addToolResult,
+  applyRunCompleted,
+  applyRunEvent,
+  applyRunList,
+  applyRunStarted,
   appendAssistant,
   applyAssetList,
   applyChangeDiff,
@@ -185,9 +199,11 @@ export function useRemoteMessageHandler({
   currentFilePath,
   getSessionChat,
   historySessionIDRef,
+  hasRunForRequest,
   isKnowledgeOperationPending,
   markAssistantError,
   mergeSessionChats,
+  mergeSessionRuns,
   requestChanges,
   requestAssets,
   requestFiles,
@@ -220,13 +236,26 @@ export function useRemoteMessageHandler({
         case "assistant_delta":
           {
             const payload = (message.payload || {}) as AssistantDeltaPayload;
+            const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
             appendAssistant(
-              resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+              targetSessionID,
               message.request_id,
               payload.content || "",
-              payload.reasoning || "",
+              hasRunForRequest(targetSessionID, message.request_id) ? "" : payload.reasoning || "",
             );
           }
+          break;
+        case "agent_run_started":
+          applyRunStarted(message.payload as AgentRunStartedPayload | undefined);
+          break;
+        case "agent_run_event":
+          applyRunEvent(message.payload as AgentRunEventPayload | undefined);
+          break;
+        case "agent_run_completed":
+          applyRunCompleted(message.payload as AgentRunCompletedPayload | undefined);
+          break;
+        case "agent_run_list_result":
+          applyRunList(message.payload as AgentRunListResultPayload | undefined);
           break;
         case "assistant_done": {
           const requestSessionID = message.request_id
@@ -236,6 +265,7 @@ export function useRemoteMessageHandler({
             message.session_id || requestSessionID || sessionIDRef.current;
           if (message.session_id && requestSessionID !== message.session_id) {
             mergeSessionChats(requestSessionID, message.session_id);
+            mergeSessionRuns(requestSessionID, message.session_id);
             if (message.request_id) {
               requestSessionMapRef.current[message.request_id] =
                 message.session_id;
@@ -295,8 +325,12 @@ export function useRemoteMessageHandler({
         }
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          if (hasRunForRequest(targetSessionID, message.request_id)) {
+            break;
+          }
           addToolCall(
-            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+            targetSessionID,
             payload.name || "tool",
             payload.arguments || "",
             message.request_id,
@@ -305,8 +339,12 @@ export function useRemoteMessageHandler({
         }
         case "tool_result": {
           const payload = (message.payload || {}) as ToolResultPayload;
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          if (hasRunForRequest(targetSessionID, message.request_id)) {
+            break;
+          }
           addToolResult(
-            resolveChatSessionID(message, requestSessionMapRef, sessionIDRef),
+            targetSessionID,
             payload.name || "tool",
             payload.arguments || "",
             payload.result || "",
@@ -602,6 +640,10 @@ export function useRemoteMessageHandler({
       addEventMessage,
       addToolCall,
       addToolResult,
+      applyRunCompleted,
+      applyRunEvent,
+      applyRunList,
+      applyRunStarted,
       appendAssistant,
       applyAssetList,
       applyChangeDiff,
@@ -635,9 +677,11 @@ export function useRemoteMessageHandler({
       currentFilePath,
       getSessionChat,
       historySessionIDRef,
+      hasRunForRequest,
       isKnowledgeOperationPending,
       markAssistantError,
       mergeSessionChats,
+      mergeSessionRuns,
       requestChanges,
       requestAssets,
       requestFiles,

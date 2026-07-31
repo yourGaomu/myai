@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	agentrunquery "myai/core/application/agentrun/query"
+	agentrunresult "myai/core/application/agentrun/result"
 	compactioncommand "myai/core/application/chat/compaction/command"
 	compactionresult "myai/core/application/chat/compaction/result"
 	generationcommand "myai/core/application/chat/generation/command"
@@ -376,6 +378,23 @@ func (s *ChatService) ListSessionMessages(ctx context.Context, sessionID string)
 		return nil, errors.New("session id is empty")
 	}
 	return s.dependencies.MessageQueries.ListMessages(ctx, sessionID)
+}
+
+func (s *ChatService) ListAgentRuns(ctx context.Context, sessionID string, limit int) ([]agentrunresult.Snapshot, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return nil, errors.New("session id is empty")
+	}
+	if s.dependencies.AgentRunQueries == nil {
+		return []agentrunresult.Snapshot{}, nil
+	}
+	return s.dependencies.AgentRunQueries.ListSessionRuns(ctx, agentrunquery.ListSessionRuns{
+		SessionID: sessionID,
+		Limit:     limit,
+	})
 }
 
 func (s *ChatService) SessionHistoryMeta(ctx context.Context, sessionID string) (sessionresult.MessageHistoryMeta, error) {

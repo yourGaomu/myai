@@ -18,6 +18,11 @@ const (
 	TypeUserMessage                      MessageType = "user_message"
 	TypeAssistantDelta                   MessageType = "assistant_delta"
 	TypeAssistantDone                    MessageType = "assistant_done"
+	TypeAgentRunStarted                  MessageType = "agent_run_started"
+	TypeAgentRunEvent                    MessageType = "agent_run_event"
+	TypeAgentRunCompleted                MessageType = "agent_run_completed"
+	TypeAgentRunList                     MessageType = "agent_run_list"
+	TypeAgentRunListResult               MessageType = "agent_run_list_result"
 	TypeToolCall                         MessageType = "tool_call"
 	TypeToolResult                       MessageType = "tool_result"
 	TypePermissionAsk                    MessageType = "permission_ask"
@@ -246,6 +251,69 @@ type AssistantDonePayload struct {
 	Retrieval *KnowledgeSearchPreviewResultPayload `json:"retrieval,omitempty"`
 	Paused    bool                                 `json:"paused,omitempty"`
 	Message   string                               `json:"message,omitempty"`
+}
+
+type AgentRun struct {
+	ID           string     `json:"id"`
+	RequestID    string     `json:"request_id,omitempty"`
+	SessionID    string     `json:"session_id"`
+	Kind         string     `json:"kind"`
+	Title        string     `json:"title,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	Status       string     `json:"status"`
+	CurrentStep  int        `json:"current_step,omitempty"`
+	TotalSteps   int        `json:"total_steps,omitempty"`
+	LastSequence int64      `json:"last_sequence,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+}
+
+type AgentRunEvent struct {
+	ID           string    `json:"id"`
+	RunID        string    `json:"run_id"`
+	SessionID    string    `json:"session_id"`
+	Sequence     int64     `json:"sequence"`
+	Type         string    `json:"type"`
+	Title        string    `json:"title,omitempty"`
+	Content      string    `json:"content,omitempty"`
+	ToolName     string    `json:"tool_name,omitempty"`
+	Arguments    string    `json:"arguments,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	ErrorCode    string    `json:"error_code,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	Truncated    bool      `json:"truncated,omitempty"`
+	Delta        bool      `json:"delta,omitempty"`
+	CurrentStep  int       `json:"current_step,omitempty"`
+	TotalSteps   int       `json:"total_steps,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type AgentRunStartedPayload struct {
+	Run AgentRun `json:"run"`
+}
+
+type AgentRunEventPayload struct {
+	Event AgentRunEvent `json:"event"`
+}
+
+type AgentRunCompletedPayload struct {
+	Run AgentRun `json:"run"`
+}
+
+type AgentRunListPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type AgentRunSnapshot struct {
+	Run    AgentRun        `json:"run"`
+	Events []AgentRunEvent `json:"events"`
+}
+
+type AgentRunListResultPayload struct {
+	SessionID string             `json:"session_id"`
+	Runs      []AgentRunSnapshot `json:"runs"`
 }
 
 type TokenUsage struct {

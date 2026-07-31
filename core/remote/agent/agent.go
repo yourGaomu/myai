@@ -224,6 +224,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionHistoryMeta(ctx, conn, message)
 	case protocol.TypeSessionHistoryDelta:
 		return a.handleSessionHistoryDelta(ctx, conn, message)
+	case protocol.TypeAgentRunList:
+		return a.handleAgentRunList(ctx, conn, message)
 	case protocol.TypeSessionPermissionSet:
 		return a.handleSessionPermissionSet(ctx, conn, message)
 	case protocol.TypeSessionModeSet:

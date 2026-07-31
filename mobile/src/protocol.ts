@@ -4,6 +4,11 @@ export type MessageType =
   | "user_message"
   | "assistant_delta"
   | "assistant_done"
+  | "agent_run_started"
+  | "agent_run_event"
+  | "agent_run_completed"
+  | "agent_run_list"
+  | "agent_run_list_result"
   | "tool_call"
   | "tool_result"
   | "permission_ask"
@@ -213,6 +218,69 @@ export type AssistantDonePayload = {
   retrieval?: KnowledgeSearchPreviewResultPayload;
   paused?: boolean;
   message?: string;
+};
+
+export type AgentRunStatus = "running" | "succeeded" | "failed" | "paused" | "canceled";
+export type AgentRunKind = "chat" | "regenerate" | "plan" | "internal";
+export type AgentRunEventType =
+  | "progress"
+  | "reasoning"
+  | "tool_call"
+  | "tool_result"
+  | "permission"
+  | "plan_update"
+  | "completed"
+  | "paused"
+  | "failed"
+  | "canceled";
+
+export type AgentRun = {
+  id: string;
+  request_id?: string;
+  session_id: string;
+  kind: AgentRunKind;
+  title?: string;
+  reason?: string;
+  status: AgentRunStatus;
+  current_step?: number;
+  total_steps?: number;
+  last_sequence?: number;
+  error_message?: string;
+  started_at: string;
+  finished_at?: string;
+};
+
+export type AgentRunEvent = {
+  id: string;
+  run_id: string;
+  session_id: string;
+  sequence: number;
+  type: AgentRunEventType;
+  title?: string;
+  content?: string;
+  tool_name?: string;
+  arguments?: string;
+  status?: string;
+  error_code?: string;
+  error_message?: string;
+  truncated?: boolean;
+  delta?: boolean;
+  current_step?: number;
+  total_steps?: number;
+  created_at: string;
+};
+
+export type AgentRunSnapshot = {
+  run: AgentRun;
+  events: AgentRunEvent[];
+};
+
+export type AgentRunStartedPayload = { run: AgentRun };
+export type AgentRunEventPayload = { event: AgentRunEvent };
+export type AgentRunCompletedPayload = { run: AgentRun };
+export type AgentRunListResultPayload = {
+  session_id: string;
+  runs?: AgentRunSnapshot[];
 };
 
 export type TokenUsage = {

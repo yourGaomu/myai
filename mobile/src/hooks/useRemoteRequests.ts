@@ -136,6 +136,21 @@ export function useRemoteRequests({
     return true;
   }, [clearSkills, clientToken, sendEnvelope, startPending, stopPending]);
 
+  const requestAgentRuns = useCallback(
+    (nextSessionID = currentSessionID) => {
+      const targetSessionID = nextSessionID.trim();
+      if (!clientToken || !targetSessionID) {
+        return false;
+      }
+      return sendEnvelope("agent_run_list", {
+        request_id: newRequestID(),
+        session_id: targetSessionID,
+        payload: { session_id: targetSessionID, limit: 50 },
+      });
+    },
+    [clientToken, currentSessionID, sendEnvelope],
+  );
+
   const requestSessionHistoryFull = useCallback(
     (nextSessionID = currentSessionID) => {
       const targetSessionID = nextSessionID.trim();
@@ -225,6 +240,7 @@ export function useRemoteRequests({
 
       startPending("sessions");
       pendingHistorySessionIDRef.current = targetSessionID;
+      requestAgentRuns(targetSessionID);
       void loadCachedSessionHistory(targetSessionID)
         .then(({ messages, meta }) => {
           if (messages.length > 0) {
@@ -243,7 +259,7 @@ export function useRemoteRequests({
         });
       return true;
     },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, sendHistoryMeta, startPending, stopPending],
+    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, sendHistoryMeta, startPending, stopPending],
   );
 
   const requestAssets = useCallback(
@@ -337,6 +353,7 @@ export function useRemoteRequests({
     reloadSkills,
     refreshRemoteState,
     requestAssets,
+    requestAgentRuns,
     requestChanges,
     requestFiles,
     requestHistory,

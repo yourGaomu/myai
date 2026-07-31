@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	domainagentrun "myai/core/domain/agentrun"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
@@ -127,6 +128,7 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 	}
 
 	response, err := run(llm.ChatStreamHandler{
+		CorrelationID: message.RequestID,
 		OnReasoning: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Reasoning: text})
 		},
@@ -169,6 +171,15 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			message.SessionID = sessionID
 			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
+		},
+		OnRunStarted: func(run domainagentrun.Run) {
+			send(protocol.TypeAgentRunStarted, protocol.AgentRunStartedPayload{Run: agentRunPayload(run)})
+		},
+		OnRunEvent: func(event domainagentrun.Event) {
+			send(protocol.TypeAgentRunEvent, protocol.AgentRunEventPayload{Event: agentRunEventPayload(event)})
+		},
+		OnRunCompleted: func(run domainagentrun.Run) {
+			send(protocol.TypeAgentRunCompleted, protocol.AgentRunCompletedPayload{Run: agentRunPayload(run)})
 		},
 	})
 	if err != nil {

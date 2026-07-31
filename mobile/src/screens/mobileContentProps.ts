@@ -3,6 +3,7 @@ import type { ScrollView } from "react-native";
 
 import type {
   ChangeDiffResultPayload,
+  AgentRunSnapshot,
   ChangeEntry,
   CompactInfo,
   ContextInfo,
@@ -105,6 +106,7 @@ export type ChatContentProps = {
   chatPanelHeight: number;
   chatScrollRef: RefObject<ScrollView | null>;
   messages: ChatItem[];
+  runs: AgentRunSnapshot[];
   onRegenerate: () => void;
   pendingHistorySessionID: string;
   pendingRequestID: string;

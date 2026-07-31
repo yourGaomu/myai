@@ -91,6 +91,7 @@ export function MobileMainContent({
           loadingHistory={common.pendingActions.sessions && Boolean(chat.pendingHistorySessionID)}
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
+          runs={chat.runs}
           showAssistantLoading={Boolean(chat.pendingRequestID) && !chat.activeAssistantID}
         />
       ) : null}

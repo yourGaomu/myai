@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	agentrunapi "myai/core/application/agentrun/api"
+	agentruncommand "myai/core/application/agentrun/command"
+	agentrunruntime "myai/core/application/agentrun/runtime"
 	generationapi "myai/core/application/chat/generation/api"
 	generationcommand "myai/core/application/chat/generation/command"
 	generationresult "myai/core/application/chat/generation/result"
@@ -17,7 +20,9 @@ import (
 	plancommandapp "myai/core/application/plan/command"
 	planserviceapp "myai/core/application/plan/service"
 	messagecommand "myai/core/application/session/message/command"
+	domainagentrun "myai/core/domain/agentrun"
 	agentplan "myai/core/plan"
+	modelport "myai/core/port/model"
 	"myai/core/session"
 )
 
@@ -30,6 +35,8 @@ type ExecutionService struct {
 	PlanStates   planport.StateStore
 	UserMessages planport.UserMessagePersistence
 	Events       planport.SessionEventPublisher
+	Runs         agentrunapi.CommandService
+	OnRunError   func(error)
 	State        planserviceapp.StateService
 	Inputs       planserviceapp.ExecutionInputBuilder
 	Responses    planserviceapp.ResponseCombiner
@@ -37,7 +44,7 @@ type ExecutionService struct {
 
 var _ planapi.Service = ExecutionService{}
 
-func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execute, updates planport.UpdateSink) (planresult.Execution, error) {
+func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execute, updates planport.UpdateSink) (execution planresult.Execution, resultErr error) {
 	if s.Models == nil {
 		return planresult.Execution{}, errors.New("llm client is nil")
 	}
@@ -67,6 +74,55 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 		return planresult.Execution{}, fmt.Errorf("current plan cannot execute from status %s", currentPlan.Status)
 	}
 
+	runID := agentrunruntime.RunID(ctx)
+	ownsRun := false
+	currentStep := 0
+	if runID == "" && s.Runs != nil {
+		run, runErr := s.Runs.Start(ctx, agentruncommand.Start{
+			RequestID: command.Stream.CorrelationID, SessionID: current.ID, Kind: domainagentrun.KindPlan,
+			Title: "Execute plan", Reason: "execute approved plan", TotalSteps: len(currentPlan.Steps),
+		})
+		if runErr != nil {
+			s.reportRunError(runErr)
+		} else {
+			runID = run.ID
+			ownsRun = true
+			ctx = agentrunruntime.WithRunID(ctx, runID)
+			if command.Stream.OnRunStarted != nil {
+				command.Stream.OnRunStarted(run)
+			}
+		}
+	}
+	if runID != "" && s.Runs != nil {
+		updates = runPlanUpdateSink{
+			base: updates, ctx: ctx, runID: runID, runs: s.Runs, stream: command.Stream, onError: s.reportRunError,
+		}
+	}
+	if ownsRun {
+		defer func() {
+			status := domainagentrun.StatusSucceeded
+			errorMessage := ""
+			if resultErr != nil {
+				errorMessage = resultErr.Error()
+				status = domainagentrun.StatusFailed
+				if errors.Is(resultErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					status = domainagentrun.StatusPaused
+				}
+			}
+			finished, finishErr := s.Runs.Finish(context.WithoutCancel(ctx), agentruncommand.Finish{
+				RunID: runID, Status: status, ErrorMessage: errorMessage,
+				CurrentStep: currentStep, TotalSteps: len(currentPlan.Steps),
+			})
+			if finishErr != nil {
+				s.reportRunError(finishErr)
+				return
+			}
+			if command.Stream.OnRunCompleted != nil {
+				command.Stream.OnRunCompleted(finished)
+			}
+		}()
+	}
+
 	if currentPlan.Status != agentplan.StatusApproved {
 		currentPlan = s.State.Approve(currentPlan)
 		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
@@ -84,6 +140,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	executedSteps := 0
 	for index := range currentPlan.Steps {
 		if currentPlan.Steps[index].Status == agentplan.StepStatusDone || currentPlan.Steps[index].Status == agentplan.StepStatusSkipped {
+			currentStep = index + 1
 			continue
 		}
 		// 每个步骤都是独立生成任务；中途取消时保留已完成步骤，并把整体计划标记为 canceled。
@@ -92,6 +149,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 		}
 
 		currentPlan = s.State.MarkStepRunning(currentPlan, index)
+		currentStep = index + 1
 		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
 			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
 		}
@@ -137,6 +195,60 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	}
 	combined.Plan = agentplan.Clone(currentPlan)
 	return combined, nil
+}
+
+type runPlanUpdateSink struct {
+	base    planport.UpdateSink
+	ctx     context.Context
+	runID   string
+	runs    agentrunapi.CommandService
+	stream  modelport.ChatStreamHandler
+	onError func(error)
+}
+
+func (s runPlanUpdateSink) PlanUpdated(currentPlan *agentplan.Plan) {
+	if s.base != nil {
+		s.base.PlanUpdated(currentPlan)
+	}
+	if currentPlan == nil || s.runs == nil {
+		return
+	}
+	currentStep, title := planProgress(currentPlan)
+	event, err := s.runs.Append(context.WithoutCancel(s.ctx), agentruncommand.Append{
+		RunID: s.runID, Type: domainagentrun.EventTypePlanUpdate, Title: title,
+		Content: currentPlan.Goal, Status: string(currentPlan.Status),
+		CurrentStep: currentStep, TotalSteps: len(currentPlan.Steps),
+	})
+	if err != nil {
+		if s.onError != nil {
+			s.onError(err)
+		}
+		return
+	}
+	if s.stream.OnRunEvent != nil {
+		s.stream.OnRunEvent(event)
+	}
+}
+
+func planProgress(currentPlan *agentplan.Plan) (int, string) {
+	current := 0
+	title := "Plan updated"
+	for index, step := range currentPlan.Steps {
+		if step.Status == agentplan.StepStatusRunning {
+			return index + 1, step.Title
+		}
+		if step.Status == agentplan.StepStatusDone || step.Status == agentplan.StepStatusSkipped {
+			current = index + 1
+			title = step.Title
+		}
+	}
+	return current, title
+}
+
+func (s ExecutionService) reportRunError(err error) {
+	if err != nil && s.OnRunError != nil {
+		s.OnRunError(err)
+	}
 }
 
 func (s ExecutionService) finishWithError(current *session.Session, currentPlan *agentplan.Plan, stepIndex int, cause error, updates planport.UpdateSink) error {

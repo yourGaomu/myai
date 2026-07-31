@@ -1,5 +1,47 @@
 # MyAI 开发变更记录
 
+## 2026-07-31：Agent 长任务时间线与历史重放
+
+本次新增独立的 AgentRun 领域，用于记录一次聊天、重新生成或 Plan 执行的完整运行过程。`request_id` 只负责 Relay 请求关联，内部 `run_id` 负责持久化身份，两者不再混用。
+
+核心链路：
+
+```text
+TaskService / Plan ExecutionService
+  -> AgentRun CommandService
+  -> runStreamRecorder
+  -> memory 或 Mongo Repository
+  -> remote Agent DTO
+  -> Relay
+  -> mobile useAgentRunState
+  -> AgentRunTimeline
+```
+
+已实现：
+
+- `AgentRun` 与 `RunEvent` 分别保存运行终态和有序事件，Mongo 使用 `agent_runs`、`agent_run_events` 两个集合。
+- 支持 reasoning、工具调用、工具结果、权限、Plan 进度、完成、暂停、失败和取消事件。
+- reasoning 实时推送增量，但每轮只持久化一个聚合事件；聚合内容限制为 1MB。
+- 工具结果限制为 256KB，工具参数限制为 64KB，并保留截断标记。
+- 普通聊天每次创建一个 Run；Plan 的全部步骤复用一个父 Run，同时保留原有步骤文件检查点。
+- 新增 `agent_run_started`、`agent_run_event`、`agent_run_completed`、`agent_run_list` 和 `agent_run_list_result` 协议。
+- Relay 将 Run 实时消息视为过程事件，聊天请求仍只由 `assistant_done` 结束，避免提前释放请求路由。
+- Mobile 使用独立 `useAgentRunState`，不把运行事件混入 `ChatItem`；加载会话历史时同时查询 Run 历史。
+- 时间线支持整段收缩、reasoning 的 Fold/Raw/Hide、工具详情展开、Plan 步骤、实时耗时和终态展示。
+- 新时间线存在时忽略旧 reasoning/tool 展示协议，保留协议发送以兼容旧客户端。
+
+验证命令：
+
+```powershell
+go test ./core/application/agentrun/service
+go test ./core/application/chat/generation/service
+go test ./core/adapter/persistence/mongo/agentrun/mapper
+go test ./core/remote/agent ./core/remote/relay
+
+cd mobile
+npm run typecheck
+```
+
 本文记录已经落地到源码的功能与修复，用于回答以下问题：
 
 - 本次开发修改了什么，以及为什么修改。

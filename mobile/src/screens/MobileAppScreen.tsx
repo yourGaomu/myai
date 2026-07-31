@@ -5,6 +5,7 @@ import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
 import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
 import { useAssetState } from "../hooks/useAssetState";
+import { useAgentRunState } from "../hooks/useAgentRunState";
 import { useChangeHistoryActions } from "../hooks/useChangeHistoryActions";
 import { useChangeHistoryState } from "../hooks/useChangeHistoryState";
 import { useChatActions } from "../hooks/useChatActions";
@@ -177,6 +178,16 @@ export function MobileAppScreen() {
     setSessionPendingPermission,
     setSessionPendingRequest,
   } = useChatMessages();
+  const {
+    applyRunCompleted,
+    applyRunEvent,
+    applyRunList,
+    applyRunStarted,
+    getSessionRuns,
+    hasRunForRequest,
+    mergeSessionRuns,
+    version: agentRunsVersion,
+  } = useAgentRunState();
   const { isBusy, pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
@@ -212,7 +223,9 @@ export function MobileAppScreen() {
     viewMode,
   });
   const currentChat = getSessionChat(sessionID);
+  const currentRuns = getSessionRuns(sessionID);
   void sessionChatsVersion;
+  void agentRunsVersion;
   const currentUsage = currentChat.lastUsage || null;
   const currentSessionBusy = Boolean(currentChat.pendingRequestID);
   const currentPauseBusy = Boolean(pendingActions.pause);
@@ -409,7 +422,7 @@ export function MobileAppScreen() {
   const { allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
-    addUserMessage: (targetSessionID, message) => addMessage(targetSessionID, "user", message),
+    addUserMessage: (targetSessionID, message, requestID) => addMessage(targetSessionID, "user", message, requestID),
     attachedFiles,
     historySessionIDRef,
     messageInput,
@@ -497,6 +510,10 @@ export function MobileAppScreen() {
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addToolCall,
     addToolResult,
+    applyRunCompleted,
+    applyRunEvent,
+    applyRunList,
+    applyRunStarted,
     appendAssistant,
     applyAssetList,
     applyChangeDiff,
@@ -530,9 +547,11 @@ export function MobileAppScreen() {
     currentFilePath: filePath,
     getSessionChat,
     historySessionIDRef,
+    hasRunForRequest,
     isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
     markAssistantError,
     mergeSessionChats,
+    mergeSessionRuns,
     requestChanges,
     requestAssets,
     requestFiles,
@@ -663,6 +682,7 @@ export function MobileAppScreen() {
           onRegenerate: regenerateSession,
           pendingHistorySessionID: pendingHistorySessionIDRef.current,
           pendingRequestID: currentChat.pendingRequestID,
+          runs: currentRuns,
         }}
         common={{
           buttonFeedback,

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	agentrunresult "myai/core/application/agentrun/result"
 	sessionresult "myai/core/application/session/result"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
@@ -33,6 +34,7 @@ type SessionQueryFacade interface {
 	ListAssets(ctx context.Context, sessionID string, limit int) ([]sessionresult.AssetListItem, error)
 	ContextInfoForSession(ctx context.Context, sessionID string) (service.ContextInfo, error)
 	ContextStateForSession(ctx context.Context, sessionID string) (service.ContextState, error)
+	ListAgentRuns(ctx context.Context, sessionID string, limit int) ([]agentrunresult.Snapshot, error)
 }
 
 type SessionSettingsFacade interface {

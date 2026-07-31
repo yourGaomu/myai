@@ -11,7 +11,7 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 type Args = {
   activeRequestIDRef: RefObject<string>;
   addEventMessage: (sessionID: string, message: string) => void;
-  addUserMessage: (sessionID: string, message: string) => void;
+  addUserMessage: (sessionID: string, message: string, requestID: string) => void;
   attachedFiles: ChatAttachment[];
   historySessionIDRef: RefObject<string>;
   messageInput: string;
@@ -68,7 +68,7 @@ export function useChatActions({
     setSessionPendingPermission(targetSessionID, null);
     setSessionLastUsage(targetSessionID, null);
     setSessionPendingRequest(targetSessionID, requestID);
-    addUserMessage(targetSessionID, userMessageEcho(content, attachedFiles));
+    addUserMessage(targetSessionID, userMessageEcho(content, attachedFiles), requestID);
 
     const sent = sendMessageWithFiles(content, requestID);
     if (!sent) {
