@@ -70,6 +70,24 @@ func TestSessionSummariesMapsApplicationResult(t *testing.T) {
 	}
 }
 
+func TestSessionPlanExecuteUpdatePayloadUsesProvidedPlanSnapshot(t *testing.T) {
+	currentPlan := &agentplan.Plan{
+		ID: "plan-1", SessionID: "session-1", Status: agentplan.StatusRunning,
+		Steps: []agentplan.Step{{ID: "step-1", Order: 1, Title: "Inspect", Status: agentplan.StepStatusRunning}},
+	}
+
+	payload := sessionPlanExecuteUpdatePayload(" session-1 ", currentPlan)
+	if payload.SessionID != "session-1" {
+		t.Fatalf("unexpected session id: %q", payload.SessionID)
+	}
+	if payload.Plan == nil || payload.Plan.Status != agentplan.StatusRunning {
+		t.Fatalf("unexpected plan payload: %#v", payload.Plan)
+	}
+	if len(payload.Plan.Steps) != 1 || payload.Plan.Steps[0].Status != agentplan.StepStatusRunning {
+		t.Fatalf("unexpected plan step payload: %#v", payload.Plan.Steps)
+	}
+}
+
 func TestTokenUsagePayloadPtrOmitsZeroValue(t *testing.T) {
 	if tokenUsagePayloadPtr(llm.TokenUsage{}) != nil {
 		t.Fatal("expected zero token usage to be omitted")

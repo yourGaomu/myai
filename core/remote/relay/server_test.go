@@ -1148,6 +1148,32 @@ func TestRelayRejectsUntrustedWebSocketOrigin(t *testing.T) {
 	}
 }
 
+func TestRelayAllowsAnyWebSocketOriginWhenWildcardIsConfigured(t *testing.T) {
+	server := NewServer(
+		"",
+		memoryauthorization.NewStore(),
+		WithAgentCredentials(AgentCredential{UserID: "local", DeviceID: "pc-local", Token: "test-agent-token"}),
+		WithAllowedOrigins("*"),
+	)
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/ws/agent"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer test-agent-token")
+	headers.Set(protocol.HeaderAgentUserID, "local")
+	headers.Set(protocol.HeaderAgentDeviceID, "pc-local")
+	headers.Set("Origin", "https://mobile.example")
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		t.Fatalf("expected wildcard origin to allow websocket connection: %v", err)
+	}
+	defer conn.Close()
+}
+
 func TestRelayProtectsAgentInventory(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
@@ -1302,6 +1328,37 @@ func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
 	}
 	if got := response.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "content-type") {
 		t.Fatalf("expected CORS headers to include content-type, got %q", got)
+	}
+}
+
+func TestRelayAllowsAnyCorsOriginWhenWildcardIsConfigured(t *testing.T) {
+	server := NewServer(
+		"",
+		memoryauthorization.NewStore(),
+		WithAgentCredentials(AgentCredential{UserID: "local", DeviceID: "pc-local", Token: "test-agent-token"}),
+		WithAllowedOrigins("*"),
+	)
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	request, err := http.NewRequest(http.MethodOptions, testServer.URL+"/pair", nil)
+	if err != nil {
+		t.Fatalf("new preflight request failed: %v", err)
+	}
+	request.Header.Set("Origin", "https://mobile.example")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("send preflight request failed: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, response.StatusCode)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Origin"); got != "https://mobile.example" {
+		t.Fatalf("expected echoed CORS origin, got %q", got)
 	}
 }
 

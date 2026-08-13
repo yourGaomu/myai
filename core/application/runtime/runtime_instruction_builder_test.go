@@ -31,6 +31,9 @@ func TestRuntimeInstructionBuilderAddsPlanPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "Skill instruction") {
 		t.Fatal("expected skill instructions")
 	}
+	if !strings.Contains(prompt, "requires any tool call") || !strings.Contains(prompt, "preflight research only") {
+		t.Fatalf("expected strict planning boundary, got %q", prompt)
+	}
 }
 
 func TestRuntimeInstructionBuilderForceChatSkipsPlanPrompt(t *testing.T) {

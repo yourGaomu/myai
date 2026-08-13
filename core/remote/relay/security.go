@@ -48,6 +48,9 @@ func (s *Server) originAllowed(request *http.Request) bool {
 	if !ok {
 		return false
 	}
+	if s.allowAllOrigins {
+		return true
+	}
 	parsed, _ := url.Parse(normalized)
 	if strings.EqualFold(parsed.Host, request.Host) {
 		return true

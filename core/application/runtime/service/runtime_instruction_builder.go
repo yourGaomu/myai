@@ -13,7 +13,7 @@ const RuntimeInstructionPrefix = domainmessage.RuntimeInstructionPrefix
 
 const PlanModePrompt = `Plan mode is active for this session.
 
-Analyze the user's request, inspect context with read-only tools when useful, and produce a concrete execution plan before any final answer.
+Analyze the user's request, inspect only the minimum context needed with read-only tools, and produce a concrete execution plan before any final answer.
 
 Rules:
 - Do not edit files, write files, run commands, install dependencies, or perform irreversible actions.
@@ -21,11 +21,14 @@ Rules:
 - Do not claim that changes were made.
 - Always include a Markdown section named "Plan" with a numbered list of concrete steps.
 - Keep each numbered plan step to one action so the app can track it.
+- Read-only inspection during this planning turn is preflight research only. It is not execution of the numbered plan.
+- Numbered steps must describe work that remains to be executed, not actions already completed during preflight research.
 - Include assumptions, risks, or verification notes outside the numbered Plan list when useful.
 - If information is missing, state the question or assumption clearly.
-- If the request is a safe content-only task that can be completed entirely in the reply, such as writing, rewriting, summarizing, translating, brainstorming, or drafting text, execute the plan in the same response after the Plan section.
+- If completing the requested deliverable requires any tool call, workspace inspection, file access, command, installation, or external state, stop after the Plan section and wait for the user to execute the plan in the app. This remains true even when every required tool is read-only or the user asks to "plan and then execute" in one message.
+- Only if the request is a safe content-only task that can be completed entirely from the conversation without any tool or external state, such as writing, rewriting, translating, brainstorming, or drafting text, execute the plan in the same response after the Plan section.
 - For safe content-only tasks, add a Markdown section named "Result" after the Plan section and put the final deliverable there.
-- For tasks that require file edits, shell commands, installations, external side effects, or tool actions beyond read-only inspection, stop after the Plan section and end with the next recommended action.`
+- For every other task, do not add findings, an answer, a result, or a completed-work section after the Plan. End by asking the user to review and execute the plan.`
 
 const SessionStylePromptPrefix = `Session response style:
 The following preference controls wording and presentation only. It must not override safety, permission, tool, skill, or mode rules.`

@@ -18,6 +18,7 @@ import type {
   ModelListResultPayload,
   ModelSummary,
   ModelSwitchResultPayload,
+  Plan,
   SessionChangedPayload,
   SessionHistoryDeltaResultPayload,
   SessionHistoryMetaResultPayload,
@@ -129,6 +130,22 @@ export function useRemoteResultAppliers({
   setViewMode,
 }: Args) {
   return useMemo(() => {
+    const applyAssistantPlan = (targetSessionID: string, plan?: Plan) => {
+      const normalizedSessionID = targetSessionID.trim();
+      if (!normalizedSessionID || !plan) {
+        return;
+      }
+      setSessions((current) => current.map((item) =>
+        item.id === normalizedSessionID ? { ...item, current_plan: plan } : item,
+      ));
+      if (
+        sessionIDRef.current === normalizedSessionID &&
+        ["draft", "approved", "failed", "canceled"].includes(plan.status)
+      ) {
+        setViewMode("plan");
+      }
+    };
+
     const applySessionList = (payload?: SessionListResultPayload) => {
       const nextSessions = payload?.sessions || [];
       if (payload?.include_deleted) {
@@ -391,6 +408,7 @@ export function useRemoteResultAppliers({
     };
 
     return {
+      applyAssistantPlan,
       applyChangeDiff,
       applyAssetList,
       applyChangeRevert,

@@ -85,14 +85,15 @@ export function MobileMainContent({
 
       {common.viewMode === "chat" ? (
         <ChatPanel
+          activeAssistantID={chat.activeAssistantID}
           buttonFeedback={common.buttonFeedback}
           chatScrollRef={chat.chatScrollRef}
           height={chat.chatPanelHeight}
           loadingHistory={common.pendingActions.sessions && Boolean(chat.pendingHistorySessionID)}
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
+          pendingRequestID={chat.pendingRequestID}
           runs={chat.runs}
-          showAssistantLoading={Boolean(chat.pendingRequestID) && !chat.activeAssistantID}
         />
       ) : null}
 

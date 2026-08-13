@@ -30,6 +30,7 @@ type Server struct {
 	connections      map[*peer]*clientConnection
 	agentCredentials map[string]string
 	origins          map[string]struct{}
+	allowAllOrigins  bool
 }
 
 type Option func(*Server)
@@ -57,6 +58,10 @@ func WithAgentCredentials(credentials ...AgentCredential) Option {
 func WithAllowedOrigins(origins ...string) Option {
 	return func(server *Server) {
 		for _, origin := range origins {
+			if strings.TrimSpace(origin) == "*" {
+				server.allowAllOrigins = true
+				continue
+			}
 			if normalized, ok := normalizeOrigin(origin); ok {
 				server.origins[normalized] = struct{}{}
 			}

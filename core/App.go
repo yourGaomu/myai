@@ -42,6 +42,7 @@ import (
 	opensandboxworkspace "myai/core/adapter/workspace/opensandbox"
 	workspaceRouter "myai/core/adapter/workspace/router"
 	snapshotworkspace "myai/core/adapter/workspace/snapshot"
+	agentrunservice "myai/core/application/agentrun/service"
 	catalogapi "myai/core/application/knowledge/catalog/api"
 	catalogservice "myai/core/application/knowledge/catalog/service"
 	documentapi "myai/core/application/knowledge/document/api"
@@ -228,6 +229,7 @@ func (app *Application) InitRedisDb() {
 func (app *Application) InitStore() {
 	if app.mongoDb == nil {
 		app.agentRunRepository = agentrunmemory.New()
+		app.recoverAgentRuns()
 		// Mongo 未配置时允许以内存模式启动，持久化相关适配器会保持为空。
 		return
 	}
@@ -235,6 +237,17 @@ func (app *Application) InitStore() {
 	database := app.properties.Mongo.Database
 	app.store = adaptermongo.New(app.mongoDb, database)
 	app.agentRunRepository = agentrunmongo.New(app.mongoDb, database)
+	app.recoverAgentRuns()
+}
+
+func (app *Application) recoverAgentRuns() {
+	if app.agentRunRepository == nil {
+		return
+	}
+	commands := agentrunservice.CommandService{Repository: app.agentRunRepository, IDs: uuidadapter.Generator{}}
+	if err := commands.RecoverRunning(context.Background()); err != nil {
+		log.Printf("recover interrupted agent runs failed: %v", err)
+	}
 }
 
 func (app *Application) InitKnowledgeStorage() {

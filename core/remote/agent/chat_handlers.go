@@ -79,11 +79,7 @@ func (a *Agent) handleSessionPlanExecute(ctx context.Context, conn *websocket.Co
 	// 步骤状态变化先发送 plan_update；全部完成后再发送 assistant_done 和最终 result。
 	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
 		return a.chatService.ExecutePlanStreamForSession(ctx, sessionID, stream, func(currentPlan *agentplan.Plan) {
-			payload, err := a.sessionSettingsPayload(ctx, sessionID, service.ContextInfo{}, "")
-			if err != nil {
-				log.Printf("build plan update failed: %v", err)
-				return
-			}
+			payload := sessionPlanExecuteUpdatePayload(sessionID, currentPlan)
 			if err := a.writeRemoteMessage(conn, protocol.TypeSessionPlanExecuteUpdate, message.RequestID, sessionID, payload); err != nil {
 				log.Printf("send plan update failed: %v", err)
 			}

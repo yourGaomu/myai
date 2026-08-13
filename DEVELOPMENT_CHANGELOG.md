@@ -30,6 +30,23 @@ TaskService / Plan ExecutionService
 - 时间线支持整段收缩、reasoning 的 Fold/Raw/Hide、工具详情展开、Plan 步骤、实时耗时和终态展示。
 - 新时间线存在时忽略旧 reasoning/tool 展示协议，保留协议发送以兼容旧客户端。
 
+### Plan 草案阶段修复
+
+- 收紧 Plan 运行时指令：只读工具只用于生成计划前的最小预检，凡是最终交付依赖工具、文件或外部状态，都必须在输出 Plan 后等待用户执行。
+- 用户在同一条消息中要求“先规划再执行”时，仍遵守两阶段协议，不能绕过 Mobile 的计划确认。
+- 初始计划捕获后向 AgentRun 追加 `plan_update` 事件，并把 Plan 模式的首次生成标记为 `plan` 类型运行。
+- Mobile 直接应用 `assistant_done.plan`；收到可执行草案时立即打开 Plan 面板，不再等待 Session 列表刷新后由用户手动寻找入口。
+
+### Plan 执行卡死修复
+
+- AgentRun 是运行时间线的旁路记录，不再允许 Mongo 驱动等待无限阻塞聊天或 Plan 主链路；`Start`、`Append`、`ReplaceEventContent`、`Finish` 统一使用独立的 5 秒持久化超时。
+- AgentRun 写入失败或超时只通过 `OnRunError` 记录，Plan 仍会继续进入步骤消息构造、模型生成和工具执行。
+- Agent 启动时把上次进程遗留的 `running` Run 收敛为 `failed`，并写入 `Agent restarted before run completed` 终态说明。
+- `running` Plan 允许在进程重启后重新执行；已完成或跳过的步骤不会重复执行。
+- 新增阻塞仓储回归测试，覆盖 AgentRun 超时后 Plan 仍能进入第一步生成并完成的场景。
+- 修复 Plan 进度回调的 Session 自锁：执行链持有 Session 操作锁时不再调用 `sessionSettingsPayload -> ContextStateForSession` 重复获取同一把锁，而是直接发送已有的 `SessionPlanExecuteUpdatePayload` 快照。
+- Mobile 按轻量 `session_plan_update {session_id, plan}` 协议直接应用步骤状态，不再把它错误解析为完整 Session 设置响应。
+
 验证命令：
 
 ```powershell

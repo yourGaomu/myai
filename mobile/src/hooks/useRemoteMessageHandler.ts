@@ -31,6 +31,7 @@ import type {
   SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
   SessionListResultPayload,
+  SessionPlanExecuteUpdatePayload,
   SessionSettingsResultPayload,
   SessionPauseResultPayload,
   SkillListResultPayload,
@@ -68,6 +69,10 @@ type Args = {
   applyRunEvent: (payload?: AgentRunEventPayload) => void;
   applyRunList: (payload?: AgentRunListResultPayload) => void;
   applyRunStarted: (payload?: AgentRunStartedPayload) => void;
+  applyAssistantPlan: (
+    sessionID: string,
+    plan?: NonNullable<AssistantDonePayload["plan"]>,
+  ) => void;
   appendAssistant: (
     sessionID: string,
     requestID: string | undefined,
@@ -166,6 +171,7 @@ export function useRemoteMessageHandler({
   applyRunEvent,
   applyRunList,
   applyRunStarted,
+  applyAssistantPlan,
   appendAssistant,
   applyAssetList,
   applyChangeDiff,
@@ -281,6 +287,9 @@ export function useRemoteMessageHandler({
           }
           if (payload.retrieval) {
             applyKnowledgeSearch(payload.retrieval);
+          }
+          if (payload.plan) {
+            applyAssistantPlan(targetSessionID, payload.plan);
           }
           completeAssistant(
             targetSessionID,
@@ -431,12 +440,21 @@ export function useRemoteMessageHandler({
           }
           break;
         }
-        case "session_plan_update":
-          // Plan 执行中间态只更新当前 Session，不结束 pending，后续还会继续收到步骤状态。
-          applySessionSettings(
-            message.payload as SessionSettingsResultPayload | undefined,
-          );
+        case "session_plan_update": {
+          const payload = message.payload as
+            | SessionPlanExecuteUpdatePayload
+            | undefined;
+          const targetSessionID = (
+            payload?.session_id ||
+            message.session_id ||
+            sessionIDRef.current
+          ).trim();
+          applyAssistantPlan(targetSessionID, payload?.plan);
+          if (payload?.message) {
+            addEventMessage(targetSessionID, payload.message);
+          }
           break;
+        }
         case "session_plan_execute_result":
           // 只有 execute_result 才表示整个计划结束，可以释放 Plan 按钮和会话运行状态。
           stopPending("plan");
@@ -644,6 +662,7 @@ export function useRemoteMessageHandler({
       applyRunEvent,
       applyRunList,
       applyRunStarted,
+      applyAssistantPlan,
       appendAssistant,
       applyAssetList,
       applyChangeDiff,

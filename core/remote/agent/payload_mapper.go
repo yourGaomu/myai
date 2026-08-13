@@ -207,6 +207,13 @@ func planPayload(currentPlan *agentplan.Plan) *protocol.Plan {
 	return payload
 }
 
+func sessionPlanExecuteUpdatePayload(sessionID string, currentPlan *agentplan.Plan) protocol.SessionPlanExecuteUpdatePayload {
+	return protocol.SessionPlanExecuteUpdatePayload{
+		SessionID: strings.TrimSpace(sessionID),
+		Plan:      planPayload(currentPlan),
+	}
+}
+
 func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
 	summaries := make([]protocol.ModelSummary, 0, len(models))
 	for _, model := range models {

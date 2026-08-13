@@ -23,11 +23,41 @@ export const styles = StyleSheet.create({
   assistantLoadingMessage: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 8,
+    minHeight: 46,
+  },
+  assistantLoadingLabel: {
+    alignSelf: "flex-start",
+    minWidth: 92,
+    overflow: "hidden",
+    position: "relative",
   },
   assistantLoadingText: {
-    color: "#12100e",
+    color: "#b5afa7",
+    fontSize: 14,
     fontWeight: "900",
+    lineHeight: 20,
+  },
+  assistantLoadingSoftWindow: {
+    left: 0,
+    overflow: "hidden",
+    pointerEvents: "none",
+    position: "absolute",
+    top: 0,
+    width: 34,
+  },
+  assistantLoadingSoftText: {
+    color: "#7d766f",
+  },
+  assistantLoadingHighlightWindow: {
+    left: 0,
+    overflow: "hidden",
+    pointerEvents: "none",
+    position: "absolute",
+    top: 0,
+    width: 16,
+  },
+  assistantLoadingHighlightText: {
+    color: "#36312d",
   },
   eventMessage: {
     alignSelf: "stretch",

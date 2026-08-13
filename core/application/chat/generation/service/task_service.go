@@ -13,6 +13,9 @@ import (
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
 	domainagentrun "myai/core/domain/agentrun"
+	agentplan "myai/core/plan"
+	modelport "myai/core/port/model"
+	"myai/core/session"
 )
 
 type TaskService struct {
@@ -46,7 +49,7 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 		run, err := s.Runs.Start(ctx, agentruncommand.Start{
 			RequestID: command.Stream.CorrelationID,
 			SessionID: command.Session.ID,
-			Kind:      runKind(command.Reason),
+			Kind:      runKind(command.Reason, command.Session, command.ForceChatMode),
 			Title:     runTitle(command.Title, command.Reason),
 			Reason:    command.Reason,
 		})
@@ -100,22 +103,53 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 		defer s.saveRecorder(recorder)
 		ctx = recorder.Attach(ctx)
 	}
-	return s.Generator.Generate(ctx, generationcommand.AssistantGeneration{
+	response, resultErr = s.Generator.Generate(ctx, generationcommand.AssistantGeneration{
 		Session: command.Session, LatestInput: command.LatestInput, RequestID: requestID,
 		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode,
 	})
+	if resultErr == nil {
+		s.recordCapturedPlan(context.WithoutCancel(ctx), runID, response.Plan, command.Stream)
+	}
+	return response, resultErr
 }
 
-func runKind(reason string) domainagentrun.Kind {
+func runKind(reason string, current *session.Session, forceChatMode bool) domainagentrun.Kind {
 	switch strings.TrimSpace(reason) {
 	case "regenerate response":
 		return domainagentrun.KindRegenerate
 	case "execute plan step":
 		return domainagentrun.KindPlan
 	case "user request":
+		if !forceChatMode && current != nil && session.NormalizeAgentMode(current.AgentMode) == session.AgentModePlan {
+			return domainagentrun.KindPlan
+		}
 		return domainagentrun.KindChat
 	default:
 		return domainagentrun.KindInternal
+	}
+}
+
+func (s TaskService) recordCapturedPlan(ctx context.Context, runID string, currentPlan *agentplan.Plan, stream modelport.ChatStreamHandler) {
+	if strings.TrimSpace(runID) == "" || currentPlan == nil || s.Runs == nil {
+		return
+	}
+	currentStep := 0
+	title := "Plan ready for review"
+	if currentPlan.Status == agentplan.StatusDone {
+		currentStep = len(currentPlan.Steps)
+		title = "Plan completed"
+	}
+	event, err := s.Runs.Append(ctx, agentruncommand.Append{
+		RunID: runID, Type: domainagentrun.EventTypePlanUpdate, Title: title,
+		Content: currentPlan.Goal, Status: currentPlan.Status,
+		CurrentStep: currentStep, TotalSteps: len(currentPlan.Steps),
+	})
+	if err != nil {
+		s.reportRunError(err)
+		return
+	}
+	if stream.OnRunEvent != nil {
+		stream.OnRunEvent(event)
 	}
 }
 

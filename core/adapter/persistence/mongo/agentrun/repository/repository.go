@@ -63,6 +63,19 @@ func (r *Repository) GetRun(ctx context.Context, runID string) (domainagentrun.R
 	return mapper.RunDomainFromDocument(document), nil
 }
 
+func (r *Repository) ListRunning(ctx context.Context) ([]domainagentrun.Run, error) {
+	var documents []po.RunDocument
+	if err := r.template.FindAll(ctx, runsCollection, bson.M{"status": string(domainagentrun.StatusRunning)}, &documents,
+		options.Find().SetSort(bson.D{{Key: "started_at", Value: 1}})); err != nil {
+		return nil, err
+	}
+	items := make([]domainagentrun.Run, 0, len(documents))
+	for _, document := range documents {
+		items = append(items, mapper.RunDomainFromDocument(document))
+	}
+	return items, nil
+}
+
 func (r *Repository) NextEventSequence(ctx context.Context, runID string) (int64, error) {
 	if r == nil || r.database == nil {
 		return 0, errors.New("mongo agent run database is nil")

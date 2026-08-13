@@ -13,12 +13,15 @@ import (
 )
 
 type CommandService struct {
-	Repository agentrunport.Repository
-	IDs        agentrunport.IDGenerator
-	Now        func() time.Time
+	Repository         agentrunport.Repository
+	IDs                agentrunport.IDGenerator
+	Now                func() time.Time
+	PersistenceTimeout time.Duration
 }
 
 var _ agentrunapi.CommandService = CommandService{}
+
+const defaultPersistenceTimeout = 5 * time.Second
 
 func (s CommandService) Start(ctx context.Context, command agentruncommand.Start) (domainagentrun.Run, error) {
 	if s.Repository == nil {
@@ -46,7 +49,9 @@ func (s CommandService) Start(ctx context.Context, command agentruncommand.Start
 	if err := run.Validate(); err != nil {
 		return domainagentrun.Run{}, err
 	}
-	if err := s.Repository.SaveRun(ctx, run); err != nil {
+	persistenceCtx, cancel := s.persistenceContext(ctx)
+	defer cancel()
+	if err := s.Repository.SaveRun(persistenceCtx, run); err != nil {
 		return domainagentrun.Run{}, err
 	}
 	return run, nil
@@ -59,6 +64,12 @@ func (s CommandService) Append(ctx context.Context, command agentruncommand.Appe
 	if s.IDs == nil {
 		return domainagentrun.Event{}, errors.New("agent run id generator is nil")
 	}
+	persistenceCtx, cancel := s.persistenceContext(ctx)
+	defer cancel()
+	return s.append(persistenceCtx, command)
+}
+
+func (s CommandService) append(ctx context.Context, command agentruncommand.Append) (domainagentrun.Event, error) {
 	run, err := s.Repository.GetRun(ctx, strings.TrimSpace(command.RunID))
 	if err != nil {
 		return domainagentrun.Event{}, err
@@ -90,14 +101,18 @@ func (s CommandService) ReplaceEventContent(ctx context.Context, command agentru
 	if strings.TrimSpace(command.RunID) == "" || strings.TrimSpace(command.EventID) == "" {
 		return errors.New("agent run event identity is empty")
 	}
-	return s.Repository.ReplaceEventContent(ctx, command.RunID, command.EventID, command.Content, command.Truncated)
+	persistenceCtx, cancel := s.persistenceContext(ctx)
+	defer cancel()
+	return s.Repository.ReplaceEventContent(persistenceCtx, command.RunID, command.EventID, command.Content, command.Truncated)
 }
 
 func (s CommandService) Finish(ctx context.Context, command agentruncommand.Finish) (domainagentrun.Run, error) {
 	if s.Repository == nil {
 		return domainagentrun.Run{}, errors.New("agent run repository is nil")
 	}
-	run, err := s.Repository.GetRun(ctx, strings.TrimSpace(command.RunID))
+	persistenceCtx, cancel := s.persistenceContext(ctx)
+	defer cancel()
+	run, err := s.Repository.GetRun(persistenceCtx, strings.TrimSpace(command.RunID))
 	if err != nil {
 		return domainagentrun.Run{}, err
 	}
@@ -120,7 +135,7 @@ func (s CommandService) Finish(ctx context.Context, command agentruncommand.Fini
 		return domainagentrun.Run{}, err
 	}
 	eventType, title := terminalEvent(status)
-	terminal, err := s.Append(ctx, agentruncommand.Append{
+	terminal, err := s.append(persistenceCtx, agentruncommand.Append{
 		RunID: run.ID, Type: eventType, Title: title, Content: run.ErrorMessage,
 		Status: string(status), CurrentStep: run.CurrentStep, TotalSteps: run.TotalSteps,
 	})
@@ -128,10 +143,35 @@ func (s CommandService) Finish(ctx context.Context, command agentruncommand.Fini
 		return domainagentrun.Run{}, err
 	}
 	run.LastSequence = terminal.Sequence
-	if err := s.Repository.SaveRun(ctx, run); err != nil {
+	if err := s.Repository.SaveRun(persistenceCtx, run); err != nil {
 		return domainagentrun.Run{}, err
 	}
 	return run, nil
+}
+
+// RecoverRunning closes runs left behind by an agent process that exited before
+// it could publish a terminal state.
+func (s CommandService) RecoverRunning(ctx context.Context) error {
+	if s.Repository == nil {
+		return errors.New("agent run repository is nil")
+	}
+	persistenceCtx, cancel := s.persistenceContext(ctx)
+	defer cancel()
+	runs, err := s.Repository.ListRunning(persistenceCtx)
+	if err != nil {
+		return err
+	}
+	var recoveryErrors []error
+	for _, run := range runs {
+		if _, err := s.Finish(context.Background(), agentruncommand.Finish{
+			RunID: run.ID, Status: domainagentrun.StatusFailed,
+			ErrorMessage: "Agent restarted before run completed",
+			CurrentStep:  run.CurrentStep, TotalSteps: run.TotalSteps,
+		}); err != nil {
+			recoveryErrors = append(recoveryErrors, err)
+		}
+	}
+	return errors.Join(recoveryErrors...)
 }
 
 func terminalEvent(status domainagentrun.Status) (domainagentrun.EventType, string) {
@@ -152,4 +192,15 @@ func (s CommandService) now() time.Time {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (s CommandService) persistenceContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := s.PersistenceTimeout
+	if timeout <= 0 {
+		timeout = defaultPersistenceTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
 }

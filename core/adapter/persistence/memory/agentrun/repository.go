@@ -43,6 +43,19 @@ func (r *Repository) GetRun(_ context.Context, runID string) (domainagentrun.Run
 	return cloneRun(run), nil
 }
 
+func (r *Repository) ListRunning(_ context.Context) ([]domainagentrun.Run, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]domainagentrun.Run, 0)
+	for _, run := range r.runs {
+		if run.Status == domainagentrun.StatusRunning {
+			items = append(items, cloneRun(run))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt.Before(items[j].StartedAt) })
+	return items, nil
+}
+
 func (r *Repository) NextEventSequence(_ context.Context, runID string) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -12,25 +12,27 @@ import { MessageBubble } from "./MessageBubble";
 import { ToolActivityGroup } from "./ToolActivityGroup";
 
 type Props = {
+  activeAssistantID: string;
   buttonFeedback: ButtonFeedback;
   chatScrollRef: RefObject<ScrollView | null>;
   height: number;
   loadingHistory: boolean;
   messages: ChatItem[];
+  pendingRequestID: string;
   runs: AgentRunSnapshot[];
   onRegenerate: () => void;
-  showAssistantLoading: boolean;
 };
 
 export function ChatPanel({
+  activeAssistantID,
   buttonFeedback,
   chatScrollRef,
   height,
   loadingHistory,
   messages,
+  pendingRequestID,
   runs,
   onRegenerate,
-  showAssistantLoading,
 }: Props) {
   const renderItems = useMemo(() => {
     const visibleMessages = messages.filter((message) => !isCoveredToolActivity(message, runs));
@@ -39,6 +41,10 @@ export function ChatPanel({
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});
   const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
+  const assistantLoadingLabel = useMemo(
+    () => loadingLabel(pendingRequestID, activeAssistantID, messages, runs),
+    [activeAssistantID, messages, pendingRequestID, runs],
+  );
 
   const rememberItemOffset = useCallback((id: string, event: LayoutChangeEvent) => {
     itemOffsetsRef.current[id] = event.nativeEvent.layout.y;
@@ -96,7 +102,7 @@ export function ChatPanel({
             ),
           )
         )}
-        {showAssistantLoading ? <AssistantLoadingBubble /> : null}
+        {pendingRequestID ? <AssistantLoadingBubble label={assistantLoadingLabel} /> : null}
       </ScrollView>
       <ChatJumpNav
         anchors={jumpAnchors}
@@ -178,6 +184,56 @@ function isCoveredByRun(message: ChatItem, runs: AgentRunSnapshot[]) {
     const finishedAt = run.finished_at ? Date.parse(run.finished_at) : Date.now();
     return Number.isFinite(startedAt) && messageAt >= startedAt - 1000 && messageAt <= finishedAt + 30000;
   });
+}
+
+function loadingLabel(
+  pendingRequestID: string,
+  activeAssistantID: string,
+  messages: ChatItem[],
+  runs: AgentRunSnapshot[],
+) {
+  if (hasRunningTool(pendingRequestID, activeAssistantID, messages, runs)) {
+    return "Running tool";
+  }
+  return activeAssistantID ? "Generating" : "Thinking";
+}
+
+function hasRunningTool(
+  pendingRequestID: string,
+  activeAssistantID: string,
+  messages: ChatItem[],
+  runs: AgentRunSnapshot[],
+) {
+  const matchingRun = [...runs]
+    .reverse()
+    .find(({ run }) => run.request_id === pendingRequestID && run.status === "running");
+  if (matchingRun) {
+    const lastToolCall = lastIndex(matchingRun.events, (event) => event.type === "tool_call");
+    const lastToolResult = lastIndex(matchingRun.events, (event) => event.type === "tool_result");
+    if (lastToolCall > lastToolResult) {
+      return true;
+    }
+  }
+
+  const requestMessages = messages.filter((message) => message.requestID === pendingRequestID);
+  const lastToolCall = lastIndex(requestMessages, (message) => message.role === "tool_call");
+  const lastToolResult = lastIndex(requestMessages, (message) => message.role === "tool");
+  if (lastToolCall > lastToolResult) {
+    return true;
+  }
+
+  return messages.some(
+    (message) => message.id === activeAssistantID && message.status === "tool_running",
+  );
+}
+
+function lastIndex<T>(items: T[], matches: (item: T) => boolean) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (matches(items[index])) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function userMessageAnchors(messages: ChatItem[]): ChatJumpAnchor[] {

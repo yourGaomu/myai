@@ -83,3 +83,9 @@ func TestNewDraftDoesNotInventExecutableStep(t *testing.T) {
 		t.Fatalf("expected malformed plan to have no executable steps, got %d", len(draft.Steps))
 	}
 }
+
+func TestRunningPlanCanResumeAfterRestart(t *testing.T) {
+	if !IsExecutableStatus(StatusRunning) {
+		t.Fatal("expected a running plan to be resumable")
+	}
+}

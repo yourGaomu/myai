@@ -67,7 +67,7 @@ func NewDraft(sessionID string, goal string, content string, now time.Time) *Pla
 
 func IsExecutableStatus(status string) bool {
 	switch status {
-	case StatusDraft, StatusApproved, StatusFailed, StatusCanceled:
+	case StatusDraft, StatusApproved, StatusRunning, StatusFailed, StatusCanceled:
 		return true
 	default:
 		return false

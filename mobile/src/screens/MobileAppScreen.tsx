@@ -440,6 +440,7 @@ export function MobileAppScreen() {
     stopPausePending: () => stopPending("pause"),
   });
   const {
+    applyAssistantPlan,
     applyAssetList,
     applyChangeDiff,
     applyChangeRevert,
@@ -514,6 +515,7 @@ export function MobileAppScreen() {
     applyRunEvent,
     applyRunList,
     applyRunStarted,
+    applyAssistantPlan,
     appendAssistant,
     applyAssetList,
     applyChangeDiff,
