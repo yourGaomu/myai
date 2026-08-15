@@ -23,11 +23,13 @@ const (
 	SyntheticReasonProjectInstruction SyntheticReason = "project_instruction"
 	SyntheticReasonSkillInstruction   SyntheticReason = "skill_instruction"
 	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
+	SyntheticReasonMemoryContext      SyntheticReason = "memory_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 )
 
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
 const RAGContextPrefix = "Retrieved knowledge context for this turn:"
+const MemoryContextPrefix = "Relevant AI experience memories for this turn:"
 
 type PartType string
 
@@ -139,6 +141,14 @@ func RAGContext(text string) Message {
 		return Message{}
 	}
 	return SyntheticText(SyntheticReasonRAGContext, RAGContextPrefix+"\n"+text)
+}
+
+func MemoryContext(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticText(SyntheticReasonMemoryContext, MemoryContextPrefix+"\n"+text)
 }
 
 func ToolCallMessage(calls []ToolCall) Message {

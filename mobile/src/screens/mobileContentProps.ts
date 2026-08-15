@@ -21,6 +21,10 @@ import type {
   KnowledgeIndexProfile,
   KnowledgeIndexingJob,
   KnowledgeSearchPreviewResultPayload,
+  AIMemory,
+  AIMemoryCandidate,
+  AIMemoryInput,
+  AIMemoryListPayload,
   RAGSettings,
   SubagentDefinition,
   SubagentTask,
@@ -178,6 +182,17 @@ export type KnowledgeContentProps = {
   onUploadDocument: () => void;
   profiles: KnowledgeIndexProfile[];
   searchResult: KnowledgeSearchPreviewResultPayload | null;
+  aiMemories: AIMemory[];
+  aiCandidates: AIMemoryCandidate[];
+  aiMemoryMessage: string;
+  onApproveAIMemoryCandidate: (candidate: AIMemoryCandidate, memoryID?: string) => boolean;
+  onCreateAIMemory: (memory: AIMemoryInput) => boolean;
+  onDeleteAIMemory: (memoryID: string) => boolean;
+  onRefreshAIMemories: (filter?: AIMemoryListPayload) => boolean;
+  onRefreshAIMemoryCandidates: () => boolean;
+  onRejectAIMemoryCandidate: (candidate: AIMemoryCandidate) => boolean;
+  onRestoreAIMemory: (memoryID: string) => boolean;
+  onUpdateAIMemory: (memoryID: string, memory: AIMemoryInput) => boolean;
 };
 
 export type PermissionContentProps = {

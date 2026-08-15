@@ -11,6 +11,8 @@ import (
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
 	chatport "myai/core/application/chat/port"
+	memoryretrievalapi "myai/core/application/memory/retrieval/api"
+	memoryretrievalcommand "myai/core/application/memory/retrieval/command"
 	"myai/core/contextmgr"
 	generation "myai/core/domain/generation"
 	modelport "myai/core/port/model"
@@ -26,7 +28,9 @@ type AssistantGenerationService struct {
 	AgentRunner       generationapi.AgentRunner
 	ResponseCommitter generationapi.ResponseCommitter
 	Persistence       generationport.Persistence
+	MemoryContext     memoryretrievalapi.ContextPreparer
 	OnCompactError    func(error)
+	OnMemoryError     func(error)
 }
 
 var _ generationapi.Generator = AssistantGenerationService{}
@@ -65,11 +69,24 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 			compactInfo = info
 		}
 	}
+	memoryContext := ""
+	if s.MemoryContext != nil {
+		prepared, memoryErr := s.MemoryContext.Prepare(ctx, memoryretrievalcommand.Prepare{
+			Input: command.LatestInput, SessionID: command.Session.ID,
+		})
+		if memoryErr != nil {
+			if s.OnMemoryError != nil {
+				s.OnMemoryError(memoryErr)
+			}
+		} else {
+			memoryContext = prepared.Prompt
+		}
+	}
 
 	result, err := s.AgentRunner.Run(ctx, generationcommand.Run{
 		Model: model, Session: command.Session, Stream: command.Stream,
 		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
-		Settings: settings,
+		Settings: settings, MemoryContext: memoryContext,
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err

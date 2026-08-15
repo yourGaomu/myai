@@ -13,4 +13,5 @@ type Run struct {
 	RequestID     string
 	ForceChatMode bool
 	Settings      generation.ResolvedSettings
+	MemoryContext string
 }

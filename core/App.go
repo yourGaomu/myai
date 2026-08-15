@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -22,11 +23,14 @@ import (
 	snowflakeid "myai/core/adapter/id/snowflake"
 	uuidadapter "myai/core/adapter/id/uuid"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
+	memoryextractor "myai/core/adapter/memory/extractor"
 	adaptermodel "myai/core/adapter/model/langchaingo"
 	minioadapter "myai/core/adapter/objectstorage/minio"
 	agentrunmemory "myai/core/adapter/persistence/memory/agentrun"
+	aimemory "myai/core/adapter/persistence/memory/memory"
 	agentrunmongo "myai/core/adapter/persistence/mongo/agentrun/repository"
 	knowledgemongo "myai/core/adapter/persistence/mongo/knowledge/repository"
+	memorymongo "myai/core/adapter/persistence/mongo/memory/repository"
 	adaptermongo "myai/core/adapter/persistence/mongo/repository"
 	subagentmongo "myai/core/adapter/persistence/mongo/subagent/repository"
 	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
@@ -56,6 +60,12 @@ import (
 	retrievalservice "myai/core/application/knowledge/retrieval/service"
 	searchapi "myai/core/application/knowledge/search/api"
 	searchservice "myai/core/application/knowledge/search/service"
+	memorycatalogapi "myai/core/application/memory/catalog/api"
+	memorycatalogservice "myai/core/application/memory/catalog/service"
+	memoryextractioncommand "myai/core/application/memory/extraction/command"
+	memoryextractionservice "myai/core/application/memory/extraction/service"
+	memoryretrievalapi "myai/core/application/memory/retrieval/api"
+	memoryretrievalservice "myai/core/application/memory/retrieval/service"
 	modelcommand "myai/core/application/model/command"
 	modelservice "myai/core/application/model/service"
 	sessionpersistenceservice "myai/core/application/session/persistence/service"
@@ -65,6 +75,7 @@ import (
 	"myai/core/asset"
 	chatcomposition "myai/core/composition/chat"
 	appconfig "myai/core/config"
+	domainmemory "myai/core/domain/memory"
 	"myai/core/hook"
 	"myai/core/infra"
 	"myai/core/llm"
@@ -74,6 +85,7 @@ import (
 	executionport "myai/core/port/execution"
 	knowledgeport "myai/core/port/knowledge"
 	documentprocessorport "myai/core/port/knowledge/documentprocessor"
+	memoryport "myai/core/port/memory"
 	persistenceport "myai/core/port/persistence"
 	sandboxport "myai/core/port/sandbox"
 	subagentport "myai/core/port/subagent"
@@ -96,6 +108,10 @@ type Application struct {
 	redisDb                     *redis.Client
 	store                       persistenceport.Store
 	agentRunRepository          agentrunport.Repository
+	memoryStore                 memoryport.Store
+	memoryCatalogService        memorycatalogapi.Service
+	memoryExtractionService     *memoryextractionservice.Service
+	memoryRetrievalService      memoryretrievalapi.ContextPreparer
 	cache                       cacheport.CurrentSessionCache
 	assetClient                 *asset.Client
 	knowledgeBaseRepository     knowledgeport.KnowledgeBaseRepository
@@ -162,9 +178,11 @@ func InitApp() {
 		instance.InitRedisDb()
 		instance.InitStore()
 		instance.InitThreadPool()
+		instance.InitMemoryStorage()
 		instance.InitKnowledgeStorage()
 		instance.InitCache()
 		instance.InitClient()
+		instance.InitMemoryServices()
 		instance.InitSessionMemory()
 		instance.InitSandbox()
 		instance.InitWorkspaceIsolation()
@@ -248,6 +266,64 @@ func (app *Application) recoverAgentRuns() {
 	if err := commands.RecoverRunning(context.Background()); err != nil {
 		log.Printf("recover interrupted agent runs failed: %v", err)
 	}
+}
+
+func (app *Application) InitMemoryStorage() {
+	if app.mongoDb == nil {
+		app.memoryStore = aimemory.New()
+		return
+	}
+	repository := memorymongo.New(app.mongoDb, app.properties.Mongo.Database)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		panic(fmt.Errorf("init AI memory indexes failed: %w", err))
+	}
+	app.memoryStore = repository
+}
+
+func (app *Application) InitMemoryServices() {
+	if app.memoryStore == nil {
+		return
+	}
+	ids := uuidadapter.Generator{}
+	app.memoryCatalogService = memorycatalogservice.CatalogService{Store: app.memoryStore, IDs: ids}
+	app.memoryRetrievalService = memoryretrievalservice.ContextService{
+		Memories: app.memoryStore, Usage: app.memoryCatalogService,
+		Scope: app.defaultMemoryScope(), TopK: 4,
+		OnUsageError: func(err error) {
+			log.Printf("record AI memory use failed: %v", err)
+		},
+	}
+	if app.agentRunRepository == nil || app.client == nil {
+		return
+	}
+	model := app.client.GetModel(app.defaultModelID)
+	if model == nil {
+		log.Printf("AI memory extraction disabled: default model %q is unavailable", app.defaultModelID)
+		return
+	}
+	extraction := &memoryextractionservice.Service{
+		Store: app.memoryStore, Runs: app.agentRunRepository, IDs: ids,
+		Extractor: memoryextractor.ModelExtractor{Model: model, DefaultScope: app.defaultMemoryScope()},
+		Async:     adapterthreadpool.Executor{Pool: app.threadPool},
+		OnError: func(err error) {
+			log.Printf("AI memory extraction failed: %v", err)
+		},
+	}
+	app.memoryExtractionService = extraction
+	if err := extraction.Recover(context.Background(), memoryextractioncommand.Recover{Limit: 100}); err != nil {
+		log.Printf("recover AI memory extraction jobs failed: %v", err)
+	}
+}
+
+func (app *Application) defaultMemoryScope() domainmemory.Scope {
+	workspace := strings.TrimSpace(app.workspace)
+	if workspace == "" {
+		return domainmemory.Scope{Type: domainmemory.ScopeGlobal}
+	}
+	if absolute, err := filepath.Abs(workspace); err == nil {
+		workspace = filepath.Clean(absolute)
+	}
+	return domainmemory.Scope{Type: domainmemory.ScopeWorkspace, Key: workspace}
 }
 
 func (app *Application) InitKnowledgeStorage() {
@@ -609,18 +685,20 @@ func (app *Application) InitWorkspaceIsolation() {
 func (app *Application) InitChatService() {
 	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
-		Models:          app.client,
-		ModelFactory:    adaptermodel.Factory{},
-		Sessions:        app.sessionMemory,
-		Store:           app.store,
-		Cache:           app.cache,
-		Async:           adapterthreadpool.Executor{Pool: app.threadPool},
-		Tools:           app.toolRegister,
-		Skills:          app.skillManager,
-		Hooks:           app.hookManager,
-		DefaultModel:    app.defaultModelID,
-		KnowledgeSearch: app.knowledgeSearchService,
-		AgentRuns:       app.agentRunRepository,
+		Models:           app.client,
+		ModelFactory:     adaptermodel.Factory{},
+		Sessions:         app.sessionMemory,
+		Store:            app.store,
+		Cache:            app.cache,
+		Async:            adapterthreadpool.Executor{Pool: app.threadPool},
+		Tools:            app.toolRegister,
+		Skills:           app.skillManager,
+		Hooks:            app.hookManager,
+		DefaultModel:     app.defaultModelID,
+		KnowledgeSearch:  app.knowledgeSearchService,
+		AgentRuns:        app.agentRunRepository,
+		AgentRunObserver: app.memoryExtractionService,
+		MemoryContext:    app.memoryRetrievalService,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -815,6 +893,10 @@ func (app *Application) GetKnowledgeSearchService() searchapi.Service {
 
 func (app *Application) GetKnowledgeService() *service.KnowledgeService {
 	return app.knowledgeService
+}
+
+func (app *Application) GetMemoryCatalogService() memorycatalogapi.Service {
+	return app.memoryCatalogService
 }
 
 func (app *Application) InitRegister() *tool.RegisterTools {

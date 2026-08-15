@@ -18,6 +18,8 @@ import { useMobileSettings } from "../hooks/useMobileSettings";
 import { useMobileUiState } from "../hooks/useMobileUiState";
 import { useKnowledgeActions } from "../hooks/useKnowledgeActions";
 import { useKnowledgeState } from "../hooks/useKnowledgeState";
+import { useAIMemoryActions } from "../hooks/useAIMemoryActions";
+import { useAIMemoryState } from "../hooks/useAIMemoryState";
 import { useNavigationActions } from "../hooks/useNavigationActions";
 import { useNormalizedRelayUrl } from "../hooks/useNormalizedRelayUrl";
 import { usePairingActions } from "../hooks/usePairingActions";
@@ -114,6 +116,15 @@ export function MobileAppScreen() {
     setMessage: setKnowledgeMessage,
     setSelectedKnowledgeBaseID,
   } = useKnowledgeState();
+  const {
+    applyCandidateMutation: applyAIMemoryCandidateMutation,
+    applyCandidates: applyAIMemoryCandidates,
+    applyMemories: applyAIMemories,
+    candidates: aiMemoryCandidates,
+    memories: aiMemories,
+    message: aiMemoryMessage,
+    setMessage: setAIMemoryMessage,
+  } = useAIMemoryState();
   const {
     applyDefinitionList: applySubagentDefinitionList,
     applyDefinitionMutation: applySubagentDefinitionMutation,
@@ -342,6 +353,21 @@ export function MobileAppScreen() {
     stopPending,
   });
   const {
+    approveCandidate: approveAIMemoryCandidate,
+    createMemory: createAIMemory,
+    deleteMemory: deleteAIMemory,
+    rejectCandidate: rejectAIMemoryCandidate,
+    requestCandidates: requestAIMemoryCandidates,
+    requestMemories: requestAIMemories,
+    restoreMemory: restoreAIMemory,
+    updateMemory: updateAIMemory,
+  } = useAIMemoryActions({
+    clientToken,
+    sendEnvelope,
+    startPending,
+    stopPending,
+  });
+  const {
     compactSession,
     executePlan,
     requestContextInfo,
@@ -531,6 +557,10 @@ export function MobileAppScreen() {
     applyKnowledgeProfiles,
     applyKnowledgeSearch,
     applyKnowledgeError: setKnowledgeMessage,
+    applyAIMemories,
+    applyAIMemoryCandidates,
+    applyAIMemoryCandidateMutation,
+    applyAIMemoryError: setAIMemoryMessage,
     applyModelList,
     applyModelSwitch,
     applySkillList,
@@ -551,6 +581,7 @@ export function MobileAppScreen() {
     historySessionIDRef,
     hasRunForRequest,
     isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
+    isMemoryOperationPending: pendingActions.memory,
     markAssistantError,
     mergeSessionChats,
     mergeSessionRuns,
@@ -577,9 +608,11 @@ export function MobileAppScreen() {
     refreshRemoteState();
     requestCatalog();
     requestProfiles();
+    requestAIMemories();
+    requestAIMemoryCandidates();
     requestSubagentDefinitions();
     requestSubagentTasks();
-  }, [refreshRemoteState, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
+  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
@@ -707,6 +740,9 @@ export function MobileAppScreen() {
         }}
         knowledge={{
           activeSession,
+          aiCandidates: aiMemoryCandidates,
+          aiMemories,
+          aiMemoryMessage,
           categories: knowledgeCategories,
           documents: documentsByBase[selectedKnowledgeBaseID] || [],
           jobs: jobsByBase[selectedKnowledgeBaseID] || [],
@@ -726,6 +762,14 @@ export function MobileAppScreen() {
           onSetRAG: setRAGSettings,
           onUpdateKnowledgeBase: updateKnowledgeBase,
           onUploadDocument: uploadDocument,
+          onApproveAIMemoryCandidate: approveAIMemoryCandidate,
+          onCreateAIMemory: createAIMemory,
+          onDeleteAIMemory: deleteAIMemory,
+          onRefreshAIMemories: requestAIMemories,
+          onRefreshAIMemoryCandidates: requestAIMemoryCandidates,
+          onRejectAIMemoryCandidate: rejectAIMemoryCandidate,
+          onRestoreAIMemory: restoreAIMemory,
+          onUpdateAIMemory: updateAIMemory,
           profiles: knowledgeProfiles,
           searchResult: knowledgeSearchResult,
         }}

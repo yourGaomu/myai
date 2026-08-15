@@ -6,6 +6,8 @@ MyAI 是一个 Go + Expo React Native 实现的 AI 编程助手，支持命令�
 
 准备开发知识库与 RAG 时，阅读 [RAG 架构设计](RAG_ARCHITECTURE_DESIGN.md) 和 [RAG 本地优先检索实现](FEATURE_RAG_RETRIEVAL_IMPLEMENTATION.md)。当前支持分类树、Session 级检索范围、自动/手动/每轮模式、MinIO 原文、Mongo 元数据、Milvus 远程向量和 sqlite-vec 本地热点索引。
 
+AI 自身总结的目标、方案、结果、痛点和经验保存在独立的 AI 记忆库，不与用户上传资料混在一起。实现细节见 [AI 记忆系统功能实现](FEATURE_AI_MEMORY_IMPLEMENTATION.md)。
+
 ## 功能实现文档
 
 - [Agent 启动功能实现](FEATURE_AGENT_STARTUP_IMPLEMENTATION.md)
@@ -13,6 +15,7 @@ MyAI 是一个 Go + Expo React Native 实现的 AI 编程助手，支持命令�
 - [模型生成功能实现](FEATURE_MODEL_GENERATION_IMPLEMENTATION.md)
 - [工具执行功能实现](FEATURE_TOOL_EXECUTION_IMPLEMENTATION.md)
 - [Plan 模式功能实现](FEATURE_PLAN_MODE_IMPLEMENTATION.md)
+- [AI 记忆系统功能实现](FEATURE_AI_MEMORY_IMPLEMENTATION.md)
 - [RAG 文档解析与分块实现](FEATURE_RAG_DOCUMENT_PROCESSING_IMPLEMENTATION.md)
 - [RAG 文档索引功能实现](FEATURE_RAG_INDEXING_IMPLEMENTATION.md)
 - [RAG Embedding Model 管理实现](FEATURE_RAG_EMBEDDING_MODEL_IMPLEMENTATION.md)
@@ -70,3 +73,4 @@ Inside chat:
 - MongoDB persistence, Redis current-session cache, and SQLite workspace history
 - Relay-based mobile pairing and remote Agent control
 - Mobile session, file, change, model, context, Plan, and hierarchical knowledge-base management
+- AI experience memory extraction, review, versioning, retrieval, and Mobile CRUD

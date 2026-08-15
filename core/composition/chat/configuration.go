@@ -25,6 +25,7 @@ import (
 	chatretrievalapi "myai/core/application/chat/retrieval/api"
 	chatretrievalservice "myai/core/application/chat/retrieval/service"
 	searchapi "myai/core/application/knowledge/search/api"
+	memoryretrievalapi "myai/core/application/memory/retrieval/api"
 	modelservice "myai/core/application/model/service"
 	planserviceapp "myai/core/application/plan/service"
 	runtimeservice "myai/core/application/runtime/service"
@@ -61,19 +62,21 @@ type ModelRegistry interface {
 
 type Configuration struct {
 	// Configuration 只接收进程已经创建好的基础设施，BuildDependencies 再把它们装配成应用服务。
-	Models          ModelRegistry
-	ModelFactory    modelport.Factory
-	Sessions        *memorysession.Store
-	Store           persistenceport.Store
-	Cache           cacheport.CurrentSessionCache
-	Async           asyncport.Executor
-	Tools           *tool.RegisterTools
-	Skills          *skill.Manager
-	Hooks           *hook.Manager
-	DefaultModel    string
-	UserID          string
-	KnowledgeSearch searchapi.Service
-	AgentRuns       agentrunport.Repository
+	Models           ModelRegistry
+	ModelFactory     modelport.Factory
+	Sessions         *memorysession.Store
+	Store            persistenceport.Store
+	Cache            cacheport.CurrentSessionCache
+	Async            asyncport.Executor
+	Tools            *tool.RegisterTools
+	Skills           *skill.Manager
+	Hooks            *hook.Manager
+	DefaultModel     string
+	UserID           string
+	KnowledgeSearch  searchapi.Service
+	AgentRuns        agentrunport.Repository
+	AgentRunObserver agentrunport.CompletionObserver
+	MemoryContext    memoryretrievalapi.ContextPreparer
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -89,7 +92,11 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	var runCommands agentrunapi.CommandService
 	var runQueries agentrunapi.QueryService
 	if configuration.AgentRuns != nil {
-		runCommands = agentrunservice.CommandService{Repository: configuration.AgentRuns, IDs: uuidadapter.Generator{}}
+		baseCommands := agentrunservice.CommandService{Repository: configuration.AgentRuns, IDs: uuidadapter.Generator{}}
+		runCommands = baseCommands
+		if configuration.AgentRunObserver != nil {
+			runCommands = agentrunservice.ObservingCommandService{Inner: baseCommands, Observer: configuration.AgentRunObserver}
+		}
 		runQueries = agentrunservice.QueryService{Repository: configuration.AgentRuns}
 	}
 
@@ -235,8 +242,12 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		AgentRunner:       agentLoop,
 		ResponseCommitter: responseCommit,
 		Persistence:       generationPersistence,
+		MemoryContext:     configuration.MemoryContext,
 		OnCompactError: func(err error) {
 			log.Printf("auto compact failed: %v", err)
+		},
+		OnMemoryError: func(err error) {
+			log.Printf("AI memory retrieval failed: %v", err)
 		},
 	}
 	generationTasks := generationservice.TaskService{

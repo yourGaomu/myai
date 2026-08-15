@@ -75,6 +75,18 @@ export type MessageType =
   | "knowledge_profile_list_result"
   | "knowledge_search_preview"
   | "knowledge_search_preview_result"
+  | "ai_memory_list"
+  | "ai_memory_list_result"
+  | "ai_memory_create"
+  | "ai_memory_update"
+  | "ai_memory_delete"
+  | "ai_memory_restore"
+  | "ai_memory_mutation_result"
+  | "ai_memory_candidate_list"
+  | "ai_memory_candidate_list_result"
+  | "ai_memory_candidate_approve"
+  | "ai_memory_candidate_reject"
+  | "ai_memory_candidate_mutation_result"
   | "subagent_definition_list"
   | "subagent_definition_list_result"
   | "subagent_definition_create"
@@ -813,6 +825,128 @@ export type KnowledgeSearchPreviewPayload = {
   knowledge_base_ids?: string[];
   category_ids?: string[];
   top_k?: number;
+};
+
+export type AIMemoryKind = "experience" | "failure" | "decision" | "preference";
+export type AIMemoryStatus = "active" | "archived" | "superseded" | "deleted";
+export type AIMemoryCandidateStatus = "pending" | "approved" | "rejected" | "merged";
+
+export type AIMemoryScope = {
+  type: "global" | "workspace" | "project" | "session";
+  key?: string;
+};
+
+export type AIMemoryContent = {
+  goal: string;
+  applicable_context?: string;
+  approach?: string;
+  result?: string;
+  pain_points?: string;
+  root_cause?: string;
+  lessons?: string;
+  verification?: string;
+};
+
+export type AIMemorySource = {
+  type: "agent_run" | "session" | "manual" | "dream";
+  session_id?: string;
+  agent_run_id?: string;
+  event_ids?: string[];
+  created_at: string;
+};
+
+export type AIMemoryRevision = {
+  id: string;
+  version: number;
+  content: AIMemoryContent;
+  confidence: number;
+  author: "model" | "human" | "system";
+  sources: AIMemorySource[];
+  created_at: string;
+};
+
+export type AIMemory = {
+  id: string;
+  title: string;
+  kind: AIMemoryKind;
+  scope: AIMemoryScope;
+  tags: string[];
+  status: AIMemoryStatus;
+  current_version: number;
+  revisions: AIMemoryRevision[];
+  human_locked: boolean;
+  supersedes_id?: string;
+  use_count: number;
+  last_used_at?: string;
+  deleted_at?: string;
+  deletion_reason?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AIMemoryCandidate = {
+  id: string;
+  title: string;
+  kind: AIMemoryKind;
+  scope: AIMemoryScope;
+  tags: string[];
+  content: AIMemoryContent;
+  confidence: number;
+  sources: AIMemorySource[];
+  status: AIMemoryCandidateStatus;
+  target_memory_id?: string;
+  review_note?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AIMemoryInput = {
+  title: string;
+  kind: AIMemoryKind;
+  scope: AIMemoryScope;
+  tags?: string[];
+  content: AIMemoryContent;
+  confidence?: number;
+};
+
+export type AIMemoryListPayload = {
+  text?: string;
+  tags?: string[];
+  kinds?: AIMemoryKind[];
+  statuses?: AIMemoryStatus[];
+  scope_types?: AIMemoryScope["type"][];
+  scope_key?: string;
+  include_deleted?: boolean;
+  limit?: number;
+};
+
+export type AIMemoryListResultPayload = {
+  memories: AIMemory[];
+  message?: string;
+};
+
+export type AIMemoryCreatePayload = { memory: AIMemoryInput };
+export type AIMemoryUpdatePayload = { memory_id: string; memory: AIMemoryInput };
+export type AIMemoryDeletePayload = { memory_id: string; reason?: string };
+export type AIMemoryRestorePayload = { memory_id: string };
+
+export type AIMemoryCandidateListPayload = {
+  statuses?: AIMemoryCandidateStatus[];
+  limit?: number;
+};
+
+export type AIMemoryCandidateListResultPayload = {
+  candidates: AIMemoryCandidate[];
+  message?: string;
+};
+
+export type AIMemoryCandidateApprovePayload = { candidate_id: string; memory_id?: string };
+export type AIMemoryCandidateRejectPayload = { candidate_id: string; note?: string };
+
+export type AIMemoryCandidateMutationResultPayload = {
+  memories: AIMemory[];
+  candidates: AIMemoryCandidate[];
+  message?: string;
 };
 
 export type FileListPayload = {

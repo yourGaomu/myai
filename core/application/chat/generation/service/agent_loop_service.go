@@ -49,7 +49,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
 		result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-			Messages: snapshot.Messages,
+			Messages: withMemoryContext(snapshot.Messages, command.MemoryContext),
 			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
 			Stream:   command.Stream,
 			Settings: command.Settings,
@@ -94,7 +94,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
 	result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
-		Messages: snapshot.Messages,
+		Messages: withMemoryContext(snapshot.Messages, command.MemoryContext),
 		Stream:   command.Stream,
 		Settings: command.Settings,
 	})
@@ -104,6 +104,25 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	totalUsage = totalUsage.Add(result.Usage)
 	reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 	return finalizeResult(result, totalUsage, reasoningParts), nil
+}
+
+func withMemoryContext(messages []domainmessage.Message, prompt string) []domainmessage.Message {
+	memoryMessage := domainmessage.MemoryContext(prompt)
+	if !memoryMessage.IsSynthetic() {
+		return messages
+	}
+	insertAt := len(messages)
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == domainmessage.RoleUser {
+			insertAt = index
+			break
+		}
+	}
+	result := make([]domainmessage.Message, 0, len(messages)+1)
+	result = append(result, messages[:insertAt]...)
+	result = append(result, memoryMessage)
+	result = append(result, messages[insertAt:]...)
+	return result
 }
 
 func validateContextWindow(snapshot contextmgr.Snapshot) error {

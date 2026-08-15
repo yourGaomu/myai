@@ -89,6 +89,18 @@ const (
 	TypeKnowledgeProfileListResult       MessageType = "knowledge_profile_list_result"
 	TypeKnowledgeSearchPreview           MessageType = "knowledge_search_preview"
 	TypeKnowledgeSearchPreviewResult     MessageType = "knowledge_search_preview_result"
+	TypeAIMemoryList                     MessageType = "ai_memory_list"
+	TypeAIMemoryListResult               MessageType = "ai_memory_list_result"
+	TypeAIMemoryCreate                   MessageType = "ai_memory_create"
+	TypeAIMemoryUpdate                   MessageType = "ai_memory_update"
+	TypeAIMemoryDelete                   MessageType = "ai_memory_delete"
+	TypeAIMemoryRestore                  MessageType = "ai_memory_restore"
+	TypeAIMemoryMutationResult           MessageType = "ai_memory_mutation_result"
+	TypeAIMemoryCandidateList            MessageType = "ai_memory_candidate_list"
+	TypeAIMemoryCandidateListResult      MessageType = "ai_memory_candidate_list_result"
+	TypeAIMemoryCandidateApprove         MessageType = "ai_memory_candidate_approve"
+	TypeAIMemoryCandidateReject          MessageType = "ai_memory_candidate_reject"
+	TypeAIMemoryCandidateMutationResult  MessageType = "ai_memory_candidate_mutation_result"
 	TypeSubagentDefinitionList           MessageType = "subagent_definition_list"
 	TypeSubagentDefinitionListResult     MessageType = "subagent_definition_list_result"
 	TypeSubagentDefinitionCreate         MessageType = "subagent_definition_create"
@@ -991,6 +1003,144 @@ type HistoryRevertResultPayload struct {
 	Reverted     bool     `json:"reverted"`
 	Paths        []string `json:"paths"`
 	Message      string   `json:"message,omitempty"`
+}
+
+type AIMemoryScope struct {
+	Type string `json:"type"`
+	Key  string `json:"key,omitempty"`
+}
+
+type AIMemoryContent struct {
+	Goal              string `json:"goal"`
+	ApplicableContext string `json:"applicable_context,omitempty"`
+	Approach          string `json:"approach,omitempty"`
+	Result            string `json:"result,omitempty"`
+	PainPoints        string `json:"pain_points,omitempty"`
+	RootCause         string `json:"root_cause,omitempty"`
+	Lessons           string `json:"lessons,omitempty"`
+	Verification      string `json:"verification,omitempty"`
+}
+
+type AIMemorySource struct {
+	Type       string    `json:"type"`
+	SessionID  string    `json:"session_id,omitempty"`
+	AgentRunID string    `json:"agent_run_id,omitempty"`
+	EventIDs   []string  `json:"event_ids,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type AIMemoryRevision struct {
+	ID         string           `json:"id"`
+	Version    int              `json:"version"`
+	Content    AIMemoryContent  `json:"content"`
+	Confidence float64          `json:"confidence"`
+	Author     string           `json:"author"`
+	Sources    []AIMemorySource `json:"sources"`
+	CreatedAt  time.Time        `json:"created_at"`
+}
+
+type AIMemory struct {
+	ID             string             `json:"id"`
+	Title          string             `json:"title"`
+	Kind           string             `json:"kind"`
+	Scope          AIMemoryScope      `json:"scope"`
+	Tags           []string           `json:"tags"`
+	Status         string             `json:"status"`
+	CurrentVersion int                `json:"current_version"`
+	Revisions      []AIMemoryRevision `json:"revisions"`
+	HumanLocked    bool               `json:"human_locked"`
+	SupersedesID   string             `json:"supersedes_id,omitempty"`
+	UseCount       int64              `json:"use_count"`
+	LastUsedAt     *time.Time         `json:"last_used_at,omitempty"`
+	DeletedAt      *time.Time         `json:"deleted_at,omitempty"`
+	DeletionReason string             `json:"deletion_reason,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+}
+
+type AIMemoryCandidate struct {
+	ID             string           `json:"id"`
+	Title          string           `json:"title"`
+	Kind           string           `json:"kind"`
+	Scope          AIMemoryScope    `json:"scope"`
+	Tags           []string         `json:"tags"`
+	Content        AIMemoryContent  `json:"content"`
+	Confidence     float64          `json:"confidence"`
+	Sources        []AIMemorySource `json:"sources"`
+	Status         string           `json:"status"`
+	TargetMemoryID string           `json:"target_memory_id,omitempty"`
+	ReviewNote     string           `json:"review_note,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+}
+
+type AIMemoryInput struct {
+	Title      string          `json:"title"`
+	Kind       string          `json:"kind"`
+	Scope      AIMemoryScope   `json:"scope"`
+	Tags       []string        `json:"tags,omitempty"`
+	Content    AIMemoryContent `json:"content"`
+	Confidence float64         `json:"confidence,omitempty"`
+}
+
+type AIMemoryListPayload struct {
+	Text           string   `json:"text,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	Kinds          []string `json:"kinds,omitempty"`
+	Statuses       []string `json:"statuses,omitempty"`
+	ScopeTypes     []string `json:"scope_types,omitempty"`
+	ScopeKey       string   `json:"scope_key,omitempty"`
+	IncludeDeleted bool     `json:"include_deleted,omitempty"`
+	Limit          int      `json:"limit,omitempty"`
+}
+
+type AIMemoryListResultPayload struct {
+	Memories []AIMemory `json:"memories"`
+	Message  string     `json:"message,omitempty"`
+}
+
+type AIMemoryCreatePayload struct {
+	Memory AIMemoryInput `json:"memory"`
+}
+
+type AIMemoryUpdatePayload struct {
+	MemoryID string        `json:"memory_id"`
+	Memory   AIMemoryInput `json:"memory"`
+}
+
+type AIMemoryDeletePayload struct {
+	MemoryID string `json:"memory_id"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type AIMemoryRestorePayload struct {
+	MemoryID string `json:"memory_id"`
+}
+
+type AIMemoryCandidateListPayload struct {
+	Statuses []string `json:"statuses,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+}
+
+type AIMemoryCandidateListResultPayload struct {
+	Candidates []AIMemoryCandidate `json:"candidates"`
+	Message    string              `json:"message,omitempty"`
+}
+
+type AIMemoryCandidateApprovePayload struct {
+	CandidateID string `json:"candidate_id"`
+	MemoryID    string `json:"memory_id,omitempty"`
+}
+
+type AIMemoryCandidateRejectPayload struct {
+	CandidateID string `json:"candidate_id"`
+	Note        string `json:"note,omitempty"`
+}
+
+type AIMemoryCandidateMutationResultPayload struct {
+	Memories   []AIMemory          `json:"memories"`
+	Candidates []AIMemoryCandidate `json:"candidates"`
+	Message    string              `json:"message,omitempty"`
 }
 
 type ErrorPayload struct {

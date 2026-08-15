@@ -29,4 +29,5 @@ export type PendingAction =
   | "upload"
 	| "pause"
 	| "knowledge"
+	| "memory"
 	| "subagents";

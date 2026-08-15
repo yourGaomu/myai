@@ -1,6 +1,9 @@
 import { useCallback, type RefObject } from "react";
 
 import type {
+  AIMemoryCandidateListResultPayload,
+  AIMemoryCandidateMutationResultPayload,
+  AIMemoryListResultPayload,
   AgentRunCompletedPayload,
   AgentRunEventPayload,
   AgentRunListResultPayload,
@@ -93,6 +96,10 @@ type Args = {
   applyKnowledgeProfiles: (payload?: KnowledgeProfileListResultPayload) => void;
   applyKnowledgeSearch: (payload?: KnowledgeSearchPreviewResultPayload) => void;
   applyKnowledgeError: (message: string) => void;
+  applyAIMemories: (payload?: AIMemoryListResultPayload) => void;
+  applyAIMemoryCandidates: (payload?: AIMemoryCandidateListResultPayload) => void;
+  applyAIMemoryCandidateMutation: (payload?: AIMemoryCandidateMutationResultPayload) => void;
+  applyAIMemoryError: (message: string) => void;
   applyModelList: (payload?: ModelListResultPayload) => void;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
   applySessionChanged: (payload?: SessionChangedPayload) => void;
@@ -125,6 +132,7 @@ type Args = {
   historySessionIDRef: RefObject<string>;
   hasRunForRequest: (sessionID: string, requestID?: string) => boolean;
   isKnowledgeOperationPending: boolean;
+  isMemoryOperationPending: boolean;
   markAssistantError: (
     sessionID: string,
     requestID: string | undefined,
@@ -187,6 +195,10 @@ export function useRemoteMessageHandler({
   applyKnowledgeProfiles,
   applyKnowledgeSearch,
   applyKnowledgeError,
+  applyAIMemories,
+  applyAIMemoryCandidates,
+  applyAIMemoryCandidateMutation,
+  applyAIMemoryError,
   applyModelList,
   applyModelSwitch,
   applySessionChanged,
@@ -207,6 +219,7 @@ export function useRemoteMessageHandler({
   historySessionIDRef,
   hasRunForRequest,
   isKnowledgeOperationPending,
+  isMemoryOperationPending,
   markAssistantError,
   mergeSessionChats,
   mergeSessionRuns,
@@ -530,6 +543,19 @@ export function useRemoteMessageHandler({
           stopPending("knowledge");
           applyKnowledgeSearch(message.payload as KnowledgeSearchPreviewResultPayload | undefined);
           break;
+        case "ai_memory_list_result":
+        case "ai_memory_mutation_result":
+          stopPending("memory");
+          applyAIMemories(message.payload as AIMemoryListResultPayload | undefined);
+          break;
+        case "ai_memory_candidate_list_result":
+          stopPending("memory");
+          applyAIMemoryCandidates(message.payload as AIMemoryCandidateListResultPayload | undefined);
+          break;
+        case "ai_memory_candidate_mutation_result":
+          stopPending("memory");
+          applyAIMemoryCandidateMutation(message.payload as AIMemoryCandidateMutationResultPayload | undefined);
+          break;
         case "subagent_definition_list_result":
           stopPending("subagents");
           applySubagentDefinitionList(message.payload as SubagentDefinitionListResultPayload | undefined);
@@ -602,6 +628,9 @@ export function useRemoteMessageHandler({
           if (isKnowledgeOperationPending) {
             applyKnowledgeError(payload.message || "知识库操作失败");
           }
+          if (isMemoryOperationPending) {
+            applyAIMemoryError(payload.message || "AI 记忆操作失败");
+          }
           const targetSessionID = resolveChatSessionID(
             message,
             requestSessionMapRef,
@@ -636,6 +665,7 @@ export function useRemoteMessageHandler({
           stopPending("plan");
           stopPending("pause");
           stopPending("knowledge");
+          stopPending("memory");
           stopPending("subagents");
           if (
             !message.request_id ||
@@ -678,6 +708,10 @@ export function useRemoteMessageHandler({
       applyKnowledgeProfiles,
       applyKnowledgeSearch,
       applyKnowledgeError,
+      applyAIMemories,
+      applyAIMemoryCandidates,
+      applyAIMemoryCandidateMutation,
+      applyAIMemoryError,
       applyModelList,
       applyModelSwitch,
       applySessionChanged,
@@ -698,6 +732,7 @@ export function useRemoteMessageHandler({
       historySessionIDRef,
       hasRunForRequest,
       isKnowledgeOperationPending,
+      isMemoryOperationPending,
       markAssistantError,
       mergeSessionChats,
       mergeSessionRuns,

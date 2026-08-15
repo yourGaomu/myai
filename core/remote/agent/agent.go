@@ -25,6 +25,7 @@ type Agent struct {
 	fileService       WorkspaceFileFacade
 	changeService     WorkspaceChangeFacade
 	knowledgeService  KnowledgeFacade
+	memoryService     MemoryFacade
 	subagentService   SubagentFacade
 	subagentEvents    SubagentEventSource
 	runtimes          *sessionRuntimeManager
@@ -34,7 +35,7 @@ type Agent struct {
 	permissionTimeout time.Duration
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
@@ -45,6 +46,7 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		fileService:       fileService,
 		changeService:     changeService,
 		knowledgeService:  knowledgeService,
+		memoryService:     memoryService,
 		subagentService:   subagentService,
 		subagentEvents:    subagentEvents,
 		runtimes:          newSessionRuntimeManager(),
@@ -278,6 +280,22 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleKnowledgeProfileList(ctx, conn, message)
 	case protocol.TypeKnowledgeSearchPreview:
 		return a.handleKnowledgeSearchPreview(ctx, conn, message)
+	case protocol.TypeAIMemoryList:
+		return a.handleAIMemoryList(ctx, conn, message)
+	case protocol.TypeAIMemoryCreate:
+		return a.handleAIMemoryCreate(ctx, conn, message)
+	case protocol.TypeAIMemoryUpdate:
+		return a.handleAIMemoryUpdate(ctx, conn, message)
+	case protocol.TypeAIMemoryDelete:
+		return a.handleAIMemoryDelete(ctx, conn, message)
+	case protocol.TypeAIMemoryRestore:
+		return a.handleAIMemoryRestore(ctx, conn, message)
+	case protocol.TypeAIMemoryCandidateList:
+		return a.handleAIMemoryCandidateList(ctx, conn, message)
+	case protocol.TypeAIMemoryCandidateApprove:
+		return a.handleAIMemoryCandidateApprove(ctx, conn, message)
+	case protocol.TypeAIMemoryCandidateReject:
+		return a.handleAIMemoryCandidateReject(ctx, conn, message)
 	case protocol.TypeSubagentDefinitionList:
 		return a.handleSubagentDefinitionList(ctx, conn, message)
 	case protocol.TypeSubagentDefinitionCreate:

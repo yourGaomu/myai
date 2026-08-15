@@ -14,6 +14,7 @@
 - [模型生成功能实现](FEATURE_MODEL_GENERATION_IMPLEMENTATION.md)
 - [工具执行功能实现](FEATURE_TOOL_EXECUTION_IMPLEMENTATION.md)
 - [Plan 模式功能实现](FEATURE_PLAN_MODE_IMPLEMENTATION.md)
+- [AI 记忆系统功能实现](FEATURE_AI_MEMORY_IMPLEMENTATION.md)
 - [RAG 文档解析与分块实现](FEATURE_RAG_DOCUMENT_PROCESSING_IMPLEMENTATION.md)
 - [RAG 文档索引功能实现](FEATURE_RAG_INDEXING_IMPLEMENTATION.md)
 - [RAG Embedding Model 管理实现](FEATURE_RAG_EMBEDDING_MODEL_IMPLEMENTATION.md)
@@ -37,6 +38,7 @@
 | 文件、变更或检查点恢复异常 | 13 |
 | Skill、MCP、Hook 不生效 | 14 |
 | 知识库分类、文档索引或检索异常 | RAG 架构设计、RAG 功能实现文档 |
+| AI 经验没有提取、审核或注入回答 | AI 记忆系统功能实现 |
 | 新增协议或业务能力 | 17 |
 
 ## 2. 运行时总览

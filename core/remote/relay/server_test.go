@@ -524,7 +524,7 @@ func TestRelayForwardsSessionMessages(t *testing.T) {
 	}
 }
 
-func TestRelayForwardsRAGAndKnowledgeMessages(t *testing.T) {
+func TestRelayForwardsRAGKnowledgeAndMemoryMessages(t *testing.T) {
 	testCases := []struct {
 		request  protocol.MessageType
 		response protocol.MessageType
@@ -543,6 +543,14 @@ func TestRelayForwardsRAGAndKnowledgeMessages(t *testing.T) {
 		{protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeDocumentMutationResult},
 		{protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeProfileListResult},
 		{protocol.TypeKnowledgeSearchPreview, protocol.TypeKnowledgeSearchPreviewResult},
+		{protocol.TypeAIMemoryList, protocol.TypeAIMemoryListResult},
+		{protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryMutationResult},
+		{protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryMutationResult},
+		{protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryMutationResult},
+		{protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryMutationResult},
+		{protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateListResult},
+		{protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateMutationResult},
+		{protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryCandidateMutationResult},
 	}
 
 	server := newTestServer()

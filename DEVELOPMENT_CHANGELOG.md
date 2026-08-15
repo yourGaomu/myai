@@ -393,6 +393,55 @@ go test ./core/architecture
 git diff --check
 ```
 
+## 2026-08-15：AI 经验记忆系统
+
+新增独立于用户资料知识库的 AI 记忆库，用于保存 Agent 从实际任务中总结出的目标、方案、结果、痛点、错误原因、经验和偏好。
+
+### 1. 领域与应用服务
+
+- 新增 `Memory`、不可变 `Revision`、`Candidate`、`ExtractionJob`、`DreamRun` 等领域对象。
+- `CatalogService` 支持 CRUD、追加版本、逻辑删除、恢复、候选审核和使用次数统计。
+- 人工创建或编辑会设置 `HumanLocked=true`，为后续 Dream 模式保留人工保护边界。
+- Dream 模式当前只完成领域对象和持久化骨架，尚未实现自动合并和夜间调度。
+
+### 2. 白天提取
+
+- AgentRun 以 succeeded 或 failed 完成后，通过 CompletionObserver 异步创建提取任务。
+- 提取任务先持久化再提交线程池，进程重启后可恢复 pending、running 和可重试 failed Job。
+- `agent_run_id + extractor_version` 唯一；并发冲突时回读已有任务。
+- failed Job 最多自动尝试三次，避免每次启动无限重试。
+- 模型输入限制单 Event 和总证据长度，并对常见 API Key、Token、Password、Secret 和 Bearer 值脱敏。
+- 相同 Job 重试使用确定性 Candidate ID，避免重复候选。
+
+### 3. 生成前检索
+
+- 每个 GenerationTask 只检索一次，AgentLoop 的所有工具轮次复用同一份 MemoryContext。
+- 支持 global、workspace、project、session 作用域，默认 TopK 为 4，Prompt 限制约 900 Token。
+- MemoryContext 插入最新 user message 之前，不写入 `Session.Messages`，保持历史与缓存前缀稳定。
+- failure 记忆只作为警告，不作为推荐方案。
+- 命中后通过 Catalog 用例更新使用次数；统计失败不阻断模型回答。
+
+### 4. Mongo、协议与 Mobile
+
+- 新增 `ai_memories`、`ai_memory_candidates`、`ai_memory_extraction_jobs`、`ai_memory_dream_runs` 集合和索引。
+- Mongo 不可用时回退到进程内存仓储。
+- 新增 `ai_memory_*` 远程协议和 Agent Handler。
+- Mobile 知识页增加“资料知识库 / AI 记忆”，AI 记忆内部提供“有效记忆 / 待审核”。
+- 支持搜索、新建、编辑新版本、逻辑删除、查看已删除、恢复、通过候选和拒绝候选，并提供统一加载反馈。
+
+完整调用链见 [FEATURE_AI_MEMORY_IMPLEMENTATION.md](FEATURE_AI_MEMORY_IMPLEMENTATION.md)。
+
+验证命令：
+
+```powershell
+go test ./core/domain/memory ./core/application/memory/... ./core/adapter/memory/...
+go test ./core/adapter/persistence/mongo/memory/... ./core/application/chat ./core/remote/agent
+go test ./core/architecture ./core
+
+cd mobile
+npm run typecheck
+```
+
 ## 后续记录约定
 
 后续每次跨模块功能或重要缺陷修复，都应在提交前追加一个日期章节，至少记录：

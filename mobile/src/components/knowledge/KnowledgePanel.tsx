@@ -15,7 +15,7 @@ import type { KnowledgeBaseChanges } from "../../types/knowledge";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 
-type Props = {
+export type KnowledgePanelProps = {
   activeSession?: SessionSummary;
   buttonFeedback: ButtonFeedback;
   categories: KnowledgeCategory[];
@@ -71,7 +71,7 @@ export function KnowledgePanel({
   pendingSettings,
   profiles,
   searchResult,
-}: Props) {
+}: KnowledgePanelProps) {
   const [selectedID, setSelectedID] = useState("");
   const [detailTab, setDetailTab] = useState<DetailTab | null>(null);
   const [filterText, setFilterText] = useState("");

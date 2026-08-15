@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"myai/core/contextmgr"
@@ -143,6 +144,48 @@ func TestAgentLoopServiceExecutesToolsAndContinuesGeneration(t *testing.T) {
 	}
 	if len(records.last.Assets) != 1 || records.last.Assets[0].ShortCode != "asset-code" {
 		t.Fatalf("expected shared assets to be recorded, got %#v", records.last.Assets)
+	}
+}
+
+func TestAgentLoopServiceReusesMemoryContextWithoutPersistingIt(t *testing.T) {
+	current := testSession()
+	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{call}},
+		{Content: "done"},
+	}}
+	executor := &recordingToolExecutor{result: ToolExecutionResult{Messages: []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "ok"}),
+	}}}
+
+	_, err := AgentLoopService{Contexts: &recordingContextProvider{}, Tools: &recordingToolCatalog{}, ToolExecutor: executor}.Run(
+		context.Background(),
+		RunCommand{Model: model, Session: current, MemoryContext: "Prefer the durable retry solution."},
+	)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("expected two model requests, got %d", len(model.requests))
+	}
+	for index, request := range model.requests {
+		memoryMessages := 0
+		for _, message := range request.Messages {
+			if message.IsSyntheticReason(domainmessage.SyntheticReasonMemoryContext) {
+				memoryMessages++
+				if !strings.Contains(message.Text(), "durable retry solution") {
+					t.Fatalf("request %d has unexpected memory context: %q", index, message.Text())
+				}
+			}
+		}
+		if memoryMessages != 1 {
+			t.Fatalf("request %d expected one memory context, got %d", index, memoryMessages)
+		}
+	}
+	for _, message := range current.Messages {
+		if message.IsSyntheticReason(domainmessage.SyntheticReasonMemoryContext) {
+			t.Fatalf("memory context was persisted in the session: %#v", current.Messages)
+		}
 	}
 }
 
