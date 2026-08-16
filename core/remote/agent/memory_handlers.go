@@ -8,6 +8,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	memorycommand "myai/core/application/memory/catalog/command"
+	memorydreamcommand "myai/core/application/memory/dream/command"
+	memoryextractioncommand "myai/core/application/memory/extraction/command"
 	domainmemory "myai/core/domain/memory"
 	memoryport "myai/core/port/memory"
 	"myai/core/remote/protocol"
@@ -16,6 +18,20 @@ import (
 func (a *Agent) requireMemoryService() error {
 	if a.memoryService == nil {
 		return errors.New("AI memory service is not configured")
+	}
+	return nil
+}
+
+func (a *Agent) requireMemoryExtractionService() error {
+	if a.memoryExtraction == nil {
+		return errors.New("AI memory extraction service is not configured")
+	}
+	return nil
+}
+
+func (a *Agent) requireMemoryDreamService() error {
+	if a.memoryDream == nil {
+		return errors.New("AI memory dream service is not configured")
 	}
 	return nil
 }
@@ -142,6 +158,110 @@ func (a *Agent) handleAIMemoryCandidateReject(ctx context.Context, conn *websock
 	})
 }
 
+func (a *Agent) handleAIMemoryExtractionJobList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if err := a.requireMemoryExtractionService(); err != nil {
+		return err
+	}
+	payload, err := protocol.DecodePayload[protocol.AIMemoryExtractionJobListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode AI memory extraction job list failed: %w", err)
+	}
+	statuses := extractionJobStatuses(payload.Statuses)
+	if len(statuses) == 0 {
+		statuses = []domainmemory.JobStatus{domainmemory.JobFailed}
+	}
+	result, err := a.memoryExtraction.ListJobs(ctx, memoryextractioncommand.ListJobs{Statuses: statuses, Limit: payload.Limit})
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeAIMemoryExtractionJobListResult, message.RequestID, message.SessionID, aiMemoryExtractionJobsPayload(result.Items, ""))
+}
+
+func (a *Agent) handleAIMemoryExtractionJobRetry(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if err := a.requireMemoryExtractionService(); err != nil {
+		return err
+	}
+	payload, err := protocol.DecodePayload[protocol.AIMemoryExtractionJobRetryPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode AI memory extraction job retry failed: %w", err)
+	}
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+	if _, err := a.memoryExtraction.Retry(ctx, memoryextractioncommand.Retry{JobID: payload.JobID}); err != nil {
+		return err
+	}
+	result, err := a.memoryExtraction.ListJobs(ctx, memoryextractioncommand.ListJobs{
+		Statuses: []domainmemory.JobStatus{domainmemory.JobFailed}, Limit: 100,
+	})
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeAIMemoryExtractionJobRetryResult, message.RequestID, message.SessionID, aiMemoryExtractionJobsPayload(result.Items, "Extraction retry scheduled."))
+}
+
+func (a *Agent) handleAIMemoryDreamList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if err := a.requireMemoryDreamService(); err != nil {
+		return err
+	}
+	payload, err := protocol.DecodePayload[protocol.AIMemoryDreamListPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode AI memory dream list failed: %w", err)
+	}
+	runs, err := a.memoryDream.List(ctx, memorydreamcommand.List{Limit: payload.Limit})
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeAIMemoryDreamListResult, message.RequestID, message.SessionID, protocol.AIMemoryDreamResultPayload{
+		Runs: aiMemoryDreamRunsPayload(runs.Runs),
+	})
+}
+
+func (a *Agent) handleAIMemoryDreamRun(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if err := a.requireMemoryDreamService(); err != nil {
+		return err
+	}
+	payload, err := protocol.DecodePayload[protocol.AIMemoryDreamRunPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode AI memory dream run failed: %w", err)
+	}
+	dreamResult, err := a.memoryDream.Run(ctx, memorydreamcommand.Run{
+		Trigger: "manual", CandidateLimit: payload.CandidateLimit, MemoryLimit: payload.MemoryLimit,
+	})
+	if err != nil {
+		runs, listErr := a.memoryDream.List(ctx, memorydreamcommand.List{Limit: 20})
+		if listErr != nil {
+			return errors.Join(err, listErr)
+		}
+		return a.writeRemoteMessage(conn, protocol.TypeAIMemoryDreamRunResult, message.RequestID, message.SessionID, protocol.AIMemoryDreamResultPayload{
+			Runs: aiMemoryDreamRunsPayload(runs.Runs), Message: "Dream failed: " + err.Error(),
+		})
+	}
+	runs, err := a.memoryDream.List(ctx, memorydreamcommand.List{Limit: 20})
+	if err != nil {
+		return err
+	}
+	memories, err := a.memoryService.List(ctx, memorycommand.List{Filter: memoryport.ListFilter{Limit: 100}})
+	if err != nil {
+		return err
+	}
+	candidates, err := a.memoryService.ListCandidates(ctx, memorycommand.ListCandidates{Filter: memoryport.CandidateFilter{
+		Statuses: []domainmemory.CandidateStatus{domainmemory.CandidatePending}, Limit: 100,
+	}})
+	if err != nil {
+		return err
+	}
+	messageText := fmt.Sprintf(
+		"Dream completed: %d created, %d merged, %d rejected.",
+		dreamResult.DreamRun.CreatedCount, dreamResult.DreamRun.MergedCount, dreamResult.DreamRun.RejectedCount,
+	)
+	return a.writeRemoteMessage(conn, protocol.TypeAIMemoryDreamRunResult, message.RequestID, message.SessionID, protocol.AIMemoryDreamResultPayload{
+		Runs:       aiMemoryDreamRunsPayload(runs.Runs),
+		Memories:   aiMemoriesPayload(memories.Memories, "").Memories,
+		Candidates: aiMemoryCandidatesPayload(candidates.Items, "").Candidates,
+		Message:    messageText,
+	})
+}
+
 func (a *Agent) mutateAIMemoryCandidates(ctx context.Context, conn *websocket.Conn, message protocol.Message, response string, mutate func() error) error {
 	if err := a.requireMemoryService(); err != nil {
 		return err
@@ -208,6 +328,14 @@ func candidateStatuses(values []string) []domainmemory.CandidateStatus {
 	items := make([]domainmemory.CandidateStatus, 0, len(values))
 	for _, value := range values {
 		items = append(items, domainmemory.CandidateStatus(value))
+	}
+	return items
+}
+
+func extractionJobStatuses(values []string) []domainmemory.JobStatus {
+	items := make([]domainmemory.JobStatus, 0, len(values))
+	for _, value := range values {
+		items = append(items, domainmemory.JobStatus(value))
 	}
 	return items
 }

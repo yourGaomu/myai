@@ -213,6 +213,7 @@ export function useChatMessages() {
       content?: string,
       reasoning?: string,
     ) => {
+      const completedAt = new Date().toISOString();
       updateSessionChat(sessionID, (current) => {
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
@@ -227,6 +228,7 @@ export function useChatMessages() {
             messages: [
               ...current.messages,
               {
+                completedAt,
                 id,
                 requestID,
                 createdAt: new Date().toISOString(),
@@ -250,6 +252,7 @@ export function useChatMessages() {
             item.id === assistantID
               ? {
                   ...item,
+                  completedAt,
                   requestID: item.requestID || requestID,
                   reasoning: reasoning || item.reasoning,
                   status,
@@ -266,6 +269,7 @@ export function useChatMessages() {
 
   const markAssistantError = useCallback(
     (sessionID: string, requestID: string | undefined, message?: string) => {
+      const completedAt = new Date().toISOString();
       updateSessionChat(sessionID, (current) => {
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
@@ -277,6 +281,7 @@ export function useChatMessages() {
             messages: [
               ...current.messages,
               {
+                completedAt,
                 id,
                 requestID,
                 createdAt: new Date().toISOString(),
@@ -298,6 +303,7 @@ export function useChatMessages() {
             item.id === assistantID
               ? {
                   ...item,
+                  completedAt,
                   requestID: item.requestID || requestID,
                   status: "error",
                   text: item.text || message || "Request failed.",

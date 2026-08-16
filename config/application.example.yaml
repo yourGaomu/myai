@@ -1,0 +1,109 @@
+myai:
+  base_url: ""
+  api_key: ""
+  model: "gpt-5.5"
+
+memory:
+  extraction:
+    model_id: ""
+  dream:
+    model_id: ""
+
+mongo:
+  uri: ""
+  database: "myai"
+
+redis:
+  addr: ""
+  password: ""
+  db: 0
+
+rag:
+  id_node: 1
+  embedding:
+    models: []
+  milvus:
+    enabled: false
+    address: ""
+    username: ""
+    password: ""
+    database: "default"
+    api_key: ""
+    enable_tls: false
+    collection_prefix: "knowledge_vectors"
+    shards: 1
+  local:
+    enabled: false
+    path: "/workspace/.myai/knowledge.db"
+    vector_path: "/workspace/.myai/vectors.db"
+    max_open_connections: 4
+  retrieval:
+    candidate_multiplier: 3
+    max_candidates: 100
+    min_local_results: 3
+    min_local_score: 0.55
+    rrf_k: 60
+    cache_remote_results: true
+  document_processor:
+    enabled: false
+    python_executable: "/opt/myai-venv/bin/python"
+    script: "/app/document_processor/main.py"
+    transport: "auto"
+    worker_count: 2
+    max_pending_jobs: 16
+    startup_timeout_seconds: 30
+    timeout_seconds: 120
+    shutdown_grace_seconds: 5
+    max_document_size_mb: 512
+    content_chunk_kb: 256
+    chunk_batch_size: 64
+    grpc_max_message_mb: 8
+    temp_directory: "/tmp"
+  minio:
+    endpoint: ""
+    access_key: ""
+    secret_key: ""
+    session_token: ""
+    bucket: "myai-knowledge"
+    region: ""
+    use_ssl: false
+    auto_create_bucket: true
+
+thread:
+  core: 5
+  queueSize: 10
+
+asset:
+  shortener_base_url: ""
+  upload_timeout_seconds: 60
+  ttl_seconds: 604800
+  max_visits: 0
+
+skill:
+  root: "/app/skills"
+  registry: ""
+
+sandbox:
+  provider: "local"
+  opensandbox:
+    endpoint: "http://127.0.0.1:8090"
+    api_key: ""
+    use_server_proxy: true
+    image: "python:3.12-slim"
+    cpu: "500m"
+    memory: "512Mi"
+    sandbox_timeout_seconds: 300
+    command_timeout_seconds: 60
+    request_timeout_seconds: 30
+    max_download_mb: 16
+
+subagent:
+  worker_count: 2
+  queue_size: 32
+  snapshot_root: "/workspace/.myai/subagent-snapshots"
+
+hooks:
+  commands: []
+
+mcp:
+  servers: []

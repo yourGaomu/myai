@@ -3,8 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { AgentRunEvent, AgentRunSnapshot } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-
-type ReasoningMode = "compact" | "raw" | "hidden";
+import { ThinkingReasoning } from "./ThinkingReasoning";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -13,16 +12,22 @@ type Props = {
 
 export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
   const [expanded, setExpanded] = useState(snapshot.run.status === "running");
-  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>("compact");
   const elapsed = useRunElapsed(snapshot);
+  const reasoning = useMemo(
+    () => snapshot.events
+      .filter((event) => event.type === "reasoning")
+      .map(eventContent)
+      .filter(Boolean)
+      .join("\n\n"),
+    [snapshot.events],
+  );
   const events = useMemo(() => {
-    const visible = snapshot.events.filter((event) => reasoningMode !== "hidden" || event.type !== "reasoning");
+    const visible = snapshot.events.filter((event) => event.type !== "reasoning");
     if (snapshot.run.status !== "running" && !visible.some(isTerminalEvent)) {
       visible.push(terminalEventFromRun(snapshot));
     }
     return visible;
-  }, [reasoningMode, snapshot]);
-  const hasReasoning = snapshot.events.some((event) => event.type === "reasoning");
+  }, [snapshot]);
 
   useEffect(() => {
     if (snapshot.run.status === "running") {
@@ -47,36 +52,24 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
 
       {expanded ? (
         <View style={styles.body}>
-          {hasReasoning ? (
-            <View style={styles.modeRow}>
-              <Text style={styles.modeLabel}>Reasoning</Text>
-              {(["compact", "raw", "hidden"] as ReasoningMode[]).map((mode) => (
-                <Pressable
-                  accessibilityLabel={`${mode} reasoning`}
-                  key={mode}
-                  onPress={() => setReasoningMode(mode)}
-                  style={({ pressed }) => buttonFeedback([
-                    styles.modeButton,
-                    reasoningMode === mode && styles.modeButtonActive,
-                  ], pressed)}
-                >
-                  <Text style={[styles.modeButtonText, reasoningMode === mode && styles.modeButtonTextActive]}>
-                    {modeLabel(mode)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+          {reasoning ? (
+            <ThinkingReasoning
+              buttonFeedback={buttonFeedback}
+              finishedAt={snapshot.run.finished_at}
+              reasoning={reasoning}
+              running={snapshot.run.status === "running"}
+              startedAt={snapshot.run.started_at}
+            />
           ) : null}
 
           {events.length === 0 ? (
-            <Text style={styles.emptyText}>Waiting for activity...</Text>
+            reasoning ? null : <Text style={styles.emptyText}>Waiting for activity...</Text>
           ) : (
             events.map((event, index) => (
               <TimelineEvent
                 event={event}
                 key={`${event.id}-${event.sequence}`}
                 last={index === events.length - 1}
-                reasoningMode={reasoningMode}
               />
             ))
           )}
@@ -87,11 +80,10 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
   );
 }
 
-function TimelineEvent({ event, last, reasoningMode }: { event: AgentRunEvent; last: boolean; reasoningMode: ReasoningMode }) {
+function TimelineEvent({ event, last }: { event: AgentRunEvent; last: boolean }) {
   const expandable = event.type === "tool_call" || event.type === "tool_result" || event.type === "permission";
   const [expanded, setExpanded] = useState(event.type === "tool_result" && isFailure(event.status));
   const content = eventContent(event);
-  const compactReasoning = event.type === "reasoning" && reasoningMode === "compact";
 
   return (
     <View style={styles.eventRow}>
@@ -109,9 +101,6 @@ function TimelineEvent({ event, last, reasoningMode }: { event: AgentRunEvent; l
           {expandable ? <Text style={styles.eventToggle}>{expanded ? "-" : "+"}</Text> : null}
         </Pressable>
 
-        {event.type === "reasoning" && content ? (
-          <Text numberOfLines={compactReasoning ? 4 : undefined} style={styles.reasoningText}>{content}</Text>
-        ) : null}
         {event.type === "plan_update" && content ? <Text style={styles.eventText}>{content}</Text> : null}
         {event.type === "progress" && content ? <Text style={styles.eventText}>{content}</Text> : null}
         {isTerminalEvent(event) && content ? <Text style={isFailure(event.status) ? styles.errorText : styles.eventText}>{content}</Text> : null}
@@ -209,14 +198,6 @@ function runKindLabel(kind: string) {
   }
 }
 
-function modeLabel(mode: ReasoningMode) {
-  switch (mode) {
-    case "raw": return "Raw";
-    case "hidden": return "Hide";
-    default: return "Fold";
-  }
-}
-
 function eventLabel(event: AgentRunEvent) {
   switch (event.type) {
     case "reasoning": return "THINK";
@@ -303,12 +284,6 @@ const styles = StyleSheet.create({
   subtitle: { color: "#6c665f", fontSize: 10, fontWeight: "700", marginTop: 2 },
   collapseIcon: { color: "#12100e", fontSize: 20, fontWeight: "900", textAlign: "center", width: 24 },
   body: { borderTopColor: "#12100e", borderTopWidth: 3, paddingHorizontal: 10, paddingVertical: 9 },
-  modeRow: { alignItems: "center", flexDirection: "row", gap: 5, marginBottom: 10 },
-  modeLabel: { color: "#6c665f", flex: 1, fontSize: 10, fontWeight: "900", textTransform: "uppercase" },
-  modeButton: { borderColor: "#12100e", borderRadius: 5, borderWidth: 2, paddingHorizontal: 7, paddingVertical: 4 },
-  modeButtonActive: { backgroundColor: "#12100e" },
-  modeButtonText: { color: "#12100e", fontSize: 9, fontWeight: "900" },
-  modeButtonTextActive: { color: "#fffaf0" },
   emptyText: { color: "#6c665f", fontSize: 11, paddingVertical: 5 },
   eventRow: { flexDirection: "row", minHeight: 38 },
   rail: { alignItems: "center", marginRight: 8, width: 14 },
@@ -320,7 +295,6 @@ const styles = StyleSheet.create({
   eventTitle: { color: "#12100e", flex: 1, fontSize: 11, fontWeight: "900" },
   eventToggle: { color: "#12100e", fontSize: 15, fontWeight: "900", textAlign: "center", width: 18 },
   stepText: { color: "#6c665f", fontSize: 9, fontWeight: "900" },
-  reasoningText: { color: "#3f3748", fontSize: 11, lineHeight: 17, marginTop: 3 },
   eventText: { color: "#12100e", fontSize: 11, lineHeight: 17, marginTop: 3 },
   errorText: { color: "#8a2119", fontSize: 11, lineHeight: 17, marginTop: 3 },
   details: { borderLeftColor: "#12100e", borderLeftWidth: 2, gap: 7, marginTop: 6, paddingLeft: 8 },

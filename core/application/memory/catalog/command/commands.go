@@ -56,9 +56,10 @@ type ListCandidates struct {
 }
 
 type ApproveCandidate struct {
-	CandidateID  string
-	MemoryID     string
-	HumanApprove bool
+	CandidateID           string
+	MemoryID              string
+	ExpectedMemoryVersion int
+	HumanApprove          bool
 }
 
 type RejectCandidate struct {

@@ -18,6 +18,7 @@ export type PendingAction =
   | "models"
   | "skills"
   | "settings"
+  | "generation"
   | "context"
   | "plan"
   | "assets"

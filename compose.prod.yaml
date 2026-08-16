@@ -1,0 +1,109 @@
+name: myai-prod
+
+services:
+  relay:
+    image: ${MYAI_RELAY_IMAGE:-myai-relay:latest}
+    container_name: myai-relay
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      MYAI_RELAY_AGENT_TOKEN: ${MYAI_RELAY_AGENT_TOKEN}
+      MYAI_RELAY_AGENT_USER: ${MYAI_AGENT_USER:-local}
+      MYAI_RELAY_AGENT_DEVICE: ${MYAI_AGENT_DEVICE:-server-agent}
+      MONGO_URI: ${MONGO_URI:-}
+      MONGO_DATABASE: ${MONGO_DATABASE:-myai}
+    command:
+      - relay
+      - --addr
+      - 0.0.0.0:18080
+      - --urlConfig
+      - /app/config/relay.yaml
+    volumes:
+      - ./config/relay.yaml:/app/config/relay.yaml:ro
+    ports:
+      - "127.0.0.1:18080:18080"
+    networks:
+      - myai
+
+  agent:
+    profiles:
+      - agent
+    image: ${MYAI_AGENT_IMAGE:-myai-agent:latest}
+    container_name: myai-agent
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - relay
+    env_file:
+      - .env
+    environment:
+      MYAI_RELAY_AGENT_TOKEN: ${MYAI_RELAY_AGENT_TOKEN}
+      MYAI_BASE_URL: ${MYAI_BASE_URL:-}
+      MYAI_API_KEY: ${MYAI_API_KEY:-}
+      MYAI_MODEL: ${MYAI_MODEL:-gpt-5.5}
+      MONGO_URI: ${MONGO_URI:-}
+      MONGO_DATABASE: ${MONGO_DATABASE:-myai}
+      REDIS_ADDR: ${REDIS_ADDR:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      ASSET_SHORTENER_BASE_URL: ${ASSET_SHORTENER_BASE_URL:-}
+      RAG_MINIO_ENDPOINT: ${RAG_MINIO_ENDPOINT:-}
+      RAG_MINIO_ACCESS_KEY: ${RAG_MINIO_ACCESS_KEY:-}
+      RAG_MINIO_SECRET_KEY: ${RAG_MINIO_SECRET_KEY:-}
+      RAG_MINIO_BUCKET: ${RAG_MINIO_BUCKET:-myai-knowledge}
+      RAG_MINIO_USE_SSL: ${RAG_MINIO_USE_SSL:-false}
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-local}
+      SANDBOX_OPENSANDBOX_ENDPOINT: ${SANDBOX_OPENSANDBOX_ENDPOINT:-http://myai-opensandbox-server:8090}
+      SANDBOX_OPENSANDBOX_API_KEY: ${SANDBOX_OPENSANDBOX_API_KEY:-}
+    command:
+      - agent
+      - --server
+      - ws://relay:18080/ws/agent
+      - --user
+      - ${MYAI_AGENT_USER:-local}
+      - --device
+      - ${MYAI_AGENT_DEVICE:-server-agent}
+      - --workspace
+      - /workspace
+    volumes:
+      - ./config/application.yaml:/app/resource/application.yaml:ro
+      - ${MYAI_WORKSPACE_PATH:-./workspace}:/workspace
+    networks:
+      - myai
+
+  url-shortener:
+    profiles:
+      - shortener
+    image: ${MYAI_URL_SHORTENER_IMAGE:-myai-url-shortener:latest}
+    container_name: myai-url-shortener
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      URL_SHORTENER_ADDR: ${URL_SHORTENER_ADDR:-:18081}
+      URL_SHORTENER_BASE_URL: ${URL_SHORTENER_BASE_URL:-https://assets.example.com}
+      URL_SHORTENER_STORE: ${URL_SHORTENER_STORE:-mongo}
+      URL_SHORTENER_MONGO_URI: ${URL_SHORTENER_MONGO_URI:-}
+      URL_SHORTENER_MONGO_DATABASE: ${URL_SHORTENER_MONGO_DATABASE:-myai}
+      URL_SHORTENER_REDIS_ENABLED: ${URL_SHORTENER_REDIS_ENABLED:-false}
+      URL_SHORTENER_REDIS_ADDR: ${URL_SHORTENER_REDIS_ADDR:-}
+      URL_SHORTENER_REDIS_PASSWORD: ${URL_SHORTENER_REDIS_PASSWORD:-}
+      URL_SHORTENER_REDIS_DB: ${URL_SHORTENER_REDIS_DB:-0}
+      URL_SHORTENER_MINIO_ENDPOINT: ${URL_SHORTENER_MINIO_ENDPOINT:-}
+      URL_SHORTENER_MINIO_ACCESS_KEY: ${URL_SHORTENER_MINIO_ACCESS_KEY:-}
+      URL_SHORTENER_MINIO_SECRET_KEY: ${URL_SHORTENER_MINIO_SECRET_KEY:-}
+      URL_SHORTENER_MINIO_BUCKET: ${URL_SHORTENER_MINIO_BUCKET:-myai-assets}
+      URL_SHORTENER_MINIO_USE_SSL: ${URL_SHORTENER_MINIO_USE_SSL:-false}
+      URL_SHORTENER_MINIO_ENSURE_BUCKET: ${URL_SHORTENER_MINIO_ENSURE_BUCKET:-true}
+    ports:
+      - "127.0.0.1:18081:18081"
+    networks:
+      - myai
+
+networks:
+  myai:
+    external: true
+    name: ${INFRA_NETWORK:-myai-shared}

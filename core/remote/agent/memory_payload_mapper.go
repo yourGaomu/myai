@@ -69,3 +69,38 @@ func aiMemoryCandidatesPayload(candidates []domainmemory.Candidate, message stri
 	}
 	return protocol.AIMemoryCandidateListResultPayload{Candidates: items, Message: message}
 }
+
+func aiMemoryExtractionJobsPayload(jobs []domainmemory.ExtractionJob, message string) protocol.AIMemoryExtractionJobListResultPayload {
+	items := make([]protocol.AIMemoryExtractionJob, 0, len(jobs))
+	for _, job := range jobs {
+		items = append(items, protocol.AIMemoryExtractionJob{
+			ID: job.ID, AgentRunID: job.AgentRunID, ExtractorVersion: job.ExtractorVersion,
+			Status: string(job.Status), Attempts: job.Attempts, LastError: job.LastError,
+			CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, CompletedAt: job.CompletedAt,
+		})
+	}
+	return protocol.AIMemoryExtractionJobListResultPayload{Jobs: items, Message: message}
+}
+
+func aiMemoryDreamRunsPayload(runs []domainmemory.DreamRun) []protocol.AIMemoryDreamRun {
+	items := make([]protocol.AIMemoryDreamRun, 0, len(runs))
+	for _, run := range runs {
+		actions := make([]protocol.AIMemoryDreamAction, 0, len(run.Actions))
+		for _, action := range run.Actions {
+			actions = append(actions, protocol.AIMemoryDreamAction{
+				CandidateID: action.CandidateID, CandidateTitle: action.CandidateTitle,
+				MemoryID: action.MemoryID, MemoryTitle: action.MemoryTitle,
+				Decision: string(action.Decision), Reason: action.Reason,
+				Applied: action.Applied, FailureReason: action.FailureReason,
+			})
+		}
+		items = append(items, protocol.AIMemoryDreamRun{
+			ID: run.ID, Status: string(run.Status), Trigger: run.Trigger,
+			CandidateCount: run.CandidateCount, CreatedCount: run.CreatedCount,
+			MergedCount: run.MergedCount, SupersededCount: run.SupersededCount,
+			RejectedCount: run.RejectedCount, Actions: actions, LastError: run.LastError,
+			StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
+		})
+	}
+	return items
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +114,44 @@ func TestCatalogCandidateApprovalAndRejection(t *testing.T) {
 	}
 	if rejected.MemoryCandidate.Status != domainmemory.CandidateRejected || rejected.MemoryCandidate.ReviewNote != "not reusable" {
 		t.Fatalf("unexpected rejected candidate: %#v", rejected.MemoryCandidate)
+	}
+}
+
+func TestRecordUseIsAtomicAcrossConcurrentCalls(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	store := memoryrepository.New()
+	service := CatalogService{Store: store, IDs: &sequenceIDs{}, Now: func() time.Time { return now }}
+	created, err := service.Create(ctx, command.Create{
+		Title: "Atomic usage", Kind: domainmemory.KindExperience,
+		Content: domainmemory.Content{Goal: "Count concurrent retrieval", Approach: "Use repository atomic update"},
+	})
+	if err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+	const calls = 100
+	var wait sync.WaitGroup
+	wait.Add(calls)
+	errorsFound := make(chan error, calls)
+	for range calls {
+		go func() {
+			defer wait.Done()
+			if recordErr := service.RecordUse(ctx, command.RecordUse{MemoryID: created.Memory.ID}); recordErr != nil {
+				errorsFound <- recordErr
+			}
+		}()
+	}
+	wait.Wait()
+	close(errorsFound)
+	for recordErr := range errorsFound {
+		t.Fatalf("record use: %v", recordErr)
+	}
+	stored, err := store.Get(ctx, created.Memory.ID)
+	if err != nil {
+		t.Fatalf("load memory: %v", err)
+	}
+	if stored.UseCount != calls || stored.LastUsedAt == nil || !stored.LastUsedAt.Equal(now) {
+		t.Fatalf("unexpected usage state: %#v", stored)
 	}
 }
 

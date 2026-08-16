@@ -3,6 +3,14 @@ myai:
   api_key: "***REDACTED***"
   model: gpt-5.5
 
+memory:
+  extraction:
+    # Empty means using the application default chat model.
+    model_id: ""
+  dream:
+    # Empty means using the application default chat model.
+    model_id: ""
+
 mongo:
   uri: "mongodb://***REDACTED***@170.106.115.187:27017/"
   database: myai

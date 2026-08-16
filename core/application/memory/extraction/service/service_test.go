@@ -123,6 +123,59 @@ func TestRecoverStopsAutomaticallyRetryingAfterThreeAttempts(t *testing.T) {
 	}
 }
 
+func TestRetryResubmitsFailedJobBeyondAutomaticLimit(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	store := memoryrepository.New()
+	job := domainmemory.ExtractionJob{
+		ID: "failed-job", AgentRunID: "run-1", ExtractorVersion: "test-v1",
+		Status: domainmemory.JobFailed, Attempts: 3, LastError: "model timeout", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.SaveExtractionJob(ctx, job); err != nil {
+		t.Fatalf("save job: %v", err)
+	}
+	executor := &recordingExecutor{}
+	service := Service{
+		Store: store, Runs: agentrunrepository.New(), Extractor: &stubExtractor{}, IDs: &testIDs{},
+		Async: executor, Now: func() time.Time { return now.Add(time.Minute) },
+	}
+
+	retried, err := service.Retry(ctx, memorycommand.Retry{JobID: job.ID})
+	if err != nil {
+		t.Fatalf("retry failed job: %v", err)
+	}
+	if retried.ExtractionJob.Status != domainmemory.JobPending || retried.ExtractionJob.Attempts != 3 || retried.ExtractionJob.LastError != "" {
+		t.Fatalf("unexpected retried job: %#v", retried.ExtractionJob)
+	}
+	if len(executor.tasks) != 1 {
+		t.Fatalf("expected one retry task, got %d", len(executor.tasks))
+	}
+	failed, err := service.ListJobs(ctx, memorycommand.ListJobs{Statuses: []domainmemory.JobStatus{domainmemory.JobFailed}})
+	if err != nil {
+		t.Fatalf("list failed jobs: %v", err)
+	}
+	if len(failed.Items) != 0 {
+		t.Fatalf("retried job remained failed: %#v", failed.Items)
+	}
+}
+
+func TestRetryRejectsNonFailedJob(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	store := memoryrepository.New()
+	job := domainmemory.ExtractionJob{
+		ID: "pending-job", AgentRunID: "run-1", ExtractorVersion: "test-v1",
+		Status: domainmemory.JobPending, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.SaveExtractionJob(ctx, job); err != nil {
+		t.Fatalf("save job: %v", err)
+	}
+	service := Service{Store: store, Runs: agentrunrepository.New(), Extractor: &stubExtractor{}, IDs: &testIDs{}}
+	if _, err := service.Retry(ctx, memorycommand.Retry{JobID: job.ID}); err == nil {
+		t.Fatal("expected retry of pending job to fail")
+	}
+}
+
 type stubExtractor struct {
 	drafts []domainmemory.CandidateDraft
 	err    error

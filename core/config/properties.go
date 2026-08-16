@@ -2,6 +2,7 @@ package config
 
 type Properties struct {
 	Model    ModelProperties
+	Memory   MemoryProperties
 	Mongo    MongoProperties
 	Redis    RedisProperties
 	RAG      RAGProperties
@@ -12,6 +13,19 @@ type Properties struct {
 	Subagent SubagentProperties
 	Hooks    HookProperties
 	MCP      MCPProperties
+}
+
+type MemoryProperties struct {
+	Extraction MemoryExtractionProperties
+	Dream      MemoryDreamProperties
+}
+
+type MemoryExtractionProperties struct {
+	ModelID string
+}
+
+type MemoryDreamProperties struct {
+	ModelID string
 }
 
 type ModelProperties struct {

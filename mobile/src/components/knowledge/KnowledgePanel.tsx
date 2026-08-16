@@ -14,6 +14,7 @@ import type {
 import type { KnowledgeBaseChanges } from "../../types/knowledge";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
+import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
 
 export type KnowledgePanelProps = {
   activeSession?: SessionSummary;
@@ -153,23 +154,30 @@ export function KnowledgePanel({
     if (topK !== settings.top_k) updateRAG({ top_k: topK });
   };
 
+  const closeCatalogManagement = () => {
+    setManagedCategoryID("");
+    setRecursiveDeleteID("");
+    setShowCatalogManagement(false);
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <View style={styles.headerRow}>
-        <View style={styles.flex}>
-          <Text style={styles.eyebrow}>KNOWLEDGE</Text>
-          <Text style={styles.title}>知识库</Text>
+    <>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.headerRow}>
+          <View style={styles.flex}>
+            <Text style={styles.eyebrow}>KNOWLEDGE</Text>
+            <Text style={styles.title}>知识库</Text>
+          </View>
+          <Pressable
+            disabled={pendingKnowledge}
+            onPress={onRefresh}
+            style={({ pressed }) =>
+              buttonFeedback([styles.outlineButton, pendingKnowledge && styles.disabledButton], pressed)
+            }
+          >
+            <ButtonContent loading={pendingKnowledge} text={pendingKnowledge ? "刷新中" : "刷新"} />
+          </Pressable>
         </View>
-        <Pressable
-          disabled={pendingKnowledge}
-          onPress={onRefresh}
-          style={({ pressed }) =>
-            buttonFeedback([styles.outlineButton, pendingKnowledge && styles.disabledButton], pressed)
-          }
-        >
-          <ButtonContent loading={pendingKnowledge} text={pendingKnowledge ? "刷新中" : "刷新"} />
-        </Pressable>
-      </View>
 
       <View style={styles.toolbarRow}>
         <TextInput
@@ -212,17 +220,14 @@ export function KnowledgePanel({
             </Text>
           </View>
           <Pressable
-            onPress={() => setShowCatalogManagement((current) => !current)}
-            style={({ pressed }) =>
-              buttonFeedback(
-                showCatalogManagement ? styles.iconTextButton : styles.newButton,
-                pressed,
-              )
-            }
+            onPress={() => {
+              setManagedCategoryID("");
+              setRecursiveDeleteID("");
+              setShowCatalogManagement(true);
+            }}
+            style={({ pressed }) => buttonFeedback(styles.newButton, pressed)}
           >
-            <Text style={showCatalogManagement ? styles.iconTextButtonLabel : styles.newButtonText}>
-              {showCatalogManagement ? "完成" : "+ 新建"}
-            </Text>
+            <Text style={styles.newButtonText}>+ 新建</Text>
           </Pressable>
         </View>
 
@@ -255,95 +260,7 @@ export function KnowledgePanel({
           <Text style={styles.emptyText}>还没有内容，请先创建知识库。</Text>
         ) : null}
 
-        {showCatalogManagement ? (
-          <CatalogManagement
-            availableMoveParents={availableMoveParents}
-            baseName={baseName}
-            buttonFeedback={buttonFeedback}
-            categories={categories}
-            categoryMoveParentID={categoryMoveParentID}
-            categoryName={categoryName}
-            managedCategory={managedCategory}
-            onCreateCategory={() => {
-              if (onCreateCategory(categoryName, parentID)) setCategoryName("");
-            }}
-            onCreateKnowledgeBase={() => {
-              if (onCreateKnowledgeBase(baseName, parentID, profileID)) setBaseName("");
-            }}
-            onDeleteCategory={onDeleteCategory}
-            onFinishCategory={() => setManagedCategoryID("")}
-            onMoveCategory={onMoveCategory}
-            onSelectMoveParent={setCategoryMoveParentID}
-            onSelectParent={setParentID}
-            onSelectProfile={setProfileID}
-            parentID={parentID}
-            pending={pendingKnowledge}
-            profileID={profileID}
-            profiles={profiles}
-            recursiveDeleteID={recursiveDeleteID}
-            setBaseName={setBaseName}
-            setCategoryName={setCategoryName}
-            setRecursiveDeleteID={setRecursiveDeleteID}
-          />
-        ) : null}
       </View>
-
-      {selectedBase && detailTab ? (
-        <View style={styles.detailSection}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.sectionTitle}>{selectedBase.name}</Text>
-              <Text style={styles.meta}>{selectedBase.description || "未填写描述"}</Text>
-            </View>
-            <Pressable
-              onPress={() => setDetailTab(null)}
-              style={({ pressed }) => buttonFeedback(styles.iconTextButton, pressed)}
-            >
-              <Text style={styles.iconTextButtonLabel}>关闭</Text>
-            </Pressable>
-          </View>
-          <View style={styles.tabRow}>
-            {(["search", "config"] as const).map((tab) => (
-              <Pressable
-                key={tab}
-                onPress={() => setDetailTab(tab)}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.tabButton, detailTab === tab && styles.tabButtonActive], pressed)
-                }
-              >
-                <Text style={styles.tabText}>{tab === "search" ? "检索测试" : "知识库设置"}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {detailTab === "search" ? (
-            <SearchPanel
-              buttonFeedback={buttonFeedback}
-              onChangeQuery={setSemanticQuery}
-              onSearch={() =>
-                onSearch(semanticQuery, {
-                  ...settings,
-                  category_ids: [],
-                  knowledge_base_ids: [selectedBase.id],
-                })
-              }
-              pending={pendingKnowledge}
-              query={semanticQuery}
-              result={searchResult}
-            />
-          ) : null}
-          {detailTab === "config" ? (
-            <ConfigPanel
-              base={selectedBase}
-              buttonFeedback={buttonFeedback}
-              categories={categories}
-              onDelete={onDeleteKnowledgeBase}
-              onUpdate={onUpdateKnowledgeBase}
-              pending={pendingKnowledge}
-              profiles={profiles}
-            />
-          ) : null}
-        </View>
-      ) : null}
 
       <View style={styles.sessionSection}>
         <Pressable
@@ -453,8 +370,110 @@ export function KnowledgePanel({
             </View>
           </View>
         ) : null}
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+
+      <ResponsiveFormModal
+        buttonFeedback={buttonFeedback}
+        footer={(
+          <Pressable onPress={closeCatalogManagement} style={({ pressed }) => buttonFeedback(styles.footerDoneButton, pressed)}>
+            <Text style={styles.footerDoneText}>完成</Text>
+          </Pressable>
+        )}
+        onClose={closeCatalogManagement}
+        title={managedCategory ? "管理目录" : "新建目录或知识库"}
+        visible={showCatalogManagement}
+      >
+        <CatalogManagement
+          availableMoveParents={availableMoveParents}
+          baseName={baseName}
+          buttonFeedback={buttonFeedback}
+          categories={categories}
+          categoryMoveParentID={categoryMoveParentID}
+          categoryName={categoryName}
+          managedCategory={managedCategory}
+          onCreateCategory={() => {
+            if (onCreateCategory(categoryName, parentID)) setCategoryName("");
+          }}
+          onCreateKnowledgeBase={() => {
+            if (onCreateKnowledgeBase(baseName, parentID, profileID)) setBaseName("");
+          }}
+          onDeleteCategory={onDeleteCategory}
+          onMoveCategory={onMoveCategory}
+          onSelectMoveParent={setCategoryMoveParentID}
+          onSelectParent={setParentID}
+          onSelectProfile={setProfileID}
+          parentID={parentID}
+          pending={pendingKnowledge}
+          profileID={profileID}
+          profiles={profiles}
+          recursiveDeleteID={recursiveDeleteID}
+          setBaseName={setBaseName}
+          setCategoryName={setCategoryName}
+          setRecursiveDeleteID={setRecursiveDeleteID}
+        />
+      </ResponsiveFormModal>
+
+      {selectedBase ? (
+        <ResponsiveFormModal
+          buttonFeedback={buttonFeedback}
+          footer={(
+            <Pressable onPress={() => setDetailTab(null)} style={({ pressed }) => buttonFeedback(styles.footerDoneButton, pressed)}>
+              <Text style={styles.footerDoneText}>完成</Text>
+            </Pressable>
+          )}
+          onClose={() => setDetailTab(null)}
+          title={selectedBase.name}
+          visible={Boolean(detailTab)}
+        >
+          <Text style={styles.meta}>{selectedBase.description || "未填写描述"}</Text>
+          <View style={styles.tabRow}>
+            {(["search", "config"] as const).map((tab) => (
+              <Pressable
+                key={tab}
+                onPress={() => setDetailTab(tab)}
+                style={({ pressed }) =>
+                  buttonFeedback([styles.tabButton, detailTab === tab && styles.tabButtonActive], pressed)
+                }
+              >
+                <Text style={[styles.tabText, detailTab === tab && styles.tabTextActive]}>{tab === "search" ? "检索测试" : "知识库设置"}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {detailTab === "search" ? (
+            <SearchPanel
+              buttonFeedback={buttonFeedback}
+              onChangeQuery={setSemanticQuery}
+              onSearch={() =>
+                onSearch(semanticQuery, {
+                  ...settings,
+                  category_ids: [],
+                  knowledge_base_ids: [selectedBase.id],
+                })
+              }
+              pending={pendingKnowledge}
+              query={semanticQuery}
+              result={searchResult}
+            />
+          ) : null}
+          {detailTab === "config" ? (
+            <ConfigPanel
+              base={selectedBase}
+              buttonFeedback={buttonFeedback}
+              categories={categories}
+              onDelete={(knowledgeBaseID) => {
+                const sent = onDeleteKnowledgeBase(knowledgeBaseID);
+                if (sent) setDetailTab(null);
+                return sent;
+              }}
+              onUpdate={onUpdateKnowledgeBase}
+              pending={pendingKnowledge}
+              profiles={profiles}
+            />
+          ) : null}
+        </ResponsiveFormModal>
+      ) : null}
+    </>
   );
 }
 
@@ -652,7 +671,6 @@ type CatalogManagementProps = {
   onCreateCategory: () => void;
   onCreateKnowledgeBase: () => void;
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
-  onFinishCategory: () => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
   onSelectMoveParent: (parentID: string) => void;
   onSelectParent: (parentID: string) => void;
@@ -678,7 +696,6 @@ function CatalogManagement({
   onCreateCategory,
   onCreateKnowledgeBase,
   onDeleteCategory,
-  onFinishCategory,
   onMoveCategory,
   onSelectMoveParent,
   onSelectParent,
@@ -696,18 +713,7 @@ function CatalogManagement({
     <View style={styles.managementPanel}>
       {managedCategory ? (
         <View style={styles.managementBlock}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.sectionTitle}>管理目录</Text>
-              <Text style={styles.meta}>{categoryPathLabel(managedCategory, categories)}</Text>
-            </View>
-            <Pressable
-              onPress={onFinishCategory}
-              style={({ pressed }) => buttonFeedback(styles.iconTextButton, pressed)}
-            >
-              <Text style={styles.iconTextButtonLabel}>完成</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.meta}>{categoryPathLabel(managedCategory, categories)}</Text>
           <Text style={styles.meta}>移动到</Text>
           <View style={styles.chipWrap}>
             <ScopeChip active={!categoryMoveParentID} label="根目录" onPress={() => onSelectMoveParent("")} />
@@ -1030,7 +1036,6 @@ const styles = StyleSheet.create({
   toolbarRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   sectionHeader: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" },
   explorerSection: { backgroundColor: "#fffaf0", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, overflow: "hidden" },
-  detailSection: { backgroundColor: "#fffaf0", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, gap: 10, padding: 12 },
   sessionSection: { backgroundColor: "#fffaf0", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, overflow: "hidden" },
   sessionSummaryRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 58, paddingHorizontal: 12, paddingVertical: 10 },
   sessionSettingsBody: { borderTopColor: "#ded2c3", borderTopWidth: 1, gap: 10, padding: 12 },
@@ -1076,7 +1081,7 @@ const styles = StyleSheet.create({
   documentMark: { backgroundColor: "#e9f4ff", borderColor: "#2387d8", borderRadius: 2, borderWidth: 1, height: 18, width: 14 },
   documentName: { color: "#12100e", fontSize: 13, fontWeight: "900" },
   documentMeta: { color: "#8a8177", fontSize: 10, fontWeight: "700", marginTop: 2 },
-  managementPanel: { borderTopColor: "#12100e", borderTopWidth: 2, gap: 14, padding: 12 },
+  managementPanel: { gap: 18 },
   managementBlock: { gap: 10 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   scopeChip: { borderColor: "#b8aea1", borderRadius: 6, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 7 },
@@ -1090,10 +1095,13 @@ const styles = StyleSheet.create({
   dangerButton: { alignItems: "center", backgroundColor: "#ef7868", borderColor: "#12100e", borderRadius: 6, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 9 },
   dangerText: { color: "#12100e", fontSize: 12, fontWeight: "900" },
   errorText: { color: "#b5412b", fontSize: 11, fontWeight: "700" },
-  tabRow: { flexDirection: "row", gap: 6 },
-  tabButton: { borderBottomColor: "#b8aea1", borderBottomWidth: 2, paddingHorizontal: 8, paddingVertical: 7 },
-  tabButtonActive: { borderBottomColor: "#12100e" },
-  tabText: { color: "#12100e", fontSize: 12, fontWeight: "900" },
+  tabRow: { backgroundColor: "#e8e5df", borderRadius: 7, flexDirection: "row", gap: 3, padding: 3 },
+  tabButton: { alignItems: "center", borderRadius: 5, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 8, paddingVertical: 7 },
+  tabButtonActive: { backgroundColor: "#ffffff", borderColor: "#b8aea1", borderWidth: 1 },
+  tabText: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
+  tabTextActive: { color: "#12100e" },
+  footerDoneButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 6, borderWidth: 2, justifyContent: "center", minHeight: 42, minWidth: 104, paddingHorizontal: 16 },
+  footerDoneText: { color: "#12100e", fontSize: 13, fontWeight: "900" },
   searchResults: { gap: 8 },
   hitRow: { borderTopColor: "#ded2c3", borderTopWidth: 1, gap: 4, paddingTop: 10 },
   hitTitle: { color: "#12100e", fontSize: 12, fontWeight: "900" },

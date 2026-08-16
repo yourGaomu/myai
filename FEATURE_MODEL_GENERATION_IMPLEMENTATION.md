@@ -439,6 +439,81 @@ llms.WithToolChoice("auto")
 
 模型默认值来自模型配置和 Registry 元数据，Session 覆盖值保存在 Session 聚合及其持久化记录中。上下文压缩等非 Session 模型调用显式使用 `generation.SystemDefaults()`，不依赖 Adapter 隐藏默认值。
 
+### 21.1 Mobile 如何查询和修改会话参数
+
+Mobile 进入设置页的“生成”分区时，以及当前 Session 或模型发生变化时，会主动查询一次服务端状态：
+
+```text
+SettingsPanel
+-> useSessionSettingsActions.requestGenerationPreferences
+-> session_generation_query
+-> Relay 校验 client_token 并转发
+-> Agent.handleSessionGenerationQuery
+-> ChatService.SessionPreferencesForSession
+-> session_generation_query_result
+-> useRemoteMessageHandler
+-> useSessionGenerationState.applyPreferences
+-> SettingsPanel 展示 Session 覆盖、模型默认、系统兜底和最终生效值
+```
+
+查询结果的核心 DTO 为：
+
+```json
+{
+  "preferences": {
+    "session_id": "session-123",
+    "session_overrides": {
+      "temperature": 0,
+      "top_p": null,
+      "max_output_tokens": 4096
+    },
+    "model_defaults": {
+      "temperature": null,
+      "top_p": 0.9,
+      "max_output_tokens": null
+    },
+    "effective": {
+      "temperature": 0,
+      "top_p": 0.9,
+      "max_output_tokens": 4096
+    },
+    "style_instruction": "使用简洁中文，先给结论。"
+  }
+}
+```
+
+其中 `session_overrides` 和 `model_defaults` 保留可空字段，`effective` 一定是经过三级解析后的完整数值。界面会分别标明“模型未设置”和“系统兜底”，不会把系统值误显示为模型配置。
+
+参数保存使用独立协议：
+
+```text
+session_generation_set
+-> Agent.handleSessionGenerationSet
+-> ChatService.SetGenerationSettingsForSession
+-> Session Settings UseCase
+-> MemoryStore + Session persistence + SessionChanged event
+-> 重新查询 SessionPreferences
+-> session_generation_set_result
+```
+
+Mobile 空输入框会被编码为 JSON `null`，表示继承；字符串 `"0"` 会被编码为数值 `0`，表示显式覆盖。因此 Temperature 的继承和零温度不会混淆：
+
+```json
+{
+  "settings": {
+    "temperature": 0,
+    "top_p": null,
+    "max_output_tokens": null
+  }
+}
+```
+
+“继承”只清空当前输入框，点击“应用参数”后才保存；“全部继承”会立即发送三个 `null`。Mobile 先校验 Temperature `[0,2]`、Top P `[0,1]`、最大输出 Token `[1,131072]`，后端领域层仍会再次校验，客户端校验不能替代服务端约束。
+
+回复风格单独使用 `session_style_set`，避免参数有效但风格超过 2000 字符时出现一半成功、一半失败的状态。成功结果会回传最新 Preferences 和可见提示；服务端错误通过统一 `error` 协议回到当前设置区域。保存期间按钮进入 loading 并禁止重复提交。
+
+当前 Mobile 可以选择模型并修改 Session 覆盖值，但没有编辑 Model 默认生成参数的独立界面。Model 默认值仍由模型配置入口维护。`StyleInstruction` 只注入本轮 Runtime Instruction，不写入 `Session.Messages`，因此不会污染聊天历史或固定缓存前缀。
+
 ## 22. 流式正文
 
 Provider 每产生一个 chunk：

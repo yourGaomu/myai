@@ -72,6 +72,14 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			TopP:            optionalFloat64(v, "myai.top_p"),
 			MaxOutputTokens: optionalInt(v, "myai.max_output_tokens"),
 		},
+		Memory: MemoryProperties{
+			Extraction: MemoryExtractionProperties{
+				ModelID: strings.TrimSpace(v.GetString("memory.extraction.model_id")),
+			},
+			Dream: MemoryDreamProperties{
+				ModelID: strings.TrimSpace(v.GetString("memory.dream.model_id")),
+			},
+		},
 		Mongo: MongoProperties{
 			URI:      strings.TrimSpace(v.GetString("mongo.uri")),
 			Database: strings.TrimSpace(v.GetString("mongo.database")),

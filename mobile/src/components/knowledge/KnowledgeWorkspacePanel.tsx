@@ -19,7 +19,7 @@ export function KnowledgeWorkspacePanel({ aiMemory, buttonFeedback, knowledge }:
         <Pressable onPress={() => setMode("documents")} style={({ pressed }) => buttonFeedback([styles.tab, mode === "documents" && styles.tabActive], pressed)}>
           <Text style={[styles.tabText, mode === "documents" && styles.tabTextActive]}>资料知识库</Text>
         </Pressable>
-        <Pressable onPress={() => { setMode("memory"); aiMemory.onRefreshMemories(); aiMemory.onRefreshCandidates(); }} style={({ pressed }) => buttonFeedback([styles.tab, mode === "memory" && styles.tabActive], pressed)}>
+        <Pressable onPress={() => { setMode("memory"); aiMemory.onRefreshMemories(); aiMemory.onRefreshCandidates(); aiMemory.onRefreshExtractionJobs(); }} style={({ pressed }) => buttonFeedback([styles.tab, mode === "memory" && styles.tabActive], pressed)}>
           <Text style={[styles.tabText, mode === "memory" && styles.tabTextActive]}>AI 记忆</Text>
         </Pressable>
       </View>

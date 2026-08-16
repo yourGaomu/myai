@@ -23,6 +23,7 @@ import type {
   SessionHistoryDeltaResultPayload,
   SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
+  SessionGenerationResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
   SkillListResultPayload,
@@ -76,6 +77,7 @@ type Args = {
   setSkills: (skills: SkillSummary[]) => void;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
   setSessionContext: (sessionID: string, context: ContextInfo) => void;
+  setSessionGenerationPreferences: (payload?: SessionGenerationResultPayload) => void;
   setSessionID: (sessionID: string) => void;
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setDeletedSessions: (sessions: SessionSummary[]) => void;
@@ -123,6 +125,7 @@ export function useRemoteResultAppliers({
   setSkills,
   setSessionLastUsage,
   setSessionContext,
+  setSessionGenerationPreferences,
   setSessionID,
   setSessionPendingPermission,
   setDeletedSessions,
@@ -220,6 +223,10 @@ export function useRemoteResultAppliers({
       if (payload.message) {
         addEventMessage(nextSessionID || sessionIDRef.current, payload.message);
       }
+    };
+
+    const applySessionGenerationPreferences = (payload?: SessionGenerationResultPayload) => {
+      setSessionGenerationPreferences(payload);
     };
 
     const applySessionHistory = (payload?: SessionHistoryResultPayload) => {
@@ -427,6 +434,7 @@ export function useRemoteResultAppliers({
       applySessionHistoryMeta,
       applySessionList,
       applySessionSettings,
+      applySessionGenerationPreferences,
     };
   }, [
     addEventMessage,
@@ -467,6 +475,7 @@ export function useRemoteResultAppliers({
     setSkills,
     setSessionLastUsage,
     setSessionContext,
+    setSessionGenerationPreferences,
     setSessionID,
     setSessionPendingPermission,
     setDeletedSessions,

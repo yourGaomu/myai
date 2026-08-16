@@ -41,6 +41,12 @@ export type MessageType =
   | "session_context_set_result"
   | "session_rag_set"
   | "session_rag_set_result"
+  | "session_generation_query"
+  | "session_generation_query_result"
+  | "session_generation_set"
+  | "session_generation_set_result"
+  | "session_style_set"
+  | "session_style_set_result"
   | "session_compact"
   | "session_compact_result"
   | "session_pause"
@@ -87,6 +93,14 @@ export type MessageType =
   | "ai_memory_candidate_approve"
   | "ai_memory_candidate_reject"
   | "ai_memory_candidate_mutation_result"
+  | "ai_memory_extraction_job_list"
+  | "ai_memory_extraction_job_list_result"
+  | "ai_memory_extraction_job_retry"
+  | "ai_memory_extraction_job_retry_result"
+  | "ai_memory_dream_run"
+  | "ai_memory_dream_run_result"
+  | "ai_memory_dream_list"
+  | "ai_memory_dream_list_result"
   | "subagent_definition_list"
   | "subagent_definition_list_result"
   | "subagent_definition_create"
@@ -483,6 +497,45 @@ export type SessionContextSetPayload = {
 
 export type SessionContextQueryPayload = {
   session_id?: string;
+};
+
+export type GenerationSettings = {
+  temperature: number | null;
+  top_p: number | null;
+  max_output_tokens: number | null;
+};
+
+export type ResolvedGenerationSettings = {
+  temperature: number;
+  top_p: number;
+  max_output_tokens: number;
+};
+
+export type SessionGenerationPreferences = {
+  session_id: string;
+  session_overrides: GenerationSettings;
+  model_defaults: GenerationSettings;
+  effective: ResolvedGenerationSettings;
+  style_instruction?: string;
+};
+
+export type SessionGenerationQueryPayload = {
+  session_id?: string;
+};
+
+export type SessionGenerationSetPayload = {
+  session_id?: string;
+  settings: GenerationSettings;
+};
+
+export type SessionStyleSetPayload = {
+  session_id?: string;
+  style_instruction: string;
+};
+
+export type SessionGenerationResultPayload = {
+  preferences?: SessionGenerationPreferences;
+  message?: string;
 };
 
 export type SessionCompactPayload = {
@@ -946,6 +999,69 @@ export type AIMemoryCandidateRejectPayload = { candidate_id: string; note?: stri
 export type AIMemoryCandidateMutationResultPayload = {
   memories: AIMemory[];
   candidates: AIMemoryCandidate[];
+  message?: string;
+};
+
+export type AIMemoryExtractionJobStatus = "pending" | "running" | "succeeded" | "failed";
+
+export type AIMemoryExtractionJob = {
+  id: string;
+  agent_run_id: string;
+  extractor_version: string;
+  status: AIMemoryExtractionJobStatus;
+  attempts: number;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+};
+
+export type AIMemoryExtractionJobListPayload = {
+  statuses?: AIMemoryExtractionJobStatus[];
+  limit?: number;
+};
+
+export type AIMemoryExtractionJobListResultPayload = {
+  jobs: AIMemoryExtractionJob[];
+  message?: string;
+};
+
+export type AIMemoryExtractionJobRetryPayload = { job_id: string };
+
+export type AIMemoryDreamDecision = "create" | "merge" | "supersede" | "keep_both" | "reject" | "needs_review";
+
+export type AIMemoryDreamAction = {
+  candidate_id?: string;
+  candidate_title?: string;
+  memory_id?: string;
+  memory_title?: string;
+  decision: AIMemoryDreamDecision;
+  reason?: string;
+  applied: boolean;
+  failure_reason?: string;
+};
+
+export type AIMemoryDreamRun = {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  trigger: string;
+  candidate_count: number;
+  created_count: number;
+  merged_count: number;
+  superseded_count: number;
+  rejected_count: number;
+  actions: AIMemoryDreamAction[];
+  last_error?: string;
+  started_at: string;
+  finished_at?: string;
+};
+
+export type AIMemoryDreamRunPayload = { candidate_limit?: number; memory_limit?: number };
+export type AIMemoryDreamListPayload = { limit?: number };
+export type AIMemoryDreamResultPayload = {
+  runs: AIMemoryDreamRun[];
+  memories?: AIMemory[];
+  candidates?: AIMemoryCandidate[];
   message?: string;
 };
 

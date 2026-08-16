@@ -75,7 +75,8 @@ func DreamRunDocumentFromDomain(run domainmemory.DreamRun) po.DreamRunDocument {
 	actions := make([]po.DreamActionDocument, 0, len(run.Actions))
 	for _, action := range run.Actions {
 		actions = append(actions, po.DreamActionDocument{
-			CandidateID: action.CandidateID, MemoryID: action.MemoryID, Decision: string(action.Decision),
+			CandidateID: action.CandidateID, CandidateTitle: action.CandidateTitle,
+			MemoryID: action.MemoryID, MemoryTitle: action.MemoryTitle, Decision: string(action.Decision),
 			Reason: action.Reason, Applied: action.Applied, FailureReason: action.FailureReason,
 		})
 	}
@@ -91,7 +92,8 @@ func DreamRunDomainFromDocument(document po.DreamRunDocument) domainmemory.Dream
 	actions := make([]domainmemory.DreamAction, 0, len(document.Actions))
 	for _, action := range document.Actions {
 		actions = append(actions, domainmemory.DreamAction{
-			CandidateID: action.CandidateID, MemoryID: action.MemoryID, Decision: domainmemory.DreamDecision(action.Decision),
+			CandidateID: action.CandidateID, CandidateTitle: action.CandidateTitle,
+			MemoryID: action.MemoryID, MemoryTitle: action.MemoryTitle, Decision: domainmemory.DreamDecision(action.Decision),
 			Reason: action.Reason, Applied: action.Applied, FailureReason: action.FailureReason,
 		})
 	}

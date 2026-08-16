@@ -26,6 +26,8 @@ type Agent struct {
 	changeService     WorkspaceChangeFacade
 	knowledgeService  KnowledgeFacade
 	memoryService     MemoryFacade
+	memoryExtraction  MemoryExtractionFacade
+	memoryDream       MemoryDreamFacade
 	subagentService   SubagentFacade
 	subagentEvents    SubagentEventSource
 	runtimes          *sessionRuntimeManager
@@ -35,7 +37,7 @@ type Agent struct {
 	permissionTimeout time.Duration
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
@@ -47,6 +49,8 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		changeService:     changeService,
 		knowledgeService:  knowledgeService,
 		memoryService:     memoryService,
+		memoryExtraction:  memoryExtraction,
+		memoryDream:       memoryDream,
 		subagentService:   subagentService,
 		subagentEvents:    subagentEvents,
 		runtimes:          newSessionRuntimeManager(),
@@ -240,6 +244,12 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionContextSet(ctx, conn, message)
 	case protocol.TypeSessionRAGSet:
 		return a.handleSessionRAGSet(ctx, conn, message)
+	case protocol.TypeSessionGenerationQuery:
+		return a.handleSessionGenerationQuery(ctx, conn, message)
+	case protocol.TypeSessionGenerationSet:
+		return a.handleSessionGenerationSet(ctx, conn, message)
+	case protocol.TypeSessionStyleSet:
+		return a.handleSessionStyleSet(ctx, conn, message)
 	case protocol.TypeSessionCompact:
 		return a.handleSessionCompact(ctx, conn, message)
 	case protocol.TypeSessionPause:
@@ -296,6 +306,14 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleAIMemoryCandidateApprove(ctx, conn, message)
 	case protocol.TypeAIMemoryCandidateReject:
 		return a.handleAIMemoryCandidateReject(ctx, conn, message)
+	case protocol.TypeAIMemoryExtractionJobList:
+		return a.handleAIMemoryExtractionJobList(ctx, conn, message)
+	case protocol.TypeAIMemoryExtractionJobRetry:
+		return a.handleAIMemoryExtractionJobRetry(ctx, conn, message)
+	case protocol.TypeAIMemoryDreamRun:
+		go a.processAIMemoryDreamRun(ctx, conn, message)
+	case protocol.TypeAIMemoryDreamList:
+		return a.handleAIMemoryDreamList(ctx, conn, message)
 	case protocol.TypeSubagentDefinitionList:
 		return a.handleSubagentDefinitionList(ctx, conn, message)
 	case protocol.TypeSubagentDefinitionCreate:
@@ -337,6 +355,14 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	}
 
 	return nil
+}
+
+func (a *Agent) processAIMemoryDreamRun(ctx context.Context, conn *websocket.Conn, message protocol.Message) {
+	if err := a.handleAIMemoryDreamRun(ctx, conn, message); err != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+			log.Printf("send AI memory dream error failed: %v", writeErr)
+		}
+	}
 }
 
 func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) {

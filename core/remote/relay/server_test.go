@@ -551,6 +551,8 @@ func TestRelayForwardsRAGKnowledgeAndMemoryMessages(t *testing.T) {
 		{protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateListResult},
 		{protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateMutationResult},
 		{protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryCandidateMutationResult},
+		{protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobListResult},
+		{protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryExtractionJobRetryResult},
 	}
 
 	server := newTestServer()
@@ -606,6 +608,22 @@ func TestRelayForwardsRAGKnowledgeAndMemoryMessages(t *testing.T) {
 func TestSessionContextQueryResultIsTerminal(t *testing.T) {
 	if !isTerminalResponseForRequest(protocol.TypeSessionContextQuery, protocol.TypeSessionContextQueryResult) {
 		t.Fatal("session context query result must complete its request route")
+	}
+}
+
+func TestSessionGenerationResponsesAreTerminal(t *testing.T) {
+	cases := []struct {
+		request  protocol.MessageType
+		response protocol.MessageType
+	}{
+		{protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationQueryResult},
+		{protocol.TypeSessionGenerationSet, protocol.TypeSessionGenerationSetResult},
+		{protocol.TypeSessionStyleSet, protocol.TypeSessionStyleSetResult},
+	}
+	for _, testCase := range cases {
+		if !isTerminalResponseForRequest(testCase.request, testCase.response) {
+			t.Fatalf("%s must complete %s", testCase.response, testCase.request)
+		}
 	}
 }
 

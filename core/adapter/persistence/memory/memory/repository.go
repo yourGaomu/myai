@@ -2,9 +2,11 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	domainmemory "myai/core/domain/memory"
 	memoryport "myai/core/port/memory"
@@ -106,6 +108,76 @@ func (repository *Repository) SaveCandidate(_ context.Context, candidate domainm
 	defer repository.mu.Unlock()
 	repository.ensureMaps()
 	repository.candidates[candidate.ID] = cloneCandidate(candidate)
+	return nil
+}
+
+func (repository *Repository) SaveCandidateApproval(_ context.Context, memory domainmemory.Memory, candidate domainmemory.Candidate, expectedMemoryVersion int) error {
+	if err := memory.Validate(); err != nil {
+		return err
+	}
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	repository.ensureMaps()
+	current, exists := repository.candidates[candidate.ID]
+	if !exists {
+		return memoryport.ErrNotFound
+	}
+	if current.Status != domainmemory.CandidatePending {
+		return memoryport.ErrConflict
+	}
+	if expectedMemoryVersion > 0 {
+		currentMemory, exists := repository.memories[memory.ID]
+		if !exists {
+			return memoryport.ErrNotFound
+		}
+		if currentMemory.CurrentVersion != expectedMemoryVersion {
+			return memoryport.ErrConflict
+		}
+	}
+	repository.memories[memory.ID] = cloneMemory(memory)
+	repository.candidates[candidate.ID] = cloneCandidate(candidate)
+	return nil
+}
+
+func (repository *Repository) SaveCandidateRejection(_ context.Context, candidate domainmemory.Candidate) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	repository.ensureMaps()
+	current, exists := repository.candidates[candidate.ID]
+	if !exists {
+		return memoryport.ErrNotFound
+	}
+	if current.Status != domainmemory.CandidatePending {
+		return memoryport.ErrConflict
+	}
+	repository.candidates[candidate.ID] = cloneCandidate(candidate)
+	return nil
+}
+
+func (repository *Repository) RecordUse(_ context.Context, memoryID string, usedAt time.Time) error {
+	if usedAt.IsZero() {
+		return errors.New("memory used_at is empty")
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	memory, exists := repository.memories[strings.TrimSpace(memoryID)]
+	if !exists {
+		return memoryport.ErrNotFound
+	}
+	if memory.Status != domainmemory.StatusActive {
+		return nil
+	}
+	usedAt = usedAt.UTC()
+	memory.UseCount++
+	memory.LastUsedAt = &usedAt
+	memory.UpdatedAt = usedAt
+	repository.memories[memory.ID] = cloneMemory(memory)
 	return nil
 }
 

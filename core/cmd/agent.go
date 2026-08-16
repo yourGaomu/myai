@@ -53,7 +53,7 @@ var agentCmd = &cobra.Command{
 			DeviceID:    agentDeviceID,
 			BindingCode: agentBindCode,
 			Workspace:   agentWorkspace,
-		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetMemoryCatalogService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents())
+		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetMemoryCatalogService(), core.GetApp().GetMemoryExtractionService(), core.GetApp().GetMemoryDreamService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents())
 
 		return a.Run(ctx)
 	},

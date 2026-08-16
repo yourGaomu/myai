@@ -202,6 +202,92 @@ func (a *Agent) handleSessionRAGSet(ctx context.Context, conn *websocket.Conn, m
 	return a.writeRemoteMessage(conn, protocol.TypeSessionRAGSetResult, message.RequestID, sessionID, result)
 }
 
+func (a *Agent) sessionGenerationResult(ctx context.Context, sessionID string, message string) (protocol.SessionGenerationResultPayload, error) {
+	preferences, err := a.chatService.SessionPreferencesForSession(ctx, sessionID)
+	if err != nil {
+		return protocol.SessionGenerationResultPayload{}, err
+	}
+	return protocol.SessionGenerationResultPayload{
+		Preferences: sessionGenerationPreferencesPayload(sessionID, preferences),
+		Message:     message,
+	}, nil
+}
+
+func (a *Agent) handleSessionGenerationQuery(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionGenerationQueryPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session generation query failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	result, err := a.sessionGenerationResult(ctx, sessionID, "")
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionGenerationQueryResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionGenerationSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionGenerationSetPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session generation set failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.SetGenerationSettingsForSession(ctx, sessionID, generationSettingsFromPayload(payload.Settings)); err != nil {
+		return err
+	}
+	result, err := a.sessionGenerationResult(ctx, sessionID, "生成参数已保存。")
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionGenerationSetResult, message.RequestID, sessionID, result)
+}
+
+func (a *Agent) handleSessionStyleSet(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SessionStyleSetPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode session style set failed: %w", err)
+	}
+	sessionID := resolveSessionID(payload.SessionID, message.SessionID, a.chatService.CurrentSessionID())
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	runtime := a.runtimes.get(sessionID)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+
+	if err := a.chatService.SetStyleInstructionForSession(ctx, sessionID, payload.StyleInstruction); err != nil {
+		return err
+	}
+	result, err := a.sessionGenerationResult(ctx, sessionID, "回复风格已保存。")
+	if err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionStyleSetResult, message.RequestID, sessionID, result)
+}
+
 func (a *Agent) handleSessionCompact(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.SessionCompactPayload](message)
 	if err != nil {

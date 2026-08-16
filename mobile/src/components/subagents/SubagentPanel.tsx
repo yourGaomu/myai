@@ -4,6 +4,7 @@ import { LayoutAnimation, Platform, Pressable, StyleSheet, Switch, Text, TextInp
 import type { SubagentDefinition, SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
+import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -132,32 +133,80 @@ export function SubagentPanel({
   };
 
   return (
-    <View style={styles.stack}>
-      <View style={styles.toolbar}>
-        <View style={styles.flex}>
-          <Text style={styles.title}>子智能体</Text>
-          <Text style={styles.meta}>{definitions.length} 个配置 / 当前会话 {visibleTasks.length} 个任务</Text>
+    <>
+      <View style={styles.stack}>
+        <View style={styles.toolbar}>
+          <View style={styles.flex}>
+            <Text style={styles.title}>子智能体</Text>
+            <Text style={styles.meta}>{definitions.length} 个配置 / 当前会话 {visibleTasks.length} 个任务</Text>
+          </View>
+          <Pressable disabled={pending} onPress={onRefresh} style={({ pressed }) => buttonFeedback([styles.secondaryButton, pending && styles.disabled], pressed)}>
+            <ButtonContent loading={pending} text="刷新" />
+          </Pressable>
+          <Pressable
+            disabled={pending}
+            onPress={() => { setDraft(emptyDraft); setShowEditor(true); }}
+            style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}
+          >
+            <Text style={styles.primaryButtonText}>新建</Text>
+          </Pressable>
         </View>
-        <Pressable disabled={pending} onPress={onRefresh} style={({ pressed }) => buttonFeedback([styles.secondaryButton, pending && styles.disabled], pressed)}>
-          <ButtonContent loading={pending} text="刷新" />
-        </Pressable>
-        <Pressable
-          disabled={pending}
-          onPress={() => { setDraft(emptyDraft); setShowEditor(true); }}
-          style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}
-        >
-          <Text style={styles.primaryButtonText}>新建</Text>
-        </Pressable>
+
+        {message ? <Text style={styles.notice}>{message}</Text> : null}
+
+        <Text style={styles.sectionTitle}>配置</Text>
+        {definitions.map((definition) => (
+          <View key={definition.id} style={styles.item}>
+            <View style={styles.rowBetween}>
+              <View style={styles.flex}>
+                <Text style={styles.itemTitle}>{definition.name}</Text>
+                <Text style={styles.meta}>{definition.capability_mode} / {definition.isolation_mode} / v{definition.version || 1}</Text>
+              </View>
+              <Text style={[styles.badge, !definition.enabled && styles.badgeMuted]}>{definition.enabled ? "启用" : "停用"}</Text>
+            </View>
+            {definition.description ? <Text style={styles.body}>{definition.description}</Text> : null}
+            <Text numberOfLines={2} style={styles.codeText}>{(definition.allowed_tools || []).join(", ") || "无工具"}</Text>
+            {definition.source !== "builtin" ? (
+              <View style={styles.actionRow}>
+                <Pressable disabled={pending} onPress={() => editDefinition(definition)} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><Text style={styles.secondaryButtonText}>编辑</Text></Pressable>
+                <Pressable disabled={pending} onPress={() => onDeleteDefinition(definition.id)} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><Text style={styles.dangerText}>删除</Text></Pressable>
+              </View>
+            ) : null}
+          </View>
+        ))}
+
+        <Text style={styles.sectionTitle}>后台任务</Text>
+        {visibleTasks.length === 0 ? <Text style={styles.empty}>当前会话还没有子智能体任务。</Text> : visibleTasks.map((task) => (
+          <TaskItem
+            buttonFeedback={buttonFeedback}
+            key={task.id}
+            onApply={() => onApplyTask(task.id)}
+            onCancel={() => onCancelTask(task.id)}
+            onCheck={() => onCheckTask(task.id)}
+            onDiscard={() => onDiscardTask(task.id)}
+            onResume={() => onResumeTask(task.id)}
+            pending={pending}
+            task={task}
+          />
+        ))}
       </View>
 
-      {message ? <Text style={styles.notice}>{message}</Text> : null}
-
-      {showEditor ? (
-        <View style={styles.editor}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.sectionTitle}>{editing ? "编辑配置" : "创建配置"}</Text>
-            <Pressable onPress={closeEditor}><Text style={styles.link}>关闭</Text></Pressable>
-          </View>
+      <ResponsiveFormModal
+        buttonFeedback={buttonFeedback}
+        footer={(
+          <>
+            <Pressable onPress={closeEditor} style={({ pressed }) => buttonFeedback(styles.modalCancelButton, pressed)}>
+              <Text style={styles.modalCancelText}>取消</Text>
+            </Pressable>
+            <Pressable disabled={pending} onPress={submit} style={({ pressed }) => buttonFeedback([styles.primaryButton, styles.modalSubmitButton, pending && styles.disabled], pressed)}>
+              <ButtonContent color="#ffffff" loading={pending} text={editing ? "保存配置" : "创建配置"} />
+            </Pressable>
+          </>
+        )}
+        onClose={closeEditor}
+        title={editing ? "编辑子智能体配置" : "创建子智能体配置"}
+        visible={showEditor}
+      >
           <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, name: value }))} placeholder="名称" placeholderTextColor="#776f66" style={styles.input} value={draft.name} />
           <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, description: value }))} placeholder="用途说明" placeholderTextColor="#776f66" style={styles.input} value={draft.description} />
           <TextInput
@@ -193,48 +242,8 @@ export function SubagentPanel({
             <Text style={styles.fieldLabel}>启用</Text>
             <Switch onValueChange={(value) => setDraft((current) => ({ ...current, enabled: value }))} value={draft.enabled} />
           </View>
-          <Pressable disabled={pending} onPress={submit} style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}>
-            <ButtonContent color="#ffffff" loading={pending} text={editing ? "保存配置" : "创建配置"} />
-          </Pressable>
-        </View>
-      ) : null}
-
-      <Text style={styles.sectionTitle}>配置</Text>
-      {definitions.map((definition) => (
-        <View key={definition.id} style={styles.item}>
-          <View style={styles.rowBetween}>
-            <View style={styles.flex}>
-              <Text style={styles.itemTitle}>{definition.name}</Text>
-              <Text style={styles.meta}>{definition.capability_mode} / {definition.isolation_mode} / v{definition.version || 1}</Text>
-            </View>
-            <Text style={[styles.badge, !definition.enabled && styles.badgeMuted]}>{definition.enabled ? "启用" : "停用"}</Text>
-          </View>
-          {definition.description ? <Text style={styles.body}>{definition.description}</Text> : null}
-          <Text numberOfLines={2} style={styles.codeText}>{(definition.allowed_tools || []).join(", ") || "无工具"}</Text>
-          {definition.source !== "builtin" ? (
-            <View style={styles.actionRow}>
-              <Pressable disabled={pending} onPress={() => editDefinition(definition)} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><Text style={styles.secondaryButtonText}>编辑</Text></Pressable>
-              <Pressable disabled={pending} onPress={() => onDeleteDefinition(definition.id)} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><Text style={styles.dangerText}>删除</Text></Pressable>
-            </View>
-          ) : null}
-        </View>
-      ))}
-
-      <Text style={styles.sectionTitle}>后台任务</Text>
-      {visibleTasks.length === 0 ? <Text style={styles.empty}>当前会话还没有子智能体任务。</Text> : visibleTasks.map((task) => (
-        <TaskItem
-          buttonFeedback={buttonFeedback}
-          key={task.id}
-          onApply={() => onApplyTask(task.id)}
-          onCancel={() => onCancelTask(task.id)}
-          onCheck={() => onCheckTask(task.id)}
-          onDiscard={() => onDiscardTask(task.id)}
-          onResume={() => onResumeTask(task.id)}
-          pending={pending}
-          task={task}
-        />
-      ))}
-    </View>
+      </ResponsiveFormModal>
+    </>
   );
 }
 
@@ -329,7 +338,6 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   drawerIcon: { alignItems: "center", backgroundColor: "#eee6da", borderRadius: 4, height: 28, justifyContent: "center", width: 28 },
   drawerIconText: { color: "#39342e", fontSize: 15, fontWeight: "900", lineHeight: 18 },
-  editor: { borderColor: "#1c1916", borderRadius: 6, borderWidth: 2, gap: 9, padding: 12 },
   empty: { color: "#756d64", fontSize: 13, paddingVertical: 12 },
   emptyResult: { color: "#756d64", fontSize: 12, lineHeight: 18, marginTop: 5 },
   errorText: { color: "#9f352d", fontSize: 12, marginTop: 7 },
@@ -338,7 +346,9 @@ const styles = StyleSheet.create({
   input: { backgroundColor: "#fffdf8", borderColor: "#b8aa98", borderRadius: 5, borderWidth: 1, color: "#171411", fontSize: 13, minHeight: 42, paddingHorizontal: 11, paddingVertical: 9 },
   item: { backgroundColor: "#fffdf8", borderColor: "#c7b9a6", borderRadius: 6, borderWidth: 1, padding: 12 },
   itemTitle: { color: "#171411", fontSize: 14, fontWeight: "900" },
-  link: { color: "#315d48", fontSize: 12, fontWeight: "800" },
+  modalCancelButton: { alignItems: "center", borderColor: "#9c9184", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 13 },
+  modalCancelText: { color: "#4f4841", fontSize: 12, fontWeight: "800" },
+  modalSubmitButton: { minHeight: 42, minWidth: 120 },
   meta: { color: "#756d64", fontSize: 11, lineHeight: 16 },
   notice: { backgroundColor: "#e6efe4", borderRadius: 5, color: "#2c5030", fontSize: 12, padding: 9 },
   primaryButton: { alignItems: "center", backgroundColor: "#1d5c45", borderRadius: 5, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },

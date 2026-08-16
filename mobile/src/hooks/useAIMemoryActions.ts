@@ -6,6 +6,11 @@ import type {
   AIMemoryCandidateRejectPayload,
   AIMemoryCreatePayload,
   AIMemoryDeletePayload,
+  AIMemoryExtractionJob,
+  AIMemoryExtractionJobListPayload,
+  AIMemoryExtractionJobRetryPayload,
+  AIMemoryDreamListPayload,
+  AIMemoryDreamRunPayload,
   AIMemoryInput,
   AIMemoryListPayload,
   AIMemoryRestorePayload,
@@ -35,6 +40,10 @@ export function useAIMemoryActions({ clientToken, sendEnvelope, startPending, st
 
   const requestMemories = useCallback((filter: AIMemoryListPayload = {}) => send("ai_memory_list", filter), [send]);
   const requestCandidates = useCallback(() => send("ai_memory_candidate_list", { statuses: ["pending"], limit: 100 }), [send]);
+  const requestExtractionJobs = useCallback(() => {
+    const payload: AIMemoryExtractionJobListPayload = { statuses: ["failed"], limit: 100 };
+    return send("ai_memory_extraction_job_list", payload);
+  }, [send]);
 
   const createMemory = useCallback((memory: AIMemoryInput) => {
     const payload: AIMemoryCreatePayload = { memory };
@@ -66,13 +75,32 @@ export function useAIMemoryActions({ clientToken, sendEnvelope, startPending, st
     return send("ai_memory_candidate_reject", payload);
   }, [send]);
 
+  const retryExtractionJob = useCallback((job: AIMemoryExtractionJob) => {
+    const payload: AIMemoryExtractionJobRetryPayload = { job_id: job.id };
+    return send("ai_memory_extraction_job_retry", payload);
+  }, [send]);
+
+  const requestDreamRuns = useCallback(() => {
+    const payload: AIMemoryDreamListPayload = { limit: 20 };
+    return send("ai_memory_dream_list", payload);
+  }, [send]);
+
+  const runDream = useCallback(() => {
+    const payload: AIMemoryDreamRunPayload = { candidate_limit: 20, memory_limit: 50 };
+    return send("ai_memory_dream_run", payload);
+  }, [send]);
+
   return {
     approveCandidate,
     createMemory,
     deleteMemory,
     rejectCandidate,
     requestCandidates,
+    requestExtractionJobs,
+    requestDreamRuns,
     requestMemories,
+    retryExtractionJob,
+    runDream,
     restoreMemory,
     updateMemory,
   };

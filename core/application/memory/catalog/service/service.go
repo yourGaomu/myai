@@ -183,14 +183,24 @@ func (service CatalogService) ApproveCandidate(ctx context.Context, command comm
 	}
 	now := service.now()
 	memoryID := strings.TrimSpace(command.MemoryID)
+	merging := memoryID != ""
 	var memory domainmemory.Memory
-	if memoryID != "" {
+	if merging {
 		memory, err = service.Store.Get(ctx, memoryID)
 		if err != nil {
 			return result.Detail{}, err
 		}
 		if memory.Status == domainmemory.StatusDeleted {
 			return result.Detail{}, errors.New("cannot approve candidate into deleted memory")
+		}
+		if command.ExpectedMemoryVersion > 0 && memory.CurrentVersion != command.ExpectedMemoryVersion {
+			return result.Detail{}, fmt.Errorf(
+				"memory version changed: expected %d, got %d",
+				command.ExpectedMemoryVersion, memory.CurrentVersion,
+			)
+		}
+		if !command.HumanApprove && memory.HumanLocked {
+			return result.Detail{}, errors.New("cannot automatically merge candidate into human-locked memory")
 		}
 		if err := memory.AppendRevision(domainmemory.Revision{
 			ID: service.IDs.NewID(), Content: candidate.Content, Confidence: candidate.Confidence,
@@ -217,13 +227,13 @@ func (service CatalogService) ApproveCandidate(ctx context.Context, command comm
 	if err := memory.Validate(); err != nil {
 		return result.Detail{}, err
 	}
-	if err := service.Store.Save(ctx, memory); err != nil {
-		return result.Detail{}, err
-	}
 	candidate.Status = domainmemory.CandidateApproved
+	if merging && !command.HumanApprove {
+		candidate.Status = domainmemory.CandidateMerged
+	}
 	candidate.TargetMemoryID = memory.ID
 	candidate.UpdatedAt = now
-	if err := service.Store.SaveCandidate(ctx, candidate); err != nil {
+	if err := service.Store.SaveCandidateApproval(ctx, memory, candidate, command.ExpectedMemoryVersion); err != nil {
 		return result.Detail{}, err
 	}
 	return result.Detail{Memory: memory}, nil
@@ -243,7 +253,7 @@ func (service CatalogService) RejectCandidate(ctx context.Context, command comma
 	candidate.Status = domainmemory.CandidateRejected
 	candidate.ReviewNote = strings.TrimSpace(command.Note)
 	candidate.UpdatedAt = service.now()
-	if err := service.Store.SaveCandidate(ctx, candidate); err != nil {
+	if err := service.Store.SaveCandidateRejection(ctx, candidate); err != nil {
 		return result.Candidate{}, err
 	}
 	return result.Candidate{MemoryCandidate: candidate}, nil
@@ -253,18 +263,7 @@ func (service CatalogService) RecordUse(ctx context.Context, command command.Rec
 	if err := service.validate(); err != nil {
 		return err
 	}
-	memory, err := service.Store.Get(ctx, strings.TrimSpace(command.MemoryID))
-	if err != nil {
-		return err
-	}
-	if memory.Status != domainmemory.StatusActive {
-		return nil
-	}
-	now := service.now()
-	memory.UseCount++
-	memory.LastUsedAt = &now
-	memory.UpdatedAt = now
-	return service.Store.Save(ctx, memory)
+	return service.Store.RecordUse(ctx, strings.TrimSpace(command.MemoryID), service.now())
 }
 
 func (service CatalogService) validate() error {

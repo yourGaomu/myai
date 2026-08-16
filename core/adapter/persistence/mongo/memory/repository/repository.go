@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	gomongo "go.mongodb.org/mongo-driver/v2/mongo"
@@ -169,6 +170,116 @@ func (repository *Repository) SaveCandidate(ctx context.Context, candidate domai
 	})
 }
 
+func (repository *Repository) SaveCandidateApproval(ctx context.Context, memory domainmemory.Memory, candidate domainmemory.Candidate, expectedMemoryVersion int) error {
+	if repository == nil || repository.database == nil {
+		return errors.New("mongo memory database is nil")
+	}
+	if err := memory.Validate(); err != nil {
+		return err
+	}
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	candidateUpdate, err := documentUpdate(mapper.CandidateDocumentFromDomain(candidate), []string{
+		"origin_key", "target_memory_id", "review_note",
+	})
+	if err != nil {
+		return err
+	}
+	memoryUpdate, err := documentUpdate(mapper.MemoryDocumentFromDomain(memory), []string{
+		"human_locked", "supersedes_id", "use_count", "last_used_at", "deleted_at", "deletion_reason",
+	})
+	if err != nil {
+		return err
+	}
+	session, err := repository.database.Client().StartSession()
+	if err != nil {
+		return err
+	}
+	defer session.EndSession(context.Background())
+	_, err = session.WithTransaction(ctx, func(transactionContext context.Context) (any, error) {
+		result, updateErr := repository.template.UpdateOne(transactionContext, candidatesCollection, bson.M{
+			"_id": candidate.ID, "status": string(domainmemory.CandidatePending),
+		}, candidateUpdate)
+		if updateErr != nil {
+			return nil, translateError(updateErr)
+		}
+		if result.MatchedCount == 0 {
+			return nil, memoryport.ErrConflict
+		}
+		if expectedMemoryVersion > 0 {
+			memoryResult, memoryErr := repository.template.UpdateOne(transactionContext, memoriesCollection, bson.M{
+				"_id": memory.ID, "current_version": expectedMemoryVersion,
+			}, memoryUpdate)
+			if memoryErr != nil {
+				return nil, translateError(memoryErr)
+			}
+			if memoryResult.MatchedCount == 0 {
+				return nil, memoryport.ErrConflict
+			}
+		} else if saveErr := repository.Save(transactionContext, memory); saveErr != nil {
+			return nil, saveErr
+		}
+		return nil, nil
+	})
+	return translateError(err)
+}
+
+func (repository *Repository) SaveCandidateRejection(ctx context.Context, candidate domainmemory.Candidate) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	update, err := documentUpdate(mapper.CandidateDocumentFromDomain(candidate), []string{
+		"origin_key", "target_memory_id", "review_note",
+	})
+	if err != nil {
+		return err
+	}
+	result, err := repository.template.UpdateOne(ctx, candidatesCollection, bson.M{
+		"_id": candidate.ID, "status": string(domainmemory.CandidatePending),
+	}, update)
+	if err != nil {
+		return translateError(err)
+	}
+	if result.MatchedCount == 0 {
+		return memoryport.ErrConflict
+	}
+	return nil
+}
+
+func (repository *Repository) RecordUse(ctx context.Context, memoryID string, usedAt time.Time) error {
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return errors.New("memory id is empty")
+	}
+	if usedAt.IsZero() {
+		return errors.New("memory used_at is empty")
+	}
+	usedAt = usedAt.UTC()
+	result, err := repository.template.UpdateOne(ctx, memoriesCollection, bson.M{
+		"_id": memoryID, "status": string(domainmemory.StatusActive),
+	}, bson.M{
+		"$inc": bson.M{"use_count": 1},
+		"$set": bson.M{"last_used_at": usedAt, "updated_at": usedAt},
+	})
+	if err != nil {
+		return translateError(err)
+	}
+	if result.MatchedCount > 0 {
+		return nil
+	}
+	// Keep the domain behavior consistent with the in-memory adapter: a deleted
+	// memory is a no-op, while a missing memory is still an error.
+	var document po.MemoryDocument
+	if findErr := repository.template.FindOne(ctx, memoriesCollection, bson.M{"_id": memoryID}, &document); findErr != nil {
+		return translateError(findErr)
+	}
+	if mapper.MemoryDomainFromDocument(document).Status != domainmemory.StatusActive {
+		return nil
+	}
+	return memoryport.ErrNotFound
+}
+
 func (repository *Repository) GetExtractionJob(ctx context.Context, jobID string) (domainmemory.ExtractionJob, error) {
 	var document po.ExtractionJobDocument
 	if err := repository.template.FindOne(ctx, jobsCollection, bson.M{"_id": strings.TrimSpace(jobID)}, &document); err != nil {
@@ -251,9 +362,19 @@ func (repository *Repository) SaveDreamRun(ctx context.Context, run domainmemory
 }
 
 func (repository *Repository) upsert(ctx context.Context, collection string, id string, document any, optionalFields []string) error {
-	set, err := documentMap(document)
+	update, err := documentUpdate(document, optionalFields)
 	if err != nil {
 		return err
+	}
+	update["$setOnInsert"] = bson.M{"_id": id}
+	_, err = repository.template.UpdateOne(ctx, collection, bson.M{"_id": id}, update, options.UpdateOne().SetUpsert(true))
+	return translateError(err)
+}
+
+func documentUpdate(document any, optionalFields []string) (bson.M, error) {
+	set, err := documentMap(document)
+	if err != nil {
+		return nil, err
 	}
 	delete(set, "_id")
 	unset := bson.M{}
@@ -262,12 +383,11 @@ func (repository *Repository) upsert(ctx context.Context, collection string, id 
 			unset[field] = ""
 		}
 	}
-	update := bson.M{"$set": set, "$setOnInsert": bson.M{"_id": id}}
+	update := bson.M{"$set": set}
 	if len(unset) > 0 {
 		update["$unset"] = unset
 	}
-	_, err = repository.template.UpdateOne(ctx, collection, bson.M{"_id": id}, update, options.UpdateOne().SetUpsert(true))
-	return translateError(err)
+	return update, nil
 }
 
 func documentMap(document any) (bson.M, error) {

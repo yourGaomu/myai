@@ -1,5 +1,31 @@
 # MyAI 开发变更记录
 
+## 2026-08-15：移动端响应式表单弹层
+
+修复长列表中的内嵌编辑器与当前滚动位置脱节的问题。此前点击 AI 记忆或子智能体条目中的“编辑”后，表单会插入列表顶部，用户必须手动向上滚动才能开始操作。
+
+已实现：
+
+- 新增通用 `ResponsiveFormModal`，统一处理遮罩、键盘避让、安全区、独立内容滚动和固定操作区。
+- 小于 700px 的视口使用底部展开的近全屏编辑层；宽屏使用最大宽度 760px 的居中窗口。
+- AI 记忆的新建和编辑不再改变列表布局，关闭弹层后保留原来的列表位置。
+- 子智能体配置的新建和编辑迁移到同一交互模式，避免重复出现“编辑器在当前位置之外”的问题。
+- 在 390×844 和 1440×900 视口完成交互检查，确认长表单可滚动，标题栏与取消/保存操作始终可见。
+
+验证命令：
+
+```powershell
+cd mobile
+npm run typecheck
+```
+
+### 第二优先级：资料知识库操作区
+
+- 目录创建、知识库创建和目录管理迁移到响应式弹层，目录树数量不会再影响操作区的位置。
+- 知识库的“检索测试”和“知识库设置”迁移到独立弹层，使用响应式页签切换。
+- 知识库设置中的移动目录、RAG 开关、索引 Profile 和删除操作继续复用原有 Hook 与协议。
+- 删除知识库成功后自动关闭设置弹层；取消或完成操作后保留目录树的原滚动位置。
+
 ## 2026-07-31：Agent 长任务时间线与历史重放
 
 本次新增独立的 AgentRun 领域，用于记录一次聊天、重新生成或 Plan 执行的完整运行过程。`request_id` 只负责 Relay 请求关联，内部 `run_id` 负责持久化身份，两者不再混用。
@@ -440,6 +466,131 @@ go test ./core/architecture ./core
 
 cd mobile
 npm run typecheck
+```
+
+## 2026-08-15：AI 记忆生产级一致性与失败恢复
+
+补齐 AI 记忆第一批生产级缺口，重点保证候选审批的一致性、使用计数的并发正确性，以及提取失败后的人工恢复能力。
+
+### 1. 候选审批与使用统计
+
+- `CandidateApprovalRepository` 将 Memory 保存和 Candidate 状态更新收口为一个仓储操作。
+- Mongo Adapter 使用事务保存审批结果，并通过 `status=pending` 条件更新阻止同一候选被重复审批；内存 Adapter 在同一把锁内完成相同行为。
+- `UsageRepository.RecordUse` 使用 Mongo `$inc` 或内存锁完成原子自增，避免并发命中同一条记忆时丢失计数。
+- 不存在的 Memory 返回 `ErrNotFound`，已逻辑删除的 Memory 保持幂等，不再增加使用次数。
+
+### 2. 提取失败任务恢复
+
+- Extraction 应用服务新增失败任务查询和手动重试用例；手动重试只接受 `failed` Job，恢复为 `pending` 后重新提交线程池。
+- 手动重试保留累计 `Attempts`，清空 `LastError` 和 `CompletedAt`，并且不受三次自动重试上限限制。
+- 新增 `ai_memory_extraction_job_list`、`ai_memory_extraction_job_retry` 及对应结果协议，Relay、Agent Handler 和 DTO Mapper 已完整接通。
+- Mobile 的“AI 记忆 / 待审核”页展示失败任务的 AgentRun ID、尝试次数和最后错误，并提供带加载反馈的“重试”按钮。
+
+### 3. 尚未纳入本批的能力
+
+- 提取模型仍复用默认模型，尚未支持独立的记忆模型配置。
+- Mobile 尚未支持把候选合并到指定的已有 Memory。
+- Dream 仍只有领域对象和持久化骨架，尚未实现质检、去重合并和调度。
+
+验证命令：
+
+```powershell
+go test ./...
+go test ./core/architecture
+
+cd mobile
+npm run typecheck
+
+git diff --check
+```
+
+## 2026-08-16：AI 记忆独立模型、候选合并与手动 Dream
+
+完成 AI 记忆第二优先级能力：提取和 Dream 不再必须绑定默认聊天模型，Mobile 可以把候选合并到已有记忆，并提供可审计的手动 Dream 质检流程。
+
+### 1. 独立模型配置
+
+- 新增 `memory.extraction.model_id` 和 `memory.dream.model_id`；留空时分别回退到应用默认模型。
+- `Application.InitMemoryServices` 从 Model Registry 独立获取两个 `ChatModelPort`。某一模型不可用时只禁用对应能力，不影响 AI 记忆 CRUD 和生成前检索。
+- `ModelExtractor.Version()` 加入模型 ID 的稳定哈希，切换提取模型后不会错误复用旧模型对应的 ExtractionJob。
+- 提取仍固定使用低温度和 1600 输出 Token；Dream 固定使用低温度和 3000 输出 Token，不继承 Session 风格与生成参数。
+
+### 2. 候选人工合并
+
+- Mobile 待审核页新增“合并到已有”，使用响应式弹层搜索和选择 active Memory，并展示目标标题、目标摘要和当前版本。
+- `ai_memory_candidate_approve` 通过可选 `memory_id` 区分新建和合并，继续复用 Catalog Application Service。
+- 人工审批使用 `HumanApprove=true`，生成新 Revision 后保持 `HumanLocked=true`，允许用户显式纠正已锁定记忆。
+- Mongo 使用事务同时更新 Candidate 和 Memory；候选必须仍为 `pending`，版本条件可以阻止并发覆盖。
+
+### 3. 手动 Dream 质检
+
+- 新增 `application/memory/dream` 的 command、result、api 和 service，模型能力通过 `DreamConsolidator` 接口与 `ModelConsolidator` 实现隔离。
+- 模型只生成 `create`、`merge`、`keep_both`、`reject` 或 `needs_review` 建议，不能直接访问仓储。
+- Application Service 再次校验 Candidate、目标状态、`HumanLocked` 和目标版本，并通过 CatalogService 应用动作。
+- `create` 和 `keep_both` 创建新 Memory，`merge` 追加 Revision，`reject` 更新候选状态，`needs_review` 保持 pending。
+- 自动 `supersede` 在具备跨多 Memory 的原子持久化前保持禁用；非法或未应用动作写入 `FailureReason`。
+- 同一进程的 Dream Run 串行执行；运行开始即保存审计记录，模型、仓储或 JSON 失败时也能查询失败终态。
+
+### 4. 远程协议与 Mobile 审计
+
+- 新增 `ai_memory_dream_run`、`ai_memory_dream_list` 及对应结果协议，Relay 和 Agent Handler 已接通。
+- Mobile AI 记忆增加 Dream 页签，可手动执行、查看运行计数，并展开每条 Action 的候选标题、目标标题、模型理由、应用状态和失败原因。
+- Dream 成功返回最新 Runs、Memories 和 pending Candidates，三个页签同步刷新。
+- `DreamAction` 的可读标题和完整审计字段已进入 Mongo PO、Mapper 和内存实现。
+
+当前边界：尚未实现闲置或夜间自动调度、分布式 Dream 锁、自动 `supersede` 和 AI 记忆向量检索；独立模型配置目前需要修改 YAML 或环境变量并重启 Agent。
+
+验证命令：
+
+```powershell
+go test ./...
+go vet ./...
+go test ./core/architecture
+
+cd mobile
+npm run typecheck
+
+git diff --check
+```
+
+## 2026-08-16：Mobile 会话级生成参数与回复风格
+
+补齐已有生成参数能力的远程控制和 Mobile 设置入口，同一个模型现在可以按 Session 使用不同采样参数和表达风格。
+
+### 1. 远程协议与应用层复用
+
+- 新增 `session_generation_query`、`session_generation_set`、`session_style_set` 及对应结果协议。
+- Relay 将三类请求纳入客户端 Token 鉴权、请求路由和响应类型匹配；Agent 使用现有会话运行时锁和请求锁处理，避免与同一会话的其他设置并发覆盖。
+- Agent 通过 `ChatService` Facade 调用既有 Session Settings Application Service，继续执行参数校验、内存更新、持久化和 `SessionChanged` 事件发布，没有从远程层直接修改领域对象。
+- 保存成功后重新计算并返回 Session 覆盖、Model 默认和 Effective Settings，Mobile 不使用本地乐观值冒充服务端状态。
+
+### 2. Mobile 设置界面
+
+- 设置页新增“生成”分区，进入分区、切换 Session 或切换模型时主动查询最新配置。
+- 支持 Temperature、Top P、最大输出 Token 的单项继承、完整替换和全部继承，并展示最终生效值。
+- Model 没有配置默认值时明确显示“模型未设置”和系统兜底值，不再把 `0.7`、`1.0`、`2048` 误标成模型默认值。
+- 空输入发送 JSON `null` 表示继承，显式数值 `0` 保持为零；客户端范围校验和后端领域校验共同生效。
+- 回复风格支持保存和清除，限制 2000 个 Unicode 字符；参数和风格采用独立保存协议。
+- 查询和保存期间显示 loading、禁止重复点击，成功与服务端错误都在当前生成设置区域反馈。
+
+### 3. 边界与兼容性
+
+- 旧 Session 文档缺少生成字段时自然恢复为继承，不需要数据库迁移。
+- Session 参数优先级保持为 `Session 显式覆盖 > Model 默认值 > System 兜底值`。
+- 回复风格仍只进入 Runtime Instruction，不写入聊天历史，不改变固定 System Prompt 和历史缓存前缀。
+- Mobile 当前没有编辑 Model 默认生成参数的独立界面，模型级默认值仍通过模型配置入口维护。
+
+验证命令：
+
+```powershell
+go test ./...
+go vet ./...
+go test ./core/architecture
+
+cd mobile
+npm run typecheck
+
+git diff --check
 ```
 
 ## 后续记录约定

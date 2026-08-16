@@ -20,11 +20,13 @@ AI 记忆不是文件知识库中的一个分类，也不复用 RAG Chunk。两�
 - 有效记忆新建、编辑、追加版本、逻辑删除和恢复。
 - 按全局、工作区、项目和会话作用域过滤。
 - 模型生成前检索相关经验并注入当前轮上下文。
-- Mobile 中查看有效记忆和待审核候选。
+- 提取模型与 Dream 模型可以独立于默认聊天模型配置。
+- Mobile 中查看有效记忆、待审核候选和 Dream 审计记录。
+- 候选支持人工新建记忆、合并到已有记忆或拒绝。
+- Dream 支持手动质检，并安全执行新建、合并、保留两者和拒绝决策。
 - Mongo 持久化和无 Mongo 时的内存实现。
-- DreamRun 领域对象和存储骨架。
 
-当前尚未实现自动 Dream 合并、定时夜间整理和 AI 记忆向量检索。
+当前尚未实现定时或闲置触发的夜间 Dream、自动 supersede 和 AI 记忆向量检索。
 
 ## 2. 目录与分层
 
@@ -45,9 +47,13 @@ core/application/memory
   catalog                   CRUD、审核、使用次数
   extraction                异步提取任务
   retrieval                 生成前经验检索
+  dream                     Dream 命令、结果、接口和应用服务
 
 core/adapter/memory/extractor
   model_extractor.go        使用 ChatModelPort 提取候选
+
+core/adapter/memory/dream
+  model_consolidator.go     使用 ChatModelPort 生成质检建议
 
 core/adapter/persistence
   memory/memory             内存仓储实现
@@ -183,7 +189,7 @@ app.memoryStore = aimemory.New()
 
 ### 4.2 InitMemoryServices
 
-此函数创建三个 Application Service：
+此函数创建四个 Application Service：
 
 ```text
 CatalogService
@@ -194,9 +200,24 @@ ExtractionService
 
 Retrieval ContextService
   负责生成前的相关经验检索和 Prompt 格式化
+
+DreamService
+  负责质检运行、业务校验、动作应用和完整审计
 ```
 
 `ExtractionService` 同时注册为 AgentRun 的 `CompletionObserver`；`RetrievalService` 注入聊天生成链路。
+
+提取与 Dream 分别读取独立模型配置：
+
+```yaml
+memory:
+  extraction:
+    model_id: ""
+  dream:
+    model_id: ""
+```
+
+空字符串表示回退到应用默认聊天模型。也可以通过 `MEMORY_EXTRACTION_MODEL_ID` 和 `MEMORY_DREAM_MODEL_ID` 覆盖。`Application.InitMemoryServices` 分别从 Model Registry 获取两个 `ChatModelPort`；某个模型 ID 不存在时只禁用对应能力，不影响 Catalog 和 Retrieval。
 
 ## 5. 白天提取链路
 
@@ -267,7 +288,7 @@ last_error=错误文本
 attempts=本次尝试次数
 ```
 
-启动恢复最多自动尝试三次。达到三次后不再在每次启动时无限重试；用户后续可以增加显式重试用例，但当前远程协议还没有该入口。
+启动恢复最多自动尝试三次。达到三次后不再在每次启动时无限重试；失败任务可以在 Mobile 中通过 `ai_memory_extraction_job_retry` 手动重新提交。
 
 ## 6. 模型提取器
 
@@ -292,6 +313,14 @@ max_output_tokens = 1600
 ```
 
 它不继承当前 Session 的聊天风格和采样参数，避免用户会话风格改变结构化提取结果。
+
+模型来源由 `memory.extraction.model_id` 决定；留空时使用默认聊天模型。`ModelExtractor.Version()` 会把模型 ID 的稳定哈希加入版本号：
+
+```text
+memory-extractor-v1:<model-id-hash>
+```
+
+`ExtractionJob` 的幂等键包含 `extractor_version`。因此切换提取模型后，同一个 AgentRun 可以按新模型生成新的提取任务，不会错误复用旧模型留下的 Job。
 
 ### 6.3 输出协议
 
@@ -341,7 +370,7 @@ RecordUse
 
 指定 `MemoryID`：把候选内容追加为目标 Memory 的新 Revision。
 
-通过后：
+人工通过后：
 
 ```text
 Candidate.Status = approved
@@ -349,7 +378,16 @@ Candidate.TargetMemoryID = Memory.ID
 Memory.HumanLocked = true
 ```
 
-当前 Mobile 只提供“通过并新建记忆”。合并到已有 Memory 的后端能力已经存在，但 UI 还没有目标记忆选择器。
+Mobile 提供“通过并新建”和“合并到已有”。选择合并后会打开响应式目标选择弹层，支持搜索并展示目标标题、目标和当前版本。协议通过可选的 `memory_id` 区分两种操作：
+
+```json
+{
+  "candidate_id": "candidate-123",
+  "memory_id": "memory-456"
+}
+```
+
+人工合并使用 `HumanApprove=true`，因此允许人工纠正已有的 `HumanLocked` 记忆，并在合并后继续保持人工锁。
 
 ### 7.2 人工编辑
 
@@ -360,7 +398,7 @@ Author = human
 HumanLocked = true
 ```
 
-Dream 模式未来执行合并时必须尊重 `HumanLocked`，不能静默覆盖人工修正。
+Dream 自动合并使用 `HumanApprove=false`，必须尊重 `HumanLocked`，不能静默覆盖人工修正。
 
 ## 8. 生成前检索
 
@@ -446,9 +484,15 @@ ai_memory_candidates:
 ai_memory_extraction_jobs:
   unique agent_run_id + extractor_version
   status + updated_at
+
+ai_memory_dream_runs:
+  started_at
+  status + started_at
 ```
 
 Mongo PO 在 `core/adapter/persistence/mongo/memory/po`，Domain 和 PO 的转换集中在 `mapper`，Repository 不手写字段转换。
+
+候选通过采用 `CandidateApprovalRepository.SaveCandidateApproval`。Mongo 实现使用事务同时保存 Memory 和 Candidate，并用 `status=pending`、`current_version=expected` 条件防止重复审批和并发覆盖。拒绝同样要求 Candidate 当前仍为 `pending`。
 
 ## 11. 远程协议
 
@@ -463,6 +507,10 @@ ai_memory_restore
 ai_memory_candidate_list
 ai_memory_candidate_approve
 ai_memory_candidate_reject
+ai_memory_extraction_job_list
+ai_memory_extraction_job_retry
+ai_memory_dream_run
+ai_memory_dream_list
 ```
 
 Agent 返回：
@@ -472,6 +520,10 @@ ai_memory_list_result
 ai_memory_mutation_result
 ai_memory_candidate_list_result
 ai_memory_candidate_mutation_result
+ai_memory_extraction_job_list_result
+ai_memory_extraction_job_retry_result
+ai_memory_dream_run_result
+ai_memory_dream_list_result
 ```
 
 调用链示例：
@@ -502,7 +554,7 @@ Mobile useAIMemoryActions.createMemory
 AI 记忆第二层：
 
 ```text
-有效记忆 | 待审核
+有效记忆 | 待审核 | Dream
 ```
 
 有效记忆支持：
@@ -517,36 +569,117 @@ AI 记忆第二层：
 
 - 查看自动提取内容和来源。
 - 通过并创建有效记忆。
+- 搜索目标记忆并把候选合并为其新版本。
 - 拒绝候选。
+- 查看失败的提取任务并手动重试。
 
-## 13. Dream 模式现状
+Dream 页支持：
 
-已经存在：
+- 手动运行一次质检。
+- 查看候选、新建、合并和拒绝计数。
+- 展开每次运行，查看候选标题、目标标题、模型理由、是否应用和失败原因。
+- 运行结束后同步刷新有效记忆和待审核候选。
 
-- `DreamRun`
-- `DreamAction`
-- `DreamDecision`
-- `DreamRunRepository`
-- Mongo 和内存存储
+## 13. Dream 模式实现
 
-尚未存在：
+### 13.1 接口、实现类与装配
 
-- Dream Application Service。
-- 手动触发协议。
-- 闲置时间调度器。
-- 模型去重、合并、替代和版本决策实现。
-- Mobile Dream 执行记录页面。
-
-后续实现时推荐继续遵守：
+按项目分层，Dream 没有把模型调用、业务规则和协议处理写在同一个对象中：
 
 ```text
-模型只生成 DreamAction 建议
--> Application Service 校验 HumanLocked、版本和状态
--> 单条应用并记录 Applied/FailureReason
--> DreamRun 保存完整审计结果
+port/memory.DreamConsolidator
+  -> 模型质检能力接口
+adapter/memory/dream.ModelConsolidator
+  -> ChatModelPort 实现类
+application/memory/dream/api.Service
+  -> Run / Get / List 用例接口
+application/memory/dream/service.Service
+  -> 状态、权限、并发和持久化规则
+DreamRunRepository
+  -> 审计记录仓储接口
 ```
 
-不要允许模型直接写 Mongo。
+`Application.InitMemoryServices` 读取 `memory.dream.model_id`，留空时回退到默认模型。Dream 模型不可用时只禁用 Dream，白天提取可以继续使用自己的模型。
+
+### 13.2 模型只产生建议
+
+`ModelConsolidator.Consolidate` 把 pending Candidate 和 active Memory 编码为 JSON 证据。已有 Memory 证据包含当前版本和 `human_locked`。模型调用固定使用：
+
+```text
+temperature = 0.1
+max_output_tokens = 3000
+```
+
+输出动作仅允许：
+
+```text
+create        创建新 Memory
+merge         追加到指定 Memory 的新 Revision
+keep_both     相关但适用场景不同，保留为独立 Memory
+reject        无复用价值、不安全或没有新增价值
+needs_review  证据不足，留给人工审核
+```
+
+Prompt 明确禁止模型返回 `supersede`，也禁止虚构 ID。即使模型违反约束，它返回的仍只是 `DreamAction`，不能直接访问 Mongo。
+
+### 13.3 应用服务校验和执行
+
+手动运行链路：
+
+```text
+Mobile 运行 Dream
+-> ai_memory_dream_run
+-> Agent.handleAIMemoryDreamRun
+-> DreamService.Run(trigger=manual)
+-> 先保存 DreamRun(status=running)
+-> 查询 pending Candidate 和 active Memory
+-> DreamConsolidator.Consolidate
+-> 对每个动作重新校验并调用 CatalogService
+-> 保存 DreamRun(status=succeeded/failed)
+-> 返回 Runs、Memories、Candidates
+-> Mobile 刷新三个页签
+```
+
+每条动作应用前会检查：
+
+- Candidate 必须属于本次运行且仍为 `pending`。
+- 一个 Candidate 不能在同次输出中出现多次。
+- merge 目标必须是本次读取到的 active Memory。
+- merge 目标不能有 `HumanLocked`。
+- merge 使用读取时的 `CurrentVersion` 作为 `ExpectedMemoryVersion`，Repository 写入时再次比较版本。
+- 模型遗漏的 Candidate 自动记录为 `needs_review`，继续保持 pending。
+- `supersede` 不执行，并记录明确的 `FailureReason`。
+
+当前支持的实际状态转换：
+
+```text
+create / keep_both: pending -> approved
+merge:              pending -> merged，目标 Memory 版本 +1
+reject:             pending -> rejected
+needs_review:       保持 pending
+```
+
+同一进程的多个 Dream Run 由 Service 互斥执行，避免两个质检同时消费相同候选。Dream 请求由 Agent 独立 goroutine 处理，模型调用不会占用普通聊天请求的全局操作锁。
+
+### 13.4 审计与失败
+
+`DreamRun` 在读取候选之前就先持久化，因此读取仓储、调用模型或解析 JSON 失败时也会保存 `failed` 运行记录。每条 `DreamAction` 保存：
+
+```text
+CandidateID / CandidateTitle
+MemoryID / MemoryTitle
+Decision / Reason
+Applied / FailureReason
+```
+
+单条动作因人工锁、并发版本冲突或非法目标而失败时，不回滚其他已安全应用的动作；该动作保留 `Applied=false` 和失败原因。整个运行记录用于解释“模型建议了什么、应用服务实际做了什么”。
+
+### 13.5 当前边界
+
+- 只有 Mobile 手动触发，尚无闲置检测、Cron 或夜间调度器。
+- `supersede` 需要同时更新新旧两条 Memory；在提供跨多 Memory 的原子持久化前保持禁用。
+- 当前每次最多读取 100 个 Candidate 和 100 个 Memory；Mobile 默认请求 20 个 Candidate、50 个 Memory。
+- Dream 不是后台 Job，Mobile 连接断开不会提供单独的任务恢复协议，但已落库的 DreamRun 仍可再次查询。
 
 ## 14. 调试入口
 
@@ -557,7 +690,7 @@ AI 记忆第二层：
 1. AgentRun 是否以 `succeeded` 或 `failed` 完成。
 2. `ObservingCommandService.Finish` 是否调用 Observer。
 3. `ai_memory_extraction_jobs` 是否存在 pending/failed Job。
-4. 默认模型是否在 `InitMemoryServices` 时可用。
+4. `memory.extraction.model_id` 指定的模型是否已注册；留空时再检查默认模型。
 5. `last_error` 是否为 JSON、模型调用或 Candidate 校验错误。
 
 ### 14.2 候选生成但 Mobile 看不到
@@ -585,14 +718,24 @@ ai_memory_candidate_list
 5. `AssistantGenerationService.MemoryContext` 是否注入。
 6. `AgentLoopService.withMemoryContext` 是否生成 `SyntheticReasonMemoryContext`。
 
+### 14.4 Dream 没有执行或没有应用动作
+
+检查：
+
+1. `memory.dream.model_id` 是否为空或对应模型已注册。
+2. 是否存在 `pending` Candidate；没有候选时运行会成功结束但 Actions 为空。
+3. `ai_memory_dream_run_result.message` 和最新 DreamRun 的 `last_error`。
+4. Action 的 `failure_reason` 是否为人工锁、目标不存在、候选重复或版本冲突。
+5. `needs_review` 和模型遗漏的 Candidate 会故意保持 pending，不是写入失败。
+
 ## 15. 已知限制
 
 - AI 记忆检索目前是轻量词法评分，不是 Embedding 检索。
-- 自动提取使用应用启动时的默认 ChatModel，没有独立的记忆模型配置界面。
-- 使用次数采用 Get 后 Save 的应用服务流程，高并发下不是原子自增。
-- 候选通过时 Memory 和 Candidate 是两次保存，尚未使用 Mongo 事务封装。
-- Mobile 尚不支持把候选合并到用户选择的已有 Memory。
-- Dream 模式只有领域和持久化骨架。
+- 提取与 Dream 已支持独立模型 ID，但 Mobile 尚无修改这两个配置的界面，修改配置后需要重启 Agent。
+- Dream 只有手动触发，尚未实现闲置或夜间调度。
+- Dream 自动 `supersede` 尚未实现。
+- 多个进程同时运行 Dream 还没有分布式锁；Mongo 的候选状态和版本条件会阻止重复写入，但运行审计中可能出现冲突动作。
+- AI 记忆检索、提取和 Dream 当前没有独立的超时、批次和 Token 预算配置界面。
 - 脱敏使用规则匹配，不能代替完整敏感信息检测。
 
 ## 16. 验证命令
@@ -602,6 +745,7 @@ go test ./core/domain/memory
 go test ./core/application/memory/...
 go test ./core/adapter/memory/...
 go test ./core/adapter/persistence/mongo/memory/...
+go test ./core/config
 go test ./core/application/chat
 go test ./core/remote/agent
 go test ./core/architecture

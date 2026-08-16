@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions
 
 import { ButtonContent } from "../common/ButtonContent";
 import { SubagentPanel } from "../subagents/SubagentPanel";
-import type { CompactInfo, ContextInfo, ModelSummary, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask } from "../../protocol";
+import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask } from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { shortID } from "../../utils/ids";
@@ -21,6 +21,8 @@ type Props = {
   compact?: CompactInfo;
   connected: boolean;
   context?: ContextInfo;
+  generation?: SessionGenerationPreferences;
+  generationStatus?: { error: boolean; message: string };
   currentModelID: string;
   deviceID: string;
   models: ModelSummary[];
@@ -38,6 +40,7 @@ type Props = {
   onPair: () => void;
   onRefreshModels: () => void;
   onRequestContextInfo: () => void;
+  onRequestGenerationPreferences: () => void;
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
@@ -45,7 +48,9 @@ type Props = {
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
+  onSetGenerationSettings: (settings: GenerationSettings) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
+  onSetStyleInstruction: (instruction: string) => void;
   onSwitchModel: (modelID: string) => void;
   onApplySubagentTask: (taskID: string) => void;
   onCancelSubagentTask: (taskID: string) => void;
@@ -80,13 +85,14 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "Plan", mode: "plan", meta: "read-only planning" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context";
+type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context" | "generation";
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
   { icon: "AG", key: "subagent", label: "子智能体", meta: "配置与后台任务" },
   { icon: "G", key: "general", label: "常规", meta: "状态总览" },
   { icon: "WS", key: "connection", label: "连接", meta: "Relay 与配对" },
   { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
+  { icon: "T", key: "generation", label: "生成", meta: "采样与回复风格" },
   { icon: "SK", key: "skill", label: "技能", meta: "本地 SkillHub" },
   { icon: "S", key: "session", label: "会话", meta: "新建与切换" },
   { icon: "P", key: "permission", label: "权限", meta: "工具调用策略" },
@@ -103,6 +109,8 @@ export function SettingsPanel({
   compact,
   connected,
   context,
+  generation,
+  generationStatus,
   currentModelID,
   deviceID,
   models,
@@ -120,6 +128,7 @@ export function SettingsPanel({
   onPair,
   onRefreshModels,
   onRequestContextInfo,
+  onRequestGenerationPreferences,
   onRefreshSessions,
   onRefreshSkills,
   onReloadSkills,
@@ -127,7 +136,9 @@ export function SettingsPanel({
   onRelayURLChange,
   onSetAgentMode,
   onSetContextWindowK,
+  onSetGenerationSettings,
   onSetPermissionMode,
+  onSetStyleInstruction,
   onSwitchModel,
   onApplySubagentTask,
   onCancelSubagentTask,
@@ -157,8 +168,14 @@ export function SettingsPanel({
   const activePlan = activeSession?.current_plan;
   const currentWindowK = context?.window_k || activeSession?.context_window_k || 16;
   const [windowInput, setWindowInput] = useState(String(currentWindowK));
+  const [temperatureInput, setTemperatureInput] = useState("");
+  const [topPInput, setTopPInput] = useState("");
+  const [maxTokensInput, setMaxTokensInput] = useState("");
+  const [styleInput, setStyleInput] = useState("");
+  const [generationError, setGenerationError] = useState("");
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const requestContextInfoRef = useRef(onRequestContextInfo);
+  const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
 
   useEffect(() => {
     setWindowInput(String(currentWindowK));
@@ -169,12 +186,31 @@ export function SettingsPanel({
   }, [onRequestContextInfo]);
 
   useEffect(() => {
+    requestGenerationPreferencesRef.current = onRequestGenerationPreferences;
+  }, [onRequestGenerationPreferences]);
+
+  useEffect(() => {
     if (activeSection === "context" && connected && clientToken && sessionID) {
       requestContextInfoRef.current();
     }
   }, [activeSection, clientToken, connected, sessionID]);
 
+  useEffect(() => {
+    if (activeSection === "generation" && connected && clientToken && sessionID) {
+      requestGenerationPreferencesRef.current();
+    }
+  }, [activeSection, activeSession?.model, clientToken, connected, sessionID]);
+
+  useEffect(() => {
+    setTemperatureInput(formatOverride(generation?.session_overrides.temperature));
+    setTopPInput(formatOverride(generation?.session_overrides.top_p));
+    setMaxTokensInput(formatOverride(generation?.session_overrides.max_output_tokens));
+    setStyleInput(generation?.style_instruction || "");
+    setGenerationError("");
+  }, [generation]);
+
   const settingsBusy = pendingActions.settings;
+  const generationBusy = pendingActions.generation;
   const contextBusy = pendingActions.context;
   const planBusy = pendingActions.plan;
   const canUseSessionSettings = Boolean(clientToken && sessionID);
@@ -313,6 +349,147 @@ export function SettingsPanel({
       ) : (
         <EmptyBox text={clientToken ? "还没有加载模型，点击刷新试试" : "先完成配对，再加载模型"} />
       )}
+    </View>
+  );
+
+  const submitGeneration = () => {
+    const temperature = parseOptionalSetting(temperatureInput, "Temperature", 0, 2);
+    const topP = parseOptionalSetting(topPInput, "Top P", 0, 1);
+    const maxOutputTokens = parseOptionalInteger(maxTokensInput, "最大输出 Token", 1, 131072);
+    const error = temperature.error || topP.error || maxOutputTokens.error;
+    if (error) {
+      setGenerationError(error);
+      return;
+    }
+    setGenerationError("");
+    onSetGenerationSettings({
+      temperature: temperature.value,
+      top_p: topP.value,
+      max_output_tokens: maxOutputTokens.value,
+    });
+  };
+
+  const resetGeneration = () => {
+    setTemperatureInput("");
+    setTopPInput("");
+    setMaxTokensInput("");
+    setGenerationError("");
+    onSetGenerationSettings({ temperature: null, top_p: null, max_output_tokens: null });
+  };
+
+  const submitStyle = () => {
+    if (Array.from(styleInput).length > 2000) {
+      setGenerationError("回复风格不能超过 2000 个字符。");
+      return;
+    }
+    setGenerationError("");
+    onSetStyleInstruction(styleInput.trim());
+  };
+
+  const generationSection = (
+    <View style={styles.sectionStack}>
+      <View style={styles.controlBlock}>
+        <View style={styles.controlHeader}>
+          <View style={styles.flex}>
+            <Text style={styles.controlTitle}>会话生成参数</Text>
+            <Text style={styles.settingMeta}>空值表示继承模型默认值；最终生效值会包含系统兜底值。</Text>
+          </View>
+          {generationBusy ? <ButtonContent loading text="保存中" /> : null}
+        </View>
+        {generation ? (
+          <>
+            <GenerationField
+              effective={generation.effective.temperature}
+              label="Temperature"
+              modelDefault={generation.model_defaults.temperature}
+              onChangeText={setTemperatureInput}
+              onReset={() => setTemperatureInput("")}
+              systemDefault={0.7}
+              value={temperatureInput}
+            />
+            <GenerationField
+              effective={generation.effective.top_p}
+              label="Top P"
+              modelDefault={generation.model_defaults.top_p}
+              onChangeText={setTopPInput}
+              onReset={() => setTopPInput("")}
+              systemDefault={1}
+              value={topPInput}
+            />
+            <GenerationField
+              effective={generation.effective.max_output_tokens}
+              integer
+              label="最大输出 Token"
+              modelDefault={generation.model_defaults.max_output_tokens}
+              onChangeText={setMaxTokensInput}
+              onReset={() => setMaxTokensInput("")}
+              systemDefault={2048}
+              value={maxTokensInput}
+            />
+            <View style={styles.row}>
+              <Pressable
+                disabled={!canUseSessionSettings || generationBusy}
+                onPress={submitGeneration}
+                style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
+              >
+                <ButtonContent loading={generationBusy} text="应用参数" />
+              </Pressable>
+              <Pressable
+                disabled={!canUseSessionSettings || generationBusy}
+                onPress={resetGeneration}
+                style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
+              >
+                <ButtonContent loading={generationBusy} text="全部继承" />
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <View style={styles.generationLoading}>
+            <ButtonContent loading={generationBusy} text={generationBusy ? "正在读取生成参数" : "连接后读取生成参数"} />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.controlBlock}>
+        <View style={styles.controlHeader}>
+          <View style={styles.flex}>
+            <Text style={styles.controlTitle}>回复风格</Text>
+            <Text style={styles.settingMeta}>只影响表达方式，不覆盖模式、工具权限和安全规则。</Text>
+          </View>
+          <Text style={styles.generationCount}>{Array.from(styleInput).length}/2000</Text>
+        </View>
+        <TextInput
+          multiline
+          onChangeText={setStyleInput}
+          placeholder="例如：使用简洁的中文，先给结论，再给必要细节。"
+          placeholderTextColor="#776f66"
+          style={[styles.input, styles.multilineInput]}
+          textAlignVertical="top"
+          value={styleInput}
+        />
+        <View style={styles.row}>
+          <Pressable
+            disabled={!canUseSessionSettings || generationBusy}
+            onPress={submitStyle}
+            style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={generationBusy} text="保存风格" />
+          </Pressable>
+          <Pressable
+            disabled={!canUseSessionSettings || generationBusy}
+            onPress={() => { setStyleInput(""); onSetStyleInstruction(""); }}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={generationBusy} text="清除风格" />
+          </Pressable>
+        </View>
+      </View>
+
+      {generationError || generationStatus?.message ? (
+        <Text style={generationError || generationStatus?.error ? styles.generationMessage : styles.generationSuccess}>
+          {generationError || generationStatus?.message}
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -722,6 +899,7 @@ export function SettingsPanel({
   const sectionContent: Record<SettingsSection, ReactNode> = {
     connection: relaySection,
     context: contextSection,
+    generation: generationSection,
     general: generalSection,
     model: modelSection,
     permission: permissionSection,
@@ -796,6 +974,53 @@ function IconBox({ label }: { label: string }) {
   return (
     <View style={styles.settingIconBox}>
       <Text style={styles.settingIconText}>{label}</Text>
+    </View>
+  );
+}
+
+function GenerationField({
+  effective,
+  integer = false,
+  label,
+  modelDefault,
+  onChangeText,
+  onReset,
+  systemDefault,
+  value,
+}: {
+  effective: number;
+  integer?: boolean;
+  label: string;
+  modelDefault: number | null;
+  onChangeText: (value: string) => void;
+  onReset: () => void;
+  systemDefault: number;
+  value: string;
+}) {
+  const inheritedValue = modelDefault == null
+    ? `模型未设置 · 系统兜底 ${formatNumber(systemDefault)}`
+    : `模型默认 ${formatNumber(modelDefault)} · 系统兜底 ${formatNumber(systemDefault)}`;
+
+  return (
+    <View style={styles.generationField}>
+      <View style={styles.generationFieldHeader}>
+        <Text style={styles.generationLabel}>{label}</Text>
+        <Text style={styles.generationEffective}>生效 {formatNumber(effective)}</Text>
+      </View>
+      <View style={styles.generationInputRow}>
+        <TextInput
+          keyboardType={integer ? "number-pad" : "decimal-pad"}
+          onChangeText={onChangeText}
+          placeholder="继承"
+          placeholderTextColor="#776f66"
+          style={[styles.input, styles.generationInput]}
+          value={value}
+        />
+        <Pressable onPress={onReset} style={styles.inheritButton}>
+          <Text style={styles.inheritButtonText}>继承</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.generationMeta}>{inheritedValue} · 会话覆盖 {value.trim() || "未设置"}</Text>
     </View>
   );
 }
@@ -893,6 +1118,37 @@ function formatDate(value?: string) {
     return "-";
   }
   return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatOverride(value?: number | null) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function formatNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+}
+
+function parseOptionalSetting(input: string, label: string, min: number, max: number): { value: number | null; error: string } {
+  const normalized = input.trim();
+  if (!normalized) {
+    return { value: null, error: "" };
+  }
+  const value = Number(normalized);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    return { value: null, error: `${label} 必须在 ${min} 到 ${max} 之间。` };
+  }
+  return { value, error: "" };
+}
+
+function parseOptionalInteger(input: string, label: string, min: number, max: number): { value: number | null; error: string } {
+  const parsed = parseOptionalSetting(input, label, min, max);
+  if (parsed.error || parsed.value === null) {
+    return parsed;
+  }
+  if (!Number.isInteger(parsed.value)) {
+    return { value: null, error: `${label} 必须是整数。` };
+  }
+  return parsed;
 }
 
 const styles = StyleSheet.create({
@@ -1104,6 +1360,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     textAlignVertical: "center",
   },
+  multilineInput: {
+    minHeight: 116,
+  },
   row: {
     alignItems: "center",
     flexDirection: "row",
@@ -1253,6 +1512,88 @@ const styles = StyleSheet.create({
     color: "#12100e",
     fontSize: 16,
     fontWeight: "900",
+  },
+  generationField: {
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    gap: 6,
+    padding: 9,
+  },
+  generationFieldHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  generationLabel: {
+    color: "#12100e",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  generationEffective: {
+    color: "#1e6847",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  generationInputRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  generationInput: {
+    flex: 1,
+  },
+  inheritButton: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 58,
+    paddingHorizontal: 9,
+  },
+  inheritButtonText: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  generationMeta: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  generationCount: {
+    color: "#6c665f",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  generationLoading: {
+    alignItems: "flex-start",
+    minHeight: 48,
+    justifyContent: "center",
+  },
+  generationMessage: {
+    backgroundColor: "#ffe1d8",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    color: "#8c2d1c",
+    fontSize: 13,
+    fontWeight: "800",
+    padding: 10,
+  },
+  generationSuccess: {
+    backgroundColor: "#dff3dc",
+    borderColor: "#1e6847",
+    borderRadius: 8,
+    borderWidth: 2,
+    color: "#1e6847",
+    fontSize: 13,
+    fontWeight: "800",
+    padding: 10,
   },
   segmentRow: {
     flexDirection: "row",

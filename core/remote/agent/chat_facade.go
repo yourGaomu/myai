@@ -5,6 +5,7 @@ import (
 
 	agentrunresult "myai/core/application/agentrun/result"
 	sessionresult "myai/core/application/session/result"
+	"myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/service"
@@ -42,6 +43,9 @@ type SessionSettingsFacade interface {
 	SetAgentModeForSession(ctx context.Context, sessionID string, mode string) error
 	SetContextWindowKForSession(ctx context.Context, sessionID string, windowK int) error
 	SetRAGSettingsForSession(ctx context.Context, sessionID string, settings session.RAGSettings) error
+	SetGenerationSettingsForSession(ctx context.Context, sessionID string, settings generation.Settings) error
+	SetStyleInstructionForSession(ctx context.Context, sessionID string, instruction string) error
+	SessionPreferencesForSession(ctx context.Context, sessionID string) (service.SessionPreferencesView, error)
 	CompactSession(ctx context.Context, sessionID string) (service.ContextInfo, error)
 	SwitchModelForSession(ctx context.Context, sessionID string, modelID string) error
 }

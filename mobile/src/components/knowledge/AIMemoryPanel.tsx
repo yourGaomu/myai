@@ -1,27 +1,34 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import type { AIMemory, AIMemoryCandidate, AIMemoryInput, AIMemoryKind, AIMemoryListPayload, AIMemoryScope } from "../../protocol";
+import type { AIMemory, AIMemoryCandidate, AIMemoryDreamRun, AIMemoryExtractionJob, AIMemoryInput, AIMemoryKind, AIMemoryListPayload, AIMemoryScope } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
+import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
 
 export type AIMemoryPanelProps = {
   buttonFeedback: ButtonFeedback;
   candidates: AIMemoryCandidate[];
+  dreamRuns: AIMemoryDreamRun[];
+  extractionJobs: AIMemoryExtractionJob[];
   memories: AIMemory[];
   message: string;
   onApproveCandidate: (candidate: AIMemoryCandidate, memoryID?: string) => boolean;
   onCreateMemory: (memory: AIMemoryInput) => boolean;
   onDeleteMemory: (memoryID: string) => boolean;
   onRefreshCandidates: () => boolean;
+  onRefreshDreamRuns: () => boolean;
+  onRefreshExtractionJobs: () => boolean;
   onRefreshMemories: (filter?: AIMemoryListPayload) => boolean;
   onRejectCandidate: (candidate: AIMemoryCandidate) => boolean;
   onRestoreMemory: (memoryID: string) => boolean;
+  onRetryExtractionJob: (job: AIMemoryExtractionJob) => boolean;
+  onRunDream: () => boolean;
   onUpdateMemory: (memoryID: string, memory: AIMemoryInput) => boolean;
   pending: boolean;
 };
 
-type ViewTab = "memories" | "candidates";
+type ViewTab = "memories" | "candidates" | "dream";
 type Draft = AIMemoryInput & { tagsText: string };
 
 const emptyDraft: Draft = {
@@ -36,27 +43,51 @@ const emptyDraft: Draft = {
 export function AIMemoryPanel({
   buttonFeedback,
   candidates,
+  dreamRuns,
+  extractionJobs,
   memories,
   message,
   onApproveCandidate,
   onCreateMemory,
   onDeleteMemory,
   onRefreshCandidates,
+  onRefreshDreamRuns,
+  onRefreshExtractionJobs,
   onRefreshMemories,
   onRejectCandidate,
   onRestoreMemory,
+  onRetryExtractionJob,
+  onRunDream,
   onUpdateMemory,
   pending,
 }: AIMemoryPanelProps) {
   const [tab, setTab] = useState<ViewTab>("memories");
   const [query, setQuery] = useState("");
   const [expandedID, setExpandedID] = useState("");
+  const [expandedDreamID, setExpandedDreamID] = useState("");
   const [editingID, setEditingID] = useState("");
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [showEditor, setShowEditor] = useState(false);
   const [includeDeleted, setIncludeDeleted] = useState(false);
+  const [mergeCandidate, setMergeCandidate] = useState<AIMemoryCandidate | null>(null);
+  const [mergeMemoryID, setMergeMemoryID] = useState("");
+  const [mergeQuery, setMergeQuery] = useState("");
 
   const activeCount = useMemo(() => memories.filter((memory) => memory.status !== "deleted").length, [memories]);
+
+  const mergeTargets = useMemo(() => {
+    const value = mergeQuery.trim().toLowerCase();
+    return memories.filter((memory) => {
+      if (memory.status !== "active") return false;
+      if (!value) return true;
+      const revision = currentRevision(memory);
+      return [memory.title, ...(memory.tags || []), revision?.content.goal, revision?.content.approach]
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase()
+        .includes(value);
+    });
+  }, [memories, mergeQuery]);
 
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -74,13 +105,31 @@ export function AIMemoryPanel({
 
   const refresh = () => {
     if (tab === "memories") onRefreshMemories({ include_deleted: includeDeleted, text: query.trim() || undefined, limit: 100 });
-    else onRefreshCandidates();
+    else if (tab === "candidates") {
+      onRefreshCandidates();
+      onRefreshExtractionJobs();
+    } else {
+      onRefreshDreamRuns();
+    }
   };
 
   const beginCreate = () => {
     setEditingID("");
     setDraft(emptyDraft);
     setShowEditor(true);
+  };
+
+  const beginMerge = (candidate: AIMemoryCandidate) => {
+    setMergeCandidate(candidate);
+    setMergeMemoryID("");
+    setMergeQuery("");
+  };
+
+  const confirmMerge = () => {
+    if (!mergeCandidate || !mergeMemoryID || pending) return;
+    if (onApproveCandidate(mergeCandidate, mergeMemoryID)) {
+      setMergeCandidate(null);
+    }
   };
 
   const beginEdit = (memory: AIMemory) => {
@@ -115,7 +164,8 @@ export function AIMemoryPanel({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.headerRow}>
         <View style={styles.flex}>
           <Text style={styles.eyebrow}>AI MEMORY</Text>
@@ -130,6 +180,7 @@ export function AIMemoryPanel({
       <View style={styles.segmented}>
         <Segment active={tab === "memories"} label="有效记忆" onPress={() => setTab("memories")} buttonFeedback={buttonFeedback} />
         <Segment active={tab === "candidates"} label={`待审核 ${candidates.length}`} onPress={() => setTab("candidates")} buttonFeedback={buttonFeedback} />
+        <Segment active={tab === "dream"} label="Dream" onPress={() => setTab("dream")} buttonFeedback={buttonFeedback} />
       </View>
 
       {message ? <Text style={styles.status}>{message}</Text> : null}
@@ -151,18 +202,6 @@ export function AIMemoryPanel({
           <Pressable onPress={() => { const next = !includeDeleted; setIncludeDeleted(next); onRefreshMemories({ include_deleted: next, limit: 100 }); }} style={({ pressed }) => buttonFeedback(styles.filterToggle, pressed)}>
             <Text style={styles.filterToggleText}>{includeDeleted ? "隐藏已删除" : "查看已删除"}</Text>
           </Pressable>
-
-          {showEditor ? (
-            <MemoryEditor
-              buttonFeedback={buttonFeedback}
-              draft={draft}
-              editing={Boolean(editingID)}
-              onCancel={() => setShowEditor(false)}
-              onChange={setDraft}
-              onSubmit={submit}
-              pending={pending}
-            />
-          ) : null}
 
           {filtered.map((memory) => {
             const revision = currentRevision(memory);
@@ -202,8 +241,34 @@ export function AIMemoryPanel({
           })}
           {!pending && filtered.length === 0 ? <Text style={styles.empty}>还没有符合条件的 AI 记忆。</Text> : null}
         </>
-      ) : (
+      ) : tab === "candidates" ? (
         <>
+          {extractionJobs.length > 0 ? (
+            <View style={styles.extractionSection}>
+              <View style={styles.extractionHeader}>
+                <Text style={styles.sectionTitle}>提取失败 {extractionJobs.length}</Text>
+                <Text style={styles.meta}>记忆没有丢失，可以手动重试</Text>
+              </View>
+              {extractionJobs.map((job) => (
+                <View key={job.id} style={styles.extractionCard}>
+                  <Text style={styles.extractionLabel}>AgentRun</Text>
+                  <Text selectable style={styles.extractionValue}>{job.agent_run_id || "-"}</Text>
+                  <Text style={styles.extractionMeta}>尝试次数：{job.attempts}</Text>
+                  <Text selectable numberOfLines={4} style={styles.extractionError}>
+                    错误：{job.last_error || "未知提取错误"}
+                  </Text>
+                  <View style={styles.actions}>
+                    <Action
+                      buttonFeedback={buttonFeedback}
+                      disabled={pending}
+                      label={pending ? "重试中..." : "重试"}
+                      onPress={() => onRetryExtractionJob(job)}
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
           {pending && candidates.length === 0 ? <ActivityIndicator color="#1d6b52" /> : null}
           {candidates.map((candidate) => (
             <View key={candidate.id} style={styles.memoryCard}>
@@ -216,19 +281,174 @@ export function AIMemoryPanel({
               <View style={styles.tagRow}>{(candidate.tags || []).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View>
               <Text style={styles.meta}>可信度 {Math.round(candidate.confidence * 100)}% · {candidate.sources?.[0]?.agent_run_id ? "来自 AgentRun" : "自动提取"}</Text>
               <View style={styles.actions}>
-                <Action label="通过" onPress={() => onApproveCandidate(candidate)} buttonFeedback={buttonFeedback} />
+                <Action label="通过并新建" onPress={() => onApproveCandidate(candidate)} buttonFeedback={buttonFeedback} />
+                {memories.some((memory) => memory.status === "active") ? (
+                  <Action disabled={pending} label="合并到已有" onPress={() => beginMerge(candidate)} buttonFeedback={buttonFeedback} />
+                ) : null}
                 <Action danger label="拒绝" onPress={() => onRejectCandidate(candidate)} buttonFeedback={buttonFeedback} />
               </View>
             </View>
           ))}
           {!pending && candidates.length === 0 ? <Text style={styles.empty}>没有待审核候选。</Text> : null}
         </>
+      ) : (
+        <View style={styles.dreamSection}>
+          <View style={styles.dreamHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.sectionTitle}>Dream 质检</Text>
+              <Text style={styles.meta}>待处理 {candidates.length} · 运行记录 {dreamRuns.length}</Text>
+            </View>
+            <Pressable disabled={pending} onPress={onRunDream} style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}>
+              <ButtonContent loading={pending} text={pending ? "运行中..." : "运行 Dream"} />
+            </Pressable>
+          </View>
+          {dreamRuns.map((run) => {
+            const expanded = expandedDreamID === run.id;
+            return (
+              <View key={run.id} style={styles.dreamCard}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded }}
+                  onPress={() => setExpandedDreamID(expanded ? "" : run.id)}
+                  style={({ pressed }) => buttonFeedback(styles.dreamRunHeader, pressed)}
+                >
+                  <View style={styles.flex}>
+                    <View style={styles.labelRow}>
+                      <Text style={styles.memoryTitle}>{run.status === "succeeded" ? "已完成" : run.status === "failed" ? "执行失败" : "执行中"}</Text>
+                      <Text style={styles.kindLabel}>{run.trigger}</Text>
+                    </View>
+                    <Text style={styles.meta}>候选 {run.candidate_count} · 新建 {run.created_count} · 合并 {run.merged_count} · 拒绝 {run.rejected_count}</Text>
+                  </View>
+                  <Text style={styles.chevron}>{expanded ? "−" : "+"}</Text>
+                </Pressable>
+                {expanded ? (
+                  <View style={styles.dreamDetails}>
+                    {run.last_error ? <Text style={styles.extractionError}>{run.last_error}</Text> : null}
+                    {run.actions.map((action, index) => (
+                      <View key={`${run.id}-${index}`} style={styles.dreamActionRow}>
+                        <View style={styles.labelRow}>
+                          <Text style={styles.dreamActionTitle}>{action.candidate_title || action.candidate_id || "未知候选"}</Text>
+                          <Text style={[styles.dreamActionStatus, action.applied ? styles.dreamApplied : styles.dreamSkipped]}>
+                            {action.applied ? "已应用" : "未应用"}
+                          </Text>
+                        </View>
+                        <Text style={styles.detailText}>{dreamDecisionLabel(action.decision)}{action.memory_title ? ` · ${action.memory_title}` : ""}</Text>
+                        {action.reason ? <Text style={styles.extractionMeta}>{action.reason}</Text> : null}
+                        {action.failure_reason ? <Text style={styles.extractionError}>{action.failure_reason}</Text> : null}
+                      </View>
+                    ))}
+                    {run.actions.length === 0 ? <Text style={styles.extractionMeta}>本次没有待处理候选。</Text> : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+          {dreamRuns.length === 0 ? <Text style={styles.empty}>还没有 Dream 运行记录。</Text> : null}
+        </View>
       )}
-    </ScrollView>
+      </ScrollView>
+      <MemoryEditor
+        buttonFeedback={buttonFeedback}
+        draft={draft}
+        editing={Boolean(editingID)}
+        onCancel={() => setShowEditor(false)}
+        onChange={setDraft}
+        onSubmit={submit}
+        pending={pending}
+        visible={showEditor}
+      />
+      <MergeMemoryModal
+        buttonFeedback={buttonFeedback}
+        candidate={mergeCandidate}
+        memories={mergeTargets}
+        onCancel={() => setMergeCandidate(null)}
+        onChangeQuery={setMergeQuery}
+        onConfirm={confirmMerge}
+        onSelect={setMergeMemoryID}
+        pending={pending}
+        query={mergeQuery}
+        selectedID={mergeMemoryID}
+      />
+    </>
   );
 }
 
-function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSubmit, pending }: {
+function MergeMemoryModal({
+  buttonFeedback,
+  candidate,
+  memories,
+  onCancel,
+  onChangeQuery,
+  onConfirm,
+  onSelect,
+  pending,
+  query,
+  selectedID,
+}: {
+  buttonFeedback: ButtonFeedback;
+  candidate: AIMemoryCandidate | null;
+  memories: AIMemory[];
+  onCancel: () => void;
+  onChangeQuery: (value: string) => void;
+  onConfirm: () => void;
+  onSelect: (memoryID: string) => void;
+  pending: boolean;
+  query: string;
+  selectedID: string;
+}) {
+  return (
+    <ResponsiveFormModal
+      buttonFeedback={buttonFeedback}
+      footer={(
+        <>
+          <Pressable onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.footerCancelButton, pressed)}>
+            <Text style={styles.footerCancelText}>取消</Text>
+          </Pressable>
+          <Pressable
+            disabled={pending || !selectedID}
+            onPress={onConfirm}
+            style={({ pressed }) => buttonFeedback([styles.footerSubmitButton, (pending || !selectedID) && styles.disabled], pressed)}
+          >
+            <ButtonContent loading={pending} text="确认合并" />
+          </Pressable>
+        </>
+      )}
+      onClose={onCancel}
+      title="选择要合并的记忆"
+      visible={candidate !== null}
+    >
+      {candidate ? <Text style={styles.mergeHint}>候选：{candidate.title}</Text> : null}
+      <TextInput
+        onChangeText={onChangeQuery}
+        placeholder="搜索标题、目标或标签"
+        placeholderTextColor="#777169"
+        style={styles.input}
+        value={query}
+      />
+      {memories.map((memory) => {
+        const revision = currentRevision(memory);
+        const selected = selectedID === memory.id;
+        return (
+          <Pressable
+            key={memory.id}
+            onPress={() => onSelect(memory.id)}
+            style={({ pressed }) => buttonFeedback([styles.mergeTarget, selected && styles.mergeTargetSelected], pressed)}
+          >
+            <View style={styles.flex}>
+              <Text style={styles.mergeTargetTitle}>{memory.title}</Text>
+              <Text numberOfLines={2} style={styles.mergeTargetGoal}>{revision?.content.goal || "无目标描述"}</Text>
+              <Text style={styles.meta}>v{memory.current_version} · {(memory.tags || []).map((tag) => `#${tag}`).join(" ") || "无标签"}</Text>
+            </View>
+            <Text style={[styles.mergeCheck, selected && styles.mergeCheckSelected]}>{selected ? "✓" : "○"}</Text>
+          </Pressable>
+        );
+      })}
+      {memories.length === 0 ? <Text style={styles.empty}>没有找到可合并的有效记忆。</Text> : null}
+    </ResponsiveFormModal>
+  );
+}
+
+function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSubmit, pending, visible }: {
   buttonFeedback: ButtonFeedback;
   draft: Draft;
   editing: boolean;
@@ -236,15 +456,27 @@ function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSu
   onChange: (draft: Draft) => void;
   onSubmit: () => void;
   pending: boolean;
+  visible: boolean;
 }) {
   const setContent = (key: keyof AIMemoryInput["content"], value: string) => onChange({ ...draft, content: { ...draft.content, [key]: value } });
   return (
-    <View style={styles.editor}>
-      <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>{editing ? "编辑记忆" : "新建记忆"}</Text>
-        <Action label="关闭" onPress={onCancel} buttonFeedback={buttonFeedback} />
-      </View>
-      <TextInput onChangeText={(title) => onChange({ ...draft, title })} placeholder="标题" placeholderTextColor="#777169" style={styles.input} value={draft.title} />
+    <ResponsiveFormModal
+      buttonFeedback={buttonFeedback}
+      footer={(
+        <>
+          <Pressable onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.footerCancelButton, pressed)}>
+            <Text style={styles.footerCancelText}>取消</Text>
+          </Pressable>
+          <Pressable disabled={pending} onPress={onSubmit} style={({ pressed }) => buttonFeedback([styles.footerSubmitButton, pending && styles.disabled], pressed)}>
+            <ButtonContent loading={pending} text={editing ? "保存新版本" : "创建记忆"} />
+          </Pressable>
+        </>
+      )}
+      onClose={onCancel}
+      title={editing ? "编辑记忆" : "新建记忆"}
+      visible={visible}
+    >
+      <TextInput autoFocus onChangeText={(title) => onChange({ ...draft, title })} placeholder="标题" placeholderTextColor="#777169" style={styles.input} value={draft.title} />
       <View style={styles.segmented}>
         {(["experience", "failure", "decision", "preference"] as AIMemoryKind[]).map((kind) => (
           <Segment active={draft.kind === kind} buttonFeedback={buttonFeedback} key={kind} label={kindLabel(kind)} onPress={() => onChange({ ...draft, kind })} />
@@ -259,10 +491,7 @@ function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSu
       <EditorField label="经验结论" onChange={(value) => setContent("lessons", value)} value={draft.content.lessons || ""} />
       <EditorField label="验证方式" onChange={(value) => setContent("verification", value)} value={draft.content.verification || ""} />
       <TextInput onChangeText={(tagsText) => onChange({ ...draft, tagsText })} placeholder="标签，用逗号分隔" placeholderTextColor="#777169" style={styles.input} value={draft.tagsText} />
-      <Pressable disabled={pending} onPress={onSubmit} style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}>
-        <ButtonContent loading={pending} text={editing ? "保存新版本" : "创建记忆"} />
-      </Pressable>
-    </View>
+    </ResponsiveFormModal>
   );
 }
 
@@ -287,8 +516,8 @@ function Segment({ active, buttonFeedback, label, onPress }: { active: boolean; 
   return <Pressable onPress={onPress} style={({ pressed }) => buttonFeedback([styles.segment, active && styles.segmentActive], pressed)}><Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text></Pressable>;
 }
 
-function Action({ buttonFeedback, danger = false, label, onPress }: { buttonFeedback: ButtonFeedback; danger?: boolean; label: string; onPress: () => void }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => buttonFeedback([styles.actionButton, danger && styles.dangerButton], pressed)}><Text style={[styles.actionText, danger && styles.dangerText]}>{label}</Text></Pressable>;
+function Action({ buttonFeedback, danger = false, disabled = false, label, onPress }: { buttonFeedback: ButtonFeedback; danger?: boolean; disabled?: boolean; label: string; onPress: () => void }) {
+  return <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => buttonFeedback([styles.actionButton, danger && styles.dangerButton, disabled && styles.disabled], pressed)}><Text style={[styles.actionText, danger && styles.dangerText]}>{label}</Text></Pressable>;
 }
 
 function currentRevision(memory: AIMemory) {
@@ -316,6 +545,17 @@ function kindStyle(kind: AIMemoryKind) {
   if (kind === "decision") return styles.decisionLabel;
   if (kind === "preference") return styles.preferenceLabel;
   return styles.experienceLabel;
+}
+
+function dreamDecisionLabel(decision: AIMemoryDreamRun["actions"][number]["decision"]) {
+  return ({
+    create: "新建记忆",
+    merge: "合并版本",
+    supersede: "替代旧记忆",
+    keep_both: "分别保留",
+    reject: "拒绝候选",
+    needs_review: "等待人工审核",
+  } as const)[decision];
 }
 
 const styles = StyleSheet.create({
@@ -354,6 +594,13 @@ const styles = StyleSheet.create({
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 9 },
   tag: { color: "#1d6b52", fontSize: 12, fontWeight: "700" },
   details: { borderTopColor: "#ece9e3", borderTopWidth: 1, gap: 12, marginTop: 12, paddingTop: 12 },
+  extractionSection: { backgroundColor: "#fff8f6", borderColor: "#e7c5be", borderRadius: 7, borderWidth: 1, gap: 10, padding: 12 },
+  extractionHeader: { gap: 2 },
+  extractionCard: { backgroundColor: "#ffffff", borderColor: "#eedbd6", borderRadius: 6, borderWidth: 1, gap: 5, padding: 10 },
+  extractionLabel: { color: "#8b4a40", fontSize: 11, fontWeight: "800" },
+  extractionValue: { color: "#303530", fontSize: 13 },
+  extractionMeta: { color: "#716b63", fontSize: 12 },
+  extractionError: { color: "#9b4037", fontSize: 13, lineHeight: 19 },
   detailGrid: { gap: 10 },
   fieldLabel: { color: "#6b655d", fontSize: 11, fontWeight: "800", marginBottom: 4 },
   detailText: { color: "#303530", fontSize: 14, lineHeight: 21 },
@@ -362,7 +609,26 @@ const styles = StyleSheet.create({
   actionText: { color: "#275f4c", fontSize: 13, fontWeight: "800" },
   dangerButton: { borderColor: "#d3aaa4" },
   dangerText: { color: "#9b4037" },
-  editor: { backgroundColor: "#f4f2ed", borderColor: "#d7d2c8", borderRadius: 7, borderWidth: 1, gap: 10, padding: 13 },
+  footerCancelButton: { alignItems: "center", borderColor: "#a8a197", borderRadius: 6, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 14 },
+  footerCancelText: { color: "#4d504c", fontSize: 14, fontWeight: "800" },
+  footerSubmitButton: { alignItems: "center", backgroundColor: "#1d6b52", borderRadius: 6, justifyContent: "center", minHeight: 42, minWidth: 120, paddingHorizontal: 16 },
+  mergeHint: { backgroundColor: "#edf5f0", color: "#345348", fontSize: 13, lineHeight: 19, padding: 10 },
+  mergeTarget: { alignItems: "center", backgroundColor: "#ffffff", borderColor: "#d9d5cd", borderRadius: 6, borderWidth: 1, flexDirection: "row", gap: 10, padding: 11 },
+  mergeTargetSelected: { backgroundColor: "#edf5f0", borderColor: "#1d6b52", borderWidth: 2 },
+  mergeTargetTitle: { color: "#20231f", fontSize: 14, fontWeight: "800" },
+  mergeTargetGoal: { color: "#454a45", fontSize: 13, lineHeight: 18, marginTop: 4 },
+  mergeCheck: { color: "#777169", fontSize: 22, width: 24 },
+  mergeCheckSelected: { color: "#1d6b52", fontWeight: "800" },
+  dreamSection: { gap: 12 },
+  dreamHeader: { alignItems: "center", flexDirection: "row", gap: 12 },
+  dreamCard: { backgroundColor: "#ffffff", borderColor: "#d9d5cd", borderRadius: 7, borderWidth: 1, overflow: "hidden" },
+  dreamRunHeader: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 68, padding: 13 },
+  dreamDetails: { borderTopColor: "#e5e1da", borderTopWidth: 1, paddingHorizontal: 13 },
+  dreamActionRow: { borderBottomColor: "#ece9e3", borderBottomWidth: 1, gap: 5, paddingVertical: 12 },
+  dreamActionTitle: { color: "#20231f", flexShrink: 1, fontSize: 14, fontWeight: "800" },
+  dreamActionStatus: { borderRadius: 4, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
+  dreamApplied: { backgroundColor: "#dfeee8", color: "#1d6b52" },
+  dreamSkipped: { backgroundColor: "#f1e7cf", color: "#735d24" },
   empty: { color: "#777169", paddingVertical: 28, textAlign: "center" },
   filterToggle: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", paddingHorizontal: 2 },
   filterToggleText: { color: "#466f60", fontSize: 13, fontWeight: "700" },

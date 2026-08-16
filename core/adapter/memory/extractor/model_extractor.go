@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,11 +30,19 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 type ModelExtractor struct {
+	ModelID      string
 	Model        modelport.ChatModelPort
 	DefaultScope domainmemory.Scope
 }
 
-func (extractor ModelExtractor) Version() string { return extractorVersion }
+func (extractor ModelExtractor) Version() string {
+	modelID := strings.TrimSpace(extractor.ModelID)
+	if modelID == "" {
+		return extractorVersion
+	}
+	digest := sha256.Sum256([]byte(modelID))
+	return fmt.Sprintf("%s:%x", extractorVersion, digest[:8])
+}
 
 func (extractor ModelExtractor) Extract(ctx context.Context, run domainagentrun.Run, events []domainagentrun.Event) ([]domainmemory.CandidateDraft, error) {
 	if extractor.Model == nil {

@@ -7,6 +7,7 @@ import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { MarkdownText } from "./MarkdownText";
 import { SharedAssetCard } from "./SharedAssetCard";
 import { styles } from "./styles";
+import { ThinkingReasoning } from "./ThinkingReasoning";
 
 type Props = {
   message: ChatItem;
@@ -59,10 +60,13 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   return (
     <View style={[styles.message, styles[`${message.role}Message`]]}>
       {message.reasoning && !hideReasoning ? (
-        <View style={styles.reasoningBox}>
-          <Text style={styles.reasoningTitle}>Thinking</Text>
-          <Text style={styles.reasoningText}>{message.reasoning}</Text>
-        </View>
+        <ThinkingReasoning
+          buttonFeedback={buttonFeedback}
+          finishedAt={message.completedAt}
+          reasoning={message.reasoning}
+          running={message.status === "streaming" || message.status === "tool_running"}
+          startedAt={message.createdAt}
+        />
       ) : null}
       <MarkdownText text={message.text} />
       {message.role === "assistant" && (statusText || canRegenerate) ? (

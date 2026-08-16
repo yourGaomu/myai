@@ -85,12 +85,14 @@ type ExtractionJobDocument struct {
 }
 
 type DreamActionDocument struct {
-	CandidateID   string `bson:"candidate_id,omitempty"`
-	MemoryID      string `bson:"memory_id,omitempty"`
-	Decision      string `bson:"decision"`
-	Reason        string `bson:"reason,omitempty"`
-	Applied       bool   `bson:"applied,omitempty"`
-	FailureReason string `bson:"failure_reason,omitempty"`
+	CandidateID    string `bson:"candidate_id,omitempty"`
+	CandidateTitle string `bson:"candidate_title,omitempty"`
+	MemoryID       string `bson:"memory_id,omitempty"`
+	MemoryTitle    string `bson:"memory_title,omitempty"`
+	Decision       string `bson:"decision"`
+	Reason         string `bson:"reason,omitempty"`
+	Applied        bool   `bson:"applied,omitempty"`
+	FailureReason  string `bson:"failure_reason,omitempty"`
 }
 
 type DreamRunDocument struct {

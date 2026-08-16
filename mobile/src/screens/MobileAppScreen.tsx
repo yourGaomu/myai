@@ -33,6 +33,7 @@ import { useRemoteRequests } from "../hooks/useRemoteRequests";
 import { useSessionModelActions } from "../hooks/useSessionModelActions";
 import { useSessionModelState } from "../hooks/useSessionModelState";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
+import { useSessionGenerationState } from "../hooks/useSessionGenerationState";
 import { useSkillState } from "../hooks/useSkillState";
 import { useSubagentActions } from "../hooks/useSubagentActions";
 import { useSubagentState } from "../hooks/useSubagentState";
@@ -87,6 +88,12 @@ export function MobileAppScreen() {
     setSessions,
   } = useSessionModelState();
   const {
+    applyError: setSessionGenerationError,
+    applyPreferences: setSessionGenerationPreferences,
+    preferences: generationPreferences,
+    status: generationStatus,
+  } = useSessionGenerationState(sessionID);
+  const {
     clearSkills,
     setSkillMessage,
     setSkillRoot,
@@ -119,8 +126,12 @@ export function MobileAppScreen() {
   const {
     applyCandidateMutation: applyAIMemoryCandidateMutation,
     applyCandidates: applyAIMemoryCandidates,
+    applyExtractionJobs: applyAIMemoryExtractionJobs,
+    applyDreamResult: applyAIMemoryDreamResult,
     applyMemories: applyAIMemories,
     candidates: aiMemoryCandidates,
+    extractionJobs: aiMemoryExtractionJobs,
+    dreamRuns: aiMemoryDreamRuns,
     memories: aiMemories,
     message: aiMemoryMessage,
     setMessage: setAIMemoryMessage,
@@ -358,7 +369,11 @@ export function MobileAppScreen() {
     deleteMemory: deleteAIMemory,
     rejectCandidate: rejectAIMemoryCandidate,
     requestCandidates: requestAIMemoryCandidates,
+    requestExtractionJobs: requestAIMemoryExtractionJobs,
+    requestDreamRuns: requestAIMemoryDreamRuns,
     requestMemories: requestAIMemories,
+    retryExtractionJob: retryAIMemoryExtractionJob,
+    runDream: runAIMemoryDream,
     restoreMemory: restoreAIMemory,
     updateMemory: updateAIMemory,
   } = useAIMemoryActions({
@@ -371,9 +386,12 @@ export function MobileAppScreen() {
     compactSession,
     executePlan,
     requestContextInfo,
+    requestGenerationPreferences,
     setAgentMode,
     setContextWindowK,
+    setGenerationSettings,
     setPermissionMode,
+    setStyleInstruction,
   } = useSessionSettingsActions({
     activeRequestIDRef,
     clearSessionPendingRequest,
@@ -485,6 +503,7 @@ export function MobileAppScreen() {
     applySessionHistory,
     applySessionList,
     applySessionSettings,
+    applySessionGenerationPreferences,
   } = useRemoteResultAppliers({
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     appendMessages,
@@ -524,6 +543,7 @@ export function MobileAppScreen() {
     setSkills,
     setSessionLastUsage,
     setSessionContext,
+    setSessionGenerationPreferences,
     setSessionID,
     setSessionPendingPermission,
     setDeletedSessions,
@@ -560,6 +580,8 @@ export function MobileAppScreen() {
     applyAIMemories,
     applyAIMemoryCandidates,
     applyAIMemoryCandidateMutation,
+    applyAIMemoryExtractionJobs,
+    applyAIMemoryDreamResult,
     applyAIMemoryError: setAIMemoryMessage,
     applyModelList,
     applyModelSwitch,
@@ -574,6 +596,8 @@ export function MobileAppScreen() {
     applySessionHistory,
     applySessionList,
     applySessionSettings,
+    applySessionGenerationPreferences,
+    applySessionGenerationError: setSessionGenerationError,
     clearSessionPendingRequest,
     completeAssistant,
     currentFilePath: filePath,
@@ -581,6 +605,7 @@ export function MobileAppScreen() {
     historySessionIDRef,
     hasRunForRequest,
     isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
+    isGenerationOperationPending: pendingActions.generation,
     isMemoryOperationPending: pendingActions.memory,
     markAssistantError,
     mergeSessionChats,
@@ -610,9 +635,11 @@ export function MobileAppScreen() {
     requestProfiles();
     requestAIMemories();
     requestAIMemoryCandidates();
+    requestAIMemoryExtractionJobs();
+    requestAIMemoryDreamRuns();
     requestSubagentDefinitions();
     requestSubagentTasks();
-  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
+  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
@@ -741,6 +768,8 @@ export function MobileAppScreen() {
         knowledge={{
           activeSession,
           aiCandidates: aiMemoryCandidates,
+          aiDreamRuns: aiMemoryDreamRuns,
+          aiExtractionJobs: aiMemoryExtractionJobs,
           aiMemories,
           aiMemoryMessage,
           categories: knowledgeCategories,
@@ -767,8 +796,12 @@ export function MobileAppScreen() {
           onDeleteAIMemory: deleteAIMemory,
           onRefreshAIMemories: requestAIMemories,
           onRefreshAIMemoryCandidates: requestAIMemoryCandidates,
+          onRefreshAIMemoryDreamRuns: requestAIMemoryDreamRuns,
+          onRefreshAIMemoryExtractionJobs: requestAIMemoryExtractionJobs,
           onRejectAIMemoryCandidate: rejectAIMemoryCandidate,
           onRestoreAIMemory: restoreAIMemory,
+          onRetryAIMemoryExtractionJob: retryAIMemoryExtractionJob,
+          onRunAIMemoryDream: runAIMemoryDream,
           onUpdateAIMemory: updateAIMemory,
           profiles: knowledgeProfiles,
           searchResult: knowledgeSearchResult,
@@ -799,6 +832,8 @@ export function MobileAppScreen() {
           compact: sessionCompacts[sessionID],
           connected,
           context: sessionContexts[sessionID],
+          generation: generationPreferences,
+          generationStatus,
           currentModelID,
           deviceID,
           models,
@@ -816,6 +851,7 @@ export function MobileAppScreen() {
           onOpenPlan: openPlan,
           onRefreshModels: requestModels,
           onRequestContextInfo: requestContextInfo,
+          onRequestGenerationPreferences: requestGenerationPreferences,
           onRefreshSessions: requestSessions,
           onRefreshSkills: requestSkills,
           onReloadSkills: reloadSkills,
@@ -823,7 +859,9 @@ export function MobileAppScreen() {
           onRelayURLChange: setRelayURL,
           onSetAgentMode: setAgentMode,
           onSetContextWindowK: setContextWindowK,
+          onSetGenerationSettings: setGenerationSettings,
           onSetPermissionMode: setPermissionMode,
+          onSetStyleInstruction: setStyleInstruction,
           onSwitchModel: switchModel,
           onApplySubagentTask: applySubagentTask,
           onCancelSubagentTask: cancelSubagentTask,

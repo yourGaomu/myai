@@ -12,6 +12,8 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	v := viper.New()
 	v.Set("myai.model", " gpt-test ")
 	v.Set("myai.base_url", " https://example.test/v1 ")
+	v.Set("memory.extraction.model_id", " memory-extractor ")
+	v.Set("memory.dream.model_id", " memory-dream ")
 	v.Set("redis.addr", " localhost:6379 ")
 	v.Set("rag.minio.endpoint", " https://minio.example.test:9000 ")
 	v.Set("rag.id_node", 7)
@@ -61,6 +63,9 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	}
 	if properties.Model.ID != "gpt-test" || properties.Model.BaseURL != "https://example.test/v1" {
 		t.Fatalf("unexpected model properties: %#v", properties.Model)
+	}
+	if properties.Memory.Extraction.ModelID != "memory-extractor" || properties.Memory.Dream.ModelID != "memory-dream" {
+		t.Fatalf("unexpected memory model properties: %#v", properties.Memory)
 	}
 	if properties.Redis.Address != "localhost:6379" || properties.Thread.Core != 4 {
 		t.Fatalf("unexpected infrastructure properties: %#v %#v", properties.Redis, properties.Thread)

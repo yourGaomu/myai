@@ -84,6 +84,21 @@ func (service Service) EnqueueRun(ctx context.Context, command memorycommand.Enq
 	return result.Job{ExtractionJob: job}, nil
 }
 
+func (service Service) ListJobs(ctx context.Context, command memorycommand.ListJobs) (result.Jobs, error) {
+	if err := service.validate(); err != nil {
+		return result.Jobs{}, err
+	}
+	limit := command.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	jobs, err := service.Store.ListExtractionJobs(ctx, command.Statuses, limit)
+	if err != nil {
+		return result.Jobs{}, err
+	}
+	return result.Jobs{Items: jobs}, nil
+}
+
 func (service Service) Process(ctx context.Context, command memorycommand.Process) error {
 	if err := service.validate(); err != nil {
 		return err
@@ -209,6 +224,40 @@ func (service Service) Recover(ctx context.Context, command memorycommand.Recove
 		}
 	}
 	return errors.Join(recoveryErrors...)
+}
+
+func (service Service) Retry(ctx context.Context, command memorycommand.Retry) (result.Job, error) {
+	if err := service.validate(); err != nil {
+		return result.Job{}, err
+	}
+	jobID := strings.TrimSpace(command.JobID)
+	if jobID == "" {
+		return result.Job{}, errors.New("memory extraction job id is empty")
+	}
+	job, err := service.Store.GetExtractionJob(ctx, jobID)
+	if err != nil {
+		return result.Job{}, err
+	}
+	if job.Status != domainmemory.JobFailed {
+		return result.Job{}, fmt.Errorf("memory extraction job %q is %s, only failed jobs can be retried", job.ID, job.Status)
+	}
+	job.Status = domainmemory.JobPending
+	job.LastError = ""
+	job.CompletedAt = nil
+	job.UpdatedAt = service.now()
+	if err := service.Store.SaveExtractionJob(ctx, job); err != nil {
+		return result.Job{}, err
+	}
+	if service.Async != nil {
+		if err := service.Async.Submit(func() {
+			if processErr := service.Process(context.Background(), memorycommand.Process{JobID: job.ID}); processErr != nil {
+				service.report(processErr)
+			}
+		}); err != nil {
+			return result.Job{ExtractionJob: job}, fmt.Errorf("submit memory extraction retry %q: %w", job.ID, err)
+		}
+	}
+	return result.Job{ExtractionJob: job}, nil
 }
 
 func (service Service) candidateFromDraft(draft domainmemory.CandidateDraft, run domainagentrun.Run, events []domainagentrun.Event, jobID string, ordinal int, now time.Time) domainmemory.Candidate {

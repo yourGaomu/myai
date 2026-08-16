@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	sessionresult "myai/core/application/session/result"
+	"myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
@@ -36,6 +37,36 @@ func contextStatePayload(state service.ContextState) protocol.ContextInfo {
 	payload := contextInfoPayload(state.Info)
 	payload.Summary = state.Summary
 	return payload
+}
+
+func generationSettingsPayload(settings generation.Settings) protocol.GenerationSettings {
+	return protocol.GenerationSettings{
+		Temperature:     settings.Temperature,
+		TopP:            settings.TopP,
+		MaxOutputTokens: settings.MaxOutputTokens,
+	}
+}
+
+func generationSettingsFromPayload(settings protocol.GenerationSettings) generation.Settings {
+	return generation.Settings{
+		Temperature:     settings.Temperature,
+		TopP:            settings.TopP,
+		MaxOutputTokens: settings.MaxOutputTokens,
+	}
+}
+
+func sessionGenerationPreferencesPayload(sessionID string, preferences service.SessionPreferencesView) protocol.SessionGenerationPreferences {
+	return protocol.SessionGenerationPreferences{
+		SessionID:        strings.TrimSpace(sessionID),
+		SessionOverrides: generationSettingsPayload(preferences.SessionOverrides),
+		ModelDefaults:    generationSettingsPayload(preferences.ModelDefaults),
+		Effective: protocol.ResolvedGenerationSettings{
+			Temperature:     preferences.Effective.Temperature,
+			TopP:            preferences.Effective.TopP,
+			MaxOutputTokens: preferences.Effective.MaxOutputTokens,
+		},
+		StyleInstruction: preferences.StyleInstruction,
+	}
 }
 
 func compactInfoPayload(info service.CompactInfo) protocol.CompactInfo {

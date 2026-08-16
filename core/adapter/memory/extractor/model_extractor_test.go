@@ -82,6 +82,17 @@ func TestModelExtractorSkipsNonReusableAndNonTerminalRuns(t *testing.T) {
 	}
 }
 
+func TestModelExtractorVersionIncludesConfiguredModel(t *testing.T) {
+	first := ModelExtractor{ModelID: "model-a"}.Version()
+	second := ModelExtractor{ModelID: "model-b"}.Version()
+	if first == second || first == extractorVersion || second == extractorVersion {
+		t.Fatalf("model-specific extractor versions were not generated: first=%q second=%q", first, second)
+	}
+	if first != (ModelExtractor{ModelID: " model-a "}).Version() {
+		t.Fatalf("model id whitespace changed extractor version: %q", first)
+	}
+}
+
 func TestTruncateUTF8DoesNotSplitCharacters(t *testing.T) {
 	value := strings.Repeat("你", 1000)
 	truncated := truncateUTF8(value, 2000)

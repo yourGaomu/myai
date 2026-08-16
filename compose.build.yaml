@@ -1,0 +1,18 @@
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile.relay
+    image: ${MYAI_RELAY_IMAGE:-myai-relay:latest}
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: ${MYAI_AGENT_IMAGE:-myai-agent:latest}
+
+  url-shortener:
+    build:
+      context: .
+      dockerfile: Dockerfile.url-shortener
+    image: ${MYAI_URL_SHORTENER_IMAGE:-myai-url-shortener:latest}

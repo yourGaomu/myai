@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/myai \
+      .
+
+# Agent can run local tools, Python document workers, and configured MCP commands.
+FROM golang:1.25-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/myai
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       curl \
+       git \
+       nodejs \
+       npm \
+       python3 \
+       python3-pip \
+       python3-venv \
+       ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/myai-venv
+ENV GOPATH=/home/myai/go \
+    GOMODCACHE=/home/myai/.cache/go-mod \
+    GOCACHE=/home/myai/.cache/go-build \
+    NPM_CONFIG_CACHE=/home/myai/.cache/npm \
+    PATH="/opt/myai-venv/bin:/home/myai/go/bin:${PATH}"
+
+COPY document_processor/requirements.txt /tmp/document-processor-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/document-processor-requirements.txt \
+    && rm /tmp/document-processor-requirements.txt
+
+WORKDIR /app
+
+COPY --from=builder /out/myai /usr/local/bin/myai
+COPY document_processor/ /app/document_processor/
+COPY skills/ /app/skills/
+
+RUN useradd --create-home --uid 10001 --shell /bin/bash myai \
+    && mkdir -p /app/resource /workspace \
+    && chown -R myai:myai /app /workspace /home/myai
+
+USER myai
+
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/myai"]
+CMD ["help"]

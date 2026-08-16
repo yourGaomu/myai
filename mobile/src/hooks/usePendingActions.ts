@@ -9,6 +9,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   models: false,
   skills: false,
   settings: false,
+  generation: false,
   context: false,
   plan: false,
   assets: false,

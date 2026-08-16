@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /src
+
+# 先复制依赖文件，便于利用 Docker 缓存
+COPY go.mod go.sum ./
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/myai \
+      .
+
+# Relay 不需要 Python、Node.js 和 Go 工具链
+FROM gcr.io/distroless/base-debian12:nonroot
+
+WORKDIR /app
+
+COPY --from=builder /out/myai /usr/local/bin/myai
+COPY config/relay.example.yaml /app/config/relay.yaml
+
+EXPOSE 18080
+
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/myai"]
+
+CMD ["relay", "--addr", "0.0.0.0:18080", "--urlConfig", "/app/config/relay.yaml"]

@@ -3,6 +3,8 @@ import { useCallback, type RefObject } from "react";
 import type {
   AIMemoryCandidateListResultPayload,
   AIMemoryCandidateMutationResultPayload,
+  AIMemoryExtractionJobListResultPayload,
+  AIMemoryDreamResultPayload,
   AIMemoryListResultPayload,
   AgentRunCompletedPayload,
   AgentRunEventPayload,
@@ -30,6 +32,7 @@ import type {
   RelayMessage,
   SessionChangedPayload,
   SessionContextQueryResultPayload,
+  SessionGenerationResultPayload,
   SessionHistoryDeltaResultPayload,
   SessionHistoryMetaResultPayload,
   SessionHistoryResultPayload,
@@ -99,6 +102,8 @@ type Args = {
   applyAIMemories: (payload?: AIMemoryListResultPayload) => void;
   applyAIMemoryCandidates: (payload?: AIMemoryCandidateListResultPayload) => void;
   applyAIMemoryCandidateMutation: (payload?: AIMemoryCandidateMutationResultPayload) => void;
+  applyAIMemoryExtractionJobs: (payload?: AIMemoryExtractionJobListResultPayload) => void;
+  applyAIMemoryDreamResult: (payload?: AIMemoryDreamResultPayload) => void;
   applyAIMemoryError: (message: string) => void;
   applyModelList: (payload?: ModelListResultPayload) => void;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
@@ -110,6 +115,8 @@ type Args = {
   applySessionHistory: (payload?: SessionHistoryResultPayload) => void;
   applySessionList: (payload?: SessionListResultPayload) => void;
   applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
+  applySessionGenerationPreferences: (payload?: SessionGenerationResultPayload) => void;
+  applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
@@ -131,6 +138,7 @@ type Args = {
   };
   historySessionIDRef: RefObject<string>;
   hasRunForRequest: (sessionID: string, requestID?: string) => boolean;
+  isGenerationOperationPending: boolean;
   isKnowledgeOperationPending: boolean;
   isMemoryOperationPending: boolean;
   markAssistantError: (
@@ -198,6 +206,8 @@ export function useRemoteMessageHandler({
   applyAIMemories,
   applyAIMemoryCandidates,
   applyAIMemoryCandidateMutation,
+  applyAIMemoryExtractionJobs,
+  applyAIMemoryDreamResult,
   applyAIMemoryError,
   applyModelList,
   applyModelSwitch,
@@ -207,6 +217,8 @@ export function useRemoteMessageHandler({
   applySessionHistory,
   applySessionList,
   applySessionSettings,
+  applySessionGenerationPreferences,
+  applySessionGenerationError,
   applySkillList,
   applySubagentDefinitionList,
   applySubagentDefinitionMutation,
@@ -218,6 +230,7 @@ export function useRemoteMessageHandler({
   getSessionChat,
   historySessionIDRef,
   hasRunForRequest,
+  isGenerationOperationPending,
   isKnowledgeOperationPending,
   isMemoryOperationPending,
   markAssistantError,
@@ -453,6 +466,13 @@ export function useRemoteMessageHandler({
           }
           break;
         }
+        case "session_generation_query_result":
+        case "session_generation_set_result":
+        case "session_style_set_result": {
+          stopPending("generation");
+          applySessionGenerationPreferences(message.payload as SessionGenerationResultPayload | undefined);
+          break;
+        }
         case "session_plan_update": {
           const payload = message.payload as
             | SessionPlanExecuteUpdatePayload
@@ -556,6 +576,16 @@ export function useRemoteMessageHandler({
           stopPending("memory");
           applyAIMemoryCandidateMutation(message.payload as AIMemoryCandidateMutationResultPayload | undefined);
           break;
+        case "ai_memory_extraction_job_list_result":
+        case "ai_memory_extraction_job_retry_result":
+          stopPending("memory");
+          applyAIMemoryExtractionJobs(message.payload as AIMemoryExtractionJobListResultPayload | undefined);
+          break;
+        case "ai_memory_dream_list_result":
+        case "ai_memory_dream_run_result":
+          stopPending("memory");
+          applyAIMemoryDreamResult(message.payload as AIMemoryDreamResultPayload | undefined);
+          break;
         case "subagent_definition_list_result":
           stopPending("subagents");
           applySubagentDefinitionList(message.payload as SubagentDefinitionListResultPayload | undefined);
@@ -625,6 +655,9 @@ export function useRemoteMessageHandler({
           break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
+          if (isGenerationOperationPending) {
+            applySessionGenerationError(payload.message || "生成设置保存失败");
+          }
           if (isKnowledgeOperationPending) {
             applyKnowledgeError(payload.message || "知识库操作失败");
           }
@@ -661,6 +694,7 @@ export function useRemoteMessageHandler({
           stopPending("diff");
           stopPending("revert");
           stopPending("settings");
+          stopPending("generation");
           stopPending("context");
           stopPending("plan");
           stopPending("pause");
@@ -711,6 +745,8 @@ export function useRemoteMessageHandler({
       applyAIMemories,
       applyAIMemoryCandidates,
       applyAIMemoryCandidateMutation,
+      applyAIMemoryExtractionJobs,
+      applyAIMemoryDreamResult,
       applyAIMemoryError,
       applyModelList,
       applyModelSwitch,
@@ -720,6 +756,8 @@ export function useRemoteMessageHandler({
       applySessionHistory,
       applySessionList,
       applySessionSettings,
+      applySessionGenerationPreferences,
+      applySessionGenerationError,
       applySkillList,
       applySubagentDefinitionList,
       applySubagentDefinitionMutation,
@@ -731,6 +769,7 @@ export function useRemoteMessageHandler({
       getSessionChat,
       historySessionIDRef,
       hasRunForRequest,
+      isGenerationOperationPending,
       isKnowledgeOperationPending,
       isMemoryOperationPending,
       markAssistantError,

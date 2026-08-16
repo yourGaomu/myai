@@ -31,3 +31,15 @@ func TestAIMemoryPayloadMapsCurrentStateAndHistory(t *testing.T) {
 		t.Fatalf("source references were not mapped: %#v", payload.Revisions[1].Sources)
 	}
 }
+
+func TestAIMemoryExtractionJobPayloadMapsFailure(t *testing.T) {
+	now := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	job := domainmemory.ExtractionJob{
+		ID: "job-1", AgentRunID: "run-1", ExtractorVersion: "memory-v1",
+		Status: domainmemory.JobFailed, Attempts: 3, LastError: "timeout", CreatedAt: now, UpdatedAt: now,
+	}
+	payload := aiMemoryExtractionJobsPayload([]domainmemory.ExtractionJob{job}, "failed")
+	if len(payload.Jobs) != 1 || payload.Jobs[0].ID != job.ID || payload.Jobs[0].Attempts != 3 || payload.Jobs[0].LastError != "timeout" {
+		t.Fatalf("unexpected extraction job payload: %#v", payload)
+	}
+}

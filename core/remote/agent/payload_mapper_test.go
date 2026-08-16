@@ -5,6 +5,7 @@ import (
 
 	sessionresult "myai/core/application/session/result"
 	"myai/core/contextmgr"
+	"myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
@@ -18,6 +19,27 @@ func TestContextStatePayloadIncludesSummary(t *testing.T) {
 	})
 	if payload.WindowK != 16 || !payload.HasSummary || payload.Summary != "saved summary" {
 		t.Fatalf("unexpected context state payload: %#v", payload)
+	}
+}
+
+func TestSessionGenerationPreferencesPayloadPreservesInheritanceAndZero(t *testing.T) {
+	temperature := 0.0
+	modelTopP := 0.8
+	maxTokens := 4096
+	payload := sessionGenerationPreferencesPayload(" session-1 ", service.SessionPreferencesView{
+		SessionOverrides: generation.Settings{Temperature: &temperature},
+		ModelDefaults:    generation.Settings{TopP: &modelTopP, MaxOutputTokens: &maxTokens},
+		Effective:        generation.ResolvedSettings{Temperature: 0, TopP: 0.8, MaxOutputTokens: 4096},
+		StyleInstruction: "Use concise Chinese.",
+	})
+	if payload.SessionID != "session-1" || payload.SessionOverrides.Temperature == nil || *payload.SessionOverrides.Temperature != 0 {
+		t.Fatalf("unexpected session overrides: %#v", payload)
+	}
+	if payload.SessionOverrides.TopP != nil || payload.ModelDefaults.TopP == nil || *payload.ModelDefaults.TopP != 0.8 {
+		t.Fatalf("inheritance was not preserved: %#v", payload)
+	}
+	if payload.Effective.MaxOutputTokens != 4096 || payload.StyleInstruction != "Use concise Chinese." {
+		t.Fatalf("unexpected effective preferences: %#v", payload)
 	}
 }
 

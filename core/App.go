@@ -23,6 +23,7 @@ import (
 	snowflakeid "myai/core/adapter/id/snowflake"
 	uuidadapter "myai/core/adapter/id/uuid"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
+	memorydreamadapter "myai/core/adapter/memory/dream"
 	memoryextractor "myai/core/adapter/memory/extractor"
 	adaptermodel "myai/core/adapter/model/langchaingo"
 	minioadapter "myai/core/adapter/objectstorage/minio"
@@ -62,6 +63,9 @@ import (
 	searchservice "myai/core/application/knowledge/search/service"
 	memorycatalogapi "myai/core/application/memory/catalog/api"
 	memorycatalogservice "myai/core/application/memory/catalog/service"
+	memorydreamapi "myai/core/application/memory/dream/api"
+	memorydreamservice "myai/core/application/memory/dream/service"
+	memoryextractionapi "myai/core/application/memory/extraction/api"
 	memoryextractioncommand "myai/core/application/memory/extraction/command"
 	memoryextractionservice "myai/core/application/memory/extraction/service"
 	memoryretrievalapi "myai/core/application/memory/retrieval/api"
@@ -110,6 +114,7 @@ type Application struct {
 	agentRunRepository          agentrunport.Repository
 	memoryStore                 memoryport.Store
 	memoryCatalogService        memorycatalogapi.Service
+	memoryDreamService          memorydreamapi.Service
 	memoryExtractionService     *memoryextractionservice.Service
 	memoryRetrievalService      memoryretrievalapi.ContextPreparer
 	cache                       cacheport.CurrentSessionCache
@@ -293,25 +298,47 @@ func (app *Application) InitMemoryServices() {
 			log.Printf("record AI memory use failed: %v", err)
 		},
 	}
-	if app.agentRunRepository == nil || app.client == nil {
+	if app.client == nil {
 		return
 	}
-	model := app.client.GetModel(app.defaultModelID)
+	extractionModelID := strings.TrimSpace(app.properties.Memory.Extraction.ModelID)
+	if extractionModelID == "" {
+		extractionModelID = app.defaultModelID
+	}
+	model := app.client.GetModel(extractionModelID)
 	if model == nil {
-		log.Printf("AI memory extraction disabled: default model %q is unavailable", app.defaultModelID)
+		log.Printf("AI memory extraction disabled: configured model %q is unavailable", extractionModelID)
+	} else if app.agentRunRepository == nil {
+		log.Printf("AI memory extraction disabled: agent run repository is unavailable")
+	} else {
+		extraction := &memoryextractionservice.Service{
+			Store: app.memoryStore, Runs: app.agentRunRepository, IDs: ids,
+			Extractor: memoryextractor.ModelExtractor{
+				ModelID: extractionModelID, Model: model, DefaultScope: app.defaultMemoryScope(),
+			},
+			Async: adapterthreadpool.Executor{Pool: app.threadPool},
+			OnError: func(err error) {
+				log.Printf("AI memory extraction failed: %v", err)
+			},
+		}
+		app.memoryExtractionService = extraction
+		if err := extraction.Recover(context.Background(), memoryextractioncommand.Recover{Limit: 100}); err != nil {
+			log.Printf("recover AI memory extraction jobs failed: %v", err)
+		}
+	}
+
+	dreamModelID := strings.TrimSpace(app.properties.Memory.Dream.ModelID)
+	if dreamModelID == "" {
+		dreamModelID = app.defaultModelID
+	}
+	dreamModel := app.client.GetModel(dreamModelID)
+	if dreamModel == nil {
+		log.Printf("AI memory dream disabled: configured model %q is unavailable", dreamModelID)
 		return
 	}
-	extraction := &memoryextractionservice.Service{
-		Store: app.memoryStore, Runs: app.agentRunRepository, IDs: ids,
-		Extractor: memoryextractor.ModelExtractor{Model: model, DefaultScope: app.defaultMemoryScope()},
-		Async:     adapterthreadpool.Executor{Pool: app.threadPool},
-		OnError: func(err error) {
-			log.Printf("AI memory extraction failed: %v", err)
-		},
-	}
-	app.memoryExtractionService = extraction
-	if err := extraction.Recover(context.Background(), memoryextractioncommand.Recover{Limit: 100}); err != nil {
-		log.Printf("recover AI memory extraction jobs failed: %v", err)
+	app.memoryDreamService = &memorydreamservice.Service{
+		Store: app.memoryStore, Catalog: app.memoryCatalogService, IDs: ids,
+		Consolidator: memorydreamadapter.ModelConsolidator{Model: dreamModel},
 	}
 }
 
@@ -897,6 +924,14 @@ func (app *Application) GetKnowledgeService() *service.KnowledgeService {
 
 func (app *Application) GetMemoryCatalogService() memorycatalogapi.Service {
 	return app.memoryCatalogService
+}
+
+func (app *Application) GetMemoryExtractionService() memoryextractionapi.Service {
+	return app.memoryExtractionService
+}
+
+func (app *Application) GetMemoryDreamService() memorydreamapi.Service {
+	return app.memoryDreamService
 }
 
 func (app *Application) InitRegister() *tool.RegisterTools {

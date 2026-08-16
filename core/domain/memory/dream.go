@@ -7,12 +7,14 @@ import (
 )
 
 type DreamAction struct {
-	CandidateID   string
-	MemoryID      string
-	Decision      DreamDecision
-	Reason        string
-	Applied       bool
-	FailureReason string
+	CandidateID    string
+	CandidateTitle string
+	MemoryID       string
+	MemoryTitle    string
+	Decision       DreamDecision
+	Reason         string
+	Applied        bool
+	FailureReason  string
 }
 
 type DreamRun struct {

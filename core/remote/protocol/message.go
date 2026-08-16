@@ -55,6 +55,12 @@ const (
 	TypeSessionContextSetResult          MessageType = "session_context_set_result"
 	TypeSessionRAGSet                    MessageType = "session_rag_set"
 	TypeSessionRAGSetResult              MessageType = "session_rag_set_result"
+	TypeSessionGenerationQuery           MessageType = "session_generation_query"
+	TypeSessionGenerationQueryResult     MessageType = "session_generation_query_result"
+	TypeSessionGenerationSet             MessageType = "session_generation_set"
+	TypeSessionGenerationSetResult       MessageType = "session_generation_set_result"
+	TypeSessionStyleSet                  MessageType = "session_style_set"
+	TypeSessionStyleSetResult            MessageType = "session_style_set_result"
 	TypeSessionCompact                   MessageType = "session_compact"
 	TypeSessionCompactResult             MessageType = "session_compact_result"
 	TypeSessionPause                     MessageType = "session_pause"
@@ -101,6 +107,14 @@ const (
 	TypeAIMemoryCandidateApprove         MessageType = "ai_memory_candidate_approve"
 	TypeAIMemoryCandidateReject          MessageType = "ai_memory_candidate_reject"
 	TypeAIMemoryCandidateMutationResult  MessageType = "ai_memory_candidate_mutation_result"
+	TypeAIMemoryExtractionJobList        MessageType = "ai_memory_extraction_job_list"
+	TypeAIMemoryExtractionJobListResult  MessageType = "ai_memory_extraction_job_list_result"
+	TypeAIMemoryExtractionJobRetry       MessageType = "ai_memory_extraction_job_retry"
+	TypeAIMemoryExtractionJobRetryResult MessageType = "ai_memory_extraction_job_retry_result"
+	TypeAIMemoryDreamRun                 MessageType = "ai_memory_dream_run"
+	TypeAIMemoryDreamRunResult           MessageType = "ai_memory_dream_run_result"
+	TypeAIMemoryDreamList                MessageType = "ai_memory_dream_list"
+	TypeAIMemoryDreamListResult          MessageType = "ai_memory_dream_list_result"
 	TypeSubagentDefinitionList           MessageType = "subagent_definition_list"
 	TypeSubagentDefinitionListResult     MessageType = "subagent_definition_list_result"
 	TypeSubagentDefinitionCreate         MessageType = "subagent_definition_create"
@@ -526,6 +540,47 @@ type SessionRAGSetPayload struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
 	CategoryIDs      []string `json:"category_ids,omitempty"`
 	TopK             int      `json:"top_k,omitempty"`
+}
+
+// GenerationSettings carries nullable overrides. A null field means inherit
+// from the next level instead of setting a numeric zero value.
+type GenerationSettings struct {
+	Temperature     *float64 `json:"temperature"`
+	TopP            *float64 `json:"top_p"`
+	MaxOutputTokens *int     `json:"max_output_tokens"`
+}
+
+type ResolvedGenerationSettings struct {
+	Temperature     float64 `json:"temperature"`
+	TopP            float64 `json:"top_p"`
+	MaxOutputTokens int     `json:"max_output_tokens"`
+}
+
+type SessionGenerationPreferences struct {
+	SessionID        string                     `json:"session_id"`
+	SessionOverrides GenerationSettings         `json:"session_overrides"`
+	ModelDefaults    GenerationSettings         `json:"model_defaults"`
+	Effective        ResolvedGenerationSettings `json:"effective"`
+	StyleInstruction string                     `json:"style_instruction,omitempty"`
+}
+
+type SessionGenerationQueryPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SessionGenerationSetPayload struct {
+	SessionID string             `json:"session_id,omitempty"`
+	Settings  GenerationSettings `json:"settings"`
+}
+
+type SessionStyleSetPayload struct {
+	SessionID        string `json:"session_id,omitempty"`
+	StyleInstruction string `json:"style_instruction"`
+}
+
+type SessionGenerationResultPayload struct {
+	Preferences SessionGenerationPreferences `json:"preferences"`
+	Message     string                       `json:"message,omitempty"`
 }
 
 type SessionCompactPayload struct {
@@ -1140,6 +1195,74 @@ type AIMemoryCandidateRejectPayload struct {
 type AIMemoryCandidateMutationResultPayload struct {
 	Memories   []AIMemory          `json:"memories"`
 	Candidates []AIMemoryCandidate `json:"candidates"`
+	Message    string              `json:"message,omitempty"`
+}
+
+type AIMemoryExtractionJob struct {
+	ID               string     `json:"id"`
+	AgentRunID       string     `json:"agent_run_id"`
+	ExtractorVersion string     `json:"extractor_version"`
+	Status           string     `json:"status"`
+	Attempts         int        `json:"attempts"`
+	LastError        string     `json:"last_error,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+}
+
+type AIMemoryExtractionJobListPayload struct {
+	Statuses []string `json:"statuses,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+}
+
+type AIMemoryExtractionJobListResultPayload struct {
+	Jobs    []AIMemoryExtractionJob `json:"jobs"`
+	Message string                  `json:"message,omitempty"`
+}
+
+type AIMemoryExtractionJobRetryPayload struct {
+	JobID string `json:"job_id"`
+}
+
+type AIMemoryDreamAction struct {
+	CandidateID    string `json:"candidate_id,omitempty"`
+	CandidateTitle string `json:"candidate_title,omitempty"`
+	MemoryID       string `json:"memory_id,omitempty"`
+	MemoryTitle    string `json:"memory_title,omitempty"`
+	Decision       string `json:"decision"`
+	Reason         string `json:"reason,omitempty"`
+	Applied        bool   `json:"applied"`
+	FailureReason  string `json:"failure_reason,omitempty"`
+}
+
+type AIMemoryDreamRun struct {
+	ID              string                `json:"id"`
+	Status          string                `json:"status"`
+	Trigger         string                `json:"trigger"`
+	CandidateCount  int                   `json:"candidate_count"`
+	CreatedCount    int                   `json:"created_count"`
+	MergedCount     int                   `json:"merged_count"`
+	SupersededCount int                   `json:"superseded_count"`
+	RejectedCount   int                   `json:"rejected_count"`
+	Actions         []AIMemoryDreamAction `json:"actions"`
+	LastError       string                `json:"last_error,omitempty"`
+	StartedAt       time.Time             `json:"started_at"`
+	FinishedAt      *time.Time            `json:"finished_at,omitempty"`
+}
+
+type AIMemoryDreamRunPayload struct {
+	CandidateLimit int `json:"candidate_limit,omitempty"`
+	MemoryLimit    int `json:"memory_limit,omitempty"`
+}
+
+type AIMemoryDreamListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+type AIMemoryDreamResultPayload struct {
+	Runs       []AIMemoryDreamRun  `json:"runs"`
+	Memories   []AIMemory          `json:"memories,omitempty"`
+	Candidates []AIMemoryCandidate `json:"candidates,omitempty"`
 	Message    string              `json:"message,omitempty"`
 }
 

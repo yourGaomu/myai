@@ -1,6 +1,6 @@
 import { useCallback, type RefObject } from "react";
 
-import type { RelayMessage, TokenUsage } from "../protocol";
+import type { GenerationSettings, RelayMessage, TokenUsage } from "../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../types/app";
 import { newRequestID } from "../utils/ids";
 
@@ -110,6 +110,54 @@ export function useSessionSettingsActions({
     }
   }, [sendEnvelope, sessionID, startPending, stopPending]);
 
+  const requestGenerationPreferences = useCallback(() => {
+    const targetSessionID = sessionID.trim();
+    if (!targetSessionID) {
+      return;
+    }
+
+    startPending("generation");
+    if (!sendEnvelope("session_generation_query", {
+      request_id: newRequestID(),
+      session_id: targetSessionID,
+      payload: { session_id: targetSessionID },
+    })) {
+      stopPending("generation");
+    }
+  }, [sendEnvelope, sessionID, startPending, stopPending]);
+
+  const setGenerationSettings = useCallback((settings: GenerationSettings) => {
+    const targetSessionID = sessionID.trim();
+    if (!targetSessionID) {
+      return;
+    }
+
+    startPending("generation");
+    if (!sendEnvelope("session_generation_set", {
+      request_id: newRequestID(),
+      session_id: targetSessionID,
+      payload: { session_id: targetSessionID, settings },
+    })) {
+      stopPending("generation");
+    }
+  }, [sendEnvelope, sessionID, startPending, stopPending]);
+
+  const setStyleInstruction = useCallback((styleInstruction: string) => {
+    const targetSessionID = sessionID.trim();
+    if (!targetSessionID) {
+      return;
+    }
+
+    startPending("generation");
+    if (!sendEnvelope("session_style_set", {
+      request_id: newRequestID(),
+      session_id: targetSessionID,
+      payload: { session_id: targetSessionID, style_instruction: styleInstruction },
+    })) {
+      stopPending("generation");
+    }
+  }, [sendEnvelope, sessionID, startPending, stopPending]);
+
   const compactSession = useCallback(() => {
     const targetSessionID = sessionID.trim();
     if (!targetSessionID) {
@@ -171,8 +219,11 @@ export function useSessionSettingsActions({
     compactSession,
     executePlan,
     requestContextInfo,
+    requestGenerationPreferences,
     setAgentMode,
     setContextWindowK,
+    setGenerationSettings,
     setPermissionMode,
+    setStyleInstruction,
   };
 }

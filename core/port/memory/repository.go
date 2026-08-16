@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"time"
 
 	domainmemory "myai/core/domain/memory"
 )
@@ -24,6 +25,18 @@ type CandidateRepository interface {
 	SaveCandidate(ctx context.Context, candidate domainmemory.Candidate) error
 }
 
+type CandidateApprovalRepository interface {
+	SaveCandidateApproval(ctx context.Context, memory domainmemory.Memory, candidate domainmemory.Candidate, expectedMemoryVersion int) error
+}
+
+type CandidateRejectionRepository interface {
+	SaveCandidateRejection(ctx context.Context, candidate domainmemory.Candidate) error
+}
+
+type UsageRepository interface {
+	RecordUse(ctx context.Context, memoryID string, usedAt time.Time) error
+}
+
 type ExtractionJobRepository interface {
 	GetExtractionJob(ctx context.Context, jobID string) (domainmemory.ExtractionJob, error)
 	GetExtractionJobByRun(ctx context.Context, agentRunID string, extractorVersion string) (domainmemory.ExtractionJob, error)
@@ -40,6 +53,9 @@ type DreamRunRepository interface {
 type Store interface {
 	Repository
 	CandidateRepository
+	CandidateApprovalRepository
+	CandidateRejectionRepository
+	UsageRepository
 	ExtractionJobRepository
 	DreamRunRepository
 }

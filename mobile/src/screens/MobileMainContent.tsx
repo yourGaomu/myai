@@ -33,6 +33,8 @@ export function MobileMainContent({
           compact={settings.compact}
           connected={settings.connected}
           context={settings.context}
+          generation={settings.generation}
+          generationStatus={settings.generationStatus}
           currentModelID={settings.currentModelID}
           deviceID={settings.deviceID}
           models={settings.models}
@@ -50,6 +52,7 @@ export function MobileMainContent({
           onOpenPlan={settings.onOpenPlan}
           onRefreshModels={settings.onRefreshModels}
           onRequestContextInfo={settings.onRequestContextInfo}
+          onRequestGenerationPreferences={settings.onRequestGenerationPreferences}
           onRefreshSessions={settings.onRefreshSessions}
           onRefreshSkills={settings.onRefreshSkills}
           onReloadSkills={settings.onReloadSkills}
@@ -57,7 +60,9 @@ export function MobileMainContent({
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}
           onSetContextWindowK={settings.onSetContextWindowK}
+          onSetGenerationSettings={settings.onSetGenerationSettings}
           onSetPermissionMode={settings.onSetPermissionMode}
+          onSetStyleInstruction={settings.onSetStyleInstruction}
           onSwitchModel={settings.onSwitchModel}
           onApplySubagentTask={settings.onApplySubagentTask}
           onCancelSubagentTask={settings.onCancelSubagentTask}
@@ -101,15 +106,21 @@ export function MobileMainContent({
         <KnowledgeWorkspacePanel
           aiMemory={{
             candidates: knowledge.aiCandidates,
+            dreamRuns: knowledge.aiDreamRuns,
+            extractionJobs: knowledge.aiExtractionJobs,
             memories: knowledge.aiMemories,
             message: knowledge.aiMemoryMessage,
             onApproveCandidate: knowledge.onApproveAIMemoryCandidate,
             onCreateMemory: knowledge.onCreateAIMemory,
             onDeleteMemory: knowledge.onDeleteAIMemory,
             onRefreshCandidates: knowledge.onRefreshAIMemoryCandidates,
+            onRefreshDreamRuns: knowledge.onRefreshAIMemoryDreamRuns,
+            onRefreshExtractionJobs: knowledge.onRefreshAIMemoryExtractionJobs,
             onRefreshMemories: knowledge.onRefreshAIMemories,
             onRejectCandidate: knowledge.onRejectAIMemoryCandidate,
             onRestoreMemory: knowledge.onRestoreAIMemory,
+            onRetryExtractionJob: knowledge.onRetryAIMemoryExtractionJob,
+            onRunDream: knowledge.onRunAIMemoryDream,
             onUpdateMemory: knowledge.onUpdateAIMemory,
             pending: common.pendingActions.memory,
           }}
