@@ -21,6 +21,7 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || Boolean(sharedAsset)));
   const canRegenerate = message.role === "assistant" && (message.status === "paused" || message.status === "error");
   const statusText = assistantStatusText(message);
+  const showStatusText = statusText && message.status !== "streaming" && message.status !== "tool_running";
 
   if (message.role === "tool_call" || message.role === "tool") {
     return (
@@ -69,9 +70,9 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
         />
       ) : null}
       <MarkdownText text={message.text} />
-      {message.role === "assistant" && (statusText || canRegenerate) ? (
+      {message.role === "assistant" && (showStatusText || canRegenerate) ? (
         <View style={styles.messageStatusRow}>
-          {statusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}
+          {showStatusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}
           {canRegenerate ? (
             <Pressable onPress={onRegenerate} style={({ pressed }) => buttonFeedback(styles.regenerateButton, pressed)}>
               <Text style={styles.regenerateButtonText}>Regenerate</Text>

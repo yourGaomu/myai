@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -7,7 +7,7 @@ type Props = {
   bottomDock: ReactNode;
   bottomSafePadding: number;
   children: ReactNode;
-  scrollRef?: RefObject<ScrollView | null>;
+  scrollEnabled?: boolean;
   topSafePadding: number;
 };
 
@@ -15,7 +15,7 @@ export function MobileScreenShell({
   bottomDock,
   bottomSafePadding,
   children,
-  scrollRef,
+  scrollEnabled = true,
   topSafePadding,
 }: Props) {
   return (
@@ -28,21 +28,35 @@ export function MobileScreenShell({
       </View>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboard}>
         <View style={styles.screen}>
-          <ScrollView
-            contentContainerStyle={[
-              styles.content,
-              {
-                paddingTop: topSafePadding,
-                paddingBottom: bottomSafePadding + 20,
-              },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            ref={scrollRef}
-            showsVerticalScrollIndicator={false}
-            style={styles.scrollArea}
-          >
-            {children}
-          </ScrollView>
+          {scrollEnabled ? (
+            <ScrollView
+              contentContainerStyle={[
+                styles.content,
+                {
+                  paddingTop: topSafePadding,
+                  paddingBottom: bottomSafePadding + 20,
+                },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.scrollArea}
+            >
+              {children}
+            </ScrollView>
+          ) : (
+            <View
+              style={[
+                styles.content,
+                styles.fixedContent,
+                {
+                  paddingTop: topSafePadding,
+                  paddingBottom: 8,
+                },
+              ]}
+            >
+              {children}
+            </View>
+          )}
           {bottomDock}
         </View>
       </KeyboardAvoidingView>
@@ -105,5 +119,9 @@ const styles = StyleSheet.create({
   content: {
     gap: 12,
     paddingHorizontal: 14,
+  },
+  fixedContent: {
+    flex: 1,
+    minHeight: 0,
   },
 });

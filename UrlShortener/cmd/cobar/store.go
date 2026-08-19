@@ -25,6 +25,8 @@ func newObjectStore(ctx context.Context, config urlConfig.Config) (objectstore.S
 
 	minioStore, err := objectstore.NewMinIOStore(ctx, objectstore.MinIOOptions{
 		Endpoint:        config.MinIOEndpoint,
+		PublicEndpoint:  config.MinIOPublicEndpoint,
+		Region:          config.MinIORegion,
 		AccessKeyID:     config.MinIOAccessKey,
 		SecretAccessKey: config.MinIOSecretKey,
 		Bucket:          config.MinIOBucket,

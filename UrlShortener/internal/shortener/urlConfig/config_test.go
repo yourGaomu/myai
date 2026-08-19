@@ -32,6 +32,8 @@ redis:
   visit_sync_queue_size: 128
 minio:
   endpoint: "minio.local:9000"
+  public_endpoint: "https://minio.example.com"
+  region: "us-east-1"
   access_key: "ak"
   secret_key: "sk"
   bucket: "assets"
@@ -70,7 +72,7 @@ object:
 	if config.VisitSyncInterval != 500*time.Millisecond || config.VisitSyncQueueSize != 128 {
 		t.Fatalf("unexpected visit sync config: %+v", config)
 	}
-	if config.MinIOEndpoint != "minio.local:9000" || config.MinIOAccessKey != "ak" || config.MinIOSecretKey != "sk" || config.MinIOBucket != "assets" {
+	if config.MinIOEndpoint != "minio.local:9000" || config.MinIOPublicEndpoint != "https://minio.example.com" || config.MinIORegion != "us-east-1" || config.MinIOAccessKey != "ak" || config.MinIOSecretKey != "sk" || config.MinIOBucket != "assets" {
 		t.Fatalf("unexpected minio config: %+v", config)
 	}
 	if !config.MinIOUseSSL || config.MinIOEnsureBucket {

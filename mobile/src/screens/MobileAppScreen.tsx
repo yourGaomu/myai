@@ -1,5 +1,5 @@
-import { useCallback, useRef } from "react";
-import type { ScrollView } from "react-native";
+import { useCallback, useEffect, useRef } from "react";
+import { AppState, type AppStateStatus, type ScrollView } from "react-native";
 
 import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
@@ -69,6 +69,7 @@ export function MobileAppScreen() {
     setDeviceID,
     setRelayURL,
     setUserID,
+    settingsLoaded,
     userID,
   } = useMobileSettings({ onTokenRestored: handleTokenRestored });
   const {
@@ -213,6 +214,9 @@ export function MobileAppScreen() {
   const { isBusy, pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
+  const reconnectOnForegroundRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<() => void>(() => undefined);
   // 远程运行时引用不触发重渲染，用来关联 WebSocket 请求、当前 Session 和流式回答。
   const {
     activeRequestIDRef,
@@ -252,7 +256,7 @@ export function MobileAppScreen() {
   const currentSessionBusy = Boolean(currentChat.pendingRequestID);
   const currentPauseBusy = Boolean(pendingActions.pause);
   const uiBusy = isBusy || currentSessionBusy;
-  const { bottomSafePadding, chatPanelHeight, topSafePadding } = useMobileLayoutMetrics({ hasUsage: Boolean(currentUsage) });
+  const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
   // 从这里开始组装传输能力：Sender 只发送，Requests/Actions 表达命令，Handler 消费响应。
   const sendEnvelope = useRelaySender({
     activeRequestIDRef,
@@ -652,6 +656,62 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
+  useEffect(() => {
+    if (!settingsLoaded || !clientToken || AppState.currentState !== "active" || socketRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!socketRef.current) {
+        connectRef.current();
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [clientToken, settingsLoaded, socketRef]);
+
+  useEffect(() => {
+    let previousState: AppStateStatus = AppState.currentState;
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const enteringBackground = nextState === "background" || nextState === "inactive";
+      const returningToForeground =
+        (previousState === "background" || previousState === "inactive") && nextState === "active";
+
+      if (enteringBackground) {
+        // Android/iOS may suspend or close the socket while the app is backgrounded.
+        // Keep the retry intent even if the close event races with this lifecycle event.
+        reconnectOnForegroundRef.current = reconnectOnForegroundRef.current || Boolean(clientToken);
+      }
+
+      if (returningToForeground && reconnectOnForegroundRef.current && clientToken) {
+        reconnectOnForegroundRef.current = false;
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+        }
+        // Let the OS restore network interfaces before opening the replacement socket.
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          connectRef.current();
+        }, 300);
+      }
+
+      previousState = nextState;
+    });
+
+    return () => {
+      subscription.remove();
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [clientToken]);
   const {
     openChanges,
     openChat,
@@ -701,7 +761,7 @@ export function MobileAppScreen() {
         />
       }
       bottomSafePadding={bottomSafePadding}
-      scrollRef={chatScrollRef}
+      scrollEnabled={viewMode !== "chat"}
       topSafePadding={topSafePadding}
     >
       <AppHeader
@@ -738,13 +798,13 @@ export function MobileAppScreen() {
         }}
         chat={{
           activeAssistantID: currentChat.activeAssistantID,
-          chatPanelHeight,
           chatScrollRef,
           messages: currentChat.messages,
           onRegenerate: regenerateSession,
           pendingHistorySessionID: pendingHistorySessionIDRef.current,
           pendingRequestID: currentChat.pendingRequestID,
           runs: currentRuns,
+          sessionID,
         }}
         common={{
           buttonFeedback,

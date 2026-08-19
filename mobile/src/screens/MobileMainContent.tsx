@@ -93,12 +93,12 @@ export function MobileMainContent({
           activeAssistantID={chat.activeAssistantID}
           buttonFeedback={common.buttonFeedback}
           chatScrollRef={chat.chatScrollRef}
-          height={chat.chatPanelHeight}
           loadingHistory={common.pendingActions.sessions && Boolean(chat.pendingHistorySessionID)}
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
           pendingRequestID={chat.pendingRequestID}
           runs={chat.runs}
+          sessionID={chat.sessionID}
         />
       ) : null}
 

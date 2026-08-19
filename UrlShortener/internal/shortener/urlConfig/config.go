@@ -13,30 +13,32 @@ const (
 )
 
 type Config struct {
-	Addr               string
-	BaseURL            string
-	DefaultTTL         time.Duration
-	StoreType          string
-	MongoURI           string
-	MongoDatabase      string
-	MongoCollection    string
-	RedisEnabled       bool
-	RedisAddr          string
-	RedisPassword      string
-	RedisDB            int
-	RedisPrefix        string
-	RedisCacheTTL      time.Duration
-	RedisLockTTL       time.Duration
-	RedisLockWait      time.Duration
-	VisitSyncInterval  time.Duration
-	VisitSyncQueueSize int
-	MinIOEndpoint      string
-	MinIOAccessKey     string
-	MinIOSecretKey     string
-	MinIOBucket        string
-	MinIOUseSSL        bool
-	MinIOEnsureBucket  bool
-	ObjectURLTTL       time.Duration
+	Addr                string
+	BaseURL             string
+	DefaultTTL          time.Duration
+	StoreType           string
+	MongoURI            string
+	MongoDatabase       string
+	MongoCollection     string
+	RedisEnabled        bool
+	RedisAddr           string
+	RedisPassword       string
+	RedisDB             int
+	RedisPrefix         string
+	RedisCacheTTL       time.Duration
+	RedisLockTTL        time.Duration
+	RedisLockWait       time.Duration
+	VisitSyncInterval   time.Duration
+	VisitSyncQueueSize  int
+	MinIOEndpoint       string
+	MinIOPublicEndpoint string
+	MinIORegion         string
+	MinIOAccessKey      string
+	MinIOSecretKey      string
+	MinIOBucket         string
+	MinIOUseSSL         bool
+	MinIOEnsureBucket   bool
+	ObjectURLTTL        time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -78,6 +80,7 @@ func DefaultConfig() Config {
 		VisitSyncInterval:  time.Second,
 		VisitSyncQueueSize: 4096,
 		MinIOEndpoint:      "localhost:9000",
+		MinIORegion:        "us-east-1",
 		MinIOAccessKey:     "",
 		MinIOSecretKey:     "",
 		MinIOBucket:        "myai-assets",
@@ -109,6 +112,8 @@ func newViper() *viper.Viper {
 	bindEnv(v, "redis.visit_sync_interval_ms", "URL_SHORTENER_VISIT_SYNC_INTERVAL_MS")
 	bindEnv(v, "redis.visit_sync_queue_size", "URL_SHORTENER_VISIT_SYNC_QUEUE_SIZE")
 	bindEnv(v, "minio.endpoint", "URL_SHORTENER_MINIO_ENDPOINT")
+	bindEnv(v, "minio.public_endpoint", "URL_SHORTENER_MINIO_PUBLIC_ENDPOINT")
+	bindEnv(v, "minio.region", "URL_SHORTENER_MINIO_REGION")
 	bindEnv(v, "minio.access_key", "URL_SHORTENER_MINIO_ACCESS_KEY")
 	bindEnv(v, "minio.secret_key", "URL_SHORTENER_MINIO_SECRET_KEY")
 	bindEnv(v, "minio.bucket", "URL_SHORTENER_MINIO_BUCKET")
@@ -156,30 +161,32 @@ func configFromViper(v *viper.Viper) Config {
 	defaults := DefaultConfig()
 
 	config := Config{
-		Addr:               stringValue(v, "server.addr", defaults.Addr),
-		BaseURL:            stringValue(v, "server.base_url", defaults.BaseURL),
-		DefaultTTL:         secondsValue(v, "server.default_ttl_seconds", defaults.DefaultTTL),
-		StoreType:          stringValue(v, "store.type", defaults.StoreType),
-		MongoURI:           stringValue(v, "mongo.uri", defaults.MongoURI),
-		MongoDatabase:      stringValue(v, "mongo.database", defaults.MongoDatabase),
-		MongoCollection:    stringValue(v, "mongo.collection", defaults.MongoCollection),
-		RedisEnabled:       boolValue(v, "redis.enabled", defaults.RedisEnabled),
-		RedisAddr:          stringValue(v, "redis.addr", defaults.RedisAddr),
-		RedisPassword:      stringValue(v, "redis.password", defaults.RedisPassword),
-		RedisDB:            intValue(v, "redis.db", defaults.RedisDB),
-		RedisPrefix:        stringValue(v, "redis.prefix", defaults.RedisPrefix),
-		RedisCacheTTL:      secondsValue(v, "redis.cache_ttl_seconds", defaults.RedisCacheTTL),
-		RedisLockTTL:       secondsValue(v, "redis.lock_ttl_seconds", defaults.RedisLockTTL),
-		RedisLockWait:      millisecondsValue(v, "redis.lock_wait_ms", defaults.RedisLockWait),
-		VisitSyncInterval:  millisecondsValue(v, "redis.visit_sync_interval_ms", defaults.VisitSyncInterval),
-		VisitSyncQueueSize: intValue(v, "redis.visit_sync_queue_size", defaults.VisitSyncQueueSize),
-		MinIOEndpoint:      stringValue(v, "minio.endpoint", defaults.MinIOEndpoint),
-		MinIOAccessKey:     stringValue(v, "minio.access_key", defaults.MinIOAccessKey),
-		MinIOSecretKey:     stringValue(v, "minio.secret_key", defaults.MinIOSecretKey),
-		MinIOBucket:        stringValue(v, "minio.bucket", defaults.MinIOBucket),
-		MinIOUseSSL:        boolValue(v, "minio.use_ssl", defaults.MinIOUseSSL),
-		MinIOEnsureBucket:  boolValue(v, "minio.ensure_bucket", defaults.MinIOEnsureBucket),
-		ObjectURLTTL:       secondsValue(v, "object.url_ttl_seconds", defaults.ObjectURLTTL),
+		Addr:                stringValue(v, "server.addr", defaults.Addr),
+		BaseURL:             stringValue(v, "server.base_url", defaults.BaseURL),
+		DefaultTTL:          secondsValue(v, "server.default_ttl_seconds", defaults.DefaultTTL),
+		StoreType:           stringValue(v, "store.type", defaults.StoreType),
+		MongoURI:            stringValue(v, "mongo.uri", defaults.MongoURI),
+		MongoDatabase:       stringValue(v, "mongo.database", defaults.MongoDatabase),
+		MongoCollection:     stringValue(v, "mongo.collection", defaults.MongoCollection),
+		RedisEnabled:        boolValue(v, "redis.enabled", defaults.RedisEnabled),
+		RedisAddr:           stringValue(v, "redis.addr", defaults.RedisAddr),
+		RedisPassword:       stringValue(v, "redis.password", defaults.RedisPassword),
+		RedisDB:             intValue(v, "redis.db", defaults.RedisDB),
+		RedisPrefix:         stringValue(v, "redis.prefix", defaults.RedisPrefix),
+		RedisCacheTTL:       secondsValue(v, "redis.cache_ttl_seconds", defaults.RedisCacheTTL),
+		RedisLockTTL:        secondsValue(v, "redis.lock_ttl_seconds", defaults.RedisLockTTL),
+		RedisLockWait:       millisecondsValue(v, "redis.lock_wait_ms", defaults.RedisLockWait),
+		VisitSyncInterval:   millisecondsValue(v, "redis.visit_sync_interval_ms", defaults.VisitSyncInterval),
+		VisitSyncQueueSize:  intValue(v, "redis.visit_sync_queue_size", defaults.VisitSyncQueueSize),
+		MinIOEndpoint:       stringValue(v, "minio.endpoint", defaults.MinIOEndpoint),
+		MinIOPublicEndpoint: stringValue(v, "minio.public_endpoint", ""),
+		MinIORegion:         stringValue(v, "minio.region", defaults.MinIORegion),
+		MinIOAccessKey:      stringValue(v, "minio.access_key", defaults.MinIOAccessKey),
+		MinIOSecretKey:      stringValue(v, "minio.secret_key", defaults.MinIOSecretKey),
+		MinIOBucket:         stringValue(v, "minio.bucket", defaults.MinIOBucket),
+		MinIOUseSSL:         boolValue(v, "minio.use_ssl", defaults.MinIOUseSSL),
+		MinIOEnsureBucket:   boolValue(v, "minio.ensure_bucket", defaults.MinIOEnsureBucket),
+		ObjectURLTTL:        secondsValue(v, "object.url_ttl_seconds", defaults.ObjectURLTTL),
 	}
 
 	config.StoreType = strings.ToLower(strings.TrimSpace(config.StoreType))

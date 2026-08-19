@@ -116,13 +116,13 @@ export type PlanContentProps = {
 
 export type ChatContentProps = {
   activeAssistantID: string;
-  chatPanelHeight: number;
   chatScrollRef: RefObject<ScrollView | null>;
   messages: ChatItem[];
   runs: AgentRunSnapshot[];
   onRegenerate: () => void;
   pendingHistorySessionID: string;
   pendingRequestID: string;
+  sessionID: string;
 };
 
 export type FilesContentProps = {

@@ -17,6 +17,8 @@ import (
 
 type MinIOOptions struct {
 	Endpoint        string
+	PublicEndpoint  string
+	Region          string
 	AccessKeyID     string
 	SecretAccessKey string
 	Bucket          string
@@ -25,8 +27,9 @@ type MinIOOptions struct {
 }
 
 type MinIOStore struct {
-	client *minio.Client
-	bucket string
+	client        *minio.Client
+	presignClient *minio.Client
+	bucket        string
 }
 
 func NewMinIOStore(ctx context.Context, options MinIOOptions) (*MinIOStore, error) {
@@ -50,6 +53,7 @@ func NewMinIOStore(ctx context.Context, options MinIOOptions) (*MinIOStore, erro
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(options.AccessKeyID, options.SecretAccessKey, ""),
 		Secure: secure,
+		Region: strings.TrimSpace(options.Region),
 	})
 	if err != nil {
 		return nil, err
@@ -67,9 +71,29 @@ func NewMinIOStore(ctx context.Context, options MinIOOptions) (*MinIOStore, erro
 		}
 	}
 
+	presignClient := client
+	if strings.TrimSpace(options.PublicEndpoint) != "" {
+		publicEndpoint, publicSecure, err := normalizeEndpoint(options.PublicEndpoint, options.UseSSL)
+		if err != nil {
+			return nil, err
+		}
+		if publicEndpoint == "" {
+			return nil, errors.New("minio public endpoint is invalid")
+		}
+		presignClient, err = minio.New(publicEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(options.AccessKeyID, options.SecretAccessKey, ""),
+			Secure: publicSecure,
+			Region: strings.TrimSpace(options.Region),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &MinIOStore{
-		client: client,
-		bucket: options.Bucket,
+		client:        client,
+		presignClient: presignClient,
+		bucket:        options.Bucket,
 	}, nil
 }
 
@@ -124,7 +148,11 @@ func (s *MinIOStore) PresignedGetURL(ctx context.Context, bucket string, key str
 		expires = time.Hour
 	}
 
-	presignedURL, err := s.client.PresignedGetObject(ctx, bucket, key, expires, nil)
+	client := s.presignClient
+	if client == nil {
+		client = s.client
+	}
+	presignedURL, err := client.PresignedGetObject(ctx, bucket, key, expires, nil)
 	if err != nil {
 		return "", err
 	}

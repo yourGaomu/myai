@@ -70,13 +70,14 @@ export function Composer({
         >
           <ButtonContent loading={pendingUpload} text={pendingUpload ? "Uploading" : "File"} />
         </Pressable>
-        <Pressable
-          disabled={pendingSend}
-          onPress={onSend}
-          style={({ pressed }) => buttonFeedback([styles.sendButton, pendingSend && styles.disabledButton], pressed)}
-        >
-          <ButtonContent loading={pendingSend} text={pendingSend ? "Sending" : "Send"} />
-        </Pressable>
+        {!pendingSend ? (
+          <Pressable
+            onPress={onSend}
+            style={({ pressed }) => buttonFeedback(styles.sendButton, pressed)}
+          >
+            <ButtonContent text="Send" />
+          </Pressable>
+        ) : null}
         {canPause ? (
           <Pressable
             disabled={pendingPause}
@@ -157,6 +158,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     color: "#12100e",
     flex: 1,
+    minWidth: 0,
     includeFontPadding: false,
     lineHeight: 22,
     maxHeight: 120,

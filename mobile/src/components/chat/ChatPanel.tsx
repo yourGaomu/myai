@@ -1,5 +1,12 @@
-import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from "react-native";
 
 import type { AgentRunSnapshot } from "../../protocol";
 import type { ChatItem } from "../../types/chat";
@@ -15,11 +22,11 @@ type Props = {
   activeAssistantID: string;
   buttonFeedback: ButtonFeedback;
   chatScrollRef: RefObject<ScrollView | null>;
-  height: number;
   loadingHistory: boolean;
   messages: ChatItem[];
   pendingRequestID: string;
   runs: AgentRunSnapshot[];
+  sessionID: string;
   onRegenerate: () => void;
 };
 
@@ -27,11 +34,11 @@ export function ChatPanel({
   activeAssistantID,
   buttonFeedback,
   chatScrollRef,
-  height,
   loadingHistory,
   messages,
   pendingRequestID,
   runs,
+  sessionID,
   onRegenerate,
 }: Props) {
   const renderItems = useMemo(() => {
@@ -40,11 +47,17 @@ export function ChatPanel({
   }, [messages, runs]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});
+  const followTailRef = useRef(true);
   const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
   const assistantLoadingLabel = useMemo(
     () => loadingLabel(pendingRequestID, activeAssistantID, messages, runs),
     [activeAssistantID, messages, pendingRequestID, runs],
   );
+
+  useEffect(() => {
+    followTailRef.current = true;
+    itemOffsetsRef.current = {};
+  }, [sessionID]);
 
   const rememberItemOffset = useCallback((id: string, event: LayoutChangeEvent) => {
     itemOffsetsRef.current[id] = event.nativeEvent.layout.y;
@@ -60,7 +73,7 @@ export function ChatPanel({
   );
 
   return (
-    <View style={[styles.panel, styles.chatPanel, { height }]}>
+    <View style={[styles.panel, styles.chatPanel]}>
       <View style={styles.panelHeader}>
         <Text style={styles.panelTitle}>Chat</Text>
         <Text style={styles.pathText}>{messages.length} message(s)</Text>
@@ -68,7 +81,18 @@ export function ChatPanel({
       <ScrollView
         contentContainerStyle={styles.messages}
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+        nestedScrollEnabled
+        onContentSizeChange={() => {
+          if (followTailRef.current) {
+            chatScrollRef.current?.scrollToEnd({ animated: true });
+          }
+        }}
+        onScroll={(event) => {
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+          followTailRef.current = distanceFromBottom <= 36;
+        }}
+        scrollEventThrottle={100}
         ref={chatScrollRef}
         showsVerticalScrollIndicator={false}
         style={styles.messagesScroll}
@@ -276,6 +300,7 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
   },
   chatPanel: {
+    flex: 1,
     minHeight: 260,
     overflow: "hidden",
   },
