@@ -646,7 +646,7 @@ export type ModelConfigAddPayload = {
   provider?: string;
   protocol?: string;
   auth_type?: string;
-  base_url: string;
+  base_url?: string;
   api_key?: string;
   model_name?: string;
   is_default?: boolean;

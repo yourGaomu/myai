@@ -172,6 +172,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     justifyContent: "space-between",
   },
@@ -196,6 +197,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 3,
     flexDirection: "row",
+    flexShrink: 0,
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 7,

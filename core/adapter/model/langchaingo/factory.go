@@ -18,7 +18,13 @@ type Factory struct {
 
 func NewFactory(adapters ...modelport.ProtocolAdapter) *Factory {
 	factory := &Factory{adapters: make(map[domainmodel.Protocol]modelport.ProtocolAdapter)}
-	adapters = append([]modelport.ProtocolAdapter{OpenAIChatCompletionsAdapter{}}, adapters...)
+	adapters = append([]modelport.ProtocolAdapter{
+		OpenAIChatCompletionsAdapter{},
+		AnthropicMessagesAdapter{},
+		GoogleGenerativeAIAdapter{},
+		MistralChatAdapter{},
+		OllamaChatAdapter{},
+	}, adapters...)
 	for _, adapter := range adapters {
 		if adapter == nil {
 			continue
@@ -35,6 +41,15 @@ func (f *Factory) CreateModel(config modelport.CreationConfig) (modelport.ChatMo
 		return nil, fmt.Errorf("unsupported model protocol: %s", protocol)
 	}
 	return adapter.CreateModel(config)
+}
+
+func (f *Factory) ValidateConfig(config modelport.CreationConfig) error {
+	protocol := domainmodel.NormalizeProtocol(config.Protocol)
+	adapter, ok := f.adapter(protocol)
+	if !ok {
+		return fmt.Errorf("unsupported model protocol: %s", protocol)
+	}
+	return adapter.ValidateConfig(config)
 }
 
 func (f *Factory) SupportsProtocol(protocol domainmodel.Protocol) bool {

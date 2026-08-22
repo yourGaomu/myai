@@ -20,6 +20,7 @@ export const styles = StyleSheet.create({
   panelHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     justifyContent: "space-between",
   },
@@ -36,6 +37,7 @@ export const styles = StyleSheet.create({
   },
   rowCompact: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   flex: {
@@ -116,6 +118,7 @@ export const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 3,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     padding: 10,
   },

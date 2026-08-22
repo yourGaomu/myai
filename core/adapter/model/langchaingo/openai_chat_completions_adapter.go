@@ -21,7 +21,14 @@ func (OpenAIChatCompletionsAdapter) Protocol() domainmodel.Protocol {
 	return domainmodel.ProtocolOpenAIChatCompletions
 }
 
+func (OpenAIChatCompletionsAdapter) ValidateConfig(config modelport.CreationConfig) error {
+	return validateOpenAIConfig(config)
+}
+
 func (OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
+	if err := (OpenAIChatCompletionsAdapter{}).ValidateConfig(config); err != nil {
+		return nil, err
+	}
 	options := []openai.Option{
 		openai.WithToken(config.APIKey),
 		openai.WithBaseURL(config.BaseURL),

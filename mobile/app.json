@@ -11,13 +11,7 @@
     },
     "android": {
       "package": "com.myai.mobile",
-      "versionCode": 2,
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
+      "versionCode": 3,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -35,7 +29,7 @@
       [
         "expo-navigation-bar",
         {
-          "hidden": true,
+          "hidden": false,
           "style": "dark",
           "enforceContrast": false
         }

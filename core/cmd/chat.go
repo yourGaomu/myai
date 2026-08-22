@@ -245,11 +245,20 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 	if err != nil {
 		return err
 	}
-	provider, err := readModelField(reader, "provider", "openai", false)
+	protocolText, err := readModelField(reader, "protocol (openai-chat-completions/anthropic-messages/google-generative-ai/mistral-chat/ollama-chat)", string(domainmodel.ProtocolOpenAIChatCompletions), true)
 	if err != nil {
 		return err
 	}
-	authTypeText, err := readModelField(reader, "auth type (bearer/none)", "bearer", false)
+	protocol := domainmodel.NormalizeProtocol(domainmodel.Protocol(protocolText))
+	defaults, err := modelProtocolDefaults(protocol)
+	if err != nil {
+		return err
+	}
+	provider, err := readModelField(reader, "provider", defaults.provider, false)
+	if err != nil {
+		return err
+	}
+	authTypeText, err := readModelField(reader, "auth type (bearer/none)", string(defaults.authType), false)
 	if err != nil {
 		return err
 	}
@@ -257,7 +266,7 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 	if authType != domainmodel.AuthTypeBearer && authType != domainmodel.AuthTypeNone {
 		return fmt.Errorf("unsupported auth type: %s", authTypeText)
 	}
-	baseURL, err := readModelField(reader, "base url", "https://api.openai.com/v1", true)
+	baseURL, err := readModelField(reader, "base url", defaults.baseURL, defaults.baseURLRequired)
 	if err != nil {
 		return err
 	}
@@ -298,7 +307,7 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 		ID:        id,
 		Name:      name,
 		Provider:  provider,
-		Protocol:  domainmodel.ProtocolOpenAIChatCompletions,
+		Protocol:  protocol,
 		AuthType:  authType,
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
@@ -315,6 +324,30 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 
 	printSuccess("model added: " + id)
 	return nil
+}
+
+type modelProtocolInputDefaults struct {
+	provider        string
+	authType        domainmodel.AuthType
+	baseURL         string
+	baseURLRequired bool
+}
+
+func modelProtocolDefaults(protocol domainmodel.Protocol) (modelProtocolInputDefaults, error) {
+	switch domainmodel.NormalizeProtocol(protocol) {
+	case domainmodel.ProtocolOpenAIChatCompletions:
+		return modelProtocolInputDefaults{provider: "openai", authType: domainmodel.AuthTypeBearer, baseURL: "https://api.openai.com/v1", baseURLRequired: true}, nil
+	case domainmodel.ProtocolAnthropicMessages:
+		return modelProtocolInputDefaults{provider: "anthropic", authType: domainmodel.AuthTypeBearer}, nil
+	case domainmodel.ProtocolGoogleGenerativeAI:
+		return modelProtocolInputDefaults{provider: "google", authType: domainmodel.AuthTypeBearer}, nil
+	case domainmodel.ProtocolMistralChat:
+		return modelProtocolInputDefaults{provider: "mistral", authType: domainmodel.AuthTypeBearer}, nil
+	case domainmodel.ProtocolOllamaChat:
+		return modelProtocolInputDefaults{provider: "ollama", authType: domainmodel.AuthTypeNone, baseURL: "http://127.0.0.1:11434", baseURLRequired: true}, nil
+	default:
+		return modelProtocolInputDefaults{}, fmt.Errorf("unsupported model protocol: %s", protocol)
+	}
 }
 
 func parseGenerationSettings(input string) (generation.Settings, error) {

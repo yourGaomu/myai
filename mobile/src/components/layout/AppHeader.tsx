@@ -32,7 +32,7 @@ export function AppHeader({
         </View>
         <View style={styles.headerText}>
           <Text style={styles.title}>MYAI</Text>
-          <Text style={styles.subtitle}>
+          <Text numberOfLines={1} style={styles.subtitle}>
             {connected ? `手机控制电脑 / ${userID.trim() || "local"} / ${deviceID.trim() || "pc-local"}` : status}
           </Text>
         </View>
@@ -59,7 +59,15 @@ export function AppHeader({
 
 const styles = StyleSheet.create({
   header: {
-    display: "none",
+    alignItems: "center",
+    backgroundColor: "#fffaf0",
+    borderBottomColor: "#12100e",
+    borderBottomWidth: 3,
+    flexDirection: "row",
+    gap: 8,
+    minHeight: 52,
+    paddingBottom: 8,
+    paddingTop: 4,
   },
   brand: {
     alignItems: "center",
@@ -73,14 +81,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffd84f",
     borderColor: "#12100e",
     borderRadius: 8,
-    borderWidth: 4,
-    height: 46,
+    borderWidth: 3,
+    height: 38,
     justifyContent: "center",
-    width: 46,
+    width: 38,
   },
   brandMarkText: {
     color: "#12100e",
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: "900",
   },
   headerText: {
@@ -95,7 +103,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#12100e",
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "900",
     lineHeight: 24,
   },

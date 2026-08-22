@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -329,26 +328,10 @@ func validateModelConfig(config domainmodel.Config, factory modelport.Factory) e
 	if !factory.SupportsProtocol(config.Protocol) {
 		return fmt.Errorf("unsupported model protocol: %s", config.Protocol)
 	}
-	if config.AuthType != domainmodel.AuthTypeBearer && config.AuthType != domainmodel.AuthTypeNone {
-		return fmt.Errorf("unsupported auth type: %s", config.AuthType)
-	}
-	if config.BaseURL == "" {
-		return errors.New("base url is empty")
-	}
-	parsedURL, err := url.ParseRequestURI(config.BaseURL)
-	if err != nil || parsedURL.Scheme != "http" && parsedURL.Scheme != "https" || parsedURL.Host == "" {
-		return errors.New("base url must be an absolute http or https URL")
-	}
-	if parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
-		return errors.New("base url cannot contain credentials, query, or fragment")
-	}
-	if strings.HasSuffix(strings.ToLower(parsedURL.Path), "/chat/completions") {
-		return errors.New("base url must be the API root and cannot include /chat/completions")
-	}
-	if config.AuthType == domainmodel.AuthTypeBearer && config.APIKey == "" {
-		return errors.New("api key is empty")
-	}
-	return nil
+	return factory.ValidateConfig(modelport.CreationConfig{
+		Provider: config.Provider, Protocol: config.Protocol, AuthType: config.AuthType,
+		APIKey: config.APIKey, BaseURL: config.BaseURL, ModelName: config.ModelName,
+	})
 }
 
 func (s ConfigService) validateDependencies() error {

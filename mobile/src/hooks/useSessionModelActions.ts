@@ -14,7 +14,7 @@ export type ModelConfigDraft = {
   provider: string;
   protocol: string;
   auth_type: string;
-  base_url: string;
+  base_url?: string;
   api_key: string;
   model_name: string;
   defaults: GenerationSettings;

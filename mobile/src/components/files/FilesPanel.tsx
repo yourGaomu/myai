@@ -195,6 +195,7 @@ const styles = StyleSheet.create({
   panelHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     justifyContent: "space-between",
   },
@@ -211,6 +212,7 @@ const styles = StyleSheet.create({
   },
   rowCompact: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   flex: {
@@ -314,6 +316,7 @@ const styles = StyleSheet.create({
   previewHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   previewTitle: {

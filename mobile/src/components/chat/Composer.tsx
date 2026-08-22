@@ -54,7 +54,7 @@ export function Composer({
           ))}
         </View>
       ) : null}
-      <View style={styles.composerRow}>
+      <View style={styles.composerInputRow}>
         <TextInput
           multiline
           onChangeText={onChangeMessage}
@@ -63,6 +63,8 @@ export function Composer({
           style={styles.messageInput}
           value={messageInput}
         />
+      </View>
+      <View style={styles.composerActions}>
         <Pressable
           disabled={pendingUpload}
           onPress={onUploadFile}
@@ -146,10 +148,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "900",
   },
-  composerRow: {
-    alignItems: "flex-end",
+  composerInputRow: {
+    width: "100%",
+  },
+  composerActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+    width: "100%",
   },
   messageInput: {
     backgroundColor: "#fdf7ea",
@@ -176,7 +181,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     justifyContent: "center",
     minHeight: 44,
-    minWidth: 72,
+    flex: 1,
+    minWidth: 0,
     paddingHorizontal: 14,
   },
   uploadButton: {
@@ -187,7 +193,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     justifyContent: "center",
     minHeight: 44,
-    minWidth: 68,
+    flex: 1,
+    minWidth: 0,
     paddingHorizontal: 12,
   },
   pauseButton: {
@@ -198,7 +205,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     justifyContent: "center",
     minHeight: 44,
-    minWidth: 78,
+    flex: 1,
+    minWidth: 0,
     paddingHorizontal: 12,
   },
   disabledButton: {

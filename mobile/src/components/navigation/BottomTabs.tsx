@@ -38,8 +38,13 @@ export function BottomTabs({
       <Pressable onPress={onKnowledgePress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "knowledge" && styles.segmentActive], pressed)}>
         <Text style={[styles.segmentText, viewMode === "knowledge" && styles.segmentTextActive]}>知识</Text>
       </Pressable>
-      <Pressable onPress={onSettingsPress} style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "settings" && styles.segmentActive], pressed)}>
-        <Text style={[styles.segmentIconText, viewMode === "settings" && styles.segmentTextActive]}>⚙</Text>
+      <Pressable
+        accessibilityLabel="打开设置"
+        accessibilityRole="tab"
+        onPress={onSettingsPress}
+        style={({ pressed }) => buttonFeedback([styles.segment, viewMode === "settings" && styles.segmentActive], pressed)}
+      >
+        <Text style={[styles.segmentText, viewMode === "settings" && styles.segmentTextActive]}>设置</Text>
       </Pressable>
     </View>
   );
@@ -59,7 +64,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     flex: 1,
     justifyContent: "center",
-    minHeight: 38,
+    minHeight: 44,
     paddingVertical: 7,
   },
   segmentActive: {
@@ -69,12 +74,6 @@ const styles = StyleSheet.create({
     color: "#6c665f",
     fontSize: 13,
     fontWeight: "900",
-  },
-  segmentIconText: {
-    color: "#6c665f",
-    fontSize: 16,
-    fontWeight: "900",
-    lineHeight: 18,
   },
   segmentTextActive: {
     color: "#12100e",

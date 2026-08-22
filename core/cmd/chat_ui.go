@@ -266,7 +266,7 @@ func printChatHelp() {
 	printCommand("/style reset", "Clear session response style")
 	printCommand("/models", "List available models")
 	printCommand("/model", "Show current model")
-	printCommand("/model add", "Add a model urlConfig")
+	printCommand("/model add", "Add a model configuration")
 	printCommand("/model <id>", "Switch current session model")
 	printCommand("/clear", "Clear current session messages")
 	printCommand("/exit", "Leave chat")

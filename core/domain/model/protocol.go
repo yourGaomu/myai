@@ -6,6 +6,10 @@ type Protocol string
 
 const (
 	ProtocolOpenAIChatCompletions Protocol = "openai-chat-completions"
+	ProtocolAnthropicMessages     Protocol = "anthropic-messages"
+	ProtocolGoogleGenerativeAI    Protocol = "google-generative-ai"
+	ProtocolMistralChat           Protocol = "mistral-chat"
+	ProtocolOllamaChat            Protocol = "ollama-chat"
 )
 
 type AuthType string
@@ -17,10 +21,20 @@ const (
 
 func NormalizeProtocol(protocol Protocol) Protocol {
 	protocol = Protocol(strings.ToLower(strings.TrimSpace(string(protocol))))
-	if protocol == "" {
+	switch protocol {
+	case "", "openai", "openai-compatible", "openai-chat", "chat-completions":
 		return ProtocolOpenAIChatCompletions
+	case "anthropic", "claude", "claude-messages":
+		return ProtocolAnthropicMessages
+	case "gemini", "google", "google-ai", "google-generative-ai":
+		return ProtocolGoogleGenerativeAI
+	case "mistral":
+		return ProtocolMistralChat
+	case "ollama":
+		return ProtocolOllamaChat
+	default:
+		return protocol
 	}
-	return protocol
 }
 
 func NormalizeAuthType(authType AuthType) AuthType {

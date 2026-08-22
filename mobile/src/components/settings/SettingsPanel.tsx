@@ -96,6 +96,15 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
 ];
 const contextPresets = [8, 16, 32, 64, 128];
 type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context" | "generation";
+type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
+
+const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtocol }> = [
+  { label: "OpenAI 兼容", meta: "Chat Completions", protocol: "openai-chat-completions" },
+  { label: "Anthropic", meta: "Messages API", protocol: "anthropic-messages" },
+  { label: "Google Gemini", meta: "Generative AI", protocol: "google-generative-ai" },
+  { label: "Mistral", meta: "原生 Chat", protocol: "mistral-chat" },
+  { label: "Ollama", meta: "本地原生 Chat", protocol: "ollama-chat" },
+];
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
   { icon: "AG", key: "subagent", label: "子智能体", meta: "配置与后台任务" },
@@ -200,6 +209,7 @@ export function SettingsPanel({
     id: "",
     name: "",
     provider: "custom",
+    protocol: "openai-chat-completions" as ModelProtocol,
     authType: "bearer",
     baseURL: "",
     apiKey: "",
@@ -277,8 +287,13 @@ export function SettingsPanel({
     const baseURL = modelForm.baseURL.trim();
     const apiKey = modelForm.apiKey.trim();
     const modelName = modelForm.modelName.trim() || id;
-    if (!id || !baseURL) {
-      setModelFormError("模型 ID 和 Base URL 不能为空。");
+    const baseURLRequired = modelForm.protocol === "openai-chat-completions" || modelForm.protocol === "ollama-chat";
+    if (!id || (baseURLRequired && !baseURL)) {
+      setModelFormError(baseURLRequired ? "模型 ID 和 Base URL 不能为空。" : "模型 ID 不能为空。");
+      return null;
+    }
+    if (modelForm.protocol === "google-generative-ai" && baseURL) {
+      setModelFormError("Google Gemini 当前不支持自定义 Base URL，请留空。");
       return null;
     }
     if (modelForm.authType === "bearer" && !apiKey && !allowEmptyAPIKey) {
@@ -300,7 +315,7 @@ export function SettingsPanel({
       id,
       name: modelForm.name.trim() || id,
       provider: modelForm.provider.trim() || "custom",
-      protocol: "openai-chat-completions",
+      protocol: modelForm.protocol,
       auth_type: modelForm.authType,
       base_url: baseURL,
       api_key: apiKey,
@@ -316,7 +331,7 @@ export function SettingsPanel({
   const resetModelForm = () => {
     setEditingModelID("");
     setModelForm({
-      id: "", name: "", provider: "custom", authType: "bearer", baseURL: "", apiKey: "", modelName: "",
+      id: "", name: "", provider: "custom", protocol: "openai-chat-completions", authType: "bearer", baseURL: "", apiKey: "", modelName: "",
       defaultTemperature: "", defaultTopP: "", defaultMaxTokens: "",
     });
   };
@@ -327,6 +342,7 @@ export function SettingsPanel({
       id: model.id,
       name: model.name || model.id,
       provider: model.provider || "custom",
+      protocol: (model.protocol as ModelProtocol) || "openai-chat-completions",
       authType: model.auth_type || "bearer",
       baseURL: model.base_url || "",
       apiKey: "",
@@ -356,9 +372,9 @@ export function SettingsPanel({
 
   const relaySection = (
     <View style={styles.sectionStack}>
-      <View style={styles.settingCard}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="WS" />
-        <View style={styles.flex}>
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>Relay</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>{websocketURL(normalizedRelayURL)}</Text>
         </View>
@@ -437,9 +453,9 @@ export function SettingsPanel({
 
   const modelSection = (
     <View style={styles.sectionStack}>
-      <View style={styles.settingCard}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="AI" />
-        <View style={styles.flex}>
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>模型</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>
             {activeModel ? modelDisplayName(activeModel) : currentModelID || activeSession?.model || "还没有加载模型"}
@@ -474,24 +490,47 @@ export function SettingsPanel({
 
       {modelFormOpen ? (
         <View style={styles.controlBlock}>
-          <Text style={styles.controlTitle}>{editingModelID ? "编辑 OpenAI 兼容模型" : "添加 OpenAI 兼容模型"}</Text>
-          <Text style={styles.settingMeta}>Base URL 填写 API 根地址，例如 https://api.example.com/v1，不要填写 /chat/completions。</Text>
+          <Text style={styles.controlTitle}>{editingModelID ? "编辑模型" : "添加第三方模型"}</Text>
+          <Text style={styles.settingMeta}>先选择模型协议，再填写该协议要求的连接信息。</Text>
+          <View style={styles.modeRow}>
+            {modelProtocols.map((item) => (
+              <Pressable
+                key={item.protocol}
+                onPress={() => setModelForm((current) => ({
+                  ...current,
+                  protocol: item.protocol,
+                  authType: item.protocol === "ollama-chat" ? "none" : "bearer",
+                  apiKey: item.protocol === "ollama-chat" ? "" : current.apiKey,
+                  baseURL: item.protocol === "google-generative-ai" ? "" : current.baseURL,
+                }))}
+                style={({ pressed }) => buttonFeedback([
+                  styles.modeChip,
+                  modelForm.protocol === item.protocol && styles.modeChipActive,
+                ], pressed)}
+              >
+                <Text style={styles.modeChipTitle}>{item.label}</Text>
+                <Text style={styles.modeChipMeta}>{item.meta}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.settingMeta}>{modelProtocolHelp(modelForm.protocol)}</Text>
           {([
             ["id", "模型 ID", "例如 deepseek-chat"],
             ["name", "显示名称", "可选"],
             ["provider", "Provider", "例如 deepseek、ollama"],
-            ["baseURL", "Base URL", "例如 http://127.0.0.1:11434/v1"],
+            ["baseURL", "Base URL", modelProtocolPlaceholder(modelForm.protocol)],
             ["apiKey", "API Key", "无认证服务可留空"],
             ["modelName", "厂商模型名", "例如 deepseek-chat"],
           ] as const).map(([key, label, placeholder]) => (
             <TextInput
               key={key}
               autoCapitalize="none"
+              editable={key !== "baseURL" || modelForm.protocol !== "google-generative-ai"}
               onChangeText={(value) => setModelForm((current) => ({ ...current, [key]: value }))}
               placeholder={`${label}: ${placeholder}`}
               placeholderTextColor="#776f66"
               secureTextEntry={key === "apiKey"}
-              style={styles.input}
+              style={[styles.input, key === "baseURL" && modelForm.protocol === "google-generative-ai" && styles.disabledInput]}
               value={modelForm[key]}
             />
           ))}
@@ -503,6 +542,8 @@ export function SettingsPanel({
             ] as const).map(([value, label, meta]) => (
               <Pressable
                 key={value}
+                disabled={(modelForm.protocol === "ollama-chat" && value !== "none") ||
+                  (value === "none" && modelForm.protocol !== "openai-chat-completions" && modelForm.protocol !== "ollama-chat")}
                 onPress={() => setModelForm((current) => ({
                   ...current,
                   authType: value,
@@ -511,6 +552,8 @@ export function SettingsPanel({
                 style={({ pressed }) => buttonFeedback([
                   styles.modeChip,
                   modelForm.authType === value && styles.modeChipActive,
+                  ((modelForm.protocol === "ollama-chat" && value !== "none") ||
+                    (value === "none" && modelForm.protocol !== "openai-chat-completions" && modelForm.protocol !== "ollama-chat")) && styles.disabledButton,
                 ], pressed)}
               >
                 <Text style={styles.modeChipTitle}>{label}</Text>
@@ -519,13 +562,13 @@ export function SettingsPanel({
             ))}
           </View>
           <Text style={styles.settingMeta}>模型默认生成参数（留空表示使用系统默认值）</Text>
-          <View style={styles.row}>
+          <View style={[styles.row, styles.generationDefaultsRow]}>
             <TextInput
               keyboardType="decimal-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTemperature: value }))}
               placeholder="Temperature 0-2"
               placeholderTextColor="#776f66"
-              style={[styles.input, styles.flex]}
+              style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTemperature}
             />
             <TextInput
@@ -533,7 +576,7 @@ export function SettingsPanel({
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTopP: value }))}
               placeholder="Top P 0-1"
               placeholderTextColor="#776f66"
-              style={[styles.input, styles.flex]}
+              style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTopP}
             />
             <TextInput
@@ -541,7 +584,7 @@ export function SettingsPanel({
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultMaxTokens: value }))}
               placeholder="Max Tokens"
               placeholderTextColor="#776f66"
-              style={[styles.input, styles.flex]}
+              style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultMaxTokens}
             />
           </View>
@@ -772,9 +815,9 @@ export function SettingsPanel({
 
   const skillSection = (
     <View style={styles.sectionStack}>
-      <View style={styles.settingCard}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="SK" />
-        <View style={styles.flex}>
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>技能</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>
             {skills.length} loaded{skillRoot ? ` / ${skillRoot}` : ""}
@@ -830,9 +873,9 @@ export function SettingsPanel({
 
   const sessionSection = (
     <View style={styles.sectionStack}>
-      <View style={styles.settingCard}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="S" />
-        <View style={styles.flex}>
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>会话</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>
             {activeSession?.title || (sessionID ? shortID(sessionID) : "还没有选择会话")}
@@ -1227,20 +1270,25 @@ export function SettingsPanel({
           </ScrollView>
         </View>
 
-        <View style={styles.contentPane}>
+        <View style={[styles.contentPane, !wideLayout && styles.contentPaneCompact]}>
           <View style={styles.contentHeader}>
             <View style={styles.flex}>
               <Text style={styles.contentTitle}>{activeSectionMeta?.label || "设置"}</Text>
               <Text style={styles.settingMeta}>{activeSectionMeta?.meta || "配置中心"}</Text>
             </View>
           </View>
-          <ScrollView
-            contentContainerStyle={styles.contentScroll}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-          >
-            {sectionContent[activeSection]}
-          </ScrollView>
+          {wideLayout ? (
+            <ScrollView
+              contentContainerStyle={styles.contentScroll}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
+              {sectionContent[activeSection]}
+            </ScrollView>
+          ) : (
+            <View style={styles.contentScroll}>{sectionContent[activeSection]}</View>
+          )}
         </View>
       </View>
     </View>
@@ -1357,6 +1405,36 @@ function normalizeAgentMode(mode?: string): SessionAgentMode {
     return "plan";
   }
   return "chat";
+}
+
+function modelProtocolHelp(protocol: ModelProtocol) {
+  switch (protocol) {
+    case "openai-chat-completions":
+      return "Base URL 填写 API 根地址，例如 https://api.example.com/v1，不要填写 /chat/completions。";
+    case "anthropic-messages":
+      return "Base URL 可留空使用 Anthropic 官方地址；自定义地址填写服务根地址。需要 API Key。";
+    case "google-generative-ai":
+      return "使用 Google 官方 Generative AI 地址，当前不支持自定义 Base URL。需要 API Key。";
+    case "mistral-chat":
+      return "Base URL 可留空使用 Mistral 官方地址；自定义地址填写服务根地址。需要 API Key。";
+    case "ollama-chat":
+      return "填写 Ollama 服务根地址，例如 http://127.0.0.1:11434，不要填写 /v1 或 /chat/completions。";
+  }
+}
+
+function modelProtocolPlaceholder(protocol: ModelProtocol) {
+  switch (protocol) {
+    case "openai-chat-completions":
+      return "例如 https://api.example.com/v1";
+    case "anthropic-messages":
+      return "可留空，或 https://api.anthropic.com";
+    case "google-generative-ai":
+      return "Google Gemini 不需要填写";
+    case "mistral-chat":
+      return "可留空，或 https://api.mistral.ai";
+    case "ollama-chat":
+      return "例如 http://127.0.0.1:11434";
+  }
 }
 
 function permissionHelp(mode: SessionPermissionMode) {
@@ -1544,6 +1622,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
     padding: 12,
   },
+  contentPaneCompact: {
+    flex: 0,
+    maxHeight: undefined,
+    padding: 10,
+    width: "100%",
+  },
   contentScroll: {
     paddingBottom: 4,
   },
@@ -1575,9 +1659,16 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     borderWidth: 3,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
     minHeight: 74,
     padding: 12,
+  },
+  settingCardCompact: {
+    alignItems: "flex-start",
+  },
+  settingCardBody: {
+    minWidth: 112,
   },
   settingIconBox: {
     alignItems: "center",
@@ -1613,6 +1704,7 @@ const styles = StyleSheet.create({
     borderColor: "#12100e",
     borderRadius: 0,
     borderWidth: 3,
+    flexShrink: 0,
     justifyContent: "center",
     minHeight: 44,
     minWidth: 58,
@@ -1645,6 +1737,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  generationDefaultsRow: {
+    alignItems: "stretch",
+  },
+  generationDefaultsInput: {
+    minWidth: 120,
   },
   rowCompact: {
     flexDirection: "row",
@@ -1680,6 +1778,10 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.45,
+  },
+  disabledInput: {
+    backgroundColor: "#ece7dd",
+    opacity: 0.65,
   },
   modelGrid: {
     flexDirection: "row",

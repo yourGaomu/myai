@@ -9,7 +9,6 @@ export function useAndroidNavigationBar() {
     }
 
     NavigationBar.NavigationBar.setStyle("dark");
-    NavigationBar.NavigationBar.setHidden(true);
-    NavigationBar.setVisibilityAsync("hidden").catch(() => undefined);
+    NavigationBar.setVisibilityAsync("visible").catch(() => undefined);
   }, []);
 }

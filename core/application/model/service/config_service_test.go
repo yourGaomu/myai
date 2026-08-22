@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,6 +264,22 @@ func (f *fakeModelFactory) CreateModel(config modelport.CreationConfig) (modelpo
 
 func (f *fakeModelFactory) SupportsProtocol(protocol domainmodel.Protocol) bool {
 	return domainmodel.NormalizeProtocol(protocol) == domainmodel.ProtocolOpenAIChatCompletions
+}
+
+func (f *fakeModelFactory) ValidateConfig(config modelport.CreationConfig) error {
+	if !f.SupportsProtocol(config.Protocol) {
+		return errors.New("unsupported model protocol: " + string(config.Protocol))
+	}
+	if config.BaseURL == "" {
+		return errors.New("base url is empty")
+	}
+	if strings.HasSuffix(strings.ToLower(strings.TrimRight(config.BaseURL, "/")), "/chat/completions") {
+		return errors.New("base url must be the API root and cannot include /chat/completions")
+	}
+	if config.AuthType == domainmodel.AuthTypeBearer && config.APIKey == "" {
+		return errors.New("api key is empty")
+	}
+	return nil
 }
 
 type fakeChatModel struct{}

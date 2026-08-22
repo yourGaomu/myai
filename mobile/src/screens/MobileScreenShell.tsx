@@ -26,7 +26,11 @@ export function MobileScreenShell({
         <View style={styles.artStripeYellow} />
         <View style={styles.artStripeGreen} />
       </View>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboard}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+        style={styles.keyboard}
+      >
         <View style={styles.screen}>
           {scrollEnabled ? (
             <ScrollView

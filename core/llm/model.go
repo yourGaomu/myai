@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
@@ -140,12 +141,11 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 		}, nil
 	}
 
-	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
+	if resp == nil || len(resp.Choices) == 0 {
 		return ChatResult{}, nil
 	}
 
-	text := resp.Choices[0].Content
-
+	text := contentFromResponse(resp)
 	reasoning := reasoningFromResponse(resp)
 	if reasoning != "" {
 		if handler.OnReasoning != nil {
@@ -186,12 +186,12 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 	if err != nil {
 		return ChatResult{}, err
 	}
-	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
+	if resp == nil || len(resp.Choices) == 0 {
 		return ChatResult{}, nil
 	}
 
 	return ChatResult{
-		Content:   resp.Choices[0].Content,
+		Content:   contentFromResponse(resp),
 		Reasoning: reasoningFromResponse(resp),
 		Usage:     tokenUsageFromResponse(resp),
 		ToolCalls: toolCallsFromResponse(resp),
@@ -199,53 +199,121 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 }
 
 func reasoningFromResponse(resp *llms.ContentResponse) string {
-	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
+	if resp == nil || len(resp.Choices) == 0 {
 		return ""
 	}
 
-	if resp.Choices[0].ReasoningContent != "" {
-		return resp.Choices[0].ReasoningContent
+	var builder strings.Builder
+	for _, choice := range resp.Choices {
+		if choice == nil {
+			continue
+		}
+		reasoning := choice.ReasoningContent
+		if reasoning == "" {
+			if value, ok := choice.GenerationInfo["ThinkingContent"].(string); ok {
+				reasoning = value
+			}
+		}
+		builder.WriteString(reasoning)
+	}
+	return builder.String()
+}
+
+func contentFromResponse(resp *llms.ContentResponse) string {
+	if resp == nil {
+		return ""
 	}
 
-	if value, ok := resp.Choices[0].GenerationInfo["ThinkingContent"].(string); ok {
-		return value
+	var builder strings.Builder
+	for _, choice := range resp.Choices {
+		if choice != nil {
+			builder.WriteString(choice.Content)
+		}
 	}
-
-	return ""
+	return builder.String()
 }
 
 func tokenUsageFromResponse(resp *llms.ContentResponse) TokenUsage {
-	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
+	if resp == nil || len(resp.Choices) == 0 {
 		return TokenUsage{}
 	}
 
-	info := resp.Choices[0].GenerationInfo
-	if info == nil {
-		return TokenUsage{}
+	var usage TokenUsage
+	var seenPrompt, seenCompletion, seenTotal, seenReasoning, seenCached bool
+	for _, choice := range resp.Choices {
+		if choice == nil || choice.GenerationInfo == nil {
+			continue
+		}
+		info := choice.GenerationInfo
+		usage.PromptTokens, seenPrompt = mergeGenerationInfo(usage.PromptTokens, seenPrompt, info, "PromptTokens", "InputTokens")
+		usage.CompletionTokens, seenCompletion = mergeGenerationInfo(usage.CompletionTokens, seenCompletion, info, "CompletionTokens", "OutputTokens")
+		usage.TotalTokens, seenTotal = mergeGenerationInfo(usage.TotalTokens, seenTotal, info, "TotalTokens")
+		usage.ReasoningTokens, seenReasoning = mergeGenerationInfo(usage.ReasoningTokens, seenReasoning, info, "ReasoningTokens", "ThinkingTokens")
+		usage.PromptCachedTokens, seenCached = mergeGenerationInfo(usage.PromptCachedTokens, seenCached, info, "PromptCachedTokens", "CachedTokens", "CacheReadInputTokens")
+		if nested, ok := info["usage"]; ok {
+			usage.PromptTokens, seenPrompt = mergeNestedGenerationInfo(usage.PromptTokens, seenPrompt, nested, "PromptTokens")
+			usage.CompletionTokens, seenCompletion = mergeNestedGenerationInfo(usage.CompletionTokens, seenCompletion, nested, "CompletionTokens")
+			usage.TotalTokens, seenTotal = mergeNestedGenerationInfo(usage.TotalTokens, seenTotal, nested, "TotalTokens")
+		}
 	}
-
-	usage := TokenUsage{
-		PromptTokens:       intFromGenerationInfo(info["PromptTokens"]),
-		CompletionTokens:   intFromGenerationInfo(info["CompletionTokens"]),
-		TotalTokens:        intFromGenerationInfo(info["TotalTokens"]),
-		ReasoningTokens:    intFromGenerationInfo(info["ReasoningTokens"]),
-		PromptCachedTokens: intFromGenerationInfo(info["PromptCachedTokens"]),
+	if !seenTotal && seenPrompt && seenCompletion {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		seenTotal = true
 	}
-
-	_, hasPrompt := info["PromptTokens"]
-	_, hasCompletion := info["CompletionTokens"]
-	_, hasTotal := info["TotalTokens"]
-	usage.Available = hasPrompt || hasCompletion || hasTotal
+	usage.Available = seenPrompt || seenCompletion || seenTotal
 
 	return usage
 }
 
 func toolCallsFromResponse(resp *llms.ContentResponse) []modelport.ToolCall {
-	if resp == nil || len(resp.Choices) == 0 || resp.Choices[0] == nil {
+	if resp == nil || len(resp.Choices) == 0 {
 		return nil
 	}
 
-	return llmmapper.FromLLMToolCalls(resp.Choices[0].ToolCalls)
+	var calls []llms.ToolCall
+	for _, choice := range resp.Choices {
+		if choice != nil {
+			calls = append(calls, choice.ToolCalls...)
+		}
+	}
+	return llmmapper.FromLLMToolCalls(calls)
+}
+
+func mergeGenerationInfo(current int, seen bool, info map[string]any, keys ...string) (int, bool) {
+	for _, key := range keys {
+		value, ok := info[key]
+		if !ok {
+			continue
+		}
+		return mergeTokenValue(current, seen, value)
+	}
+	return current, seen
+}
+
+func mergeNestedGenerationInfo(current int, seen bool, value any, field string) (int, bool) {
+	reflected := reflect.ValueOf(value)
+	for reflected.IsValid() && (reflected.Kind() == reflect.Pointer || reflected.Kind() == reflect.Interface) {
+		if reflected.IsNil() {
+			return current, seen
+		}
+		reflected = reflected.Elem()
+	}
+	if !reflected.IsValid() || reflected.Kind() != reflect.Struct {
+		return current, seen
+	}
+	fieldValue := reflected.FieldByName(field)
+	if !fieldValue.IsValid() || !fieldValue.CanInterface() {
+		return current, seen
+	}
+	return mergeTokenValue(current, seen, fieldValue.Interface())
+}
+
+func mergeTokenValue(current int, seen bool, value any) (int, bool) {
+	parsed := intFromGenerationInfo(value)
+	if parsed != 0 || !seen {
+		current = parsed
+	}
+	return current, true
 }
 
 func isToolCallChunk(chunk []byte) bool {
