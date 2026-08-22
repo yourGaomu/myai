@@ -9,6 +9,7 @@ type Registry interface {
 type MutableRegistry interface {
 	Registry
 	SetModelInfo(modelName string, model ChatModelPort, info ModelInfo)
+	RemoveModel(modelName string) bool
 }
 
 type MetadataProvider interface {

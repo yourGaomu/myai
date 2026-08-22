@@ -15,6 +15,7 @@ import (
 	modelcommand "myai/core/application/model/command"
 	sessionresult "myai/core/application/session/result"
 	generation "myai/core/domain/generation"
+	domainmodel "myai/core/domain/model"
 	"myai/core/llm"
 	"myai/core/service"
 	"myai/core/skill"
@@ -248,11 +249,19 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 	if err != nil {
 		return err
 	}
+	authTypeText, err := readModelField(reader, "auth type (bearer/none)", "bearer", false)
+	if err != nil {
+		return err
+	}
+	authType := domainmodel.AuthType(strings.ToLower(strings.TrimSpace(authTypeText)))
+	if authType != domainmodel.AuthTypeBearer && authType != domainmodel.AuthTypeNone {
+		return fmt.Errorf("unsupported auth type: %s", authTypeText)
+	}
 	baseURL, err := readModelField(reader, "base url", "https://api.openai.com/v1", true)
 	if err != nil {
 		return err
 	}
-	apiKey, err := readModelField(reader, "api key (visible)", "", true)
+	apiKey, err := readModelField(reader, "api key (visible)", "", authType == domainmodel.AuthTypeBearer)
 	if err != nil {
 		return err
 	}
@@ -289,6 +298,8 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 		ID:        id,
 		Name:      name,
 		Provider:  provider,
+		Protocol:  domainmodel.ProtocolOpenAIChatCompletions,
+		AuthType:  authType,
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
 		ModelName: modelName,

@@ -36,6 +36,8 @@ export function MobileMainContent({
           generation={settings.generation}
           generationStatus={settings.generationStatus}
           currentModelID={settings.currentModelID}
+          modelMessage={settings.modelMessage}
+          modelMessageError={settings.modelMessageError}
           deviceID={settings.deviceID}
           models={settings.models}
           normalizedRelayURL={settings.normalizedRelayURL}
@@ -51,6 +53,13 @@ export function MobileMainContent({
           onExecutePlan={settings.onExecutePlan}
           onOpenPlan={settings.onOpenPlan}
           onRefreshModels={settings.onRefreshModels}
+          onAddModelConfig={settings.onAddModelConfig}
+          onUpdateModelConfig={settings.onUpdateModelConfig}
+          onDeleteModelConfig={settings.onDeleteModelConfig}
+          onSetModelEnabled={settings.onSetModelEnabled}
+          onSetDefaultModel={settings.onSetDefaultModel}
+          onClearModelMessage={settings.onClearModelMessage}
+          onTestModelConfig={settings.onTestModelConfig}
           onRequestContextInfo={settings.onRequestContextInfo}
           onRequestGenerationPreferences={settings.onRequestGenerationPreferences}
           onRefreshSessions={settings.onRefreshSessions}

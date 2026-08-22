@@ -70,6 +70,15 @@ const (
 	TypeModelListResult                  MessageType = "model_list_result"
 	TypeModelSwitch                      MessageType = "model_switch"
 	TypeModelSwitchResult                MessageType = "model_switch_result"
+	TypeModelConfigAdd                   MessageType = "model_config_add"
+	TypeModelConfigAddResult             MessageType = "model_config_add_result"
+	TypeModelConfigTest                  MessageType = "model_config_test"
+	TypeModelConfigTestResult            MessageType = "model_config_test_result"
+	TypeModelConfigUpdate                MessageType = "model_config_update"
+	TypeModelConfigDelete                MessageType = "model_config_delete"
+	TypeModelConfigEnabledSet            MessageType = "model_config_enabled_set"
+	TypeModelConfigDefaultSet            MessageType = "model_config_default_set"
+	TypeModelConfigMutationResult        MessageType = "model_config_mutation_result"
 	TypeSkillList                        MessageType = "skill_list"
 	TypeSkillListResult                  MessageType = "skill_list_result"
 	TypeSkillReload                      MessageType = "skill_reload"
@@ -647,12 +656,17 @@ type SessionContextQueryResultPayload struct {
 }
 
 type ModelSummary struct {
-	ID        string `json:"id"`
-	Name      string `json:"name,omitempty"`
-	Provider  string `json:"provider,omitempty"`
-	ModelName string `json:"model_name,omitempty"`
-	Enabled   bool   `json:"enabled"`
-	IsDefault bool   `json:"is_default"`
+	ID        string             `json:"id"`
+	Name      string             `json:"name,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+	Protocol  string             `json:"protocol,omitempty"`
+	AuthType  string             `json:"auth_type,omitempty"`
+	BaseURL   string             `json:"base_url,omitempty"`
+	HasAPIKey bool               `json:"has_api_key"`
+	ModelName string             `json:"model_name,omitempty"`
+	Enabled   bool               `json:"enabled"`
+	IsDefault bool               `json:"is_default"`
+	Defaults  GenerationSettings `json:"defaults,omitempty"`
 }
 
 type ModelListPayload struct{}
@@ -671,6 +685,55 @@ type ModelSwitchResultPayload struct {
 	Models         []ModelSummary `json:"models"`
 	Session        SessionSummary `json:"session"`
 	Message        string         `json:"message,omitempty"`
+}
+
+type ModelConfigAddPayload struct {
+	ID        string             `json:"id"`
+	Name      string             `json:"name,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+	Protocol  string             `json:"protocol,omitempty"`
+	AuthType  string             `json:"auth_type,omitempty"`
+	BaseURL   string             `json:"base_url"`
+	APIKey    string             `json:"api_key,omitempty"`
+	ModelName string             `json:"model_name,omitempty"`
+	IsDefault bool               `json:"is_default,omitempty"`
+	Defaults  GenerationSettings `json:"defaults,omitempty"`
+}
+
+type ModelConfigAddResultPayload struct {
+	Model   ModelSummary   `json:"model"`
+	Models  []ModelSummary `json:"models"`
+	Message string         `json:"message,omitempty"`
+}
+
+type ModelConfigTestPayload = ModelConfigAddPayload
+
+type ModelConfigTestResultPayload struct {
+	Success   bool   `json:"success"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+type ModelConfigUpdatePayload = ModelConfigAddPayload
+
+type ModelConfigDeletePayload struct {
+	ID string `json:"id"`
+}
+
+type ModelConfigEnabledSetPayload struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+type ModelConfigDefaultSetPayload struct {
+	ID string `json:"id"`
+}
+
+type ModelConfigMutationResultPayload struct {
+	Model     *ModelSummary  `json:"model,omitempty"`
+	DeletedID string         `json:"deleted_id,omitempty"`
+	Models    []ModelSummary `json:"models"`
+	Message   string         `json:"message,omitempty"`
 }
 
 type SkillListPayload struct{}

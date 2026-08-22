@@ -87,6 +87,8 @@ type ModelConfigDocument struct {
 	ID                        string                      `bson:"_id"`
 	Name                      string                      `bson:"name"`
 	Provider                  string                      `bson:"provider"`
+	Protocol                  string                      `bson:"protocol,omitempty"`
+	AuthType                  string                      `bson:"auth_type,omitempty"`
 	BaseURL                   string                      `bson:"base_url"`
 	APIKey                    string                      `bson:"api_key"`
 	ModelName                 string                      `bson:"model_name"`

@@ -9,6 +9,7 @@ import (
 	modelcommand "myai/core/application/model/command"
 	domainmodel "myai/core/domain/model"
 	modelport "myai/core/port/model"
+	repository "myai/core/port/repository"
 )
 
 func TestConfigServiceAddConfigNormalizesPersistsAndRegistersModel(t *testing.T) {
@@ -64,21 +65,77 @@ func TestConfigServiceAddConfigRejectsDuplicateModel(t *testing.T) {
 	}
 }
 
-func TestConfigServiceAddConfigRequiresSupportedProvider(t *testing.T) {
-	_, err := (ConfigService{
+func TestConfigServiceAddConfigAllowsCustomProviderAndRequiresSupportedProtocol(t *testing.T) {
+	service := ConfigService{
+		Repository: &fakeConfigRepository{},
+		Registry:   &fakeModelRegistry{},
+		Factory:    &fakeModelFactory{model: fakeChatModel{}},
+	}
+	result, err := service.AddConfig(context.Background(), modelcommand.AddConfig{
+		ID:        "deepseek-chat",
+		Provider:  "deepseek",
+		BaseURL:   "https://api.deepseek.test/v1",
+		APIKey:    "secret",
+		ModelName: "deepseek-chat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Config.Provider != "deepseek" || result.Config.Protocol != domainmodel.ProtocolOpenAIChatCompletions {
+		t.Fatalf("unexpected custom provider config: %#v", result.Config)
+	}
+
+	_, err = (ConfigService{
 		Repository: &fakeConfigRepository{},
 		Registry:   &fakeModelRegistry{},
 		Factory:    &fakeModelFactory{model: fakeChatModel{}},
 	}).AddConfig(context.Background(), modelcommand.AddConfig{
 		ID:        "gpt-test",
-		Provider:  "other",
+		Provider:  "custom",
+		Protocol:  "custom-protocol",
 		BaseURL:   "https://example.test",
 		APIKey:    "secret",
 		ModelName: "gpt-test",
 	})
 
-	if err == nil || err.Error() != "unsupported provider: other" {
-		t.Fatalf("expected unsupported provider error, got %v", err)
+	if err == nil || err.Error() != "unsupported model protocol: custom-protocol" {
+		t.Fatalf("expected unsupported protocol error, got %v", err)
+	}
+}
+
+func TestConfigServiceAddConfigAllowsNoAuthWithoutAPIKey(t *testing.T) {
+	result, err := (ConfigService{
+		Repository: &fakeConfigRepository{},
+		Registry:   &fakeModelRegistry{},
+		Factory:    &fakeModelFactory{model: fakeChatModel{}},
+	}).AddConfig(context.Background(), modelcommand.AddConfig{
+		ID:        "ollama-local",
+		Provider:  "ollama",
+		AuthType:  domainmodel.AuthTypeNone,
+		BaseURL:   "http://127.0.0.1:11434/v1/",
+		ModelName: "qwen3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Config.BaseURL != "http://127.0.0.1:11434/v1" || result.Config.AuthType != domainmodel.AuthTypeNone {
+		t.Fatalf("unexpected no-auth config: %#v", result.Config)
+	}
+}
+
+func TestConfigServiceAddConfigRejectsFullChatCompletionsURL(t *testing.T) {
+	_, err := (ConfigService{
+		Repository: &fakeConfigRepository{},
+		Registry:   &fakeModelRegistry{},
+		Factory:    &fakeModelFactory{model: fakeChatModel{}},
+	}).AddConfig(context.Background(), modelcommand.AddConfig{
+		ID:        "invalid-url",
+		AuthType:  domainmodel.AuthTypeNone,
+		BaseURL:   "https://example.test/v1/chat/completions",
+		ModelName: "model",
+	})
+	if err == nil || err.Error() != "base url must be the API root and cannot include /chat/completions" {
+		t.Fatalf("expected API root error, got %v", err)
 	}
 }
 
@@ -115,6 +172,28 @@ func (r *fakeConfigRepository) SaveConfig(ctx context.Context, model domainmodel
 		return r.err
 	}
 	r.saved = model
+	return nil
+}
+
+func (r *fakeConfigRepository) GetConfig(ctx context.Context, id string) (domainmodel.Config, error) {
+	if r.saved.ID == id {
+		return r.saved, nil
+	}
+	return domainmodel.Config{}, repository.ErrNotFound
+}
+
+func (r *fakeConfigRepository) ListConfigs(ctx context.Context) ([]domainmodel.Config, error) {
+	if r.saved.ID == "" {
+		return nil, nil
+	}
+	return []domainmodel.Config{r.saved}, nil
+}
+
+func (r *fakeConfigRepository) DeleteConfig(ctx context.Context, id string) error {
+	if r.saved.ID != id {
+		return repository.ErrNotFound
+	}
+	r.saved = domainmodel.Config{}
 	return nil
 }
 
@@ -156,6 +235,18 @@ func (r *fakeModelRegistry) SetModelInfo(modelName string, model modelport.ChatM
 	r.infos[modelName] = info
 }
 
+func (r *fakeModelRegistry) RemoveModel(modelName string) bool {
+	if r.models == nil {
+		return false
+	}
+	if _, ok := r.models[modelName]; !ok {
+		return false
+	}
+	delete(r.models, modelName)
+	delete(r.infos, modelName)
+	return true
+}
+
 type fakeModelFactory struct {
 	config modelport.CreationConfig
 	model  modelport.ChatModelPort
@@ -168,6 +259,10 @@ func (f *fakeModelFactory) CreateModel(config modelport.CreationConfig) (modelpo
 	}
 	f.config = config
 	return f.model, nil
+}
+
+func (f *fakeModelFactory) SupportsProtocol(protocol domainmodel.Protocol) bool {
+	return domainmodel.NormalizeProtocol(protocol) == domainmodel.ProtocolOpenAIChatCompletions
 }
 
 type fakeChatModel struct{}

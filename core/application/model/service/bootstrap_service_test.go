@@ -7,6 +7,7 @@ import (
 
 	modelcommand "myai/core/application/model/command"
 	domainmodel "myai/core/domain/model"
+	repository "myai/core/port/repository"
 )
 
 func TestBootstrapServiceLoadsConfigsAndRegistersEnabledModels(t *testing.T) {
@@ -113,4 +114,20 @@ func (r *fakeBootstrapRepository) ListConfigs(ctx context.Context) ([]domainmode
 		return nil, r.err
 	}
 	return r.listed, nil
+}
+
+func (r *fakeBootstrapRepository) GetConfig(ctx context.Context, id string) (domainmodel.Config, error) {
+	for _, config := range r.listed {
+		if config.ID == id {
+			return config, nil
+		}
+	}
+	if r.saved.ID == id {
+		return r.saved, nil
+	}
+	return domainmodel.Config{}, repository.ErrNotFound
+}
+
+func (r *fakeBootstrapRepository) DeleteConfig(ctx context.Context, id string) error {
+	return nil
 }

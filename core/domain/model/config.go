@@ -9,6 +9,8 @@ type Config struct {
 	ID                        string
 	Name                      string
 	Provider                  string
+	Protocol                  Protocol
+	AuthType                  AuthType
 	BaseURL                   string
 	APIKey                    string
 	ModelName                 string

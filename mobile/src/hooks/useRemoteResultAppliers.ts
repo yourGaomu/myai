@@ -16,6 +16,9 @@ import type {
   HistoryListResultPayload,
   HistoryRevertResultPayload,
   ModelListResultPayload,
+  ModelConfigAddResultPayload,
+  ModelConfigMutationResultPayload,
+  ModelConfigTestResultPayload,
   ModelSummary,
   ModelSwitchResultPayload,
   Plan,
@@ -71,6 +74,8 @@ type Args = {
   setHistoryDiff: (diff: HistoryDiffResultPayload | null) => void;
   setHistoryMessage: (message: string) => void;
   setModels: (models: ModelSummary[]) => void;
+  setModelMessage: (message: string) => void;
+  setModelMessageError: (error: boolean) => void;
   setSelectedChange: (path: string) => void;
   setSkillMessage: (message: string) => void;
   setSkillRoot: (root: string) => void;
@@ -119,6 +124,8 @@ export function useRemoteResultAppliers({
   setHistoryDiff,
   setHistoryMessage,
   setModels,
+  setModelMessage,
+  setModelMessageError,
   setSelectedChange,
   setSkillMessage,
   setSkillRoot,
@@ -296,6 +303,7 @@ export function useRemoteResultAppliers({
 
     const applyModelList = (payload?: ModelListResultPayload) => {
       setModels(payload?.models || []);
+      setModelMessageError(false);
       if (payload?.current_model_id) {
         setCurrentModelID(payload.current_model_id);
       }
@@ -303,6 +311,7 @@ export function useRemoteResultAppliers({
 
     const applyModelSwitch = (payload?: ModelSwitchResultPayload) => {
       setModels(payload?.models || []);
+      setModelMessageError(false);
       if (payload?.current_model_id) {
         setCurrentModelID(payload.current_model_id);
       }
@@ -312,6 +321,28 @@ export function useRemoteResultAppliers({
         setSessionLastUsage(payload.session.id, payload.session.last_usage || null);
       }
       addEventMessage(payload?.session?.id || sessionIDRef.current, payload?.message || `Model switched to ${payload?.current_model_id || "selected model"}`);
+    };
+
+    const applyModelConfigAdd = (payload?: ModelConfigAddResultPayload) => {
+      setModels(payload?.models || []);
+      setModelMessageError(false);
+      setModelMessage(payload?.message || "模型已添加。");
+    };
+
+    const applyModelConfigTest = (payload?: ModelConfigTestResultPayload) => {
+      setModelMessageError(false);
+      setModelMessage(payload?.message || "连接测试成功。");
+    };
+
+    const applyModelConfigMutation = (payload?: ModelConfigMutationResultPayload) => {
+      setModels(payload?.models || []);
+      setModelMessageError(false);
+      setModelMessage(payload?.message || "模型设置已更新。");
+    };
+
+    const applyModelConfigError = (message: string) => {
+      setModelMessageError(true);
+      setModelMessage(message);
     };
 
     const applySkillList = (payload?: SkillListResultPayload) => {
@@ -426,6 +457,10 @@ export function useRemoteResultAppliers({
       applyHistoryList,
       applyHistoryRevert,
       applyModelList,
+      applyModelConfigAdd,
+      applyModelConfigTest,
+      applyModelConfigMutation,
+      applyModelConfigError,
       applyModelSwitch,
       applySkillList,
       applySessionChanged,
@@ -469,6 +504,8 @@ export function useRemoteResultAppliers({
     setHistoryDiff,
     setHistoryMessage,
     setModels,
+    setModelMessage,
+    setModelMessageError,
     setSelectedChange,
     setSkillMessage,
     setSkillRoot,

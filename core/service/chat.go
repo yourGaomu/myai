@@ -615,6 +615,34 @@ func (s *ChatService) AddModelConfig(ctx context.Context, command modelcommand.A
 	return err
 }
 
+func (s *ChatService) UpdateModelConfig(ctx context.Context, command modelcommand.UpdateConfig) error {
+	_, err := s.dependencies.ModelConfig.UpdateConfig(ctx, command)
+	return err
+}
+
+func (s *ChatService) SetModelEnabled(ctx context.Context, command modelcommand.SetEnabled) error {
+	_, err := s.dependencies.ModelConfig.SetEnabled(ctx, command)
+	return err
+}
+
+func (s *ChatService) SetDefaultModel(ctx context.Context, command modelcommand.SetDefault) error {
+	_, err := s.dependencies.ModelConfig.SetDefault(ctx, command)
+	return err
+}
+
+func (s *ChatService) DeleteModelConfig(ctx context.Context, command modelcommand.DeleteConfig) error {
+	_, err := s.dependencies.ModelConfig.DeleteConfig(ctx, command)
+	return err
+}
+
+func (s *ChatService) TestModelConfig(ctx context.Context, command modelcommand.AddConfig) (int64, error) {
+	result, err := s.dependencies.ModelConfig.TestConfig(ctx, command)
+	if err != nil {
+		return 0, err
+	}
+	return result.LatencyMS, nil
+}
+
 func (s *ChatService) CurrentSessionID() string {
 	return s.dependencies.CurrentState.State().SessionID
 }

@@ -1,4 +1,7 @@
 myai:
+  provider: openai
+  protocol: openai-chat-completions
+  auth_type: bearer
   base_url: https://mikasa,icu/v1
   api_key: "***REDACTED***"
   model: gpt-5.5

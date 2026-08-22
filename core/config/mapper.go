@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	grpcprocessor "myai/core/adapter/documentprocessor/grpc"
@@ -81,10 +82,16 @@ func (Mapper) LocalVectorStoreConfig(properties LocalKnowledgeProperties, path s
 
 func (m Mapper) ModelConfig(properties ModelProperties) domainmodel.Config {
 	now := m.now()
+	provider := strings.ToLower(strings.TrimSpace(properties.Provider))
+	if provider == "" {
+		provider = "openai"
+	}
 	return domainmodel.Config{
 		ID:        properties.ID,
 		Name:      properties.ID,
-		Provider:  "openai",
+		Provider:  provider,
+		Protocol:  domainmodel.NormalizeProtocol(domainmodel.Protocol(properties.Protocol)),
+		AuthType:  domainmodel.NormalizeAuthType(domainmodel.AuthType(properties.AuthType)),
 		BaseURL:   properties.BaseURL,
 		APIKey:    properties.APIKey,
 		ModelName: properties.ID,

@@ -7,6 +7,8 @@ export function useSessionModelState() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
   const [models, setModels] = useState<ModelSummary[]>([]);
+  const [modelMessage, setModelMessage] = useState("");
+  const [modelMessageError, setModelMessageError] = useState(false);
   const [sessionContexts, setSessionContexts] = useState<Record<string, ContextInfo>>({});
   const [sessionCompacts, setSessionCompacts] = useState<Record<string, CompactInfo>>({});
   const [currentModelID, setCurrentModelID] = useState("");
@@ -19,6 +21,8 @@ export function useSessionModelState() {
   }, []);
   const clearModels = useCallback(() => {
     setModels([]);
+    setModelMessage("");
+    setModelMessageError(false);
     setCurrentModelID("");
   }, []);
   const setSessionContext = useCallback((sessionID: string, context: ContextInfo) => {
@@ -38,6 +42,8 @@ export function useSessionModelState() {
     clearModels,
     clearSessions,
     currentModelID,
+    modelMessage,
+    modelMessageError,
     deletedSessions,
     models,
     sessionCompacts,
@@ -46,6 +52,8 @@ export function useSessionModelState() {
     setCurrentModelID,
     setDeletedSessions,
     setModels,
+    setModelMessage,
+    setModelMessageError,
     setSessionCompact,
     setSessionContext,
     setSessions,

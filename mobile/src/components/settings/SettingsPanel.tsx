@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { ButtonContent } from "../common/ButtonContent";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask } from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
 import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
 import { modelDisplayName } from "../../utils/session";
@@ -24,6 +25,8 @@ type Props = {
   generation?: SessionGenerationPreferences;
   generationStatus?: { error: boolean; message: string };
   currentModelID: string;
+  modelMessage: string;
+  modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
   normalizedRelayURL: string;
@@ -39,6 +42,13 @@ type Props = {
   onOpenPlan: () => void;
   onPair: () => void;
   onRefreshModels: () => void;
+  onAddModelConfig: (config: ModelConfigDraft) => void;
+  onUpdateModelConfig: (config: ModelConfigDraft) => void;
+  onDeleteModelConfig: (modelID: string) => void;
+  onSetModelEnabled: (modelID: string, enabled: boolean) => void;
+  onSetDefaultModel: (modelID: string) => void;
+  onClearModelMessage: () => void;
+  onTestModelConfig: (config: ModelConfigDraft) => void;
   onRequestContextInfo: () => void;
   onRequestGenerationPreferences: () => void;
   onRefreshSessions: () => void;
@@ -112,6 +122,8 @@ export function SettingsPanel({
   generation,
   generationStatus,
   currentModelID,
+  modelMessage,
+  modelMessageError,
   deviceID,
   models,
   normalizedRelayURL,
@@ -127,6 +139,13 @@ export function SettingsPanel({
   onOpenPlan,
   onPair,
   onRefreshModels,
+  onAddModelConfig,
+  onUpdateModelConfig,
+  onDeleteModelConfig,
+  onSetModelEnabled,
+  onSetDefaultModel,
+  onClearModelMessage,
+  onTestModelConfig,
   onRequestContextInfo,
   onRequestGenerationPreferences,
   onRefreshSessions,
@@ -173,6 +192,22 @@ export function SettingsPanel({
   const [maxTokensInput, setMaxTokensInput] = useState("");
   const [styleInput, setStyleInput] = useState("");
   const [generationError, setGenerationError] = useState("");
+  const [modelFormOpen, setModelFormOpen] = useState(false);
+  const [editingModelID, setEditingModelID] = useState("");
+  const [modelFormSubmitting, setModelFormSubmitting] = useState(false);
+  const [modelFormError, setModelFormError] = useState("");
+  const [modelForm, setModelForm] = useState({
+    id: "",
+    name: "",
+    provider: "custom",
+    authType: "bearer",
+    baseURL: "",
+    apiKey: "",
+    modelName: "",
+    defaultTemperature: "",
+    defaultTopP: "",
+    defaultMaxTokens: "",
+  });
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const requestContextInfoRef = useRef(onRequestContextInfo);
   const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
@@ -209,6 +244,19 @@ export function SettingsPanel({
     setGenerationError("");
   }, [generation]);
 
+  useEffect(() => {
+    if (!modelFormSubmitting || !modelMessage) {
+      return;
+    }
+    if (modelMessageError) {
+      setModelFormSubmitting(false);
+      return;
+    }
+    setModelFormSubmitting(false);
+    setModelFormOpen(false);
+    resetModelForm();
+  }, [modelFormSubmitting, modelMessage, modelMessageError]);
+
   const settingsBusy = pendingActions.settings;
   const generationBusy = pendingActions.generation;
   const contextBusy = pendingActions.context;
@@ -222,6 +270,88 @@ export function SettingsPanel({
       return;
     }
     onSetContextWindowK(nextWindowK);
+  };
+
+  const buildModelConfig = (allowEmptyAPIKey = false): ModelConfigDraft | null => {
+    const id = modelForm.id.trim();
+    const baseURL = modelForm.baseURL.trim();
+    const apiKey = modelForm.apiKey.trim();
+    const modelName = modelForm.modelName.trim() || id;
+    if (!id || !baseURL) {
+      setModelFormError("模型 ID 和 Base URL 不能为空。");
+      return null;
+    }
+    if (modelForm.authType === "bearer" && !apiKey && !allowEmptyAPIKey) {
+      setModelFormError("Bearer Token 认证必须填写 API Key。");
+      return null;
+    }
+
+    const temperature = parseOptionalSetting(modelForm.defaultTemperature, "默认 Temperature", 0, 2);
+    const topP = parseOptionalSetting(modelForm.defaultTopP, "默认 Top P", 0, 1);
+    const maxTokens = parseOptionalInteger(modelForm.defaultMaxTokens, "默认最大输出 Token", 1, 131072);
+    const error = temperature.error || topP.error || maxTokens.error;
+    if (error) {
+      setModelFormError(error);
+      return null;
+    }
+
+    setModelFormError("");
+    return {
+      id,
+      name: modelForm.name.trim() || id,
+      provider: modelForm.provider.trim() || "custom",
+      protocol: "openai-chat-completions",
+      auth_type: modelForm.authType,
+      base_url: baseURL,
+      api_key: apiKey,
+      model_name: modelName,
+      defaults: {
+        temperature: temperature.value,
+        top_p: topP.value,
+        max_output_tokens: maxTokens.value,
+      },
+    };
+  };
+
+  const resetModelForm = () => {
+    setEditingModelID("");
+    setModelForm({
+      id: "", name: "", provider: "custom", authType: "bearer", baseURL: "", apiKey: "", modelName: "",
+      defaultTemperature: "", defaultTopP: "", defaultMaxTokens: "",
+    });
+  };
+
+  const openModelEditor = (model: ModelSummary) => {
+    setEditingModelID(model.id);
+    setModelForm({
+      id: model.id,
+      name: model.name || model.id,
+      provider: model.provider || "custom",
+      authType: model.auth_type || "bearer",
+      baseURL: model.base_url || "",
+      apiKey: "",
+      modelName: model.model_name || model.id,
+      defaultTemperature: formatOverride(model.defaults?.temperature),
+      defaultTopP: formatOverride(model.defaults?.top_p),
+      defaultMaxTokens: formatOverride(model.defaults?.max_output_tokens),
+    });
+    setModelFormError("");
+    onClearModelMessage();
+    setModelFormOpen(true);
+  };
+
+  const confirmDeleteModel = (model: ModelSummary) => {
+    const runDelete = () => onDeleteModelConfig(model.id);
+    if (typeof window !== "undefined" && window.confirm) {
+      if (window.confirm(`删除模型 ${modelDisplayName(model)}？`)) {
+        runDelete();
+      }
+      return;
+    }
+    Alert.alert("删除模型？", modelDisplayName(model), [
+      { text: "取消", style: "cancel" },
+      { text: "删除", style: "destructive", onPress: runDelete },
+    ]);
   };
 
   const relaySection = (
@@ -322,7 +452,137 @@ export function SettingsPanel({
         >
           <ButtonContent loading={pendingActions.models} text={pendingActions.models ? "加载中" : "刷新"} />
         </Pressable>
+        <Pressable
+          disabled={pendingActions.models}
+          onPress={() => {
+            const nextOpen = !modelFormOpen;
+            setModelFormError("");
+            setModelFormSubmitting(false);
+            if (!nextOpen) {
+              resetModelForm();
+            }
+            if (nextOpen) {
+              onClearModelMessage();
+            }
+            setModelFormOpen(nextOpen);
+          }}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
+        >
+          <ButtonContent text={modelFormOpen ? "取消添加" : "添加第三方模型"} />
+        </Pressable>
       </View>
+
+      {modelFormOpen ? (
+        <View style={styles.controlBlock}>
+          <Text style={styles.controlTitle}>{editingModelID ? "编辑 OpenAI 兼容模型" : "添加 OpenAI 兼容模型"}</Text>
+          <Text style={styles.settingMeta}>Base URL 填写 API 根地址，例如 https://api.example.com/v1，不要填写 /chat/completions。</Text>
+          {([
+            ["id", "模型 ID", "例如 deepseek-chat"],
+            ["name", "显示名称", "可选"],
+            ["provider", "Provider", "例如 deepseek、ollama"],
+            ["baseURL", "Base URL", "例如 http://127.0.0.1:11434/v1"],
+            ["apiKey", "API Key", "无认证服务可留空"],
+            ["modelName", "厂商模型名", "例如 deepseek-chat"],
+          ] as const).map(([key, label, placeholder]) => (
+            <TextInput
+              key={key}
+              autoCapitalize="none"
+              onChangeText={(value) => setModelForm((current) => ({ ...current, [key]: value }))}
+              placeholder={`${label}: ${placeholder}`}
+              placeholderTextColor="#776f66"
+              secureTextEntry={key === "apiKey"}
+              style={styles.input}
+              value={modelForm[key]}
+            />
+          ))}
+          <Text style={styles.settingMeta}>{editingModelID ? "API Key 留空表示保留原密钥" : "认证方式"}</Text>
+          <View style={styles.modeRow}>
+            {([
+              ["bearer", "Bearer Token", "需要 API Key"],
+              ["none", "无认证", "本地服务常用"],
+            ] as const).map(([value, label, meta]) => (
+              <Pressable
+                key={value}
+                onPress={() => setModelForm((current) => ({
+                  ...current,
+                  authType: value,
+                  apiKey: value === "none" ? "" : current.apiKey,
+                }))}
+                style={({ pressed }) => buttonFeedback([
+                  styles.modeChip,
+                  modelForm.authType === value && styles.modeChipActive,
+                ], pressed)}
+              >
+                <Text style={styles.modeChipTitle}>{label}</Text>
+                <Text style={styles.modeChipMeta}>{meta}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.settingMeta}>模型默认生成参数（留空表示使用系统默认值）</Text>
+          <View style={styles.row}>
+            <TextInput
+              keyboardType="decimal-pad"
+              onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTemperature: value }))}
+              placeholder="Temperature 0-2"
+              placeholderTextColor="#776f66"
+              style={[styles.input, styles.flex]}
+              value={modelForm.defaultTemperature}
+            />
+            <TextInput
+              keyboardType="decimal-pad"
+              onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTopP: value }))}
+              placeholder="Top P 0-1"
+              placeholderTextColor="#776f66"
+              style={[styles.input, styles.flex]}
+              value={modelForm.defaultTopP}
+            />
+            <TextInput
+              keyboardType="number-pad"
+              onChangeText={(value) => setModelForm((current) => ({ ...current, defaultMaxTokens: value }))}
+              placeholder="Max Tokens"
+              placeholderTextColor="#776f66"
+              style={[styles.input, styles.flex]}
+              value={modelForm.defaultMaxTokens}
+            />
+          </View>
+          <View style={styles.row}>
+            <Pressable
+              disabled={pendingActions.models}
+              onPress={() => {
+                const config = buildModelConfig(Boolean(editingModelID));
+                if (!config) {
+                  return;
+                }
+                onClearModelMessage();
+                setModelFormSubmitting(true);
+                if (editingModelID) {
+                  onUpdateModelConfig(config);
+                } else {
+                  onAddModelConfig(config);
+                }
+              }}
+              style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.models && styles.disabledButton], pressed)}
+            >
+              <ButtonContent loading={pendingActions.models} text={editingModelID ? "保存修改" : "保存模型"} />
+            </Pressable>
+            <Pressable
+              disabled={pendingActions.models}
+              onPress={() => {
+                const config = buildModelConfig();
+                if (!config) {
+                  return;
+                }
+                onClearModelMessage();
+                onTestModelConfig(config);
+              }}
+              style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
+            >
+              <ButtonContent loading={pendingActions.models} text="测试连接" />
+            </Pressable>
+          </View>
+          {modelFormError ? <Text style={styles.generationMessage}>{modelFormError}</Text> : null}
+        </View>
+      ) : null}
 
       {models.length > 0 ? (
         <View style={styles.modelGrid}>
@@ -330,25 +590,42 @@ export function SettingsPanel({
             const selected = model.id === currentModelID;
             const disabled = model.enabled === false;
             return (
-              <Pressable
-                disabled={disabled || selected || pendingActions.models}
-                key={model.id}
-                onPress={() => onSwitchModel(model.id)}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.modelChip, selected && styles.modelChipActive, disabled && styles.disabledButton], pressed)
-                }
-              >
-                <Text style={styles.modelTitle}>{modelDisplayName(model)}</Text>
-                <Text style={styles.modelMeta}>
-                  {model.provider || "provider"} / {model.model_name || model.id}
-                </Text>
-              </Pressable>
+              <View key={model.id} style={[styles.modelChip, selected && styles.modelChipActive, disabled && styles.disabledButton]}>
+                <Pressable
+                  disabled={disabled || selected || pendingActions.models}
+                  onPress={() => onSwitchModel(model.id)}
+                  style={({ pressed }) => buttonFeedback([styles.modelInfoButton], pressed)}
+                >
+                  <Text style={styles.modelTitle}>{modelDisplayName(model)}{model.is_default ? " · 默认" : ""}</Text>
+                  <Text style={styles.modelMeta}>{model.provider || "provider"} / {model.model_name || model.id}</Text>
+                  <Text numberOfLines={1} style={styles.modelMeta}>
+                    {(model.protocol || "openai-chat-completions")} · {(model.auth_type || "bearer")} · {model.has_api_key ? "已配置密钥" : "无密钥"}
+                  </Text>
+                  <Text style={styles.modelMeta}>{disabled ? "已禁用" : selected ? "当前会话正在使用" : "点击切换会话模型"}</Text>
+                  {model.base_url ? <Text numberOfLines={1} style={styles.modelMeta}>{model.base_url}</Text> : null}
+                </Pressable>
+                <View style={styles.modelActions}>
+                  <Pressable disabled={pendingActions.models} onPress={() => onSetDefaultModel(model.id)} style={({ pressed }) => buttonFeedback([styles.modelAction, model.is_default && styles.modelActionActive, pendingActions.models && styles.disabledButton], pressed)}>
+                    <Text style={styles.modelActionText}>{model.is_default ? "默认" : "设为默认"}</Text>
+                  </Pressable>
+                  <Pressable disabled={pendingActions.models} onPress={() => onSetModelEnabled(model.id, disabled)} style={({ pressed }) => buttonFeedback([styles.modelAction, pendingActions.models && styles.disabledButton], pressed)}>
+                    <Text style={styles.modelActionText}>{disabled ? "启用" : "禁用"}</Text>
+                  </Pressable>
+                  <Pressable disabled={pendingActions.models} onPress={() => openModelEditor(model)} style={({ pressed }) => buttonFeedback([styles.modelAction, pendingActions.models && styles.disabledButton], pressed)}>
+                    <Text style={styles.modelActionText}>编辑</Text>
+                  </Pressable>
+                  <Pressable disabled={pendingActions.models} onPress={() => confirmDeleteModel(model)} style={({ pressed }) => buttonFeedback([styles.modelActionDanger, pendingActions.models && styles.disabledButton], pressed)}>
+                    <Text style={styles.modelActionText}>删除</Text>
+                  </Pressable>
+                </View>
+              </View>
             );
           })}
         </View>
       ) : (
         <EmptyBox text={clientToken ? "还没有加载模型，点击刷新试试" : "先完成配对，再加载模型"} />
       )}
+      {modelMessage ? <Text style={modelMessageError ? styles.generationMessage : styles.generationSuccess}>{modelMessage}</Text> : null}
     </View>
   );
 
@@ -1418,6 +1695,43 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 132,
     padding: 10,
+  },
+  modelInfoButton: {
+    flex: 1,
+    minWidth: 0,
+  },
+  modelActions: {
+    borderColor: "#12100e",
+    borderTopWidth: 2,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginTop: 8,
+    paddingTop: 8,
+  },
+  modelAction: {
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 4,
+    borderWidth: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+  },
+  modelActionActive: {
+    backgroundColor: "#ffd84f",
+  },
+  modelActionDanger: {
+    backgroundColor: "#ffb4a7",
+    borderColor: "#12100e",
+    borderRadius: 4,
+    borderWidth: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+  },
+  modelActionText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
   },
   modelChipActive: {
     backgroundColor: "#b9e9b0",

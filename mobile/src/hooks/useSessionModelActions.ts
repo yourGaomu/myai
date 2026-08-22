@@ -1,12 +1,24 @@
 import { Alert, Platform } from "react-native";
 import { useCallback, type RefObject } from "react";
 
-import type { RelayMessage, SessionSummary, TokenUsage } from "../protocol";
+import type { GenerationSettings, RelayMessage, SessionSummary, TokenUsage } from "../protocol";
 import type { PendingAction, PermissionState } from "../types/app";
 import { newRequestID } from "../utils/ids";
 import { findSessionUsage } from "../utils/session";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
+
+export type ModelConfigDraft = {
+  id: string;
+  name: string;
+  provider: string;
+  protocol: string;
+  auth_type: string;
+  base_url: string;
+  api_key: string;
+  model_name: string;
+  defaults: GenerationSettings;
+};
 
 type Args = {
   activeRequestIDRef: RefObject<string>;
@@ -155,11 +167,74 @@ export function useSessionModelActions({
     [currentModelID, sendEnvelope, startPending, stopPending],
   );
 
+  const addModelConfig = useCallback((config: ModelConfigDraft) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_add", {
+      request_id: newRequestID(),
+      payload: config,
+    })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
+  const testModelConfig = useCallback((config: ModelConfigDraft) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_test", {
+      request_id: newRequestID(),
+      payload: config,
+    })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
+  const updateModelConfig = useCallback((config: ModelConfigDraft) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_update", { request_id: newRequestID(), payload: config })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
+  const setModelEnabled = useCallback((modelID: string, enabled: boolean) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_enabled_set", {
+      request_id: newRequestID(),
+      payload: { id: modelID, enabled },
+    })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
+  const setDefaultModel = useCallback((modelID: string) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_default_set", {
+      request_id: newRequestID(),
+      payload: { id: modelID },
+    })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
+  const deleteModelConfig = useCallback((modelID: string) => {
+    startPending("models");
+    if (!sendEnvelope("model_config_delete", {
+      request_id: newRequestID(),
+      payload: { id: modelID },
+    })) {
+      stopPending("models");
+    }
+  }, [sendEnvelope, startPending, stopPending]);
+
   return {
+    addModelConfig,
+    deleteModelConfig,
     deleteSession,
     loadSession,
     newSession,
     restoreSession,
     switchModel,
+    setDefaultModel,
+    setModelEnabled,
+    testModelConfig,
+    updateModelConfig,
   };
 }

@@ -66,6 +66,9 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	properties := Properties{
 		Model: ModelProperties{
 			ID:              strings.TrimSpace(v.GetString("myai.model")),
+			Provider:        strings.ToLower(strings.TrimSpace(v.GetString("myai.provider"))),
+			Protocol:        strings.ToLower(strings.TrimSpace(v.GetString("myai.protocol"))),
+			AuthType:        strings.ToLower(strings.TrimSpace(v.GetString("myai.auth_type"))),
 			BaseURL:         strings.TrimSpace(v.GetString("myai.base_url")),
 			APIKey:          strings.TrimSpace(v.GetString("myai.api_key")),
 			Temperature:     optionalFloat64(v, "myai.temperature"),

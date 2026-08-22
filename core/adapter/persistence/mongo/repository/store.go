@@ -162,6 +162,8 @@ func (m *Store) SaveConfig(ctx context.Context, model domainmodel.Config) error 
 	setValues := bson.M{
 		"name":       document.Name,
 		"provider":   document.Provider,
+		"protocol":   document.Protocol,
+		"auth_type":  document.AuthType,
 		"base_url":   document.BaseURL,
 		"api_key":    document.APIKey,
 		"model_name": document.ModelName,
@@ -189,6 +191,25 @@ func (m *Store) SaveConfig(ctx context.Context, model domainmodel.Config) error 
 		options.UpdateOne().SetUpsert(true),
 	)
 	return err
+}
+
+func (m *Store) GetConfig(ctx context.Context, modelID string) (domainmodel.Config, error) {
+	var document po.ModelConfigDocument
+	if err := m.template.FindOne(ctx, modelConfigsCollection, bson.M{"_id": modelID}, &document); err != nil {
+		return domainmodel.Config{}, repositoryError(err)
+	}
+	return mongomapper.ModelConfigDomainFromDocument(document), nil
+}
+
+func (m *Store) DeleteConfig(ctx context.Context, modelID string) error {
+	result, err := m.template.DeleteMany(ctx, modelConfigsCollection, bson.M{"_id": modelID})
+	if err != nil {
+		return err
+	}
+	if result.DeletedCount == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
 }
 
 func (m *Store) SaveMessage(ctx context.Context, message repository.MessageRecord) error {

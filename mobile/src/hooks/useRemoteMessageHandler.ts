@@ -27,6 +27,9 @@ import type {
   KnowledgeProfileListResultPayload,
   KnowledgeSearchPreviewResultPayload,
   ModelListResultPayload,
+  ModelConfigAddResultPayload,
+  ModelConfigMutationResultPayload,
+  ModelConfigTestResultPayload,
   ModelSwitchResultPayload,
   PermissionAskPayload,
   RelayMessage,
@@ -106,6 +109,11 @@ type Args = {
   applyAIMemoryDreamResult: (payload?: AIMemoryDreamResultPayload) => void;
   applyAIMemoryError: (message: string) => void;
   applyModelList: (payload?: ModelListResultPayload) => void;
+  applyModelConfigAdd: (payload?: ModelConfigAddResultPayload) => void;
+  applyModelConfigTest: (payload?: ModelConfigTestResultPayload) => void;
+  applyModelConfigMutation: (payload?: ModelConfigMutationResultPayload) => void;
+  applyModelConfigError: (message: string) => void;
+  isModelOperationPending: boolean;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
   applySessionChanged: (payload?: SessionChangedPayload) => void;
   applySessionHistoryDelta: (
@@ -210,6 +218,11 @@ export function useRemoteMessageHandler({
   applyAIMemoryDreamResult,
   applyAIMemoryError,
   applyModelList,
+  applyModelConfigAdd,
+  applyModelConfigTest,
+  applyModelConfigMutation,
+  applyModelConfigError,
+  isModelOperationPending,
   applyModelSwitch,
   applySessionChanged,
   applySessionHistoryDelta,
@@ -537,6 +550,18 @@ export function useRemoteMessageHandler({
           );
           requestSessions();
           break;
+        case "model_config_add_result":
+          stopPending("models");
+          applyModelConfigAdd(message.payload as ModelConfigAddResultPayload | undefined);
+          break;
+        case "model_config_test_result":
+          stopPending("models");
+          applyModelConfigTest(message.payload as ModelConfigTestResultPayload | undefined);
+          break;
+        case "model_config_mutation_result":
+          stopPending("models");
+          applyModelConfigMutation(message.payload as ModelConfigMutationResultPayload | undefined);
+          break;
         case "skill_list_result":
         case "skill_reload_result":
           stopPending("skills");
@@ -655,6 +680,10 @@ export function useRemoteMessageHandler({
           break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
+          if (isModelOperationPending) {
+            stopPending("models");
+            applyModelConfigError(payload.message || "模型操作失败");
+          }
           if (isGenerationOperationPending) {
             applySessionGenerationError(payload.message || "生成设置保存失败");
           }
@@ -749,6 +778,11 @@ export function useRemoteMessageHandler({
       applyAIMemoryDreamResult,
       applyAIMemoryError,
       applyModelList,
+      applyModelConfigAdd,
+      applyModelConfigTest,
+      applyModelConfigMutation,
+      applyModelConfigError,
+      isModelOperationPending,
       applyModelSwitch,
       applySessionChanged,
       applySessionHistoryDelta,

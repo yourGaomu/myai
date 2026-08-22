@@ -252,9 +252,14 @@ func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
 			ID:        model.ID,
 			Name:      model.Name,
 			Provider:  model.Provider,
+			Protocol:  string(model.Protocol),
+			AuthType:  string(model.AuthType),
+			BaseURL:   model.BaseURL,
+			HasAPIKey: model.HasAPIKey,
 			ModelName: model.ModelName,
 			Enabled:   model.Enabled,
 			IsDefault: model.IsDefault,
+			Defaults:  generationSettingsPayload(model.DefaultGenerationSettings),
 		})
 	}
 	return summaries

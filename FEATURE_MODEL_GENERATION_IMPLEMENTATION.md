@@ -484,6 +484,78 @@ SettingsPanel
 
 其中 `session_overrides` 和 `model_defaults` 保留可空字段，`effective` 一定是经过三级解析后的完整数值。界面会分别标明“模型未设置”和“系统兜底”，不会把系统值误显示为模型配置。
 
+### 21.2 添加第三方模型
+
+当前新增模型只支持 OpenAI Chat Completions 兼容协议。这里的 `BaseURL` 是 API 根地址，例如：
+
+```text
+https://api.example.com/v1
+```
+
+它不是协议名，运行时由 LangChainGo 在根地址后拼接 `/chat/completions`。因此不能把完整的
+`/chat/completions` 地址再次作为 `BaseURL` 保存。模型配置中的几个概念必须分开：
+
+| 字段 | 含义 |
+|---|---|
+| `Provider` | 厂商标签，可填写 `deepseek`、`ollama` 等自由文本 |
+| `Protocol` | 当前固定为 `openai-chat-completions` |
+| `AuthType` | `bearer` 或 `none` |
+| `BaseURL` | API 根地址，不包含凭据、Query 或 Fragment |
+| `ModelName` | 厂商识别的模型名 |
+
+保存调用链为：
+
+```text
+Mobile SettingsPanel
+-> model_config_add
+-> Relay
+-> Agent.handleModelConfigAdd
+-> ChatService.AddModelConfig
+-> ModelConfigService.AddConfig
+-> Factory.CreateModel
+-> Mongo SaveConfig
+-> Registry.SetModelInfo
+-> model_config_add_result
+```
+
+新增模型只有在 Factory 创建成功、Mongo 保存成功后才进入运行时 Registry。`ModelSummary` 只返回
+`has_api_key`，不会把原始 API Key 返回给手机端；当前 API Key 仍以配置数据库中的明文保存，这是待后续接入加密密钥存储的安全风险。
+
+保存前的连接测试使用独立的 `model_config_test` 协议。它复用相同的校验和 Factory，但只创建临时模型，
+使用一次最小请求，并设置 30 秒超时；测试成功不会写 Mongo，也不会注册模型。这样“地址是否可用”和“是否保存模型”
+是两个明确的用例：
+
+```text
+Mobile -> model_config_test
+       -> ConfigService.TestConfig
+       -> transient Factory model.Generate
+       -> model_config_test_result { success, latency_ms, message }
+```
+
+Mobile 的认证方式必须显式选择。`Bearer Token` 需要 API Key；`无认证`适用于本地兼容服务，Factory 会移除
+`Authorization` 请求头。模型默认 `temperature`、`top_p` 和 `max_output_tokens` 可以在添加表单中填写，
+留空表示继续使用系统兜底值。
+
+### 21.3 模型配置生命周期
+
+模型保存后仍然可以从 Mobile 设置页管理。四个管理操作都经过 Relay 和 Agent，最终由同一个
+`ModelConfigService` 修改 Mongo 配置并同步运行时 Registry：
+
+```text
+model_config_update       -> UpdateConfig       -> 重建启用模型 -> SaveConfig -> SetModelInfo
+model_config_enabled_set  -> SetEnabled        -> 校验会话引用 -> 创建或移除运行时模型
+model_config_default_set  -> SetDefault        -> 更新所有 is_default -> 更新新建会话默认模型
+model_config_delete       -> DeleteConfig      -> 校验默认值和会话引用 -> 删除配置和 Registry
+```
+
+编辑模型时，`api_key` 留空不会覆盖旧密钥；如果用户明确切换为 `none`，则会清除旧密钥。
+默认模型不能直接删除或禁用，正在被任意会话使用的模型也不能删除或禁用，避免已有 Session
+在下一轮生成时突然失去模型。`llm.Client` 内部使用读写锁，生成请求读取 Registry 的同时，
+模型管理请求可以安全地更新或删除 Map。
+
+所有管理操作都返回 `model_config_mutation_result` 和完整模型列表，Mobile 以服务端列表为准，
+不在本地推测默认值、启用状态或删除结果。
+
 参数保存使用独立协议：
 
 ```text

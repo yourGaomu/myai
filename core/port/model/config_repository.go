@@ -11,10 +11,16 @@ type ConfigWriter interface {
 }
 
 type ConfigReader interface {
+	GetConfig(ctx context.Context, modelID string) (domainmodel.Config, error)
 	ListConfigs(ctx context.Context) ([]domainmodel.Config, error)
+}
+
+type ConfigDeleter interface {
+	DeleteConfig(ctx context.Context, modelID string) error
 }
 
 type ConfigRepository interface {
 	ConfigWriter
 	ConfigReader
+	ConfigDeleter
 }

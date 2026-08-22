@@ -1,4 +1,7 @@
 myai:
+  provider: "openai"
+  protocol: "openai-chat-completions"
+  auth_type: "bearer"
   base_url: ""
   api_key: ""
   model: "gpt-5.5"

@@ -32,6 +32,7 @@ type Store struct {
 	mu               sync.RWMutex
 	currentSessionId string
 	currentModelId   string
+	defaultModelId   string
 	session          map[string]*Session
 }
 
@@ -42,6 +43,7 @@ func NewStore(modelID string) *Store {
 
 	return &Store{
 		currentModelId:   modelID,
+		defaultModelId:   modelID,
 		currentSessionId: "",
 		session:          make(map[string]*Session),
 	}
@@ -52,7 +54,7 @@ func (sm *Store) NewSession() error {
 	defer sm.mu.Unlock()
 
 	sm.currentSessionId = uuid.NewString()
-	sm.session[sm.currentSessionId] = newSession(sm.currentSessionId, sm.currentModelId, AgentModeChat, PermissionModeAsk, 0, "", 0, llm.TokenUsage{}, llm.TokenUsage{}, nil)
+	sm.session[sm.currentSessionId] = newSession(sm.currentSessionId, sm.defaultModelId, AgentModeChat, PermissionModeAsk, 0, "", 0, llm.TokenUsage{}, llm.TokenUsage{}, nil)
 	sm.currentModelId = sm.session[sm.currentSessionId].Model
 	return nil
 }
@@ -113,7 +115,7 @@ func (sm *Store) PutSessionState(state domainsession.InitialState, setCurrent bo
 	defer sm.mu.Unlock()
 
 	if state.Model == "" {
-		state.Model = sm.currentModelId
+		state.Model = sm.defaultModelId
 	}
 
 	if setCurrent {
@@ -122,6 +124,19 @@ func (sm *Store) PutSessionState(state domainsession.InitialState, setCurrent bo
 	}
 	sm.session[state.ID] = domainsession.NewFromState(state)
 	return nil
+}
+
+func (sm *Store) SetDefaultModel(modelID string) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.defaultModelId = modelID
+	if sm.currentSessionId == "" {
+		sm.currentModelId = modelID
+	}
 }
 
 func (sm *Store) UseSession(sessionID string) error {

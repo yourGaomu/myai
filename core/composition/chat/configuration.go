@@ -9,6 +9,7 @@ import (
 	taskrecorder "myai/core/adapter/history/taskrecorder"
 	hookevents "myai/core/adapter/hook/events"
 	uuidadapter "myai/core/adapter/id/uuid"
+	modelusage "myai/core/adapter/modelusage/session"
 	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
 	chatmessagerepository "myai/core/adapter/persistence/chatmessage/repository"
 	toolrecordsrepository "myai/core/adapter/persistence/toolrecords/repository"
@@ -352,6 +353,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 			Repository: configuration.Store,
 			Registry:   configuration.Models,
 			Factory:    configuration.ModelFactory,
+			Usage:      modelusage.Checker{Sessions: configuration.Store},
+			Default:    configuration.Sessions,
 		},
 		ModelQueries:    modelservice.QueryService{Catalog: configuration.Models},
 		SkillCatalog:    skillCatalog,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agentrunresult "myai/core/application/agentrun/result"
+	modelcommand "myai/core/application/model/command"
 	sessionresult "myai/core/application/session/result"
 	"myai/core/domain/generation"
 	"myai/core/llm"
@@ -63,6 +64,12 @@ type CurrentSessionFacade interface {
 
 type CatalogFacade interface {
 	ListModels() []llm.ModelInfo
+	AddModelConfig(ctx context.Context, command modelcommand.AddConfig) error
+	UpdateModelConfig(ctx context.Context, command modelcommand.UpdateConfig) error
+	SetModelEnabled(ctx context.Context, command modelcommand.SetEnabled) error
+	SetDefaultModel(ctx context.Context, command modelcommand.SetDefault) error
+	DeleteModelConfig(ctx context.Context, command modelcommand.DeleteConfig) error
+	TestModelConfig(ctx context.Context, command modelcommand.AddConfig) (int64, error)
 	ListSkills(ctx context.Context) ([]skill.Skill, error)
 	ReloadSkills(ctx context.Context, reason string) ([]skill.Skill, error)
 	SkillRoot() string

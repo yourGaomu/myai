@@ -56,6 +56,15 @@ export type MessageType =
   | "model_list_result"
   | "model_switch"
   | "model_switch_result"
+  | "model_config_add"
+  | "model_config_add_result"
+  | "model_config_test"
+  | "model_config_test_result"
+  | "model_config_update"
+  | "model_config_delete"
+  | "model_config_enabled_set"
+  | "model_config_default_set"
+  | "model_config_mutation_result"
   | "skill_list"
   | "skill_list_result"
   | "skill_reload"
@@ -605,9 +614,14 @@ export type ModelSummary = {
   id: string;
   name?: string;
   provider?: string;
+  protocol?: string;
+  auth_type?: string;
+  base_url?: string;
+  has_api_key?: boolean;
   model_name?: string;
   enabled?: boolean;
   is_default?: boolean;
+  defaults?: GenerationSettings;
 };
 
 export type ModelListResultPayload = {
@@ -623,6 +637,53 @@ export type ModelSwitchResultPayload = {
   current_model_id?: string;
   models?: ModelSummary[];
   session?: SessionSummary;
+  message?: string;
+};
+
+export type ModelConfigAddPayload = {
+  id: string;
+  name?: string;
+  provider?: string;
+  protocol?: string;
+  auth_type?: string;
+  base_url: string;
+  api_key?: string;
+  model_name?: string;
+  is_default?: boolean;
+  defaults?: GenerationSettings;
+};
+
+export type ModelConfigAddResultPayload = {
+  model?: ModelSummary;
+  models?: ModelSummary[];
+  message?: string;
+};
+
+export type ModelConfigTestResultPayload = {
+  success?: boolean;
+  latency_ms?: number;
+  message?: string;
+};
+
+export type ModelConfigUpdatePayload = ModelConfigAddPayload;
+
+export type ModelConfigDeletePayload = {
+  id: string;
+};
+
+export type ModelConfigEnabledSetPayload = {
+  id: string;
+  enabled: boolean;
+};
+
+export type ModelConfigDefaultSetPayload = {
+  id: string;
+};
+
+export type ModelConfigMutationResultPayload = {
+  model?: ModelSummary;
+  deleted_id?: string;
+  models?: ModelSummary[];
   message?: string;
 };
 

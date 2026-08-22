@@ -37,6 +37,7 @@ import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissio
 import type { ChatItem } from "../types/chat";
 import type { KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
+import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
 
 export type MainContentCommonProps = {
   buttonFeedback: ButtonFeedback;
@@ -56,6 +57,8 @@ export type SettingsContentProps = {
   bindCode: string;
   connected: boolean;
   currentModelID: string;
+  modelMessage: string;
+  modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
   normalizedRelayURL: string;
@@ -71,6 +74,13 @@ export type SettingsContentProps = {
   onExecutePlan: () => void;
   onOpenPlan: () => void;
   onRefreshModels: () => void;
+  onAddModelConfig: (config: ModelConfigDraft) => void;
+  onUpdateModelConfig: (config: ModelConfigDraft) => void;
+  onDeleteModelConfig: (modelID: string) => void;
+  onSetModelEnabled: (modelID: string, enabled: boolean) => void;
+  onSetDefaultModel: (modelID: string) => void;
+  onClearModelMessage: () => void;
+  onTestModelConfig: (config: ModelConfigDraft) => void;
   onRequestContextInfo: () => void;
   onRequestGenerationPreferences: () => void;
   onRefreshSessions: () => void;

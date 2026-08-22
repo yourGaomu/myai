@@ -19,6 +19,35 @@ cd mobile
 npm run typecheck
 ```
 
+## 2026-08-22：第三方模型配置与连接测试
+
+新增 OpenAI Chat Completions 兼容模型的运行时添加能力，支持 Provider、Protocol、AuthType、BaseURL 和厂商模型名分离配置。
+
+已实现：
+
+- Mongo 模型配置、YAML 配置、Registry 元数据和 LangChainGo Factory 同步支持协议与认证类型。
+- Mobile 设置页支持添加第三方模型、显式选择 Bearer Token/无认证、填写模型默认生成参数。
+- Base URL 严格要求为 HTTP/HTTPS API 根地址，不允许凭据、Query、Fragment 或 `/chat/completions`。
+- 新增 `model_config_add`、`model_config_add_result`，API Key 永不返回 Mobile，只返回 `has_api_key`。
+- 新增 `model_config_test`、`model_config_test_result`；测试创建临时模型并发起最小请求，不持久化、不注册，超时 30 秒。
+- Mobile 能把模型操作失败显示在模型设置区域；保存请求失败时保留表单内容，成功后才关闭并清空表单。
+- CLI `/model add` 支持认证类型和模型默认生成参数。
+- 模型配置新增编辑、删除、启用/禁用和设置默认模型；编辑时 API Key 留空表示保留旧密钥。
+- 新增 `model_config_update`、`model_config_delete`、`model_config_enabled_set`、`model_config_default_set` 和统一的 `model_config_mutation_result` 协议，Mobile 统一用服务端最新列表刷新状态。
+- 删除或禁用模型前检查会话引用；默认模型不能直接删除或禁用，必须先选择其他默认模型。
+- `llm.Client` 的运行时 Registry 增加读写锁和模型移除能力，避免生成请求与模型管理并发读写 Map。
+- Model Summary 返回模型默认生成参数，编辑表单复用添加表单并支持启用/禁用、设为默认、编辑和删除。
+
+验证命令：
+
+```powershell
+go test ./core/application/model/... ./core/adapter/persistence/mongo/mapper ./core/adapter/model/langchaingo ./core/llm ./core/remote/agent ./core/remote/relay ./core/architecture
+cd mobile
+npm run typecheck
+```
+
+已知风险：当前 API Key 仍以明文保存在模型配置数据库中，后续需要接入加密密钥存储或系统 Secret 管理。
+
 ### 第二优先级：资料知识库操作区
 
 - 目录创建、知识库创建和目录管理迁移到响应式弹层，目录树数量不会再影响操作区的位置。

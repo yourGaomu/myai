@@ -43,9 +43,7 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 
 	defaultModelID := DefaultModelID(configs, command.FallbackModelID)
 	for _, config := range configs {
-		if !config.Enabled {
-			continue
-		}
+		config = normalizeModelConfig(config)
 		modelID := config.ID
 		if err := generation.Validate(config.DefaultGenerationSettings); err != nil {
 			return modelresult.Bootstrap{}, fmt.Errorf("invalid generation settings for model %s: %w", modelID, err)
@@ -55,20 +53,29 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 			modelName = modelID
 		}
 
-		model, err := s.Factory.CreateModel(modelport.CreationConfig{
-			Provider:  config.Provider,
-			APIKey:    config.APIKey,
-			BaseURL:   config.BaseURL,
-			ModelName: modelName,
-		})
-		if err != nil {
-			return modelresult.Bootstrap{}, fmt.Errorf("create model %s failed: %w", modelID, err)
+		var model modelport.ChatModelPort
+		if config.Enabled {
+			model, err = s.Factory.CreateModel(modelport.CreationConfig{
+				Provider:  config.Provider,
+				Protocol:  config.Protocol,
+				AuthType:  config.AuthType,
+				APIKey:    config.APIKey,
+				BaseURL:   config.BaseURL,
+				ModelName: modelName,
+			})
+			if err != nil {
+				return modelresult.Bootstrap{}, fmt.Errorf("create model %s failed: %w", modelID, err)
+			}
 		}
 
 		s.Registry.SetModelInfo(modelID, model, modelport.ModelInfo{
 			ID:                        modelID,
 			Name:                      config.Name,
 			Provider:                  config.Provider,
+			Protocol:                  config.Protocol,
+			AuthType:                  config.AuthType,
+			BaseURL:                   config.BaseURL,
+			HasAPIKey:                 config.APIKey != "",
 			ModelName:                 modelName,
 			Enabled:                   config.Enabled,
 			IsDefault:                 config.IsDefault || modelID == defaultModelID,
@@ -76,7 +83,7 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 		})
 	}
 
-	if len(s.Registry.ListModels()) == 0 {
+	if defaultModelID == "" || !s.Registry.HasModel(defaultModelID) {
 		return modelresult.Bootstrap{}, errors.New("no enabled model urlConfig")
 	}
 

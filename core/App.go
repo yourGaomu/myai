@@ -652,7 +652,7 @@ func (app *Application) InitClient() {
 	result, err := (modelservice.BootstrapService{
 		Repository: app.store,
 		Registry:   app.client,
-		Factory:    adaptermodel.Factory{},
+		Factory:    adaptermodel.NewFactory(),
 	}).Bootstrap(context.Background(), modelcommand.Bootstrap{
 		Seed:            (appconfig.Mapper{}).ModelConfig(app.properties.Model),
 		FallbackModelID: app.properties.Model.ID,
@@ -713,7 +713,7 @@ func (app *Application) InitChatService() {
 	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
 		Models:           app.client,
-		ModelFactory:     adaptermodel.Factory{},
+		ModelFactory:     adaptermodel.NewFactory(),
 		Sessions:         app.sessionMemory,
 		Store:            app.store,
 		Cache:            app.cache,

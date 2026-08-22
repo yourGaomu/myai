@@ -30,6 +30,9 @@ type MemoryDreamProperties struct {
 
 type ModelProperties struct {
 	ID              string
+	Provider        string
+	Protocol        string
+	AuthType        string
 	BaseURL         string
 	APIKey          string
 	Temperature     *float64
