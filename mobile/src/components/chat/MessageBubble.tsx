@@ -27,24 +27,24 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
     return (
       <View style={[styles.message, styles.toolMessage]}>
         <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolHeader, pressed)}>
-          <Text style={styles.toolBadge}>{message.role === "tool_call" ? "CALL" : message.toolError ? "ERR" : "DONE"}</Text>
+          <Text style={styles.toolBadge}>{message.role === "tool_call" ? "调用" : message.toolError ? "错误" : "完成"}</Text>
           <View style={styles.flex}>
-            <Text style={styles.toolTitle}>{message.toolName || "tool"}</Text>
-            <Text style={styles.toolSubtitle}>{message.role === "tool_call" ? "Tool request" : "Tool result"}</Text>
+            <Text style={styles.toolTitle}>{message.toolName || "工具"}</Text>
+            <Text style={styles.toolSubtitle}>{message.role === "tool_call" ? "工具请求" : "工具结果"}</Text>
           </View>
-          <Text style={styles.toolToggle}>{expanded ? "Hide" : "Show"}</Text>
+          <Text style={styles.toolToggle}>{expanded ? "收起" : "展开"}</Text>
         </Pressable>
         {expanded ? (
           <View style={styles.toolBody}>
             {message.toolArguments ? (
               <View style={styles.toolSection}>
-                <Text style={styles.toolSectionTitle}>Arguments</Text>
+                <Text style={styles.toolSectionTitle}>参数</Text>
                 <Text style={styles.toolCode}>{message.toolArguments}</Text>
               </View>
             ) : null}
             {message.text ? (
               <View style={styles.toolSection}>
-                <Text style={styles.toolSectionTitle}>{message.toolError ? "Error" : "Result"}</Text>
+                <Text style={styles.toolSectionTitle}>{message.toolError ? "错误" : "结果"}</Text>
                 {sharedAsset && !message.toolError ? (
                   <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
                 ) : (
@@ -75,7 +75,7 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
           {showStatusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}
           {canRegenerate ? (
             <Pressable onPress={onRegenerate} style={({ pressed }) => buttonFeedback(styles.regenerateButton, pressed)}>
-              <Text style={styles.regenerateButtonText}>Regenerate</Text>
+              <Text style={styles.regenerateButtonText}>重新生成</Text>
             </Pressable>
           ) : null}
         </View>
@@ -90,13 +90,13 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
 function assistantStatusText(message: ChatItem) {
   switch (message.status) {
     case "streaming":
-      return "Generating";
+      return "正在生成";
     case "tool_running":
-      return "Using tool";
+      return "正在使用工具";
     case "paused":
-      return "Paused";
+      return "已暂停";
     case "error":
-      return "Failed";
+      return "失败";
     default:
       return "";
   }

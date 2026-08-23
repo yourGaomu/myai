@@ -45,20 +45,20 @@ export function FilesPanel({
       <View style={styles.assetSection}>
         <View style={styles.panelHeader}>
           <View style={styles.flex}>
-            <Text style={styles.panelTitle}>Session assets</Text>
-            <Text style={styles.pathText}>{assets.length === 0 ? "Shared files from this conversation" : `${assets.length} shared file(s)`}</Text>
+            <Text style={styles.panelTitle}>会话资源</Text>
+            <Text style={styles.pathText}>{assets.length === 0 ? "当前对话中的共享文件" : `${assets.length} 个共享文件`}</Text>
           </View>
           <Pressable
             disabled={pendingAssets}
             onPress={onRefreshAssets}
             style={({ pressed }) => buttonFeedback([styles.smallButton, pendingAssets && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingAssets} text={pendingAssets ? "Loading" : "Refresh"} />
+            <ButtonContent loading={pendingAssets} text={pendingAssets ? "加载中" : "刷新"} />
           </Pressable>
         </View>
 
         {assets.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "No shared assets yet" : "Pair first"}</Text>
+          <Text style={styles.emptyText}>{clientToken ? "还没有共享资源" : "请先完成配对"}</Text>
         ) : (
           <View style={styles.assetList}>
             {assets.map((asset) => (
@@ -85,7 +85,7 @@ export function FilesPanel({
                   onPress={() => void Linking.openURL(asset.short_url)}
                   style={({ pressed }) => buttonFeedback(styles.assetOpenButton, pressed)}
                 >
-                  <Text style={styles.assetOpenButtonText}>Open</Text>
+                  <Text style={styles.assetOpenButtonText}>打开</Text>
                 </Pressable>
               </View>
             ))}
@@ -95,7 +95,7 @@ export function FilesPanel({
 
       <View style={styles.panelHeader}>
         <View style={styles.flex}>
-          <Text style={styles.panelTitle}>Files</Text>
+          <Text style={styles.panelTitle}>文件</Text>
           <Text style={styles.pathText}>{filePath}</Text>
         </View>
         <View style={styles.rowCompact}>
@@ -104,21 +104,21 @@ export function FilesPanel({
             onPress={onGoToParent}
             style={({ pressed }) => buttonFeedback([styles.smallButton, (!fileParent || pendingFiles) && styles.disabledButton], pressed)}
           >
-            <Text style={styles.smallButtonText}>Up</Text>
+            <Text style={styles.smallButtonText}>上级</Text>
           </Pressable>
           <Pressable
             disabled={pendingFiles}
             onPress={onRefresh}
             style={({ pressed }) => buttonFeedback([styles.smallButton, pendingFiles && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingFiles} text={pendingFiles ? "Loading" : "Refresh"} />
+            <ButtonContent loading={pendingFiles} text={pendingFiles ? "加载中" : "刷新"} />
           </Pressable>
         </View>
       </View>
 
       <View style={styles.fileList}>
         {fileEntries.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "No files loaded" : "Pair first"}</Text>
+          <Text style={styles.emptyText}>{clientToken ? "还没有加载文件" : "请先完成配对"}</Text>
         ) : (
           fileEntries.map((entry) => (
             <Pressable
@@ -127,7 +127,7 @@ export function FilesPanel({
               onPress={() => onOpenFileEntry(entry)}
               style={({ pressed }) => buttonFeedback([styles.fileRow, pendingFiles && styles.disabledButton], pressed)}
             >
-              <Text style={styles.fileIcon}>{entry.type === "dir" ? "DIR" : "TXT"}</Text>
+              <Text style={styles.fileIcon}>{entry.type === "dir" ? "目录" : "文本"}</Text>
               <View style={styles.flex}>
                 <Text style={styles.fileName}>{entry.name}</Text>
                 <Text style={styles.fileMeta}>{entry.type === "dir" ? entry.path : `${formatBytes(entry.size || 0)} / ${entry.path}`}</Text>
@@ -150,11 +150,11 @@ export function FilesPanel({
                 buttonFeedback([styles.previewButton, (filePreview.binary || filePreviewAttached) && styles.disabledButton], pressed)
               }
             >
-              <Text style={styles.previewButtonText}>{filePreviewAttached ? "Attached" : "Attach"}</Text>
+              <Text style={styles.previewButtonText}>{filePreviewAttached ? "已附加" : "附加"}</Text>
             </Pressable>
           </View>
           {filePreview.binary ? (
-            <Text style={styles.emptyText}>Binary file preview is not available.</Text>
+            <Text style={styles.emptyText}>二进制文件暂不支持预览。</Text>
           ) : (
             <ScrollView horizontal>
               <Text style={styles.codeText}>
@@ -351,9 +351,9 @@ const styles = StyleSheet.create({
 function assetKind(asset: AssetSummary) {
   const contentType = (asset.content_type || "").toLowerCase();
   if (contentType.startsWith("image/")) {
-    return "IMG";
+    return "图片";
   }
   const name = `${asset.file_name || ""} ${asset.path || ""}`.toLowerCase();
   const extension = name.match(/\.([a-z0-9]+)(\s|$)/)?.[1];
-  return extension ? extension.slice(0, 3).toUpperCase() : "FILE";
+  return extension ? extension.slice(0, 3).toUpperCase() : "文件";
 }

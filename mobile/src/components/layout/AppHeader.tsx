@@ -1,9 +1,12 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
 
 import type { ViewMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import type { AgentActivity } from "../../utils/agentActivity";
 
 type Props = {
+  activity: AgentActivity;
   buttonFeedback: ButtonFeedback;
   connected: boolean;
   deviceID: string;
@@ -15,6 +18,7 @@ type Props = {
 };
 
 export function AppHeader({
+  activity,
   buttonFeedback,
   connected,
   deviceID,
@@ -24,16 +28,37 @@ export function AppHeader({
   userID,
   viewMode,
 }: Props) {
+  const frames = activity === "tool" ? workingFrames : thinkingFrames;
+  const animated = activity === "thinking" || activity === "tool" || activity === "permission" || activity === "uploading";
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    setFrame(0);
+    if (!animated) {
+      return;
+    }
+    const timer = setInterval(() => setFrame((current) => (current + 1) % frames.length), 100);
+    return () => clearInterval(timer);
+  }, [animated, frames.length]);
+
+  const activityText = activityLabel(activity);
+  const connectionText = connected ? `手机控制电脑 / ${userID.trim() || "本地用户"} / ${deviceID.trim() || "本地设备"}` : disconnectedLabel(status);
+  const statusText = activityText || (isBusy ? "处理中" : connected ? "在线" : "离线");
+
   return (
     <View style={styles.header}>
       <View style={styles.brand}>
         <View style={styles.brandMark}>
-          <Text style={styles.brandMarkText}>M</Text>
+          <Image
+            accessibilityLabel={activityText ? `MYAI ${activityText}` : "MYAI 图标"}
+            source={animated ? frames[frame] : require("../../../assets/icon.png")}
+            style={[styles.brandImage, animated && styles.motionImage]}
+          />
         </View>
         <View style={styles.headerText}>
           <Text style={styles.title}>MYAI</Text>
           <Text numberOfLines={1} style={styles.subtitle}>
-            {connected ? `手机控制电脑 / ${userID.trim() || "local"} / ${deviceID.trim() || "pc-local"}` : status}
+            {activityText || connectionText}
           </Text>
         </View>
       </View>
@@ -45,29 +70,75 @@ export function AppHeader({
           <Text style={styles.ghostButtonText}>⚙</Text>
         </Pressable>
         <View style={[styles.statusPill, connected ? styles.statusPillOnline : styles.statusPillOffline]}>
-          {isBusy ? (
+          {animated || isBusy ? (
             <ActivityIndicator color="#12100e" size="small" />
           ) : (
             <View style={styles.statusDot} />
           )}
-          <Text style={styles.statusPillText}>{isBusy ? "处理中" : connected ? "在线" : "离线"}</Text>
+          <Text style={styles.statusPillText}>{statusText}</Text>
         </View>
       </View>
     </View>
   );
 }
 
+const workingFrames = [
+  require("../../../assets/loading/character-01.png"),
+  require("../../../assets/loading/character-02.png"),
+  require("../../../assets/loading/character-03.png"),
+  require("../../../assets/loading/character-04.png"),
+  require("../../../assets/loading/character-05.png"),
+  require("../../../assets/loading/character-06.png"),
+  require("../../../assets/loading/character-07.png"),
+  require("../../../assets/loading/character-08.png"),
+  require("../../../assets/loading/character-09.png"),
+  require("../../../assets/loading/character-10.png"),
+];
+
+const thinkingFrames = [
+  require("../../../assets/loading/thinking/character-01.png"),
+  require("../../../assets/loading/thinking/character-02.png"),
+  require("../../../assets/loading/thinking/character-03.png"),
+  require("../../../assets/loading/thinking/character-04.png"),
+  require("../../../assets/loading/thinking/character-05.png"),
+  require("../../../assets/loading/thinking/character-06.png"),
+  require("../../../assets/loading/thinking/character-07.png"),
+  require("../../../assets/loading/thinking/character-08.png"),
+  require("../../../assets/loading/thinking/character-09.png"),
+  require("../../../assets/loading/thinking/character-10.png"),
+];
+
+function activityLabel(activity: AgentActivity) {
+  switch (activity) {
+    case "thinking": return "正在思考...";
+    case "tool": return "正在调用工具...";
+    case "permission": return "等待操作确认...";
+    case "uploading": return "正在上传文件...";
+    default: return "";
+  }
+}
+
+function disconnectedLabel(status: string) {
+  switch (status) {
+    case "Connecting": return "正在连接 Relay...";
+    case "Pairing": return "正在配对...";
+    case "Connection timeout": return "Relay 连接超时";
+    case "WebSocket error": return "Relay 连接异常";
+    default: return "未连接 Relay";
+  }
+}
+
 const styles = StyleSheet.create({
   header: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderBottomColor: "#12100e",
-    borderBottomWidth: 3,
+    backgroundColor: "#f4f5f7",
+    borderBottomColor: "#25231f",
+    borderBottomWidth: 2,
     flexDirection: "row",
     gap: 8,
-    minHeight: 52,
-    paddingBottom: 8,
-    paddingTop: 4,
+    minHeight: 60,
+    paddingBottom: 11,
+    paddingTop: 7,
   },
   brand: {
     alignItems: "center",
@@ -80,16 +151,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#ffd84f",
     borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    height: 38,
+    borderRadius: 12,
+    borderWidth: 2,
+    height: 42,
     justifyContent: "center",
-    width: 38,
+    overflow: "hidden",
+    width: 42,
   },
-  brandMarkText: {
-    color: "#12100e",
-    fontSize: 17,
-    fontWeight: "900",
+  brandImage: {
+    height: 40,
+    width: 40,
+  },
+  motionImage: {
+    height: 50,
+    resizeMode: "contain",
+    width: 24,
   },
   headerText: {
     flex: 1,
@@ -117,11 +193,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#4fd7ee",
     borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    height: 44,
+    borderRadius: 12,
+    borderWidth: 2,
+    height: 40,
     justifyContent: "center",
-    minWidth: 44,
+    minWidth: 40,
     paddingHorizontal: 10,
   },
   ghostButtonActive: {
@@ -136,11 +212,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderColor: "#12100e",
     borderRadius: 999,
-    borderWidth: 3,
+    borderWidth: 2,
     flexDirection: "row",
     gap: 6,
+    minHeight: 34,
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingVertical: 5,
   },
   statusPillOnline: {
     backgroundColor: "#b9e9b0",

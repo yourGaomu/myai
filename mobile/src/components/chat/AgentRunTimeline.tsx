@@ -38,7 +38,7 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
   return (
     <View style={styles.container}>
       <Pressable
-        accessibilityLabel={expanded ? "Collapse agent run" : "Expand agent run"}
+        accessibilityLabel={expanded ? "收起执行记录" : "展开执行记录"}
         onPress={() => setExpanded((value) => !value)}
         style={({ pressed }) => buttonFeedback(styles.header, pressed)}
       >
@@ -63,7 +63,7 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
           ) : null}
 
           {events.length === 0 ? (
-            reasoning ? null : <Text style={styles.emptyText}>Waiting for activity...</Text>
+            reasoning ? null : <Text style={styles.emptyText}>等待执行活动...</Text>
           ) : (
             events.map((event, index) => (
               <TimelineEvent
@@ -109,17 +109,17 @@ function TimelineEvent({ event, last }: { event: AgentRunEvent; last: boolean })
           <View style={styles.details}>
             {event.arguments ? (
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Arguments</Text>
+                <Text style={styles.detailLabel}>参数</Text>
                 <Text style={styles.codeText}>{event.arguments}</Text>
               </View>
             ) : null}
             {content ? (
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>{isFailure(event.status) ? "Error" : "Result"}</Text>
+                <Text style={styles.detailLabel}>{isFailure(event.status) ? "错误" : "结果"}</Text>
                 <Text style={isFailure(event.status) ? styles.errorCodeText : styles.codeText}>{content}</Text>
               </View>
             ) : null}
-            {event.truncated ? <Text style={styles.truncatedText}>Output truncated</Text> : null}
+            {event.truncated ? <Text style={styles.truncatedText}>输出已截断</Text> : null}
           </View>
         ) : null}
       </View>
@@ -140,7 +140,7 @@ function useRunElapsed(snapshot: AgentRunSnapshot) {
   const start = Date.parse(snapshot.run.started_at);
   const finish = snapshot.run.finished_at ? Date.parse(snapshot.run.finished_at) : Date.now();
   if (!Number.isFinite(start) || !Number.isFinite(finish)) {
-    return "0s";
+    return "0秒";
   }
   return formatDuration(Math.max(0, finish - start));
 }
@@ -153,7 +153,7 @@ function terminalEventFromRun(snapshot: AgentRunSnapshot): AgentRunEvent {
     session_id: snapshot.run.session_id,
     sequence: snapshot.run.last_sequence || snapshot.events.length + 1,
     type,
-    title: type === "completed" ? "Run completed" : `Run ${type}`,
+    title: type === "completed" ? "执行完成" : eventTypeLabel(type),
     content: snapshot.run.error_message,
     status: snapshot.run.status,
     current_step: snapshot.run.current_step,
@@ -174,42 +174,42 @@ function terminalEventType(status: AgentRunSnapshot["run"]["status"]): AgentRunE
 function formatDuration(durationMs: number) {
   const seconds = Math.floor(durationMs / 1000);
   if (seconds < 60) {
-    return `${seconds}s`;
+    return `${seconds}秒`;
   }
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
+  return `${minutes}分 ${seconds % 60}秒`;
 }
 
 function runMeta(snapshot: AgentRunSnapshot) {
   const { run } = snapshot;
-  const status = run.status === "succeeded" ? "complete" : run.status;
+  const status = runStatusLabel(run.status);
   if (run.total_steps) {
-    return `${status} / step ${run.current_step || 0} of ${run.total_steps}`;
+    return `${status} / 第 ${run.current_step || 0}/${run.total_steps} 步`;
   }
-  return `${status} / ${snapshot.events.length} event${snapshot.events.length === 1 ? "" : "s"}`;
+  return `${status} / ${snapshot.events.length} 个事件`;
 }
 
 function runKindLabel(kind: string) {
   switch (kind) {
-    case "plan": return "Plan execution";
-    case "regenerate": return "Regenerate response";
-    case "internal": return "Agent task";
-    default: return "Agent run";
+    case "plan": return "计划执行";
+    case "regenerate": return "重新生成回复";
+    case "internal": return "智能体任务";
+    default: return "智能体执行";
   }
 }
 
 function eventLabel(event: AgentRunEvent) {
   switch (event.type) {
-    case "reasoning": return "THINK";
-    case "tool_call": return "TOOL";
-    case "tool_result": return isFailure(event.status) ? "ERROR" : "RESULT";
-    case "permission": return "ACCESS";
-    case "plan_update": return "PLAN";
-    case "failed": return "FAILED";
-    case "paused": return "PAUSED";
-    case "canceled": return "STOP";
-    case "completed": return "DONE";
-    default: return "STEP";
+    case "reasoning": return "思考";
+    case "tool_call": return "调用";
+    case "tool_result": return isFailure(event.status) ? "错误" : "结果";
+    case "permission": return "权限";
+    case "plan_update": return "计划";
+    case "failed": return "失败";
+    case "paused": return "暂停";
+    case "canceled": return "停止";
+    case "completed": return "完成";
+    default: return "步骤";
   }
 }
 
@@ -217,7 +217,33 @@ function eventTitle(event: AgentRunEvent) {
   if (event.tool_name) {
     return event.tool_name;
   }
-  return event.title || event.type.replace(/_/g, " ");
+  return event.title || eventTypeLabel(event.type);
+}
+
+function runStatusLabel(status: string) {
+  switch (status) {
+    case "succeeded": return "已完成";
+    case "failed": return "失败";
+    case "paused": return "已暂停";
+    case "canceled": return "已停止";
+    case "running": return "执行中";
+    default: return status;
+  }
+}
+
+function eventTypeLabel(type: string) {
+  switch (type) {
+    case "tool_call": return "工具调用";
+    case "tool_result": return "工具结果";
+    case "plan_update": return "计划更新";
+    case "permission": return "权限请求";
+    case "progress": return "执行进度";
+    case "completed": return "执行完成";
+    case "failed": return "执行失败";
+    case "paused": return "执行暂停";
+    case "canceled": return "执行停止";
+    default: return type.replace(/_/g, " ");
+  }
 }
 
 function eventContent(event: AgentRunEvent) {
@@ -258,19 +284,19 @@ function eventDotStyle(event: AgentRunEvent) {
 const styles = StyleSheet.create({
   container: {
     alignSelf: "stretch",
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: "#f1eee7",
+    borderColor: "#d7cfc2",
+    borderRadius: 14,
+    borderWidth: 1,
     overflow: "hidden",
   },
   header: {
     alignItems: "center",
     flexDirection: "row",
     gap: 9,
-    minHeight: 52,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    minHeight: 50,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   statusDot: { borderColor: "#12100e", borderRadius: 7, borderWidth: 2, height: 14, width: 14 },
   dotRunning: { backgroundColor: "#ffd84f" },
@@ -283,12 +309,12 @@ const styles = StyleSheet.create({
   title: { color: "#12100e", fontSize: 13, fontWeight: "900" },
   subtitle: { color: "#6c665f", fontSize: 10, fontWeight: "700", marginTop: 2 },
   collapseIcon: { color: "#12100e", fontSize: 20, fontWeight: "900", textAlign: "center", width: 24 },
-  body: { borderTopColor: "#12100e", borderTopWidth: 3, paddingHorizontal: 10, paddingVertical: 9 },
+  body: { borderTopColor: "#d7cfc2", borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
   emptyText: { color: "#6c665f", fontSize: 11, paddingVertical: 5 },
   eventRow: { flexDirection: "row", minHeight: 38 },
   rail: { alignItems: "center", marginRight: 8, width: 14 },
   eventDot: { borderColor: "#12100e", borderRadius: 6, borderWidth: 2, height: 12, marginTop: 4, width: 12, zIndex: 1 },
-  railLine: { backgroundColor: "#12100e", flex: 1, marginBottom: -4, marginTop: -1, width: 2 },
+  railLine: { backgroundColor: "#c9c0b3", flex: 1, marginBottom: -4, marginTop: -1, width: 1 },
   eventContent: { flex: 1, minWidth: 0, paddingBottom: 11 },
   eventHeader: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 22 },
   eventBadge: { color: "#6c665f", fontSize: 8, fontWeight: "900", width: 42 },
@@ -297,7 +323,7 @@ const styles = StyleSheet.create({
   stepText: { color: "#6c665f", fontSize: 9, fontWeight: "900" },
   eventText: { color: "#12100e", fontSize: 11, lineHeight: 17, marginTop: 3 },
   errorText: { color: "#8a2119", fontSize: 11, lineHeight: 17, marginTop: 3 },
-  details: { borderLeftColor: "#12100e", borderLeftWidth: 2, gap: 7, marginTop: 6, paddingLeft: 8 },
+  details: { borderLeftColor: "#c9c0b3", borderLeftWidth: 1, gap: 7, marginTop: 6, paddingLeft: 8 },
   detailSection: { gap: 3 },
   detailLabel: { color: "#6c665f", fontSize: 8, fontWeight: "900", textTransform: "uppercase" },
   codeText: { color: "#12100e", fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), fontSize: 10, lineHeight: 15 },

@@ -37,7 +37,7 @@ export function SessionsPanel({
       <View style={styles.sessionsHeader}>
         <View>
           <Text style={styles.sessionsTitle}>全部会话</Text>
-          <Text style={styles.pathText}>{sessions.length} session(s)</Text>
+          <Text style={styles.pathText}>{sessions.length} 个会话</Text>
         </View>
         <Pressable
           disabled={pendingSessions}
@@ -56,7 +56,7 @@ export function SessionsPanel({
           </View>
         ) : null}
         {sessions.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "No sessions loaded" : "Pair first"}</Text>
+          <Text style={styles.emptyText}>{clientToken ? "还没有加载会话" : "请先完成配对"}</Text>
         ) : (
           sessions.map((session) => (
             <View
@@ -72,7 +72,7 @@ export function SessionsPanel({
                   <Text style={styles.sessionAvatarText}>…</Text>
                 </View>
                 <View style={styles.flex}>
-                  <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "New chat"}</Text>
+                  <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "新对话"}</Text>
                   <Text numberOfLines={1} style={styles.sessionListMeta}>
                     {session.model || "model"} / {session.permission_mode || "permission"}
                   </Text>
@@ -94,26 +94,26 @@ export function SessionsPanel({
       <View style={styles.recycleBox}>
         <View style={styles.recycleHeader}>
           <View>
-            <Text style={styles.recycleTitle}>Recycle Bin</Text>
-            <Text style={styles.pathText}>{deletedSessions.length} deleted session(s)</Text>
+            <Text style={styles.recycleTitle}>回收站</Text>
+            <Text style={styles.pathText}>{deletedSessions.length} 个已删除会话</Text>
           </View>
           <Pressable
             disabled={pendingSessions || !clientToken}
             onPress={onRefreshDeletedSessions}
             style={({ pressed }) => buttonFeedback([styles.recycleButton, (pendingSessions || !clientToken) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingSessions} text="Refresh" />
+            <ButtonContent loading={pendingSessions} text="刷新" />
           </Pressable>
         </View>
         {deletedSessions.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "No deleted sessions" : "Pair first"}</Text>
+          <Text style={styles.emptyText}>{clientToken ? "没有已删除会话" : "请先完成配对"}</Text>
         ) : (
           deletedSessions.map((session) => (
             <View key={session.id} style={styles.deletedItem}>
               <View style={styles.flex}>
-                <Text numberOfLines={1} style={styles.deletedTitle}>{session.title || "New chat"}</Text>
+                <Text numberOfLines={1} style={styles.deletedTitle}>{session.title || "新对话"}</Text>
                 <Text numberOfLines={1} style={styles.sessionListMeta}>
-                  Deleted {formatDateTime(session.deleted_at || session.updated_at || session.created_at)}
+                  删除于 {formatDateTime(session.deleted_at || session.updated_at || session.created_at)}
                 </Text>
               </View>
               <Pressable
@@ -121,7 +121,7 @@ export function SessionsPanel({
                 onPress={() => onRestoreSession(session.id)}
                 style={({ pressed }) => buttonFeedback([styles.restoreButton, pendingSessions && styles.disabledButton], pressed)}
               >
-                <Text style={styles.restoreButtonText}>Restore</Text>
+                <Text style={styles.restoreButtonText}>恢复</Text>
               </Pressable>
             </View>
           ))

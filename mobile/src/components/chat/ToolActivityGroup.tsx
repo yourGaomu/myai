@@ -20,14 +20,14 @@ export function ToolActivityGroup({ buttonFeedback, group }: Props) {
   return (
     <View style={[styles.message, styles.toolGroupMessage]}>
       <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolGroupHeader, pressed)}>
-        <Text style={[styles.toolGroupBadge, group.failedCount > 0 && styles.toolGroupBadgeError]}>{group.failedCount > 0 ? "ERR" : "TOOLS"}</Text>
+        <Text style={[styles.toolGroupBadge, group.failedCount > 0 && styles.toolGroupBadgeError]}>{group.failedCount > 0 ? "错误" : "工具"}</Text>
         <View style={styles.flex}>
-          <Text style={styles.toolGroupTitle}>Tool activity</Text>
+          <Text style={styles.toolGroupTitle}>工具活动</Text>
           <Text numberOfLines={1} style={styles.toolGroupSubtitle}>
             {summary}
           </Text>
         </View>
-        <Text style={styles.toolToggle}>{expanded ? "Hide" : "Show"}</Text>
+        <Text style={styles.toolToggle}>{expanded ? "收起" : "展开"}</Text>
       </Pressable>
       {expanded ? (
         <View style={styles.toolGroupBody}>
@@ -45,8 +45,8 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
     return (
       <View style={styles.toolGroupStep}>
         <View style={styles.toolGroupStepHeader}>
-          <Text style={styles.toolGroupStepBadge}>OK</Text>
-          <Text style={styles.toolGroupStepTitle}>Permission</Text>
+          <Text style={styles.toolGroupStepBadge}>好</Text>
+          <Text style={styles.toolGroupStepTitle}>权限</Text>
           <Text style={styles.toolGroupStepMeta}>#{index}</Text>
         </View>
         <Text style={styles.toolGroupStepText}>{message.text}</Text>
@@ -56,7 +56,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
 
   const sharedAsset = parseSharedAsset(message.toolName, message.text);
   const failed = Boolean(message.toolError);
-  const badge = message.role === "tool_call" ? "CALL" : failed ? "ERR" : "DONE";
+  const badge = message.role === "tool_call" ? "调用" : failed ? "错误" : "完成";
 
   return (
     <View style={styles.toolGroupStep}>
@@ -69,7 +69,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
       </View>
       {message.toolArguments ? (
         <View style={styles.toolGroupStepSection}>
-          <Text style={styles.toolGroupStepLabel}>Arguments</Text>
+          <Text style={styles.toolGroupStepLabel}>参数</Text>
           <Text numberOfLines={6} selectable style={styles.toolGroupCode}>
             {message.toolArguments}
           </Text>
@@ -77,7 +77,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
       ) : null}
       {message.text ? (
         <View style={styles.toolGroupStepSection}>
-          <Text style={styles.toolGroupStepLabel}>{failed ? "Error" : "Result"}</Text>
+          <Text style={styles.toolGroupStepLabel}>{failed ? "错误" : "结果"}</Text>
           {sharedAsset && !failed ? (
             <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
           ) : (
@@ -92,21 +92,21 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
 }
 
 function toolActivitySummary(group: ToolActivityGroupItem) {
-  const parts = [`${group.messages.length} step(s)`];
+  const parts = [`${group.messages.length} 个步骤`];
   if (group.callCount > 0) {
-    parts.push(`${group.callCount} call(s)`);
+    parts.push(`${group.callCount} 次调用`);
   }
   if (group.resultCount > 0) {
-    parts.push(`${group.resultCount} result(s)`);
+    parts.push(`${group.resultCount} 个结果`);
   }
   if (group.permissionCount > 0) {
-    parts.push(`${group.permissionCount} permission event(s)`);
+    parts.push(`${group.permissionCount} 个权限事件`);
   }
   if (group.assetCount > 0) {
-    parts.push(`${group.assetCount} asset(s)`);
+    parts.push(`${group.assetCount} 个资源`);
   }
   if (group.failedCount > 0) {
-    parts.push(`${group.failedCount} failed`);
+    parts.push(`${group.failedCount} 个失败`);
   }
 
   const names = group.names.slice(0, 4).join(", ");

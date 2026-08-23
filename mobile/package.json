@@ -8,6 +8,7 @@
     "expo-build-properties": "~56.0.17",
     "expo-document-picker": "~56.0.4",
     "expo-navigation-bar": "~56.0.3",
+    "expo-splash-screen": "~56.0.14",
     "expo-sqlite": "~56.0.5",
     "expo-status-bar": "~56.0.4",
     "react": "19.2.3",

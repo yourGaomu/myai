@@ -17,8 +17,8 @@ export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSett
     <View style={styles.tokenDock}>
       <View style={styles.tokenDockHeader}>
         <View style={styles.tokenSummary}>
-          <Text style={styles.tokenDockTitle}>{lastUsage ? usageSummary(lastUsage) : "Token usage"}</Text>
-          <Text style={styles.tokenDockMeta}>{lastUsage ? "Current reply usage" : "Appears after reply"}</Text>
+          <Text style={styles.tokenDockTitle}>{lastUsage ? usageSummary(lastUsage) : "令牌用量"}</Text>
+          <Text style={styles.tokenDockMeta}>{lastUsage ? "当前回复用量" : "回复后显示"}</Text>
         </View>
         <View style={styles.tokenDockActions}>
           <Pressable onPress={onSettingsPress} style={({ pressed }) => buttonFeedback(styles.tokenSettingsButton, pressed)}>
@@ -36,13 +36,13 @@ export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSett
       </View>
       {lastUsage && usageHasValues(lastUsage) ? (
         <View style={styles.tokenDockRow}>
-          <Text style={styles.tokenDockMeta}>In {tokenCount(lastUsage.prompt_tokens)}</Text>
-          <Text style={styles.tokenDockMeta}>Out {tokenCount(lastUsage.completion_tokens)}</Text>
-          <Text style={styles.tokenDockMeta}>Reason {tokenCount(lastUsage.reasoning_tokens)}</Text>
-          <Text style={styles.tokenDockMeta}>Cache {tokenCount(lastUsage.prompt_cached_tokens)}</Text>
+          <Text style={styles.tokenDockMeta}>输入 {tokenCount(lastUsage.prompt_tokens)}</Text>
+          <Text style={styles.tokenDockMeta}>输出 {tokenCount(lastUsage.completion_tokens)}</Text>
+          <Text style={styles.tokenDockMeta}>思考 {tokenCount(lastUsage.reasoning_tokens)}</Text>
+          <Text style={styles.tokenDockMeta}>缓存 {tokenCount(lastUsage.prompt_cached_tokens)}</Text>
         </View>
       ) : lastUsage ? (
-        <Text style={styles.tokenDockMeta}>Token usage unavailable</Text>
+        <Text style={styles.tokenDockMeta}>暂无令牌用量</Text>
       ) : null}
     </View>
   );
@@ -50,13 +50,13 @@ export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSett
 
 const styles = StyleSheet.create({
   tokenDock: {
-    backgroundColor: "#fdf7ea",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: "#eee8dd",
+    borderColor: "#d7cfc2",
+    borderRadius: 12,
+    borderWidth: 1,
     gap: 3,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
   tokenDockHeader: {
     alignItems: "center",
@@ -77,12 +77,12 @@ const styles = StyleSheet.create({
   tokenSettingsButton: {
     alignItems: "center",
     backgroundColor: "#4fd7ee",
-    borderColor: "#12100e",
+    borderColor: "#25231f",
     borderRadius: 6,
-    borderWidth: 2,
-    height: 26,
+    borderWidth: 1,
+    height: 28,
     justifyContent: "center",
-    width: 28,
+    width: 30,
   },
   tokenSettingsText: {
     color: "#12100e",
@@ -106,12 +106,12 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     alignItems: "center",
-    borderColor: "#12100e",
+    borderColor: "#25231f",
     borderRadius: 999,
-    borderWidth: 2,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 4,
-    minHeight: 26,
+    minHeight: 28,
     paddingHorizontal: 7,
     paddingVertical: 3,
   },

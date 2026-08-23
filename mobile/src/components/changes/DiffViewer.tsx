@@ -25,7 +25,7 @@ export function DiffViewer({ diff, emptyText }: Props) {
         row.type === "full" ? (
           <View key={row.id} style={[styles.diffBlock, diffBlockStyle(row.cell.kind)]}>
             <Text style={styles.diffBlockLabel}>
-              {row.cell.kind === "hunk" ? "Hunk" : row.cell.kind === "meta" ? "Meta" : "Line"}
+              {row.cell.kind === "hunk" ? "代码块" : row.cell.kind === "meta" ? "元信息" : "行"}
             </Text>
             <Text style={[styles.diffLine, diffLineStyle(row.cell.kind)]}>
               {row.cell.kind === "hunk" || row.cell.kind === "meta" ? row.cell.text : formatDiffLine(row.cell)}
@@ -33,7 +33,7 @@ export function DiffViewer({ diff, emptyText }: Props) {
           </View>
         ) : row.before?.kind === "context" && row.after?.kind === "context" && row.before.text === row.after.text ? (
           <View key={row.id} style={[styles.diffBlock, styles.diffContextBlock]}>
-            <Text style={styles.diffBlockLabel}>Context</Text>
+            <Text style={styles.diffBlockLabel}>上下文</Text>
             <Text style={[styles.diffLine, diffLineStyle(row.before.kind)]}>{formatDiffLine(row.before)}</Text>
           </View>
         ) : (
@@ -41,8 +41,8 @@ export function DiffViewer({ diff, emptyText }: Props) {
             {row.before ? (
               <View style={[styles.diffBlock, styles.diffBeforeBlock]}>
                 <View style={styles.diffBlockHeader}>
-                  <Text style={[styles.diffBlockPill, styles.diffBeforePill]}>BEFORE</Text>
-                  <Text style={styles.diffBlockLabel}>{row.before.kind === "remove" ? "Removed line" : "Original line"}</Text>
+                  <Text style={[styles.diffBlockPill, styles.diffBeforePill]}>修改前</Text>
+                  <Text style={styles.diffBlockLabel}>{row.before.kind === "remove" ? "删除的行" : "原始行"}</Text>
                 </View>
                 <Text style={[styles.diffLine, diffLineStyle(row.before.kind)]}>{formatDiffLine(row.before)}</Text>
               </View>
@@ -50,8 +50,8 @@ export function DiffViewer({ diff, emptyText }: Props) {
             {row.after ? (
               <View style={[styles.diffBlock, styles.diffAfterBlock]}>
                 <View style={styles.diffBlockHeader}>
-                  <Text style={[styles.diffBlockPill, styles.diffAfterPill]}>AFTER</Text>
-                  <Text style={styles.diffBlockLabel}>{row.after.kind === "add" ? "Added line" : "New line"}</Text>
+                  <Text style={[styles.diffBlockPill, styles.diffAfterPill]}>修改后</Text>
+                  <Text style={styles.diffBlockLabel}>{row.after.kind === "add" ? "新增的行" : "新行"}</Text>
                 </View>
                 <Text style={[styles.diffLine, diffLineStyle(row.after.kind)]}>{formatDiffLine(row.after)}</Text>
               </View>

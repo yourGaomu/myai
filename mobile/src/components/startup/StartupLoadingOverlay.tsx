@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, Text, View } from "react-native";
 
-const loadingFrames = [
+const workingFrames = [
   require("../../../assets/loading/character-01.png"),
   require("../../../assets/loading/character-02.png"),
   require("../../../assets/loading/character-03.png"),
@@ -12,6 +12,24 @@ const loadingFrames = [
   require("../../../assets/loading/character-08.png"),
   require("../../../assets/loading/character-09.png"),
   require("../../../assets/loading/character-10.png"),
+];
+
+const thinkingFrames = [
+  require("../../../assets/loading/thinking/character-01.png"),
+  require("../../../assets/loading/thinking/character-02.png"),
+  require("../../../assets/loading/thinking/character-03.png"),
+  require("../../../assets/loading/thinking/character-04.png"),
+  require("../../../assets/loading/thinking/character-05.png"),
+  require("../../../assets/loading/thinking/character-06.png"),
+  require("../../../assets/loading/thinking/character-07.png"),
+  require("../../../assets/loading/thinking/character-08.png"),
+  require("../../../assets/loading/thinking/character-09.png"),
+  require("../../../assets/loading/thinking/character-10.png"),
+];
+
+const loadingFrames = [
+  ...workingFrames.map((source) => ({ source, status: "正在启动..." })),
+  ...thinkingFrames.map((source) => ({ source, status: "正在思考..." })),
 ];
 
 type Props = {
@@ -45,7 +63,7 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
           onDone();
         }
       });
-    }, 1500);
+    }, 2200);
 
     Animated.parallel([
       Animated.timing(opacity, { duration: 260, toValue: 1, useNativeDriver: true }),
@@ -69,11 +87,11 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
       <Animated.View style={[styles.content, { opacity, transform: [{ translateY }] }]}>
         <Image
           accessibilityLabel="MYAI 正在启动"
-          source={loadingFrames[frame]}
+          source={loadingFrames[frame].source}
           style={styles.character}
         />
         <Text style={styles.title}>MYAI</Text>
-        <Text style={styles.status}>正在启动...</Text>
+        <Text style={styles.status}>{loadingFrames[frame].status}</Text>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${((frame + 1) / loadingFrames.length) * 100}%` }]} />
         </View>

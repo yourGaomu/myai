@@ -35,7 +35,7 @@ export function useRelayConnection({
 }: Args) {
   return useCallback(() => {
     if (!clientToken) {
-      addErrorMessage("Pair this phone before connecting");
+      addErrorMessage("请先在设置中完成手机配对，再连接 Relay。");
       stopPending("connect");
       return;
     }
@@ -58,7 +58,7 @@ export function useRelayConnection({
       stopPending("connect");
       setConnected(false);
       setStatus("WebSocket error");
-      addErrorMessage(`WebSocket connection failed: ${messageFromError(error)}`);
+      addErrorMessage(`Relay 连接失败：${messageFromError(error)}`);
       return;
     }
 
@@ -75,7 +75,7 @@ export function useRelayConnection({
       stopPending("connect");
       setConnected(false);
       setStatus("Connection timeout");
-      addErrorMessage("WebSocket connection timed out. Check the relay URL and make sure the relay server is running.");
+      addErrorMessage("Relay 连接超时，请检查地址、端口和服务器是否已启动。");
     }, connectTimeoutMs);
 
     const clearConnectTimeout = () => clearTimeout(timeoutID);
@@ -112,14 +112,14 @@ export function useRelayConnection({
       stopPending("connect");
       setConnected(false);
       setStatus("WebSocket error");
-      addErrorMessage("WebSocket connection error");
+      addErrorMessage("Relay 连接异常，请检查网络和服务器日志。");
     };
     socket.onmessage = (event) => {
       // 此处只完成 JSON 解码，具体消息类型由 useRemoteMessageHandler 统一归并到各状态仓库。
       try {
         onMessage(JSON.parse(event.data) as RelayMessage);
       } catch (error) {
-        addErrorMessage(`Invalid relay message: ${messageFromError(error)}`);
+        addErrorMessage(`Relay 返回的数据无法解析：${messageFromError(error)}`);
       }
     };
   }, [

@@ -30,9 +30,9 @@ export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }:
       {open ? (
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Jump</Text>
+            <Text style={styles.panelTitle}>跳转消息</Text>
             <Pressable onPress={onToggle} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
-              <Text style={styles.closeText}>Hide</Text>
+              <Text style={styles.closeText}>隐藏</Text>
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.anchorList} nestedScrollEnabled showsVerticalScrollIndicator={false}>

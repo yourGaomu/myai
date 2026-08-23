@@ -168,7 +168,7 @@ export function AIMemoryPanel({
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.headerRow}>
         <View style={styles.flex}>
-          <Text style={styles.eyebrow}>AI MEMORY</Text>
+          <Text style={styles.eyebrow}>AI 记忆</Text>
           <Text style={styles.title}>经验记忆</Text>
           <Text style={styles.meta}>{activeCount} 条有效记录 · {candidates.length} 条待审核</Text>
         </View>
@@ -180,7 +180,7 @@ export function AIMemoryPanel({
       <View style={styles.segmented}>
         <Segment active={tab === "memories"} label="有效记忆" onPress={() => setTab("memories")} buttonFeedback={buttonFeedback} />
         <Segment active={tab === "candidates"} label={`待审核 ${candidates.length}`} onPress={() => setTab("candidates")} buttonFeedback={buttonFeedback} />
-        <Segment active={tab === "dream"} label="Dream" onPress={() => setTab("dream")} buttonFeedback={buttonFeedback} />
+        <Segment active={tab === "dream"} label="记忆质检" onPress={() => setTab("dream")} buttonFeedback={buttonFeedback} />
       </View>
 
       {message ? <Text style={styles.status}>{message}</Text> : null}
@@ -251,7 +251,7 @@ export function AIMemoryPanel({
               </View>
               {extractionJobs.map((job) => (
                 <View key={job.id} style={styles.extractionCard}>
-                  <Text style={styles.extractionLabel}>AgentRun</Text>
+                  <Text style={styles.extractionLabel}>智能体运行记录</Text>
                   <Text selectable style={styles.extractionValue}>{job.agent_run_id || "-"}</Text>
                   <Text style={styles.extractionMeta}>尝试次数：{job.attempts}</Text>
                   <Text selectable numberOfLines={4} style={styles.extractionError}>
@@ -279,7 +279,7 @@ export function AIMemoryPanel({
               <Text style={styles.goal}>{candidate.content.goal}</Text>
               <MemoryContentView content={candidate.content} />
               <View style={styles.tagRow}>{(candidate.tags || []).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View>
-              <Text style={styles.meta}>可信度 {Math.round(candidate.confidence * 100)}% · {candidate.sources?.[0]?.agent_run_id ? "来自 AgentRun" : "自动提取"}</Text>
+              <Text style={styles.meta}>可信度 {Math.round(candidate.confidence * 100)}% · {candidate.sources?.[0]?.agent_run_id ? "来自智能体运行记录" : "自动提取"}</Text>
               <View style={styles.actions}>
                 <Action label="通过并新建" onPress={() => onApproveCandidate(candidate)} buttonFeedback={buttonFeedback} />
                 {memories.some((memory) => memory.status === "active") ? (
@@ -295,11 +295,11 @@ export function AIMemoryPanel({
         <View style={styles.dreamSection}>
           <View style={styles.dreamHeader}>
             <View style={styles.flex}>
-              <Text style={styles.sectionTitle}>Dream 质检</Text>
+              <Text style={styles.sectionTitle}>记忆质检</Text>
               <Text style={styles.meta}>待处理 {candidates.length} · 运行记录 {dreamRuns.length}</Text>
             </View>
             <Pressable disabled={pending} onPress={onRunDream} style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}>
-              <ButtonContent loading={pending} text={pending ? "运行中..." : "运行 Dream"} />
+              <ButtonContent loading={pending} text={pending ? "运行中..." : "运行记忆质检"} />
             </Pressable>
           </View>
           {dreamRuns.map((run) => {
@@ -343,7 +343,7 @@ export function AIMemoryPanel({
               </View>
             );
           })}
-          {dreamRuns.length === 0 ? <Text style={styles.empty}>还没有 Dream 运行记录。</Text> : null}
+          {dreamRuns.length === 0 ? <Text style={styles.empty}>还没有记忆质检记录。</Text> : null}
         </View>
       )}
       </ScrollView>

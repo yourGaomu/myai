@@ -5,13 +5,18 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-character.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#efe4d2"
+    },
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.myai.mobile",
-      "versionCode": 3,
+      "versionCode": 4,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -24,6 +29,15 @@
           "android": {
             "usesCleartextTraffic": true
           }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#efe4d2",
+          "image": "./assets/splash-character.png",
+          "imageWidth": 260,
+          "resizeMode": "contain"
         }
       ],
       [

@@ -57,10 +57,19 @@ export function useChatActions({
     }
 
     const targetSessionID = sessionID.trim();
-    // 先写本地用户消息并标记 pending，流式 delta 到达时即可追加到同一 assistant 消息。
+    // request_id 先登记到运行时引用，发送成功后再写入本地消息，避免断线时出现“假发送”记录。
     const requestID = newRequestID();
     activeRequestIDRef.current = requestID;
     requestSessionMapRef.current[requestID] = targetSessionID;
+
+    const sent = sendMessageWithFiles(content, requestID);
+    if (!sent) {
+      activeRequestIDRef.current = "";
+      delete requestSessionMapRef.current[requestID];
+      return;
+    }
+
+    // Relay 已接收后，流式 delta 到达时即可追加到同一 assistant 消息。
     resetActiveAssistant(targetSessionID);
     if (targetSessionID) {
       historySessionIDRef.current = targetSessionID;
@@ -69,18 +78,10 @@ export function useChatActions({
     setSessionLastUsage(targetSessionID, null);
     setSessionPendingRequest(targetSessionID, requestID);
     addUserMessage(targetSessionID, userMessageEcho(content, attachedFiles), requestID);
-
-    const sent = sendMessageWithFiles(content, requestID);
-    if (!sent) {
-      activeRequestIDRef.current = "";
-      delete requestSessionMapRef.current[requestID];
-      clearSessionPendingRequest(targetSessionID, requestID);
-    }
   }, [
     activeRequestIDRef,
     addUserMessage,
     attachedFiles,
-    clearSessionPendingRequest,
     historySessionIDRef,
     messageInput,
     requestSessionMapRef,

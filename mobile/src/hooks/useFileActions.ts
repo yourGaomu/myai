@@ -125,6 +125,11 @@ export function useFileActions({
 
   const uploadLocalFile = useCallback(async () => {
     // 手机文件先上传 Asset 服务，聊天消息只携带短链接元数据，避免大文件经过 WebSocket。
+    if (!assetBaseURL.trim()) {
+      addErrorMessage("请先在设置中填写资源服务地址，再上传手机文件。");
+      return;
+    }
+
     startPending("upload");
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -158,7 +163,7 @@ export function useFileActions({
       });
       setViewMode("chat");
     } catch (error) {
-      addErrorMessage(error instanceof Error ? error.message : "File upload failed");
+      addErrorMessage(uploadFailureMessage(error));
     } finally {
       stopPending("upload");
     }
@@ -174,13 +179,17 @@ export function useFileActions({
 
   const sendMessageWithFiles = useCallback(
     (content: string, requestID: string) => {
-      setMessageInput("");
-      clearAttachedFiles();
-
-      return sendEnvelope("user_message", {
+      const sent = sendEnvelope("user_message", {
         request_id: requestID,
         payload: { content: messageWithAttachedFiles(content, attachedFiles) },
       });
+
+      // 只有 Relay 确认接收后才清空编辑区；断线时保留正文和附件，方便用户修复连接后重试。
+      if (sent) {
+        setMessageInput("");
+        clearAttachedFiles();
+      }
+      return sent;
     },
     [attachedFiles, clearAttachedFiles, sendEnvelope, setMessageInput],
   );
@@ -197,4 +206,23 @@ export function useFileActions({
     sendMessageWithFiles,
     uploadLocalFile,
   };
+}
+
+function uploadFailureMessage(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const normalized = raw.toLowerCase();
+
+  if (normalized.includes("network request failed") || normalized.includes("failed to fetch")) {
+    return "无法连接资源服务，请检查资源服务地址、服务器端口和手机网络。";
+  }
+  if (normalized.includes("asset service url is required")) {
+    return "请先在设置中填写资源服务地址。";
+  }
+  if (normalized.includes("request timed out") || normalized.includes("timeout")) {
+    return "文件上传超时，请检查网络后重试。";
+  }
+  if (normalized.includes("upload failed") || normalized.includes("asset upload failed")) {
+    return `文件上传失败：${raw.replace(/^asset upload failed:\s*/i, "")}`;
+  }
+  return raw ? `文件上传失败：${raw}` : "文件上传失败，请稍后重试。";
 }

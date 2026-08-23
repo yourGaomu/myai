@@ -38,16 +38,16 @@ export function ChangeDetailPanel({
     <View style={[styles.panel, styles.diffDetailPanel]}>
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={({ pressed }) => buttonFeedback(styles.detailBackButton, pressed)}>
-          <Text style={styles.detailBackText}>Back</Text>
+          <Text style={styles.detailBackText}>返回</Text>
         </Pressable>
         <View style={styles.flex}>
-          <Text style={styles.panelTitle}>{changeDiff ? "File Change" : "History Diff"}</Text>
+          <Text style={styles.panelTitle}>{changeDiff ? "文件变更" : "历史差异"}</Text>
           <Text numberOfLines={2} style={styles.pathText}>
             {changeDiff
-              ? `${changeDiff.path}${changeDiff.truncated ? " / truncated" : ""}`
+              ? `${changeDiff.path}${changeDiff.truncated ? " / 已截断" : ""}`
               : historyDiff
-                ? `Checkpoint ${shortID(historyDiff.checkpoint_id)} / ${(historyDiff.files || []).length} file(s)`
-                : "No diff selected"}
+                ? `检查点 ${shortID(historyDiff.checkpoint_id)} / ${(historyDiff.files || []).length} 个文件`
+                : "未选择差异"}
           </Text>
         </View>
       </View>
@@ -62,7 +62,7 @@ export function ChangeDetailPanel({
                 buttonFeedback([styles.previewButton, (!canRevertSelectedChange || pendingRevert) && styles.disabledButton], pressed)
               }
             >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "Reverting" : "Revert"} />
+              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复"} />
             </Pressable>
             <Pressable
               disabled={!canOpenSelectedChangeFile || pendingFiles}
@@ -71,11 +71,11 @@ export function ChangeDetailPanel({
                 buttonFeedback([styles.previewButton, (!canOpenSelectedChangeFile || pendingFiles) && styles.disabledButton], pressed)
               }
             >
-              <ButtonContent loading={pendingFiles} text={pendingFiles ? "Opening" : "Open file"} />
+              <ButtonContent loading={pendingFiles} text={pendingFiles ? "打开中" : "打开文件"} />
             </Pressable>
           </View>
           {changeDiff.binary ? (
-            <Text style={styles.emptyText}>{changeDiff.message || "Binary diff is not available."}</Text>
+            <Text style={styles.emptyText}>{changeDiff.message || "二进制文件暂不支持差异查看。"}</Text>
           ) : (
             <DiffViewer diff={changeDiff.diff || ""} emptyText={changeDiff.message || "No diff is available."} />
           )}
@@ -90,22 +90,22 @@ export function ChangeDetailPanel({
               onPress={() => onRevertHistory(historyDiff.checkpoint_id)}
               style={({ pressed }) => buttonFeedback([styles.previewButton, pendingRevert && styles.disabledButton], pressed)}
             >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "Reverting" : "Revert checkpoint"} />
+              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
             </Pressable>
           </View>
           {historyDiff.message && (historyDiff.files || []).length > 0 ? <Text style={styles.emptyText}>{historyDiff.message}</Text> : null}
           {(historyDiff.files || []).length === 0 ? (
-            <Text style={styles.emptyText}>{historyDiff.message || "No diff is available."}</Text>
+            <Text style={styles.emptyText}>{historyDiff.message || "没有可显示的差异。"}</Text>
           ) : (
             (historyDiff.files || []).map((file) => (
               <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.historyDiffFile}>
                 <Text style={styles.fileName}>
                   {file.path}
-                  {file.truncated ? " / truncated" : ""}
+                  {file.truncated ? " / 已截断" : ""}
                 </Text>
-                <Text style={styles.fileMeta}>{file.change_type || "changed"}</Text>
+                <Text style={styles.fileMeta}>{file.change_type || "已变更"}</Text>
                 {file.binary ? (
-                  <Text style={styles.emptyText}>{file.message || "Binary diff is not available."}</Text>
+                  <Text style={styles.emptyText}>{file.message || "二进制文件暂不支持差异查看。"}</Text>
                 ) : (
                   <DiffViewer diff={file.diff || ""} emptyText={file.message || "No diff is available."} />
                 )}

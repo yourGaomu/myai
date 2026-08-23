@@ -165,7 +165,7 @@ export function KnowledgePanel({
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
           <View style={styles.flex}>
-            <Text style={styles.eyebrow}>KNOWLEDGE</Text>
+            <Text style={styles.eyebrow}>知识管理</Text>
             <Text style={styles.title}>知识库</Text>
           </View>
           <Pressable
@@ -602,7 +602,7 @@ function KnowledgeExplorer({
             <Text numberOfLines={1} style={styles.baseName}>{base.name}</Text>
             <Text style={styles.rowMeta}>{selected ? documents.length : ""}</Text>
             <Text style={[styles.statusPill, base.rag_enabled ? styles.statusPillOn : styles.statusPillOff]}>
-              {base.rag_enabled ? "RAG" : "OFF"}
+              {base.rag_enabled ? "已启用" : "关闭"}
             </Text>
           </Pressable>
           <Pressable
@@ -894,7 +894,7 @@ function SearchPanel({
       {result ? (
         <View style={styles.searchResults}>
           <Text style={styles.meta}>
-            {result.hits.length} 个片段 · {result.profiles.length} 个 Profile
+            {result.hits.length} 个片段 · {result.profiles.length} 个索引配置
           </Text>
           {result.error ? <Text style={styles.errorText}>{result.error}</Text> : null}
           {result.hits.map((hit) => (
@@ -963,7 +963,7 @@ function ConfigPanel({
           <Text style={styles.secondaryText}>{base.rag_enabled ? "关闭 RAG" : "启用 RAG"}</Text>
         </Pressable>
       </View>
-      <Text style={styles.meta}>Index Profile</Text>
+      <Text style={styles.meta}>索引配置</Text>
       <View style={styles.chipWrap}>
         {activeProfiles.map((profile) => (
           <ScopeChip

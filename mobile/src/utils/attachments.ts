@@ -63,7 +63,7 @@ export function attachmentTitle(file: ChatAttachment) {
 
 export function attachmentMeta(file: ChatAttachment) {
   if (isUploadedAssetAttachment(file)) {
-    return `${file.short_url} / ${formatAttachmentSize(file.size)} / uploaded`;
+    return `${file.short_url} / ${formatAttachmentSize(file.size)} / 已上传`;
   }
   return `${file.path} / ${formatAttachmentSize(file.size)}${file.truncated ? " / truncated" : ""}`;
 }
@@ -89,7 +89,7 @@ function escapeAttribute(value: string) {
 
 function formatAttachmentSize(size?: number) {
   if (!size || size <= 0) {
-    return "unknown size";
+    return "大小未知";
   }
   return `${size} bytes`;
 }

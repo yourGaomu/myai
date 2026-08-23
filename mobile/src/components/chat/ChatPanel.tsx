@@ -75,8 +75,8 @@ export function ChatPanel({
   return (
     <View style={[styles.panel, styles.chatPanel]}>
       <View style={styles.panelHeader}>
-        <Text style={styles.panelTitle}>Chat</Text>
-        <Text style={styles.pathText}>{messages.length} message(s)</Text>
+        <Text style={styles.panelTitle}>对话</Text>
+        <Text style={styles.pathText}>{messages.length} 条消息</Text>
       </View>
       <ScrollView
         contentContainerStyle={styles.messages}
@@ -100,10 +100,10 @@ export function ChatPanel({
         {loadingHistory ? (
           <View style={styles.inlineLoading}>
             <ActivityIndicator color="#12100e" size="small" />
-            <Text style={styles.inlineLoadingText}>Loading session history...</Text>
+            <Text style={styles.inlineLoadingText}>正在加载会话历史...</Text>
           </View>
         ) : messages.length === 0 && runs.length === 0 ? (
-          <Text style={styles.emptyText}>Messages will appear here.</Text>
+          <Text style={styles.emptyText}>消息会显示在这里。</Text>
         ) : (
           renderItems.map((item) =>
             item.type === "run" ? (
@@ -217,9 +217,9 @@ function loadingLabel(
   runs: AgentRunSnapshot[],
 ) {
   if (hasRunningTool(pendingRequestID, activeAssistantID, messages, runs)) {
-    return "Running tool";
+    return "正在运行工具";
   }
-  return activeAssistantID ? "Generating" : "Thinking";
+  return activeAssistantID ? "正在生成" : "正在思考";
 }
 
 function hasRunningTool(
@@ -280,28 +280,28 @@ function userMessageAnchors(messages: ChatItem[]): ChatJumpAnchor[] {
 function messageTitle(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) {
-    return "Empty message";
+    return "空消息";
   }
   return normalized.length > 64 ? `${normalized.slice(0, 64)}...` : normalized;
 }
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
+    backgroundColor: "#fffdf7",
+    borderColor: "#d7cfc2",
+    borderRadius: 16,
+    borderWidth: 1,
     elevation: 2,
     gap: 10,
-    padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
+    padding: 10,
+    shadowColor: "#171613",
+    shadowOffset: { height: 3, width: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
   },
   chatPanel: {
     flex: 1,
-    minHeight: 260,
+    minHeight: 220,
     overflow: "hidden",
   },
   panelHeader: {
@@ -309,6 +309,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingTop: 2,
   },
   panelTitle: {
     color: "#12100e",
@@ -326,14 +328,15 @@ const styles = StyleSheet.create({
   },
   messages: {
     gap: 8,
-    paddingBottom: 4,
+    paddingBottom: 8,
+    paddingTop: 3,
   },
   inlineLoading: {
     alignItems: "center",
     backgroundColor: "#fff4cc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#d7cfc2",
+    borderRadius: 12,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 10,

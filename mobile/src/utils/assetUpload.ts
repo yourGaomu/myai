@@ -15,7 +15,7 @@ export async function uploadMobileAsset({
 }: UploadMobileAssetOptions): Promise<UploadedAssetPayload> {
   const normalizedBaseURL = normalizeBaseURL(baseURL);
   if (!normalizedBaseURL) {
-    throw new Error("Asset service URL is required");
+    throw new Error("asset service url is required");
   }
 
   const body = new FormData();
@@ -50,7 +50,7 @@ function normalizeBaseURL(value: string) {
 }
 
 async function uploadErrorMessage(response: Response) {
-  const fallback = `Upload failed: ${response.status} ${response.statusText}`;
+  const fallback = `asset upload failed: ${response.status} ${response.statusText}`;
   try {
     const data = (await response.json()) as { error?: string; message?: string };
     return data.error || data.message || fallback;

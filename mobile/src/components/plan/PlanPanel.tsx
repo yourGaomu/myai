@@ -38,35 +38,35 @@ export function PlanPanel({
     <View style={[styles.panel, styles.planPanel]}>
       <View style={styles.header}>
         <View style={styles.flex}>
-          <Text style={styles.title}>Plan</Text>
+          <Text style={styles.title}>计划</Text>
           <Text numberOfLines={2} style={styles.meta}>
-            {activeSession?.title || sessionID || "No active session"}
+            {activeSession?.title || sessionID || "没有活动会话"}
           </Text>
         </View>
         <View style={[styles.statusBadge, statusBadgeStyle(plan?.status)]}>
           {pendingPlan || plan?.status === "running" ? <ActivityIndicator color="#12100e" size="small" /> : null}
-          <Text style={styles.statusText}>{plan?.status || "empty"}</Text>
+          <Text style={styles.statusText}>{planStatusLabel(plan?.status)}</Text>
         </View>
       </View>
 
       {!plan ? (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyTitle}>No structured plan yet</Text>
-          <Text style={styles.emptyText}>Switch this session to Plan mode, ask for a plan, then come back here to review and execute it.</Text>
+          <Text style={styles.emptyTitle}>还没有结构化计划</Text>
+          <Text style={styles.emptyText}>将当前会话切换为计划模式，请求生成计划后，再回到这里查看和执行。</Text>
         </View>
       ) : (
         <>
           <View style={styles.goalBox}>
-            <Text style={styles.goalLabel}>Goal</Text>
-            <Text style={styles.goalText}>{plan.goal || plan.steps?.[0]?.title || "Untitled plan"}</Text>
+            <Text style={styles.goalLabel}>目标</Text>
+            <Text style={styles.goalText}>{plan.goal || plan.steps?.[0]?.title || "未命名计划"}</Text>
           </View>
 
           <View style={styles.progressBox}>
             <View style={styles.progressHeader}>
               <Text style={styles.progressText}>
-                {progress.done}/{progress.total} done
+                已完成 {progress.done}/{progress.total}
               </Text>
-              <Text style={styles.progressMeta}>{progress.running ? "running" : progress.failed ? "needs attention" : "ready"}</Text>
+              <Text style={styles.progressMeta}>{progress.running ? "执行中" : progress.failed ? "需要处理" : "就绪"}</Text>
             </View>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${progress.percent}%` }]} />
@@ -86,14 +86,14 @@ export function PlanPanel({
           onPress={onOpenChat}
           style={({ pressed }) => buttonFeedback([styles.secondaryButton], pressed)}
         >
-          <Text style={styles.secondaryButtonText}>Back to chat</Text>
+          <Text style={styles.secondaryButtonText}>返回对话</Text>
         </Pressable>
         <Pressable
           disabled={!canExecute}
           onPress={onExecutePlan}
           style={({ pressed }) => buttonFeedback([styles.primaryButton, !canExecute && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingPlan} text={pendingPlan ? "Executing" : plan?.status === "running" ? "Executing" : "Execute plan"} />
+          <ButtonContent loading={pendingPlan} text={pendingPlan ? "执行中" : plan?.status === "running" ? "执行中" : "执行计划"} />
         </Pressable>
       </View>
     </View>
@@ -111,7 +111,7 @@ function PlanStepRow({ step }: { step: PlanStep }) {
         <Text style={styles.stepTitle}>{step.title}</Text>
         {step.description ? <Text style={styles.stepDescription}>{step.description}</Text> : null}
       </View>
-      <Text style={styles.stepStatus}>{step.status}</Text>
+      <Text style={styles.stepStatus}>{stepStatusLabel(step.status)}</Text>
     </View>
   );
 }
@@ -137,6 +137,29 @@ function statusBadgeStyle(status?: string) {
     return styles.statusFailed;
   }
   return styles.statusDraft;
+}
+
+function planStatusLabel(status?: string) {
+  switch (status) {
+    case "draft": return "草稿";
+    case "approved": return "已确认";
+    case "running": return "执行中";
+    case "done": return "已完成";
+    case "failed": return "失败";
+    case "canceled": return "已取消";
+    default: return "空";
+  }
+}
+
+function stepStatusLabel(status?: string) {
+  switch (status) {
+    case "pending": return "待执行";
+    case "running": return "执行中";
+    case "done": return "已完成";
+    case "failed": return "失败";
+    case "canceled": return "已取消";
+    default: return status || "未知";
+  }
 }
 
 function stepStatusStyle(status?: string) {

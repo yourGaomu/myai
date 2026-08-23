@@ -88,14 +88,14 @@ export function ThinkingReasoning({
   return (
     <View style={styles.reasoningBlock}>
       <Pressable
-        accessibilityLabel={running ? "Thinking" : summary}
+        accessibilityLabel={running ? "正在思考" : summary}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         onPress={() => setExpanded((value) => !value)}
         style={({ pressed }) => buttonFeedback(styles.reasoningHeader, pressed)}
       >
         {running ? (
-          <ShimmerLabel containerStyle={styles.reasoningShimmerLabel} label="Thinking" />
+          <ShimmerLabel containerStyle={styles.reasoningShimmerLabel} label="正在思考" />
         ) : (
           <Text style={styles.reasoningSummaryText}>{summary}</Text>
         )}
@@ -138,14 +138,14 @@ export function ThinkingReasoning({
 
 function thoughtSummary(startedAt?: string, finishedAt?: string) {
   if (!startedAt || !finishedAt) {
-    return "Thought";
+    return "思考过程";
   }
   const started = Date.parse(startedAt);
   const finished = Date.parse(finishedAt);
   if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) {
-    return "Thought";
+    return "思考过程";
   }
-  return `Thought for ${formatDuration(finished - started)}`;
+  return `思考了 ${formatDuration(finished - started)}`;
 }
 
 function formatDuration(durationMs: number) {

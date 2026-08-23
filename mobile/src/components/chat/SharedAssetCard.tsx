@@ -13,8 +13,8 @@ type Props = {
 export function SharedAssetCard({ asset, buttonFeedback }: Props) {
   const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
-  const title = asset.fileName || asset.path || "Shared file";
-  const meta = [asset.size !== undefined ? formatBytes(asset.size) : "", asset.contentType || "", asset.expiresAt ? `expires ${formatDateTime(asset.expiresAt)}` : ""]
+  const title = asset.fileName || asset.path || "共享文件";
+  const meta = [asset.size !== undefined ? formatBytes(asset.size) : "", asset.contentType || "", asset.expiresAt ? `有效期至 ${formatDateTime(asset.expiresAt)}` : ""]
     .filter(Boolean)
     .join(" / ");
   const showImagePreview = isPreviewableImageAsset(asset) && !imageFailed;
@@ -36,14 +36,14 @@ export function SharedAssetCard({ asset, buttonFeedback }: Props) {
           {imageLoading ? (
             <View style={styles.assetPreviewOverlay}>
               <ActivityIndicator color="#12100e" size="small" />
-              <Text style={styles.assetPreviewStatus}>Loading preview</Text>
+              <Text style={styles.assetPreviewStatus}>正在加载预览</Text>
             </View>
           ) : null}
         </Pressable>
       ) : null}
       <View style={styles.assetDetailsRow}>
         <View style={styles.assetIconBox}>
-          <Text style={styles.assetIconText}>{showImagePreview ? "IMG" : fileInitial(title)}</Text>
+          <Text style={styles.assetIconText}>{showImagePreview ? "图片" : fileInitial(title)}</Text>
         </View>
         <View style={styles.assetContent}>
           <Text numberOfLines={1} style={styles.assetTitle}>
@@ -55,13 +55,13 @@ export function SharedAssetCard({ asset, buttonFeedback }: Props) {
             </Text>
           ) : null}
           {meta ? <Text style={styles.assetMeta}>{meta}</Text> : null}
-          {imageFailed ? <Text style={styles.assetPreviewStatus}>Preview unavailable</Text> : null}
+          {imageFailed ? <Text style={styles.assetPreviewStatus}>无法预览</Text> : null}
           <Text numberOfLines={1} selectable style={styles.assetURL}>
             {asset.shortURL}
           </Text>
         </View>
         <Pressable onPress={() => void Linking.openURL(asset.shortURL)} style={({ pressed }) => buttonFeedback(styles.assetOpenButton, pressed)}>
-          <Text style={styles.assetOpenButtonText}>Open</Text>
+          <Text style={styles.assetOpenButtonText}>打开</Text>
         </Pressable>
       </View>
     </View>
@@ -73,5 +73,5 @@ function fileInitial(name: string) {
   if (extension && extension !== name) {
     return extension.slice(0, 3).toUpperCase();
   }
-  return "FILE";
+  return "文件";
 }

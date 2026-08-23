@@ -48,7 +48,7 @@ export function Composer({
                 onPress={() => onRemoveAttachedFile(attachmentKey(file))}
                 style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
               >
-                <Text style={styles.attachmentRemoveText}>Remove</Text>
+                <Text style={styles.attachmentRemoveText}>移除</Text>
               </Pressable>
             </View>
           ))}
@@ -58,7 +58,7 @@ export function Composer({
         <TextInput
           multiline
           onChangeText={onChangeMessage}
-          placeholder="Message, @files, /commands"
+          placeholder="输入消息，@引用文件，/使用命令"
           placeholderTextColor="#776f66"
           style={styles.messageInput}
           value={messageInput}
@@ -70,14 +70,14 @@ export function Composer({
           onPress={onUploadFile}
           style={({ pressed }) => buttonFeedback([styles.uploadButton, pendingUpload && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingUpload} text={pendingUpload ? "Uploading" : "File"} />
+          <ButtonContent loading={pendingUpload} text={pendingUpload ? "上传中" : "文件"} />
         </Pressable>
         {!pendingSend ? (
           <Pressable
             onPress={onSend}
             style={({ pressed }) => buttonFeedback(styles.sendButton, pressed)}
           >
-            <ButtonContent text="Send" />
+            <ButtonContent text="发送" />
           </Pressable>
         ) : null}
         {canPause ? (
@@ -86,7 +86,7 @@ export function Composer({
             onPress={onPause}
             style={({ pressed }) => buttonFeedback([styles.pauseButton, pendingPause && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingPause} text={pendingPause ? "Pausing" : "Pause"} />
+            <ButtonContent loading={pendingPause} text={pendingPause ? "暂停中" : "暂停"} />
           </Pressable>
         ) : null}
       </View>
@@ -96,17 +96,7 @@ export function Composer({
 
 const styles = StyleSheet.create({
   composer: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
-    gap: 10,
-    padding: 8,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
+    gap: 7,
   },
   attachmentTray: {
     gap: 8,
@@ -149,26 +139,34 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   composerInputRow: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#d7cfc2",
+    borderRadius: 16,
+    borderWidth: 1,
+    elevation: 2,
+    overflow: "hidden",
+    shadowColor: "#171613",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     width: "100%",
   },
   composerActions: {
+    alignItems: "center",
     flexDirection: "row",
-    gap: 8,
+    gap: 7,
     width: "100%",
   },
   messageInput: {
-    backgroundColor: "#fdf7ea",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: "transparent",
     color: "#12100e",
     flex: 1,
     minWidth: 0,
     includeFontPadding: false,
     lineHeight: 22,
     maxHeight: 120,
-    minHeight: 50,
-    paddingBottom: 10,
+    minHeight: 58,
+    paddingBottom: 8,
     paddingHorizontal: 12,
     paddingTop: 10,
     textAlignVertical: "top",
@@ -176,37 +174,34 @@ const styles = StyleSheet.create({
   sendButton: {
     alignItems: "center",
     backgroundColor: "#ff7f68",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#25231f",
+    borderRadius: 12,
+    borderWidth: 1,
     justifyContent: "center",
-    minHeight: 44,
-    flex: 1,
-    minWidth: 0,
+    minHeight: 42,
+    minWidth: 78,
     paddingHorizontal: 14,
   },
   uploadButton: {
     alignItems: "center",
     backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#25231f",
+    borderRadius: 12,
+    borderWidth: 1,
     justifyContent: "center",
-    minHeight: 44,
-    flex: 1,
-    minWidth: 0,
+    minHeight: 42,
+    minWidth: 78,
     paddingHorizontal: 12,
   },
   pauseButton: {
     alignItems: "center",
     backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#25231f",
+    borderRadius: 12,
+    borderWidth: 1,
     justifyContent: "center",
-    minHeight: 44,
-    flex: 1,
-    minWidth: 0,
+    minHeight: 42,
+    minWidth: 78,
     paddingHorizontal: 12,
   },
   disabledButton: {

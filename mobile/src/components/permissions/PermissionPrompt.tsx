@@ -14,15 +14,15 @@ export function PermissionPrompt({ buttonFeedback, onAllow, onDeny, permission }
   return (
     <View style={styles.permissionBox}>
       <Text style={styles.permissionTitle}>
-        {permission.name} requires {permission.permission}
+        {permission.name} 需要权限：{permission.permission}
       </Text>
       <Text style={styles.permissionArgs}>{permission.arguments}</Text>
       <View style={styles.row}>
         <Pressable onPress={onDeny} style={({ pressed }) => buttonFeedback([styles.secondaryButton, styles.flex], pressed)}>
-          <Text style={styles.secondaryButtonText}>Deny</Text>
+          <Text style={styles.secondaryButtonText}>拒绝</Text>
         </Pressable>
         <Pressable onPress={onAllow} style={({ pressed }) => buttonFeedback([styles.primaryButton, styles.flex], pressed)}>
-          <Text style={styles.primaryButtonText}>Allow</Text>
+          <Text style={styles.primaryButtonText}>允许</Text>
         </Pressable>
       </View>
     </View>

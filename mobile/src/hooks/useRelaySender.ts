@@ -27,7 +27,7 @@ export function useRelaySender({
     (type: RelayMessage["type"], overrides: Partial<RelayMessage> = {}) => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
-        addErrorMessage("WebSocket is not connected");
+        addErrorMessage("当前未连接 Relay，请先在设置中完成配对并连接。");
         return false;
       }
 

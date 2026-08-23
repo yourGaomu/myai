@@ -86,33 +86,33 @@ type Props = {
 };
 
 const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta: string }> = [
-  { label: "Read", mode: "readonly", meta: "no write/run" },
-  { label: "Ask", mode: "ask", meta: "confirm tools" },
-  { label: "Full", mode: "full", meta: "auto allow" },
+  { label: "只读", mode: "readonly", meta: "不可写入或运行" },
+  { label: "询问", mode: "ask", meta: "工具调用需确认" },
+  { label: "完全开放", mode: "full", meta: "自动允许工具调用" },
 ];
 const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }> = [
-  { label: "Chat", mode: "chat", meta: "normal execution" },
-  { label: "Plan", mode: "plan", meta: "read-only planning" },
+  { label: "对话", mode: "chat", meta: "正常对话与执行" },
+  { label: "计划", mode: "plan", meta: "只读规划" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
 type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context" | "generation";
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
 
 const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtocol }> = [
-  { label: "OpenAI 兼容", meta: "Chat Completions", protocol: "openai-chat-completions" },
-  { label: "Anthropic", meta: "Messages API", protocol: "anthropic-messages" },
-  { label: "Google Gemini", meta: "Generative AI", protocol: "google-generative-ai" },
-  { label: "Mistral", meta: "原生 Chat", protocol: "mistral-chat" },
-  { label: "Ollama", meta: "本地原生 Chat", protocol: "ollama-chat" },
+  { label: "OpenAI 兼容", meta: "聊天补全协议", protocol: "openai-chat-completions" },
+  { label: "Anthropic", meta: "消息协议", protocol: "anthropic-messages" },
+  { label: "Google Gemini", meta: "生成式 AI", protocol: "google-generative-ai" },
+  { label: "Mistral", meta: "原生对话协议", protocol: "mistral-chat" },
+  { label: "Ollama", meta: "本地原生对话", protocol: "ollama-chat" },
 ];
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
   { icon: "AG", key: "subagent", label: "子智能体", meta: "配置与后台任务" },
   { icon: "G", key: "general", label: "常规", meta: "状态总览" },
-  { icon: "WS", key: "connection", label: "连接", meta: "Relay 与配对" },
+  { icon: "WS", key: "connection", label: "连接", meta: "中继服务与配对" },
   { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
   { icon: "T", key: "generation", label: "生成", meta: "采样与回复风格" },
-  { icon: "SK", key: "skill", label: "技能", meta: "本地 SkillHub" },
+  { icon: "SK", key: "skill", label: "技能", meta: "本地技能中心" },
   { icon: "S", key: "session", label: "会话", meta: "新建与切换" },
   { icon: "P", key: "permission", label: "权限", meta: "工具调用策略" },
   { icon: "K", key: "context", label: "上下文", meta: "窗口与压缩" },
@@ -375,7 +375,7 @@ export function SettingsPanel({
       <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="WS" />
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
-          <Text style={styles.settingTitle}>Relay</Text>
+        <Text style={styles.settingTitle}>中继服务</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>{websocketURL(normalizedRelayURL)}</Text>
         </View>
         <Pressable
@@ -409,7 +409,7 @@ export function SettingsPanel({
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={onAssetBaseURLChange}
-        placeholder="Asset service http://server:18081"
+        placeholder="资源服务地址，例如 http://server:18081"
         placeholderTextColor="#776f66"
         style={styles.input}
         value={assetBaseURL}
@@ -419,7 +419,7 @@ export function SettingsPanel({
           keyboardType="number-pad"
           maxLength={6}
           onChangeText={onBindCodeChange}
-          placeholder="Bind code"
+          placeholder="配对码"
           placeholderTextColor="#776f66"
           style={[styles.input, styles.flex]}
           value={bindCode}
@@ -435,14 +435,14 @@ export function SettingsPanel({
       <View style={styles.row}>
         <TextInput
           onChangeText={onUserIDChange}
-          placeholder="User"
+          placeholder="用户标识"
           placeholderTextColor="#776f66"
           style={[styles.input, styles.flex]}
           value={userID}
         />
         <TextInput
           onChangeText={onDeviceIDChange}
-          placeholder="Device"
+          placeholder="设备标识"
           placeholderTextColor="#776f66"
           style={[styles.input, styles.flex]}
           value={deviceID}
@@ -517,9 +517,9 @@ export function SettingsPanel({
           {([
             ["id", "模型 ID", "例如 deepseek-chat"],
             ["name", "显示名称", "可选"],
-            ["provider", "Provider", "例如 deepseek、ollama"],
-            ["baseURL", "Base URL", modelProtocolPlaceholder(modelForm.protocol)],
-            ["apiKey", "API Key", "无认证服务可留空"],
+            ["provider", "服务商", "例如 deepseek、ollama"],
+            ["baseURL", "服务地址", modelProtocolPlaceholder(modelForm.protocol)],
+            ["apiKey", "API 密钥", "无认证服务可留空"],
             ["modelName", "厂商模型名", "例如 deepseek-chat"],
           ] as const).map(([key, label, placeholder]) => (
             <TextInput
@@ -534,10 +534,10 @@ export function SettingsPanel({
               value={modelForm[key]}
             />
           ))}
-          <Text style={styles.settingMeta}>{editingModelID ? "API Key 留空表示保留原密钥" : "认证方式"}</Text>
+          <Text style={styles.settingMeta}>{editingModelID ? "API 密钥留空表示保留原密钥" : "认证方式"}</Text>
           <View style={styles.modeRow}>
             {([
-              ["bearer", "Bearer Token", "需要 API Key"],
+              ["bearer", "Bearer 令牌", "需要 API 密钥"],
               ["none", "无认证", "本地服务常用"],
             ] as const).map(([value, label, meta]) => (
               <Pressable
@@ -566,7 +566,7 @@ export function SettingsPanel({
             <TextInput
               keyboardType="decimal-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTemperature: value }))}
-              placeholder="Temperature 0-2"
+              placeholder="温度 0-2"
               placeholderTextColor="#776f66"
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTemperature}
@@ -574,7 +574,7 @@ export function SettingsPanel({
             <TextInput
               keyboardType="decimal-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTopP: value }))}
-              placeholder="Top P 0-1"
+              placeholder="核采样 0-1"
               placeholderTextColor="#776f66"
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTopP}
@@ -582,7 +582,7 @@ export function SettingsPanel({
             <TextInput
               keyboardType="number-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultMaxTokens: value }))}
-              placeholder="Max Tokens"
+              placeholder="最大输出长度"
               placeholderTextColor="#776f66"
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultMaxTokens}
@@ -640,7 +640,7 @@ export function SettingsPanel({
                   style={({ pressed }) => buttonFeedback([styles.modelInfoButton], pressed)}
                 >
                   <Text style={styles.modelTitle}>{modelDisplayName(model)}{model.is_default ? " · 默认" : ""}</Text>
-                  <Text style={styles.modelMeta}>{model.provider || "provider"} / {model.model_name || model.id}</Text>
+                  <Text style={styles.modelMeta}>{model.provider || "服务商"} / {model.model_name || model.id}</Text>
                   <Text numberOfLines={1} style={styles.modelMeta}>
                     {(model.protocol || "openai-chat-completions")} · {(model.auth_type || "bearer")} · {model.has_api_key ? "已配置密钥" : "无密钥"}
                   </Text>
@@ -673,8 +673,8 @@ export function SettingsPanel({
   );
 
   const submitGeneration = () => {
-    const temperature = parseOptionalSetting(temperatureInput, "Temperature", 0, 2);
-    const topP = parseOptionalSetting(topPInput, "Top P", 0, 1);
+    const temperature = parseOptionalSetting(temperatureInput, "温度", 0, 2);
+    const topP = parseOptionalSetting(topPInput, "核采样", 0, 1);
     const maxOutputTokens = parseOptionalInteger(maxTokensInput, "最大输出 Token", 1, 131072);
     const error = temperature.error || topP.error || maxOutputTokens.error;
     if (error) {
@@ -720,7 +720,7 @@ export function SettingsPanel({
           <>
             <GenerationField
               effective={generation.effective.temperature}
-              label="Temperature"
+              label="温度"
               modelDefault={generation.model_defaults.temperature}
               onChangeText={setTemperatureInput}
               onReset={() => setTemperatureInput("")}
@@ -729,7 +729,7 @@ export function SettingsPanel({
             />
             <GenerationField
               effective={generation.effective.top_p}
-              label="Top P"
+              label="核采样"
               modelDefault={generation.model_defaults.top_p}
               onChangeText={setTopPInput}
               onReset={() => setTopPInput("")}
@@ -739,7 +739,7 @@ export function SettingsPanel({
             <GenerationField
               effective={generation.effective.max_output_tokens}
               integer
-              label="最大输出 Token"
+              label="最大输出令牌"
               modelDefault={generation.model_defaults.max_output_tokens}
               onChangeText={setMaxTokensInput}
               onReset={() => setMaxTokensInput("")}
@@ -820,7 +820,7 @@ export function SettingsPanel({
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>技能</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>
-            {skills.length} loaded{skillRoot ? ` / ${skillRoot}` : ""}
+            {skills.length} 个技能已加载{skillRoot ? ` / ${skillRoot}` : ""}
           </Text>
         </View>
         <View style={styles.rowCompact}>
@@ -906,7 +906,7 @@ export function SettingsPanel({
               <Text style={styles.currentSessionText}>{shortID(sessionID)}</Text>
               <Text style={styles.currentSessionMeta}>
                 {activeSession?.model || "model"} / {activeAgentMode} / {activePermission} / {activeSession?.context_window_k || currentWindowK}K
-                {activeSession?.usage?.total_tokens !== undefined ? ` / ${activeSession.usage.total_tokens} tokens` : ""}
+                {activeSession?.usage?.total_tokens !== undefined ? ` / ${activeSession.usage.total_tokens} 个令牌` : ""}
               </Text>
             </View>
             <Pressable
@@ -945,10 +945,10 @@ export function SettingsPanel({
               <View style={styles.planSummaryHeader}>
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.planSummaryTitle}>
-                    Plan / {activePlan.status || "draft"} / {activePlan.steps?.length || 0} steps
+                    计划 / {planStatusLabel(activePlan.status)} / {activePlan.steps?.length || 0} 个步骤
                   </Text>
                   <Text numberOfLines={2} style={styles.planSummaryMeta}>
-                    {activePlan.goal || activePlan.steps?.[0]?.title || "Structured plan is ready"}
+                    {activePlan.goal || activePlan.steps?.[0]?.title || "结构化计划已准备好"}
                   </Text>
                 </View>
                 <View style={styles.planActionRow}>
@@ -957,7 +957,7 @@ export function SettingsPanel({
                     onPress={onOpenPlan}
                     style={({ pressed }) => buttonFeedback([styles.planSmallButton, !canUseSessionSettings && styles.disabledButton], pressed)}
                   >
-                    <Text style={styles.planSmallButtonText}>View</Text>
+                    <Text style={styles.planSmallButtonText}>查看</Text>
                   </Pressable>
                   <Pressable
                     disabled={!canUseSessionSettings || planBusy || settingsBusy || activePlan.status === "done"}
@@ -992,7 +992,7 @@ export function SettingsPanel({
                 onPress={() => onLoadSession(session.id)}
                 style={({ pressed }) => buttonFeedback([styles.sessionChipMain, pendingActions.sessions && styles.disabledButton], pressed)}
               >
-                <Text numberOfLines={1} style={styles.sessionTitle}>{session.title || "New chat"}</Text>
+                <Text numberOfLines={1} style={styles.sessionTitle}>{session.title || "新对话"}</Text>
                 <Text numberOfLines={1} style={styles.sessionMeta}>
                   {shortID(session.id)} / {session.agent_mode || "chat"} / {session.permission_mode || "ask"} / {session.context_window_k || 16}K
                 </Text>
@@ -1050,7 +1050,7 @@ export function SettingsPanel({
         <View style={styles.controlHeader}>
           <View style={styles.flex}>
             <Text style={styles.controlTitle}>上下文窗口</Text>
-            <Text style={styles.settingMeta}>{currentWindowK}K active window</Text>
+            <Text style={styles.settingMeta}>{currentWindowK}K 当前窗口</Text>
           </View>
           <Pressable
             disabled={!canUseSessionSettings || settingsBusy || contextBusy}
@@ -1097,17 +1097,17 @@ export function SettingsPanel({
           ))}
         </View>
         <View style={styles.contextGrid}>
-          <ContextStat label="Full" value={context?.full_tokens} suffix="tok" />
-          <ContextStat label="Selected" value={context?.selected_tokens} suffix="tok" />
-          <ContextStat label="Summary" value={context?.summary_tokens} suffix="tok" />
-          <ContextStat label="Prefix" value={context?.prefix_tokens} suffix="tok" />
-          <ContextStat label="Cacheable" value={context?.cacheable_tokens} suffix="tok" />
-          <ContextStat label="Messages" value={context?.selected_messages} suffix="shown" />
-          <ContextStat label="Version" value={context?.summary_version} suffix="sum" />
+          <ContextStat label="完整上下文" value={context?.full_tokens} suffix="令牌" />
+          <ContextStat label="已选内容" value={context?.selected_tokens} suffix="令牌" />
+          <ContextStat label="摘要" value={context?.summary_tokens} suffix="令牌" />
+          <ContextStat label="前缀" value={context?.prefix_tokens} suffix="令牌" />
+          <ContextStat label="可缓存" value={context?.cacheable_tokens} suffix="令牌" />
+          <ContextStat label="消息数" value={context?.selected_messages} suffix="条" />
+          <ContextStat label="版本" value={context?.summary_version} suffix="版" />
         </View>
         <View style={styles.hashGrid}>
-          <HashPill label="prefix" value={context?.prefix_hash} />
-          <HashPill label="summary" value={context?.summary_hash} />
+          <HashPill label="前缀" value={context?.prefix_hash} />
+          <HashPill label="摘要" value={context?.summary_hash} />
         </View>
         <View style={styles.contextSummaryBox}>
           <View style={styles.contextSummaryHeader}>
@@ -1135,14 +1135,14 @@ export function SettingsPanel({
               <Text style={styles.compactBadge}>{compactReasonLabel(compact.reason)}</Text>
             </View>
             <View style={styles.contextGrid}>
-              <ContextStat label="Before" value={compact.before_tokens} suffix="tok" />
-              <ContextStat label="After" value={compact.after_tokens} suffix="tok" />
-              <ContextStat label="New" value={compact.new_messages} suffix="msg" />
-              <ContextStat label="Cacheable" value={compact.cacheable_tokens} suffix="tok" />
+              <ContextStat label="压缩前" value={compact.before_tokens} suffix="令牌" />
+              <ContextStat label="压缩后" value={compact.after_tokens} suffix="令牌" />
+              <ContextStat label="新增" value={compact.new_messages} suffix="条消息" />
+              <ContextStat label="可缓存" value={compact.cacheable_tokens} suffix="令牌" />
             </View>
             <View style={styles.hashGrid}>
-              <HashPill label="prefix" value={compact.prefix_hash} />
-              <HashPill label="summary" value={compact.summary_hash} />
+              <HashPill label="前缀" value={compact.prefix_hash} />
+              <HashPill label="摘要" value={compact.summary_hash} />
             </View>
           </View>
         ) : (
@@ -1159,9 +1159,9 @@ export function SettingsPanel({
         <SummaryTile label="模型" value={activeModel ? modelDisplayName(activeModel) : currentModelID || "未加载"} />
         <SummaryTile label="技能" value={`${skills.length}`} tone={skills.length > 0 ? "good" : "quiet"} />
         <SummaryTile label="会话" value={activeSession?.title || (sessionID ? shortID(sessionID) : "未选择")} />
-        <SummaryTile label="权限" value={activePermission} tone={activePermission === "full" ? "warn" : activePermission === "readonly" ? "quiet" : "normal"} />
+          <SummaryTile label="权限" value={permissionModeLabel(activePermission)} tone={activePermission === "full" ? "warn" : activePermission === "readonly" ? "quiet" : "normal"} />
         <SummaryTile label="上下文" value={`${currentWindowK}K`} />
-        <SummaryTile label="设备" value={deviceID.trim() || "pc-local"} />
+        <SummaryTile label="设备" value={deviceID.trim() || "本地设备"} />
       </View>
       <View style={styles.quickActions}>
         <Pressable
@@ -1407,16 +1407,38 @@ function normalizeAgentMode(mode?: string): SessionAgentMode {
   return "chat";
 }
 
+function permissionModeLabel(mode: SessionPermissionMode) {
+  if (mode === "readonly") {
+    return "只读";
+  }
+  if (mode === "full") {
+    return "完全开放";
+  }
+  return "询问";
+}
+
+function planStatusLabel(status?: string) {
+  switch (status) {
+    case "draft": return "草稿";
+    case "approved": return "已确认";
+    case "running": return "执行中";
+    case "done": return "已完成";
+    case "failed": return "失败";
+    case "canceled": return "已取消";
+    default: return "空";
+  }
+}
+
 function modelProtocolHelp(protocol: ModelProtocol) {
   switch (protocol) {
     case "openai-chat-completions":
-      return "Base URL 填写 API 根地址，例如 https://api.example.com/v1，不要填写 /chat/completions。";
+      return "服务地址填写 API 根地址，例如 https://api.example.com/v1，不要填写 /chat/completions。";
     case "anthropic-messages":
-      return "Base URL 可留空使用 Anthropic 官方地址；自定义地址填写服务根地址。需要 API Key。";
+      return "服务地址可留空使用 Anthropic 官方地址；自定义地址填写服务根地址。需要 API 密钥。";
     case "google-generative-ai":
-      return "使用 Google 官方 Generative AI 地址，当前不支持自定义 Base URL。需要 API Key。";
+      return "使用 Google 官方生成式 AI 地址，当前不支持自定义服务地址。需要 API 密钥。";
     case "mistral-chat":
-      return "Base URL 可留空使用 Mistral 官方地址；自定义地址填写服务根地址。需要 API Key。";
+      return "服务地址可留空使用 Mistral 官方地址；自定义地址填写服务根地址。需要 API 密钥。";
     case "ollama-chat":
       return "填写 Ollama 服务根地址，例如 http://127.0.0.1:11434，不要填写 /v1 或 /chat/completions。";
   }
@@ -1509,16 +1531,16 @@ function parseOptionalInteger(input: string, label: string, min: number, max: nu
 const styles = StyleSheet.create({
   panel: {
     backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
+    borderColor: "#d8cdbb",
+    borderRadius: 16,
+    borderWidth: 1,
+    elevation: 1,
     gap: 10,
     padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
+    shadowColor: "#8f8272",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
   },
   panelWide: {
     alignSelf: "center",
@@ -1546,9 +1568,9 @@ const styles = StyleSheet.create({
   },
   sideRail: {
     backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#ded4c6",
+    borderRadius: 12,
+    borderWidth: 1,
   },
   sideRailWide: {
     flexShrink: 0,
@@ -1572,8 +1594,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#fffaf0",
     borderColor: "transparent",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderRadius: 10,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     minHeight: 48,
@@ -1585,7 +1607,7 @@ const styles = StyleSheet.create({
   },
   navItemActive: {
     backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
+    borderColor: "#d8a900",
   },
   navIcon: {
     color: "#12100e",
@@ -1613,9 +1635,9 @@ const styles = StyleSheet.create({
   },
   contentPane: {
     backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderColor: "#ded4c6",
+    borderRadius: 14,
+    borderWidth: 1,
     flex: 1,
     gap: 12,
     maxHeight: 680,

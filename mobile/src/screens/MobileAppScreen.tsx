@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus, type ScrollView } from "react-native";
 
 import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
+import { SessionModeSwitch } from "../components/session/SessionModeSwitch";
 import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
 import { useAssetState } from "../hooks/useAssetState";
 import { useAgentRunState } from "../hooks/useAgentRunState";
@@ -41,6 +42,7 @@ import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
 import { historyMessageToChatItem } from "../utils/chatHistory";
+import { agentActivity } from "../utils/agentActivity";
 
 export function MobileAppScreen() {
   useAndroidNavigationBar();
@@ -254,9 +256,16 @@ export function MobileAppScreen() {
   });
   const currentChat = getSessionChat(sessionID);
   const currentRuns = getSessionRuns(sessionID);
+  const headerActivity = agentActivity({
+    connected,
+    messages: currentChat.messages,
+    pendingPermission: Boolean(currentChat.pendingPermission),
+    pendingRequestID: currentChat.pendingRequestID,
+    runs: currentRuns,
+    uploading: pendingActions.upload,
+  });
   void sessionChatsVersion;
   void agentRunsVersion;
-  const currentUsage = currentChat.lastUsage || null;
   const currentSessionBusy = Boolean(currentChat.pendingRequestID);
   const currentPauseBusy = Boolean(pendingActions.pause);
   const uiBusy = isBusy || currentSessionBusy;
@@ -755,9 +764,6 @@ export function MobileAppScreen() {
           bottomPadding={bottomSafePadding}
           buttonFeedback={buttonFeedback}
           changesActive={changesTabActive}
-          connected={connected}
-          isBusy={uiBusy}
-          lastUsage={currentUsage}
           messageInput={messageInput}
           onChangeMessage={setMessageInput}
           onChangesPress={openChanges}
@@ -780,6 +786,7 @@ export function MobileAppScreen() {
       topSafePadding={topSafePadding}
     >
       <AppHeader
+        activity={headerActivity}
         buttonFeedback={buttonFeedback}
         connected={connected}
         deviceID={deviceID}
@@ -789,6 +796,16 @@ export function MobileAppScreen() {
         userID={userID}
         viewMode={viewMode}
       />
+
+      {viewMode === "chat" ? (
+        <SessionModeSwitch
+          buttonFeedback={buttonFeedback}
+          disabled={!connected || !sessionID}
+          mode={activeSession?.agent_mode === "plan" ? "plan" : "chat"}
+          onChange={setAgentMode}
+          pending={pendingActions.settings}
+        />
+      ) : null}
 
       <MobileMainContent
         changes={{

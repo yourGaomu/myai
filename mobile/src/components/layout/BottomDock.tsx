@@ -3,19 +3,14 @@ import { StyleSheet, View } from "react-native";
 import type { ViewMode } from "../../types/app";
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import type { TokenUsage } from "../../protocol";
 import { Composer } from "../chat/Composer";
 import { BottomTabs } from "../navigation/BottomTabs";
-import { TokenDock } from "../status/TokenDock";
 
 type Props = {
   attachedFiles: ChatAttachment[];
   bottomPadding: number;
   buttonFeedback: ButtonFeedback;
   changesActive: boolean;
-  connected: boolean;
-  isBusy: boolean;
-  lastUsage: TokenUsage | null;
   messageInput: string;
   onChangeMessage: (value: string) => void;
   onChangesPress: () => void;
@@ -38,9 +33,6 @@ export function BottomDock({
   bottomPadding,
   buttonFeedback,
   changesActive,
-  connected,
-  isBusy,
-  lastUsage,
   messageInput,
   onChangeMessage,
   onChangesPress,
@@ -59,25 +51,6 @@ export function BottomDock({
 }: Props) {
   return (
     <View style={[styles.bottomDock, { paddingBottom: bottomPadding }]}>
-      <BottomTabs
-        buttonFeedback={buttonFeedback}
-        changesActive={changesActive}
-        onChangesPress={onChangesPress}
-        onChatPress={onChatPress}
-        onFilesPress={onFilesPress}
-        onKnowledgePress={onKnowledgePress}
-        onSettingsPress={onSettingsPress}
-        viewMode={viewMode}
-      />
-      {viewMode === "chat" ? (
-        <TokenDock
-          buttonFeedback={buttonFeedback}
-          connected={connected}
-          isBusy={isBusy}
-          lastUsage={lastUsage}
-          onSettingsPress={onSettingsPress}
-        />
-      ) : null}
       {viewMode !== "settings" && viewMode !== "changeDetail" && viewMode !== "plan" && viewMode !== "knowledge" ? (
         <Composer
           attachedFiles={attachedFiles}
@@ -94,15 +67,25 @@ export function BottomDock({
           pendingUpload={pendingUpload}
         />
       ) : null}
+      <BottomTabs
+        buttonFeedback={buttonFeedback}
+        changesActive={changesActive}
+        onChangesPress={onChangesPress}
+        onChatPress={onChatPress}
+        onFilesPress={onFilesPress}
+        onKnowledgePress={onKnowledgePress}
+        onSettingsPress={onSettingsPress}
+        viewMode={viewMode}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bottomDock: {
-    backgroundColor: "#efe4d2",
-    gap: 8,
+    backgroundColor: "#f4f5f7",
+    gap: 7,
     paddingHorizontal: 14,
-    paddingTop: 8,
+    paddingTop: 9,
   },
 });
