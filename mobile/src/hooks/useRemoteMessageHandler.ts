@@ -458,8 +458,14 @@ export function useRemoteMessageHandler({
           applySessionHistoryDelta(payload);
           break;
         }
-        case "session_permission_set_result":
         case "session_mode_set_result":
+          // 模式响应已经携带服务端最新 Session。不要立刻请求列表，避免旧列表响应覆盖刚切换的模式。
+          stopPending("settings");
+          applySessionSettings(
+            message.payload as SessionSettingsResultPayload | undefined,
+          );
+          break;
+        case "session_permission_set_result":
         case "session_context_set_result":
         case "session_rag_set_result":
         case "session_compact_result":

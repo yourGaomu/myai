@@ -24,6 +24,7 @@ type Props = {
   onUploadFile: () => void;
   pendingPause: boolean;
   pendingSend: boolean;
+  pendingSettings: boolean;
   pendingUpload: boolean;
   viewMode: ViewMode;
 };
@@ -46,12 +47,13 @@ export function BottomDock({
   onUploadFile,
   pendingPause,
   pendingSend,
+  pendingSettings,
   pendingUpload,
   viewMode,
 }: Props) {
   return (
     <View style={[styles.bottomDock, { paddingBottom: bottomPadding }]}>
-      {viewMode !== "settings" && viewMode !== "changeDetail" && viewMode !== "plan" && viewMode !== "knowledge" ? (
+      {viewMode === "chat" ? (
         <Composer
           attachedFiles={attachedFiles}
           buttonFeedback={buttonFeedback}
@@ -63,7 +65,7 @@ export function BottomDock({
           onSend={onSend}
           onUploadFile={onUploadFile}
           pendingPause={pendingPause}
-          pendingSend={pendingSend}
+          pendingSend={pendingSend || pendingSettings}
           pendingUpload={pendingUpload}
         />
       ) : null}
@@ -84,8 +86,8 @@ export function BottomDock({
 const styles = StyleSheet.create({
   bottomDock: {
     backgroundColor: "#f4f5f7",
-    gap: 7,
+    gap: 5,
     paddingHorizontal: 14,
-    paddingTop: 9,
+    paddingTop: 6,
   },
 });

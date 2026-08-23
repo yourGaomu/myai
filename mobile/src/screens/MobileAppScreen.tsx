@@ -777,6 +777,7 @@ export function MobileAppScreen() {
           onUploadFile={uploadLocalFile}
           pendingPause={currentPauseBusy}
           pendingSend={Boolean(currentChat.pendingRequestID)}
+          pendingSettings={pendingActions.settings}
           pendingUpload={pendingActions.upload}
           viewMode={viewMode}
         />

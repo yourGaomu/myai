@@ -39,7 +39,7 @@ import type { ChatItem } from "../types/chat";
 import { appendCachedSessionHistory, replaceCachedSessionHistory } from "../storage/sessionHistoryCache";
 import { historyMessageToChatItem } from "../utils/chatHistory";
 import { shortID } from "../utils/ids";
-import { findSessionUsage, upsertSession } from "../utils/session";
+import { findSessionUsage, mergeSessionList, upsertSession } from "../utils/session";
 
 type Args = {
   addEventMessage: (sessionID: string, message: string) => void;
@@ -163,7 +163,7 @@ export function useRemoteResultAppliers({
         return;
       }
 
-      setSessions(nextSessions);
+      setSessions((current) => mergeSessionList(current, nextSessions));
       const currentSessionID = (payload?.current_session_id || sessionIDRef.current || "").trim();
       if (!currentSessionID) {
         return;
@@ -186,7 +186,7 @@ export function useRemoteResultAppliers({
 
     const applySessionChanged = (payload?: SessionChangedPayload) => {
       const nextSessions = payload?.sessions || [];
-      setSessions(nextSessions);
+      setSessions((current) => mergeSessionList(current, nextSessions));
       if (payload?.current_session_id) {
         setSessionID(payload.current_session_id);
         sessionIDRef.current = payload.current_session_id;
@@ -213,7 +213,7 @@ export function useRemoteResultAppliers({
 
       const nextSessionID = payload.session?.id || payload.current_session_id || sessionIDRef.current;
       if (payload.sessions) {
-        setSessions(payload.sessions);
+        setSessions((current) => mergeSessionList(current, payload.sessions || []));
       } else if (payload.session?.id) {
         setSessions((current) => upsertSession(current, payload.session as SessionSummary));
       }

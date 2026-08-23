@@ -49,7 +49,7 @@ export function MobileScreenShell({
                 styles.fixedContent,
                 {
                   paddingTop: topSafePadding,
-                  paddingBottom: 8,
+                  paddingBottom: 2,
                 },
               ]}
             >
