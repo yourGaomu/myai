@@ -8,11 +8,13 @@ import { styles } from "./styles";
 type Props = {
   asset: SharedAsset;
   buttonFeedback: (style: StyleProp<ViewStyle>, active?: boolean) => StyleProp<ViewStyle>;
+  previewURL?: string;
 };
 
-export function SharedAssetCard({ asset, buttonFeedback }: Props) {
+export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
   const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
+  const [imageSource, setImageSource] = useState(previewURL || asset.shortURL);
   const title = asset.fileName || asset.path || "共享文件";
   const meta = [asset.size !== undefined ? formatBytes(asset.size) : "", asset.contentType || "", asset.expiresAt ? `有效期至 ${formatDateTime(asset.expiresAt)}` : ""]
     .filter(Boolean)
@@ -25,12 +27,17 @@ export function SharedAssetCard({ asset, buttonFeedback }: Props) {
         <Pressable onPress={() => void Linking.openURL(asset.shortURL)} style={({ pressed }) => buttonFeedback(styles.assetPreviewButton, pressed)}>
           <Image
             onError={() => {
+              if (previewURL && imageSource === previewURL && previewURL !== asset.shortURL) {
+                setImageSource(asset.shortURL);
+                setImageLoading(true);
+                return;
+              }
               setImageFailed(true);
               setImageLoading(false);
             }}
             onLoadEnd={() => setImageLoading(false)}
             resizeMode="cover"
-            source={{ uri: asset.shortURL }}
+            source={{ uri: imageSource }}
             style={styles.assetPreviewImage}
           />
           {imageLoading ? (

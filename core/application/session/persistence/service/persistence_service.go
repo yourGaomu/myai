@@ -136,6 +136,11 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		record.ContextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
 		record.Summary = current.Summary
 		record.CompactedMessages = current.CompactedMessages
+		record.CompactionSourceHash = current.CompactionSourceHash
+		record.CompactionCheckpoint = current.CompactionCheckpoint
+		if record.CompactionCheckpoint != nil {
+			record.CompactionCheckpoint = record.CompactionCheckpoint.Clone()
+		}
 		record.Usage = TokenUsageRecord(current.Usage)
 		record.LastUsage = TokenUsageRecord(current.LastUsage)
 		record.CurrentPlan = agentplan.Clone(current.CurrentPlan)
@@ -171,6 +176,11 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		}
 		record.Summary = existing.Summary
 		record.CompactedMessages = existing.CompactedMessages
+		record.CompactionSourceHash = existing.CompactionSourceHash
+		record.CompactionCheckpoint = existing.CompactionCheckpoint
+		if record.CompactionCheckpoint != nil {
+			record.CompactionCheckpoint = record.CompactionCheckpoint.Clone()
+		}
 		record.CompactedAt = existing.CompactedAt
 		record.Usage = existing.Usage
 		record.LastUsage = existing.LastUsage

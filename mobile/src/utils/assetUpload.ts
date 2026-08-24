@@ -1,4 +1,5 @@
 import type { DocumentPickerAsset } from "expo-document-picker";
+import { File } from "expo-file-system";
 
 import type { UploadedAssetPayload } from "../protocol";
 
@@ -22,10 +23,11 @@ export async function uploadMobileAsset({
   if (asset.file) {
     body.append("file", asset.file);
   } else {
+    const file = new File(asset.uri);
     body.append("file", {
-      uri: asset.uri,
       name: asset.name || "upload",
       type: asset.mimeType || "application/octet-stream",
+      bytes: () => file.bytes(),
     } as unknown as Blob);
   }
   body.append("title", asset.name || "mobile upload");

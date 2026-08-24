@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	sessionresult "myai/core/application/session/result"
 	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	"myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
@@ -13,11 +16,16 @@ import (
 )
 
 func TestContextStatePayloadIncludesSummary(t *testing.T) {
+	checkpoint, err := compaction.NewCheckpoint(`{"current_goal":"继续","preferences":[],"constraints":[],"decisions":[],"completed_work":[],"modified_files":[],"tool_verification":[],"problems":[],"open_tasks":[],"next_steps":[],"references":[]}`, 0, 3, "source-hash", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	payload := contextStatePayload(service.ContextState{
-		Info:    contextmgr.Info{WindowK: 16, HasSummary: true},
-		Summary: "saved summary",
+		Info:       contextmgr.Info{WindowK: 16, HasSummary: true},
+		Summary:    "saved summary",
+		Checkpoint: &checkpoint,
 	})
-	if payload.WindowK != 16 || !payload.HasSummary || payload.Summary != "saved summary" {
+	if payload.WindowK != 16 || !payload.HasSummary || !strings.Contains(payload.Summary, "继续") || payload.Checkpoint == nil || payload.Checkpoint.SourceHistoryHash != "source-hash" {
 		t.Fatalf("unexpected context state payload: %#v", payload)
 	}
 }

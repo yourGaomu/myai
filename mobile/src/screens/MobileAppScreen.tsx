@@ -483,7 +483,7 @@ export function MobileAppScreen() {
   const { allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
-    addUserMessage: (targetSessionID, message, requestID) => addMessage(targetSessionID, "user", message, requestID),
+    addUserMessage: (targetSessionID, message, requestID, attachments) => addMessage(targetSessionID, "user", message, requestID, attachments),
     attachedFiles,
     historySessionIDRef,
     messageInput,

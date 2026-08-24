@@ -149,6 +149,8 @@ export function useFileActions({
       });
       const attachment: UploadedAssetAttachment = {
         ...uploaded,
+        content_type: uploaded.content_type || asset.mimeType || "application/octet-stream",
+        file_name: uploaded.file_name || asset.name || "已上传文件",
         kind: "uploaded_asset",
         local_uri: asset.uri,
       };

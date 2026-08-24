@@ -11,7 +11,7 @@ import (
 )
 
 func TestSummaryServiceBuildsPromptAndReturnsTrimmedSummary(t *testing.T) {
-	model := &summaryModel{result: modelport.ChatResult{Content: "  compacted summary  "}}
+	model := &summaryModel{result: modelport.ChatResult{Content: ` {"current_goal":"compacted summary","preferences":[],"constraints":[],"decisions":[],"completed_work":[],"modified_files":[],"tool_verification":[],"problems":[],"open_tasks":[],"next_steps":[],"references":[]} `}}
 	messages := []domainmessage.Message{
 		domainmessage.Text(domainmessage.RoleSystem, "system should be ignored"),
 		domainmessage.Text(domainmessage.RoleUser, "hello"),
@@ -33,18 +33,20 @@ func TestSummaryServiceBuildsPromptAndReturnsTrimmedSummary(t *testing.T) {
 		t.Fatalf("Summarize returned error: %v", err)
 	}
 
-	if summary != "compacted summary" {
-		t.Fatalf("expected trimmed summary, got %q", summary)
+	if !strings.Contains(summary, `"current_goal":"compacted summary"`) || !strings.HasPrefix(summary, "{") {
+		t.Fatalf("expected canonical JSON summary, got %q", summary)
 	}
 	if len(model.request.Messages) != 2 {
 		t.Fatalf("expected system and user prompt messages, got %#v", model.request.Messages)
 	}
 	prompt := model.request.Messages[1].Text()
 	for _, want := range []string{
-		"Existing summary:\nold summary",
+		"Existing checkpoint to update:\nold summary",
+		`"current_goal"`,
+		`"next_steps"`,
 		"User:\nhello",
 		"Assistant tool call:\ntool_call id=call-1 name=read_file",
-		"Tool result:\ntool_result id=call-1 name=read_file content=file content",
+		"Tool result:\ntool_result id=call-1 name=read_file status= error_code= error= content=file content",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", want, prompt)
@@ -73,6 +75,15 @@ func TestSummaryServiceRejectsEmptySummary(t *testing.T) {
 	})
 	if err == nil || err.Error() != "compact summary is empty" {
 		t.Fatalf("expected empty summary error, got %v", err)
+	}
+}
+
+func TestSummaryServiceRejectsNonJSONModelOutput(t *testing.T) {
+	_, err := SummaryService{}.Summarize(context.Background(), &summaryModel{result: modelport.ChatResult{Content: "## 当前目标\nnot json"}}, "", []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleUser, "hello"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid compact summary JSON") {
+		t.Fatalf("expected invalid JSON error, got %v", err)
 	}
 }
 

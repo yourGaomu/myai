@@ -84,6 +84,10 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 8,
   },
+  messageAttachments: {
+    gap: 8,
+    marginTop: 8,
+  },
   messageStatusRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -341,6 +345,31 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     padding: 9,
+  },
+  workspaceAttachmentCard: {
+    alignItems: "center",
+    backgroundColor: "#fffaf0",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 3,
+    flexDirection: "row",
+    gap: 10,
+    padding: 9,
+  },
+  workspaceAttachmentIcon: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 7,
+    borderWidth: 2,
+    height: 42,
+    justifyContent: "center",
+    width: 48,
+  },
+  workspaceAttachmentIconText: {
+    color: "#12100e",
+    fontSize: 10,
+    fontWeight: "900",
   },
   assetImageCard: {
     alignItems: "stretch",

@@ -3,36 +3,62 @@ package po
 import "time"
 
 type SessionDocument struct {
-	ID                   string                      `bson:"_id"`
-	Kind                 string                      `bson:"kind,omitempty"`
-	ParentSessionID      string                      `bson:"parent_session_id,omitempty"`
-	ParentTaskID         string                      `bson:"parent_task_id,omitempty"`
-	AgentDefinitionID    string                      `bson:"agent_definition_id,omitempty"`
-	AgentDefinitionVer   int64                       `bson:"agent_definition_version,omitempty"`
-	SystemInstruction    string                      `bson:"system_instruction,omitempty"`
-	AllowedTools         []string                    `bson:"allowed_tools,omitempty"`
-	EnforceToolAllowlist bool                        `bson:"enforce_tool_allowlist,omitempty"`
-	WorkspaceRoot        string                      `bson:"workspace_root,omitempty"`
-	WorkspaceSandboxID   string                      `bson:"workspace_sandbox_id,omitempty"`
-	MaxToolRounds        int                         `bson:"max_tool_rounds,omitempty"`
-	Model                string                      `bson:"model"`
-	AgentMode            string                      `bson:"agent_mode,omitempty"`
-	PermissionMode       string                      `bson:"permission_mode"`
-	ContextWindowK       int                         `bson:"context_window_k"`
-	Summary              string                      `bson:"summary,omitempty"`
-	CompactedMessages    int                         `bson:"compacted_messages,omitempty"`
-	CompactedAt          *time.Time                  `bson:"compacted_at,omitempty"`
-	Title                string                      `bson:"title"`
-	Usage                *TokenUsageDocument         `bson:"usage,omitempty"`
-	LastUsage            *TokenUsageDocument         `bson:"last_usage,omitempty"`
-	CurrentPlan          *PlanDocument               `bson:"current_plan,omitempty"`
-	RAGSettings          *RAGSettingsDocument        `bson:"rag_settings,omitempty"`
-	GenerationSettings   *GenerationSettingsDocument `bson:"generation_settings,omitempty"`
-	StyleInstruction     string                      `bson:"style_instruction,omitempty"`
-	Deleted              bool                        `bson:"deleted,omitempty"`
-	DeletedAt            *time.Time                  `bson:"deleted_at,omitempty"`
-	CreatedAt            time.Time                   `bson:"created_at"`
-	UpdatedAt            time.Time                   `bson:"updated_at"`
+	ID                   string                        `bson:"_id"`
+	Kind                 string                        `bson:"kind,omitempty"`
+	ParentSessionID      string                        `bson:"parent_session_id,omitempty"`
+	ParentTaskID         string                        `bson:"parent_task_id,omitempty"`
+	AgentDefinitionID    string                        `bson:"agent_definition_id,omitempty"`
+	AgentDefinitionVer   int64                         `bson:"agent_definition_version,omitempty"`
+	SystemInstruction    string                        `bson:"system_instruction,omitempty"`
+	AllowedTools         []string                      `bson:"allowed_tools,omitempty"`
+	EnforceToolAllowlist bool                          `bson:"enforce_tool_allowlist,omitempty"`
+	WorkspaceRoot        string                        `bson:"workspace_root,omitempty"`
+	WorkspaceSandboxID   string                        `bson:"workspace_sandbox_id,omitempty"`
+	MaxToolRounds        int                           `bson:"max_tool_rounds,omitempty"`
+	Model                string                        `bson:"model"`
+	AgentMode            string                        `bson:"agent_mode,omitempty"`
+	PermissionMode       string                        `bson:"permission_mode"`
+	ContextWindowK       int                           `bson:"context_window_k"`
+	Summary              string                        `bson:"summary,omitempty"`
+	CompactedMessages    int                           `bson:"compacted_messages,omitempty"`
+	CompactionSourceHash string                        `bson:"compaction_source_hash,omitempty"`
+	CompactionCheckpoint *CompactionCheckpointDocument `bson:"compaction_checkpoint,omitempty"`
+	CompactedAt          *time.Time                    `bson:"compacted_at,omitempty"`
+	Title                string                        `bson:"title"`
+	Usage                *TokenUsageDocument           `bson:"usage,omitempty"`
+	LastUsage            *TokenUsageDocument           `bson:"last_usage,omitempty"`
+	CurrentPlan          *PlanDocument                 `bson:"current_plan,omitempty"`
+	RAGSettings          *RAGSettingsDocument          `bson:"rag_settings,omitempty"`
+	GenerationSettings   *GenerationSettingsDocument   `bson:"generation_settings,omitempty"`
+	StyleInstruction     string                        `bson:"style_instruction,omitempty"`
+	Deleted              bool                          `bson:"deleted,omitempty"`
+	DeletedAt            *time.Time                    `bson:"deleted_at,omitempty"`
+	CreatedAt            time.Time                     `bson:"created_at"`
+	UpdatedAt            time.Time                     `bson:"updated_at"`
+}
+
+type CompactionCheckpointDocument struct {
+	Version            int                        `bson:"version"`
+	SourceStartMessage int                        `bson:"source_start_message"`
+	SourceEndMessage   int                        `bson:"source_end_message"`
+	SourceHistoryHash  string                     `bson:"source_history_hash,omitempty"`
+	Summary            string                     `bson:"summary"`
+	SummaryData        *CompactionSummaryDocument `bson:"summary_data,omitempty"`
+	CreatedAt          time.Time                  `bson:"created_at,omitempty"`
+}
+
+type CompactionSummaryDocument struct {
+	CurrentGoal      string   `bson:"current_goal,omitempty"`
+	Preferences      []string `bson:"preferences,omitempty"`
+	Constraints      []string `bson:"constraints,omitempty"`
+	Decisions        []string `bson:"decisions,omitempty"`
+	CompletedWork    []string `bson:"completed_work,omitempty"`
+	ModifiedFiles    []string `bson:"modified_files,omitempty"`
+	ToolVerification []string `bson:"tool_verification,omitempty"`
+	Problems         []string `bson:"problems,omitempty"`
+	OpenTasks        []string `bson:"open_tasks,omitempty"`
+	NextSteps        []string `bson:"next_steps,omitempty"`
+	References       []string `bson:"references,omitempty"`
 }
 
 type MessageDocument struct {

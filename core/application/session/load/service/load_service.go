@@ -84,6 +84,8 @@ func (s LoadService) EnsureInMemory(ctx context.Context, command loadcommand.Ens
 		ContextWindowK:       record.ContextWindowK,
 		Summary:              record.Summary,
 		CompactedMessages:    record.CompactedMessages,
+		CompactionSourceHash: record.CompactionSourceHash,
+		CompactionCheckpoint: record.CompactionCheckpoint,
 		Usage:                TokenUsageFromRecord(record.Usage),
 		LastUsage:            TokenUsageFromRecord(record.LastUsage),
 		RAGSettings:          record.RAGSettings,

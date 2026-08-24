@@ -3,7 +3,9 @@ package contextmgr
 import (
 	"strings"
 	"testing"
+	"time"
 
+	compaction "myai/core/domain/compaction"
 	domainmessage "myai/core/domain/message"
 )
 
@@ -124,5 +126,49 @@ func TestCurrentTurnTokensStartsAtAttachedRuntimeContext(t *testing.T) {
 	want := EstimateMessagesTokens(messages[3:])
 	if got := CurrentTurnTokens(messages); got != want {
 		t.Fatalf("current turn tokens = %d, want %d", got, want)
+	}
+}
+
+func TestCompactionCheckpointRejectsChangedSourcePrefix(t *testing.T) {
+	messages := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system"),
+		domainmessage.Text(domainmessage.RoleUser, "old question"),
+		domainmessage.Text(domainmessage.RoleAssistant, "old answer"),
+		domainmessage.Text(domainmessage.RoleUser, "latest question"),
+	}
+	hash := CompactionSourceHash(messages, 3)
+	if !CompactionCheckpointMatches(messages, "summary", 3, hash) {
+		t.Fatal("expected matching source checkpoint")
+	}
+	messages[1] = domainmessage.Text(domainmessage.RoleUser, "changed question")
+	if CompactionCheckpointMatches(messages, "summary", 3, hash) {
+		t.Fatal("expected changed source prefix to invalidate checkpoint")
+	}
+}
+
+func TestStructuredCompactionCheckpointIsAppliedOnlyForMatchingHistory(t *testing.T) {
+	messages := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system"),
+		domainmessage.Text(domainmessage.RoleUser, "old"),
+		domainmessage.Text(domainmessage.RoleAssistant, "answer"),
+		domainmessage.Text(domainmessage.RoleUser, "latest"),
+	}
+	hash := CompactionSourceHash(messages, 3)
+	checkpoint, err := compaction.NewCheckpoint(`{"current_goal":"continue","preferences":[],"constraints":[],"decisions":[],"completed_work":[],"modified_files":[],"tool_verification":[],"problems":[],"open_tasks":[],"next_steps":[],"references":[]}`, 0, 3, hash, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := BuildSnapshotWithCheckpoint(messages, checkpoint, checkpoint.SourceEndMessage, 16)
+	if !snapshot.Info.HasSummary || snapshot.Info.Checkpoint == nil {
+		t.Fatalf("expected checkpoint in snapshot: %#v", snapshot.Info)
+	}
+	if snapshot.Info.Checkpoint.SourceHistoryHash != hash {
+		t.Fatalf("unexpected checkpoint hash: %#v", snapshot.Info.Checkpoint)
+	}
+
+	messages[1] = domainmessage.Text(domainmessage.RoleUser, "changed")
+	stale := BuildSnapshotWithCheckpoint(messages, checkpoint, checkpoint.SourceEndMessage, 16)
+	if stale.Info.HasSummary || stale.Info.Checkpoint != nil {
+		t.Fatal("stale structured checkpoint was applied")
 	}
 }

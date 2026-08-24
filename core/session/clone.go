@@ -17,6 +17,9 @@ func Clone(current *Session) *Session {
 	cloned.CurrentPlan = agentplan.Clone(current.CurrentPlan)
 	cloned.RAGSettings = CloneRAGSettings(current.RAGSettings)
 	cloned.GenerationSettings = generation.Clone(current.GenerationSettings)
+	if current.CompactionCheckpoint != nil {
+		cloned.CompactionCheckpoint = current.CompactionCheckpoint.Clone()
+	}
 	cloned.Messages = domainmessage.CloneAll(current.Messages)
 	return &cloned
 }

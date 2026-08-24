@@ -1,5 +1,6 @@
 import type { SessionHistoryMessage } from "../protocol";
 import type { ChatItem } from "../types/chat";
+import { displayMessageText, parseAttachedFiles } from "./attachments";
 import { newRequestID } from "./ids";
 
 export function historyMessageToChatItem(
@@ -8,6 +9,7 @@ export function historyMessageToChatItem(
   const role = chatRoleFromHistory(message.role);
   return {
     id: message.id || newRequestID(),
+    attachments: role === "user" ? parseAttachedFiles(message.content || "") : undefined,
     createdAt: message.created_at,
     role,
     status: role === "assistant" ? "done" : undefined,
@@ -51,7 +53,7 @@ function historyMessageText(message: SessionHistoryMessage) {
     case "assistant":
       return message.content || "(empty assistant message)";
     case "user":
-      return message.content || "(empty user message)";
+      return displayMessageText(message.content || "") || (parseAttachedFiles(message.content || "").length > 0 ? "" : "(empty user message)");
     default:
       return (
         message.content ||

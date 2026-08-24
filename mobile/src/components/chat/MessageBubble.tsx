@@ -5,6 +5,7 @@ import type { ChatItem } from "../../types/chat";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { MarkdownText } from "./MarkdownText";
+import { ChatAttachmentCard } from "./ChatAttachmentCard";
 import { SharedAssetCard } from "./SharedAssetCard";
 import { styles } from "./styles";
 import { ThinkingReasoning } from "./ThinkingReasoning";
@@ -69,7 +70,18 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
           startedAt={message.createdAt}
         />
       ) : null}
-      <MarkdownText text={message.text} />
+      {message.text ? <MarkdownText text={message.text} /> : null}
+      {message.attachments?.length ? (
+        <View style={styles.messageAttachments}>
+          {message.attachments.map((attachment, index) => (
+            <ChatAttachmentCard
+              attachment={attachment}
+              buttonFeedback={buttonFeedback}
+              key={`${message.id}-attachment-${index}`}
+            />
+          ))}
+        </View>
+      ) : null}
       {message.role === "assistant" && (showStatusText || canRegenerate) ? (
         <View style={styles.messageStatusRow}>
           {showStatusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}

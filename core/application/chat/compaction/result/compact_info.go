@@ -1,5 +1,7 @@
 package result
 
+import compaction "myai/core/domain/compaction"
+
 type CompactInfo struct {
 	Triggered         bool
 	Reason            string
@@ -12,4 +14,5 @@ type CompactInfo struct {
 	SummaryHash       string
 	PrefixHash        string
 	CacheableTokens   int
+	Checkpoint        *compaction.Checkpoint
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
 	agentplan "myai/core/plan"
@@ -35,6 +36,7 @@ func TestSessionDocumentRoundTrip(t *testing.T) {
 		ContextWindowK:       128,
 		Summary:              "summary",
 		CompactedMessages:    3,
+		CompactionSourceHash: "source-hash",
 		CompactedAt:          &now,
 		Title:                "title",
 		Usage: &repository.TokenUsageRecord{
@@ -64,6 +66,11 @@ func TestSessionDocumentRoundTrip(t *testing.T) {
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
+	checkpoint, err := compaction.NewCheckpoint(`{"current_goal":"继续任务","preferences":[],"constraints":[],"decisions":[],"completed_work":[],"modified_files":[],"tool_verification":[],"problems":[],"open_tasks":[],"next_steps":[],"references":[]}`, 0, 3, "source-hash", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.CompactionCheckpoint = &checkpoint
 
 	roundTrip := SessionRecordFromDocument(SessionDocumentFromRecord(record))
 	if !reflect.DeepEqual(roundTrip, record) {

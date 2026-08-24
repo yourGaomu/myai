@@ -581,6 +581,31 @@ export type ContextInfo = {
   summary_hash?: string;
   prefix_hash?: string;
   summary?: string;
+  checkpoint?: CompactionCheckpoint;
+};
+
+export type CompactionSummary = {
+  current_goal?: string;
+  preferences?: string[];
+  constraints?: string[];
+  decisions?: string[];
+  completed_work?: string[];
+  modified_files?: string[];
+  tool_verification?: string[];
+  problems?: string[];
+  open_tasks?: string[];
+  next_steps?: string[];
+  references?: string[];
+};
+
+export type CompactionCheckpoint = {
+  version: number;
+  source_start_message: number;
+  source_end_message: number;
+  source_history_hash?: string;
+  summary: string;
+  summary_data?: CompactionSummary;
+  created_at?: string;
 };
 
 export type CompactInfo = {
@@ -595,6 +620,7 @@ export type CompactInfo = {
   summary_hash?: string;
   prefix_hash?: string;
   cacheable_tokens?: number;
+  checkpoint?: CompactionCheckpoint;
 };
 
 export type SessionSettingsResultPayload = {

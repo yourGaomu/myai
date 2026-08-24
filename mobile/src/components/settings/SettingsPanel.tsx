@@ -1122,6 +1122,7 @@ export function SettingsPanel({
             <Text style={styles.contextSummaryEmpty}>当前还没有压缩摘要。点击“压缩”后会在这里显示实际保存的摘要内容。</Text>
           )}
         </View>
+        {context?.checkpoint ? <CheckpointDetails checkpoint={context.checkpoint} /> : null}
         <View style={styles.contextNote}>
           <Text style={styles.contextNoteText}>
             {context?.has_summary ? "已有摘要，会把老消息压成稳定前缀" : "还没有摘要，当前主要发送最近消息"}
@@ -1355,6 +1356,53 @@ function ContextStat({ label, suffix, value }: { label: string; suffix: string; 
     <View style={styles.contextStat}>
       <Text style={styles.contextValue}>{value ?? "-"}</Text>
       <Text style={styles.contextLabel}>{label} {suffix}</Text>
+    </View>
+  );
+}
+
+function CheckpointDetails({ checkpoint }: { checkpoint: NonNullable<ContextInfo["checkpoint"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  const data = checkpoint.summary_data;
+  const sections: Array<[string, string[] | undefined]> = [
+    ["用户偏好与约束", [...(data?.preferences || []), ...(data?.constraints || [])]],
+    ["关键决策", data?.decisions],
+    ["已完成工作", data?.completed_work],
+    ["修改文件", data?.modified_files],
+    ["工具与验证", data?.tool_verification],
+    ["问题与根因", data?.problems],
+    ["未完成任务", data?.open_tasks],
+    ["下一步", data?.next_steps],
+    ["重要引用", data?.references],
+  ];
+  return (
+    <View style={styles.checkpointBox}>
+      <Pressable onPress={() => setExpanded((value) => !value)} style={styles.checkpointHeader}>
+        <View style={styles.flex}>
+          <Text style={styles.compactTitle}>压缩检查点</Text>
+          <Text style={styles.settingMeta}>版本 {checkpoint.version || 0} · 消息 {checkpoint.source_start_message} 至 {checkpoint.source_end_message}（结束索引不含）</Text>
+        </View>
+        <Text style={styles.checkpointToggle}>{expanded ? "收起" : "展开"}</Text>
+      </Pressable>
+      {expanded ? (
+        <View style={styles.checkpointContent}>
+          <HashPill label="源历史" value={checkpoint.source_history_hash} />
+          {data?.current_goal ? <CheckpointSection title="当前目标" lines={[data.current_goal]} /> : null}
+          {sections.map(([title, lines]) => <CheckpointSection key={title} title={title} lines={lines} />)}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function CheckpointSection({ title, lines }: { title: string; lines?: string[] }) {
+  const visible = lines?.filter((line) => line.trim()) || [];
+  if (visible.length === 0) {
+    return null;
+  }
+  return (
+    <View style={styles.checkpointSection}>
+      <Text style={styles.checkpointSectionTitle}>{title}</Text>
+      {visible.map((line, index) => <Text key={`${title}-${index}`} style={styles.checkpointLine}>- {line}</Text>)}
     </View>
   );
 }
@@ -2154,6 +2202,41 @@ const styles = StyleSheet.create({
     color: "#6c665f",
     fontSize: 12,
     fontWeight: "800",
+    lineHeight: 18,
+  },
+  checkpointBox: {
+    backgroundColor: "#eef7ff",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    gap: 8,
+    padding: 10,
+  },
+  checkpointHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  checkpointToggle: {
+    color: "#1e5c9a",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  checkpointContent: {
+    gap: 8,
+  },
+  checkpointSection: {
+    gap: 3,
+  },
+  checkpointSectionTitle: {
+    color: "#1e5c9a",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  checkpointLine: {
+    color: "#12100e",
+    fontSize: 12,
     lineHeight: 18,
   },
   contextNoteText: {

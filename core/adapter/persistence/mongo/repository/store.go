@@ -80,6 +80,7 @@ func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecor
 		"context_window_k":         document.ContextWindowK,
 		"summary":                  document.Summary,
 		"compacted_messages":       document.CompactedMessages,
+		"compaction_source_hash":   document.CompactionSourceHash,
 		"compacted_at":             document.CompactedAt,
 		"title":                    document.Title,
 		"usage":                    document.Usage,
@@ -96,6 +97,11 @@ func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecor
 		},
 	}
 	unsetValues := bson.M{}
+	if document.CompactionCheckpoint == nil {
+		unsetValues["compaction_checkpoint"] = ""
+	} else {
+		setValues["compaction_checkpoint"] = document.CompactionCheckpoint
+	}
 	if document.GenerationSettings == nil {
 		unsetValues["generation_settings"] = ""
 	} else {

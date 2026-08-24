@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	compaction "myai/core/domain/compaction"
 	domainmessage "myai/core/domain/message"
 )
 
@@ -33,6 +34,7 @@ type Info struct {
 	SummaryVersion    int
 	SummaryHash       string
 	PrefixHash        string
+	Checkpoint        *compaction.Checkpoint
 }
 
 type Snapshot struct {
@@ -57,8 +59,19 @@ func ValidateWindowK(windowK int) error {
 }
 
 func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMessages int, windowK int, fixedContext ...string) Snapshot {
+	return BuildSnapshotWithCheckpoint(messages, compaction.LegacyCheckpoint(summary, compactedMessages, ""), compactedMessages, windowK, fixedContext...)
+}
+
+func BuildSnapshotWithCheckpoint(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, windowK int, fixedContext ...string) Snapshot {
+	if !CompactionCheckpointMatchesCheckpoint(messages, &checkpoint) {
+		checkpoint = compaction.Checkpoint{}
+		compactedMessages = 0
+	}
 	// base 始终放固定 system 和可选摘要，recent 再按 token 预算从新到旧选择完整消息块。
-	summary = strings.TrimSpace(summary)
+	summary := strings.TrimSpace(checkpoint.Summary)
+	if summary == "" {
+		checkpoint = compaction.Checkpoint{}
+	}
 	summary = summaryForWindow(summary, windowK)
 	base, recent := buildBaseAndRecent(messages, summary, compactedMessages, fixedContext...)
 	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
@@ -68,6 +81,9 @@ func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMe
 	info.PrefixTokens = EstimateMessagesTokens(cacheablePrefix)
 	info.CacheableTokens = info.PrefixTokens
 	info.PrefixHash = StableMessagesHash(cacheablePrefix)
+	if checkpoint.Summary != "" {
+		info.Checkpoint = checkpoint.Clone()
+	}
 
 	return Snapshot{
 		Info:     info,
@@ -131,6 +147,12 @@ func CompactSplit(messages []domainmessage.Message, compactedMessages int, keepC
 
 	cutoff := start + compactableCount
 	return messages[start:cutoff], messages[cutoff:], cutoff
+}
+
+// MessageChunks exposes the same complete-turn grouping used by compaction to
+// consumers that need to process history in bounded batches.
+func MessageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
+	return messageChunks(messages)
 }
 
 func NormalizeCompactedMessages(messages []domainmessage.Message, compactedMessages int) int {
@@ -281,6 +303,54 @@ func StableMessagesHash(messages []domainmessage.Message) string {
 		builder.WriteString("---\n")
 	}
 	return StableTextHash(builder.String())
+}
+
+// CompactionSourceHash returns a stable fingerprint for the message prefix
+// represented by a persisted compaction summary. It lets a reloaded session
+// detect stale summaries instead of silently applying them to a different
+// history layout.
+func CompactionSourceHash(messages []domainmessage.Message, compactedMessages int) string {
+	if len(messages) == 0 || compactedMessages <= 0 {
+		return ""
+	}
+	cutoff := compactedMessages
+	if cutoff > len(messages) {
+		cutoff = len(messages)
+	}
+	return StableMessagesHash(messages[:cutoff])
+}
+
+// CompactionCheckpointMatches accepts old sessions without a source hash for
+// backward compatibility. New checkpoints must match the exact message
+// prefix; otherwise callers should rebuild context from the full history.
+func CompactionCheckpointMatches(messages []domainmessage.Message, summary string, compactedMessages int, sourceHash string) bool {
+	if strings.TrimSpace(summary) == "" {
+		return true
+	}
+	if strings.TrimSpace(sourceHash) == "" {
+		return true
+	}
+	return CompactionSourceHash(messages, compactedMessages) == strings.TrimSpace(sourceHash)
+}
+
+// CompactionCheckpointMatchesCheckpoint validates the structured checkpoint
+// before it is used to replace history. Version zero is the legacy format and
+// deliberately allows missing hashes; version one requires an exact range and
+// source hash match.
+func CompactionCheckpointMatchesCheckpoint(messages []domainmessage.Message, checkpoint *compaction.Checkpoint) bool {
+	if checkpoint == nil || strings.TrimSpace(checkpoint.Summary) == "" {
+		return true
+	}
+	if checkpoint.Version == 0 {
+		return CompactionCheckpointMatches(messages, checkpoint.Summary, checkpoint.SourceEndMessage, checkpoint.SourceHistoryHash)
+	}
+	if err := checkpoint.Validate(); err != nil {
+		return false
+	}
+	if checkpoint.SourceStartMessage != 0 || checkpoint.SourceEndMessage > len(messages) {
+		return false
+	}
+	return CompactionSourceHash(messages, checkpoint.SourceEndMessage) == strings.TrimSpace(checkpoint.SourceHistoryHash)
 }
 
 func StableTextHash(text string) string {

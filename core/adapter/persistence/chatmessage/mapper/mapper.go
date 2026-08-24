@@ -7,6 +7,7 @@ import (
 	chatmessageport "myai/core/adapter/persistence/chatmessage/port"
 	generationcommand "myai/core/application/chat/generation/command"
 	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
@@ -81,6 +82,10 @@ func (m Mapper) Session(current *session.Session, title string) repository.Sessi
 	if current == nil {
 		return repository.SessionRecord{}
 	}
+	var checkpoint *compaction.Checkpoint
+	if current.CompactionCheckpoint != nil {
+		checkpoint = current.CompactionCheckpoint.Clone()
+	}
 	return repository.SessionRecord{
 		ID:                   current.ID,
 		Kind:                 string(session.NormalizeKind(current.Kind)),
@@ -100,6 +105,8 @@ func (m Mapper) Session(current *session.Session, title string) repository.Sessi
 		ContextWindowK:       contextmgr.NormalizeWindowK(current.ContextWindowK),
 		Summary:              current.Summary,
 		CompactedMessages:    current.CompactedMessages,
+		CompactionSourceHash: current.CompactionSourceHash,
+		CompactionCheckpoint: checkpoint,
 		Title:                title,
 		Usage:                tokenUsage(current.Usage),
 		LastUsage:            tokenUsage(current.LastUsage),

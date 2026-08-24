@@ -22,7 +22,7 @@ export function messageWithAttachedFiles(content: string, files: ChatAttachment[
   const fileBlocks = files.map((file) => {
     if (isUploadedAssetAttachment(file)) {
       return [
-        `<uploaded_file name="${escapeAttribute(file.file_name)}" content_type="${escapeAttribute(file.content_type || "")}" size="${file.size || 0}" short_url="${escapeAttribute(file.short_url)}" code="${escapeAttribute(file.code)}">`,
+        `<uploaded_file name="${escapeAttribute(file.file_name)}" content_type="${escapeAttribute(file.content_type || "")}" size="${file.size || 0}" short_url="${escapeAttribute(file.short_url)}" code="${escapeAttribute(file.code)}" expires_at="${escapeAttribute(file.expires_at || "")}">`,
         "The user uploaded this file from mobile. Use the short_url to inspect or download it when needed.",
         "</uploaded_file>",
       ].join("\n");
@@ -41,13 +41,71 @@ export function messageWithAttachedFiles(content: string, files: ChatAttachment[
   return `${prompt}\n\nAttached files:\n${fileBlocks.join("\n\n")}`;
 }
 
-export function userMessageEcho(content: string, files: ChatAttachment[]) {
-  const text = content || "Sent attached file context";
-  if (files.length === 0) {
-    return text;
+export function userMessageEcho(content: string, _files: ChatAttachment[]) {
+  return content.trim();
+}
+
+// 历史消息只保存了发给模型的文本，因此从协议中的附件块恢复可展示的附件元数据。
+export function parseAttachedFiles(content: string): ChatAttachment[] {
+  const attachments: ChatAttachment[] = [];
+  const uploadedPattern = /<uploaded_file\b([^>]*)>[\s\S]*?<\/uploaded_file>/gi;
+  let uploadedMatch: RegExpExecArray | null;
+  while ((uploadedMatch = uploadedPattern.exec(content))) {
+    const attributes = parseAttributes(uploadedMatch[1]);
+    const shortURL = attributes.short_url || "";
+    if (!shortURL) {
+      continue;
+    }
+    attachments.push({
+      kind: "uploaded_asset",
+      code: attributes.code || shortURL,
+      short_url: shortURL,
+      file_name: attributes.name || "已上传文件",
+      content_type: attributes.content_type || undefined,
+      size: numberAttribute(attributes.size),
+      expires_at: attributes.expires_at || undefined,
+    });
   }
-  const names = files.map((file) => `@${attachmentTitle(file)}`).join("\n");
-  return `${text}\n\n${names}`;
+
+  const workspacePattern = /<file\b([^>]*)>([\s\S]*?)<\/file>/gi;
+  let workspaceMatch: RegExpExecArray | null;
+  while ((workspaceMatch = workspacePattern.exec(content))) {
+    const attributes = parseAttributes(workspaceMatch[1]);
+    const path = attributes.path || "";
+    if (!path) {
+      continue;
+    }
+    const body = workspaceMatch[2].replace(/\n\[content truncated\]\s*$/i, "");
+    attachments.push({
+      kind: "workspace_file",
+      path,
+      name: path.split(/[\\/]/).pop() || path,
+      language: attributes.language || "",
+      content: body,
+      size: numberAttribute(attributes.size) || 0,
+      truncated: /\[content truncated\]/i.test(workspaceMatch[2]),
+      binary: false,
+    });
+  }
+
+  return attachments;
+}
+
+export function displayMessageText(content: string) {
+  const value = content.trim();
+  if (!value) {
+    return "";
+  }
+
+  const markerIndex = value.indexOf("\n\nAttached files:");
+  if (markerIndex >= 0) {
+    return value.slice(0, markerIndex).trim();
+  }
+
+  return value
+    .replace(/<uploaded_file\b[^>]*>[\s\S]*?<\/uploaded_file>/gi, "")
+    .replace(/<file\b[^>]*>[\s\S]*?<\/file>/gi, "")
+    .trim();
 }
 
 export function attachmentKey(file: ChatAttachment) {
@@ -92,4 +150,27 @@ function formatAttachmentSize(size?: number) {
     return "大小未知";
   }
   return `${size} bytes`;
+}
+
+function parseAttributes(value: string) {
+  const attributes: Record<string, string> = {};
+  const pattern = /([a-zA-Z_][\w-]*)="([^"]*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value))) {
+    attributes[match[1]] = decodeAttribute(match[2]);
+  }
+  return attributes;
+}
+
+function decodeAttribute(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function numberAttribute(value?: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }

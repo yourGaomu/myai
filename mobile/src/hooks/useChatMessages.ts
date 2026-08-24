@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { TokenUsage, ToolResultPayload } from "../protocol";
 import type { PermissionState } from "../types/app";
-import type { ChatItem, ChatMessageStatus } from "../types/chat";
+import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
 import { newRequestID } from "../utils/ids";
 
 type SessionChatState = {
@@ -66,10 +66,10 @@ export function useChatMessages() {
   }, []);
 
   const addMessage = useCallback(
-    (sessionID: string, role: ChatItem["role"], text: string, requestID?: string) => {
+    (sessionID: string, role: ChatItem["role"], text: string, requestID?: string, attachments?: ChatAttachment[]) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
-        messages: [...current.messages, { id: newRequestID(), requestID, createdAt: new Date().toISOString(), role, text }],
+        messages: [...current.messages, { attachments, id: newRequestID(), requestID, createdAt: new Date().toISOString(), role, text }],
       }));
     },
     [updateSessionChat],

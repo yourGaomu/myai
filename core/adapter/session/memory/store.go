@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -17,6 +18,8 @@ import (
 type Session = domainsession.Session
 type PermissionMode = domainsession.PermissionMode
 type AgentMode = domainsession.AgentMode
+
+type CompactionCheckpoint = compaction.Checkpoint
 
 const (
 	PermissionModeAsk = domainsession.PermissionModeAsk
@@ -54,7 +57,7 @@ func (sm *Store) NewSession() error {
 	defer sm.mu.Unlock()
 
 	sm.currentSessionId = uuid.NewString()
-	sm.session[sm.currentSessionId] = newSession(sm.currentSessionId, sm.defaultModelId, AgentModeChat, PermissionModeAsk, 0, "", 0, llm.TokenUsage{}, llm.TokenUsage{}, nil)
+	sm.session[sm.currentSessionId] = newSession(sm.currentSessionId, sm.defaultModelId, AgentModeChat, PermissionModeAsk, 0, "", 0, "", llm.TokenUsage{}, llm.TokenUsage{}, nil)
 	sm.currentModelId = sm.session[sm.currentSessionId].Model
 	return nil
 }
@@ -93,16 +96,17 @@ func (sm *Store) PutSessionWithModeUsageNoCurrent(sessionID string, modelID stri
 
 func (sm *Store) putSessionWithModeUsage(sessionID string, modelID string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message, setCurrent bool) error {
 	return sm.PutSessionState(domainsession.InitialState{
-		ID:                sessionID,
-		Model:             modelID,
-		AgentMode:         agentMode,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: compactedMessages,
-		Usage:             usage,
-		LastUsage:         lastUsage,
-		Messages:          messages,
+		ID:                   sessionID,
+		Model:                modelID,
+		AgentMode:            agentMode,
+		PermissionMode:       permissionMode,
+		ContextWindowK:       contextWindowK,
+		Summary:              summary,
+		CompactedMessages:    compactedMessages,
+		CompactionSourceHash: "",
+		Usage:                usage,
+		LastUsage:            lastUsage,
+		Messages:             messages,
 	}, setCurrent)
 }
 
@@ -453,6 +457,18 @@ func (sm *Store) SetSummary(summary string, compactedMessages int) error {
 }
 
 func (sm *Store) SetSummaryForSession(sessionID string, summary string, compactedMessages int) error {
+	return sm.setSummaryForSession(sessionID, summary, compactedMessages, "", nil)
+}
+
+func (sm *Store) SetSummaryForSessionWithCheckpoint(sessionID string, summary string, compactedMessages int, sourceHash string) error {
+	return sm.setSummaryForSession(sessionID, summary, compactedMessages, sourceHash, nil)
+}
+
+func (sm *Store) SetSummaryForSessionWithCheckpointObject(sessionID string, summary string, compactedMessages int, sourceHash string, checkpoint *compaction.Checkpoint) error {
+	return sm.setSummaryForSession(sessionID, summary, compactedMessages, sourceHash, checkpoint)
+}
+
+func (sm *Store) setSummaryForSession(sessionID string, summary string, compactedMessages int, sourceHash string, checkpoint *compaction.Checkpoint) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -463,6 +479,12 @@ func (sm *Store) SetSummaryForSession(sessionID string, summary string, compacte
 
 	session.Summary = summary
 	session.CompactedMessages = compactedMessages
+	session.CompactionSourceHash = sourceHash
+	if checkpoint == nil {
+		session.CompactionCheckpoint = nil
+	} else {
+		session.CompactionCheckpoint = checkpoint.Clone()
+	}
 	return nil
 }
 
@@ -571,17 +593,18 @@ func textFromMessage(message domainmessage.Message) string {
 	return strings.Join([]string{message.Text()}, "\n")
 }
 
-func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) *Session {
+func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, compactionSourceHash string, usage llm.TokenUsage, lastUsage llm.TokenUsage, messages []domainmessage.Message) *Session {
 	return domainsession.NewFromState(domainsession.InitialState{
-		ID:                id,
-		Model:             model,
-		AgentMode:         agentMode,
-		PermissionMode:    permissionMode,
-		ContextWindowK:    contextWindowK,
-		Summary:           summary,
-		CompactedMessages: compactedMessages,
-		Usage:             usage,
-		LastUsage:         lastUsage,
-		Messages:          messages,
+		ID:                   id,
+		Model:                model,
+		AgentMode:            agentMode,
+		PermissionMode:       permissionMode,
+		ContextWindowK:       contextWindowK,
+		Summary:              summary,
+		CompactedMessages:    compactedMessages,
+		CompactionSourceHash: compactionSourceHash,
+		Usage:                usage,
+		LastUsage:            lastUsage,
+		Messages:             messages,
 	})
 }

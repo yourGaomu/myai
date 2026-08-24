@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"myai/core/adapter/persistence/mongo/po"
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
 	agentplan "myai/core/plan"
@@ -30,6 +31,8 @@ func SessionDocumentFromRecord(record repository.SessionRecord) po.SessionDocume
 		ContextWindowK:       record.ContextWindowK,
 		Summary:              record.Summary,
 		CompactedMessages:    record.CompactedMessages,
+		CompactionSourceHash: record.CompactionSourceHash,
+		CompactionCheckpoint: CompactionCheckpointDocumentFromDomain(record.CompactionCheckpoint),
 		CompactedAt:          record.CompactedAt,
 		Title:                record.Title,
 		Usage:                TokenUsageDocumentFromRecord(record.Usage),
@@ -65,6 +68,8 @@ func SessionRecordFromDocument(document po.SessionDocument) repository.SessionRe
 		ContextWindowK:       document.ContextWindowK,
 		Summary:              document.Summary,
 		CompactedMessages:    document.CompactedMessages,
+		CompactionSourceHash: document.CompactionSourceHash,
+		CompactionCheckpoint: CompactionCheckpointDomainFromDocument(document.CompactionCheckpoint),
 		CompactedAt:          document.CompactedAt,
 		Title:                document.Title,
 		Usage:                TokenUsageRecordFromDocument(document.Usage),
@@ -78,6 +83,57 @@ func SessionRecordFromDocument(document po.SessionDocument) repository.SessionRe
 		CreatedAt:            document.CreatedAt,
 		UpdatedAt:            document.UpdatedAt,
 	}
+}
+
+func CompactionCheckpointDocumentFromDomain(checkpoint *compaction.Checkpoint) *po.CompactionCheckpointDocument {
+	if checkpoint == nil {
+		return nil
+	}
+	return &po.CompactionCheckpointDocument{
+		Version: checkpoint.Version, SourceStartMessage: checkpoint.SourceStartMessage,
+		SourceEndMessage: checkpoint.SourceEndMessage, SourceHistoryHash: checkpoint.SourceHistoryHash,
+		Summary: checkpoint.Summary, SummaryData: CompactionSummaryDocumentFromDomain(checkpoint.SummaryData),
+		CreatedAt: checkpoint.CreatedAt,
+	}
+}
+
+func CompactionSummaryDocumentFromDomain(summary compaction.Summary) *po.CompactionSummaryDocument {
+	return &po.CompactionSummaryDocument{
+		CurrentGoal: summary.CurrentGoal, Preferences: append([]string(nil), summary.Preferences...),
+		Constraints: append([]string(nil), summary.Constraints...), Decisions: append([]string(nil), summary.Decisions...),
+		CompletedWork: append([]string(nil), summary.CompletedWork...), ModifiedFiles: append([]string(nil), summary.ModifiedFiles...),
+		ToolVerification: append([]string(nil), summary.ToolVerification...), Problems: append([]string(nil), summary.Problems...),
+		OpenTasks: append([]string(nil), summary.OpenTasks...), NextSteps: append([]string(nil), summary.NextSteps...),
+		References: append([]string(nil), summary.References...),
+	}
+}
+
+func CompactionCheckpointDomainFromDocument(document *po.CompactionCheckpointDocument) *compaction.Checkpoint {
+	if document == nil {
+		return nil
+	}
+	checkpoint := &compaction.Checkpoint{
+		Version: document.Version, SourceStartMessage: document.SourceStartMessage,
+		SourceEndMessage: document.SourceEndMessage, SourceHistoryHash: document.SourceHistoryHash,
+		Summary: document.Summary, CreatedAt: document.CreatedAt,
+	}
+	if parsed, err := compaction.DecodeJSON(checkpoint.Summary); err == nil {
+		// Canonical JSON is authoritative and also restores empty arrays that
+		// Mongo omitempty may have omitted from the nested document.
+		checkpoint.SummaryData = parsed
+	} else if document.SummaryData != nil {
+		checkpoint.SummaryData = compaction.Summary{
+			CurrentGoal: document.SummaryData.CurrentGoal, Preferences: append([]string(nil), document.SummaryData.Preferences...),
+			Constraints: append([]string(nil), document.SummaryData.Constraints...), Decisions: append([]string(nil), document.SummaryData.Decisions...),
+			CompletedWork: append([]string(nil), document.SummaryData.CompletedWork...), ModifiedFiles: append([]string(nil), document.SummaryData.ModifiedFiles...),
+			ToolVerification: append([]string(nil), document.SummaryData.ToolVerification...), Problems: append([]string(nil), document.SummaryData.Problems...),
+			OpenTasks: append([]string(nil), document.SummaryData.OpenTasks...), NextSteps: append([]string(nil), document.SummaryData.NextSteps...),
+			References: append([]string(nil), document.SummaryData.References...),
+		}
+	} else {
+		checkpoint.SummaryData = compaction.ParseSummary(checkpoint.Summary)
+	}
+	return checkpoint
 }
 
 func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocument {

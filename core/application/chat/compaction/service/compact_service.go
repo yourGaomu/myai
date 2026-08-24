@@ -40,13 +40,33 @@ func (s CompactService) CompactSession(ctx context.Context, current *session.Ses
 		return errors.New("compact summary store is nil")
 	}
 	// 只摘要较旧的完整消息块，并保留最近若干块原文，兼顾上下文连续性与 token 预算。
-	compactable, _, cutoff := contextmgr.CompactSplit(current.Messages, current.CompactedMessages, s.keepChunks())
+	summary := current.Summary
+	compactedMessages := current.CompactedMessages
+	if current.CompactionCheckpoint != nil {
+		if !contextmgr.CompactionCheckpointMatchesCheckpoint(current.Messages, current.CompactionCheckpoint) {
+			summary = ""
+			compactedMessages = 0
+		} else {
+			summary = current.CompactionCheckpoint.Summary
+			compactedMessages = current.CompactionCheckpoint.SourceEndMessage
+		}
+	} else if !contextmgr.CompactionCheckpointMatches(current.Messages, summary, compactedMessages, current.CompactionSourceHash) {
+		// Rebuild from the first user turn when the persisted checkpoint no
+		// longer describes the current message prefix.
+		summary = ""
+		compactedMessages = 0
+	}
+	compactable, _, cutoff := contextmgr.CompactSplit(current.Messages, compactedMessages, s.keepChunks())
 	if len(compactable) == 0 {
 		return ErrNotEnoughHistory
 	}
-	summary, err := s.Summarizer.Summarize(ctx, model, current.Summary, compactable)
+	summary, err := s.Summarizer.Summarize(ctx, model, summary, compactable)
 	if err != nil {
 		return err
+	}
+	sourceHash := contextmgr.CompactionSourceHash(current.Messages, cutoff)
+	if checkpointStore, ok := s.Summaries.(compactionport.CheckpointSummaryStore); ok {
+		return checkpointStore.SaveSummaryWithCheckpoint(ctx, current, summary, cutoff, sourceHash)
 	}
 	return s.Summaries.SaveSummary(ctx, current, summary, cutoff)
 }
@@ -66,7 +86,7 @@ func (s CompactService) CompactIfNeeded(ctx context.Context, current *session.Se
 		return compactionresult.CompactInfo{}, nil
 	} else {
 		after := s.Contexts.Snapshot(current).Info
-		return compactionresult.CompactInfo{Triggered: true, Reason: compactReason(before), BeforeTokens: before.SelectedTokens, AfterTokens: after.SelectedTokens, NewMessages: after.CompactedMessages - before.CompactedMessages, CompactedMessages: after.CompactedMessages, SummaryTokens: after.SummaryTokens, SummaryVersion: after.SummaryVersion, SummaryHash: after.SummaryHash, PrefixHash: after.PrefixHash, CacheableTokens: after.CacheableTokens}, err
+		return compactionresult.CompactInfo{Triggered: true, Reason: compactReason(before), BeforeTokens: before.SelectedTokens, AfterTokens: after.SelectedTokens, NewMessages: after.CompactedMessages - before.CompactedMessages, CompactedMessages: after.CompactedMessages, SummaryTokens: after.SummaryTokens, SummaryVersion: after.SummaryVersion, SummaryHash: after.SummaryHash, PrefixHash: after.PrefixHash, CacheableTokens: after.CacheableTokens, Checkpoint: after.Checkpoint}, err
 	}
 }
 

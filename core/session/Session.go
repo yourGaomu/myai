@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -98,6 +99,12 @@ type Session struct {
 	ContextWindowK       int
 	Summary              string
 	CompactedMessages    int
+	// CompactionSourceHash identifies the exact message prefix represented by Summary.
+	// Empty means the session was created before checkpoint validation existed.
+	CompactionSourceHash string
+	// CompactionCheckpoint is the structured form of the legacy summary fields.
+	// The legacy fields remain populated for compatibility with old adapters.
+	CompactionCheckpoint *compaction.Checkpoint
 	Usage                llm.TokenUsage
 	LastUsage            llm.TokenUsage
 	CurrentPlan          *agentplan.Plan
@@ -107,7 +114,7 @@ type Session struct {
 	Messages             []domainmessage.Message
 }
 
-func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, usage llm.TokenUsage, lastUsage llm.TokenUsage, ragSettings RAGSettings, generationSettings generation.Settings, styleInstruction string, messages []domainmessage.Message) *Session {
+func newSession(id, model string, agentMode AgentMode, permissionMode PermissionMode, contextWindowK int, summary string, compactedMessages int, compactionSourceHash string, usage llm.TokenUsage, lastUsage llm.TokenUsage, ragSettings RAGSettings, generationSettings generation.Settings, styleInstruction string, messages []domainmessage.Message) *Session {
 	if len(messages) == 0 {
 		messages = defaultMessages()
 	}
@@ -116,19 +123,20 @@ func newSession(id, model string, agentMode AgentMode, permissionMode Permission
 	contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
 
 	return &Session{
-		ID:                 id,
-		Model:              model,
-		AgentMode:          agentMode,
-		PermissionMode:     permissionMode,
-		ContextWindowK:     contextWindowK,
-		Summary:            summary,
-		CompactedMessages:  contextmgr.NormalizeCompactedMessages(messages, compactedMessages),
-		Usage:              usage,
-		LastUsage:          lastUsage,
-		RAGSettings:        CloneRAGSettings(ragSettings),
-		GenerationSettings: generation.Clone(generationSettings),
-		StyleInstruction:   styleInstruction,
-		Messages:           messages,
+		ID:                   id,
+		Model:                model,
+		AgentMode:            agentMode,
+		PermissionMode:       permissionMode,
+		ContextWindowK:       contextWindowK,
+		Summary:              summary,
+		CompactedMessages:    contextmgr.NormalizeCompactedMessages(messages, compactedMessages),
+		CompactionSourceHash: compactionSourceHash,
+		Usage:                usage,
+		LastUsage:            lastUsage,
+		RAGSettings:          CloneRAGSettings(ragSettings),
+		GenerationSettings:   generation.Clone(generationSettings),
+		StyleInstruction:     styleInstruction,
+		Messages:             messages,
 	}
 }
 
@@ -174,6 +182,8 @@ func (s *Session) Clear() {
 	s.Messages = defaultMessages(s.SystemInstruction)
 	s.Summary = ""
 	s.CompactedMessages = 0
+	s.CompactionSourceHash = ""
+	s.CompactionCheckpoint = nil
 	s.Usage = llm.TokenUsage{}
 	s.LastUsage = llm.TokenUsage{}
 	s.CurrentPlan = nil

@@ -1,6 +1,10 @@
 package session
 
 import (
+	"strings"
+
+	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -25,6 +29,8 @@ type InitialState struct {
 	ContextWindowK       int
 	Summary              string
 	CompactedMessages    int
+	CompactionSourceHash string
+	CompactionCheckpoint *compaction.Checkpoint
 	Usage                llm.TokenUsage
 	LastUsage            llm.TokenUsage
 	RAGSettings          RAGSettings
@@ -43,6 +49,7 @@ func NewFromState(state InitialState) *Session {
 		state.ContextWindowK,
 		state.Summary,
 		state.CompactedMessages,
+		state.CompactionSourceHash,
 		state.Usage,
 		state.LastUsage,
 		state.RAGSettings,
@@ -61,8 +68,36 @@ func NewFromState(state InitialState) *Session {
 	current.WorkspaceRoot = state.WorkspaceRoot
 	current.WorkspaceSandboxID = state.WorkspaceSandboxID
 	current.MaxToolRounds = state.MaxToolRounds
+	if state.CompactionCheckpoint != nil {
+		current.CompactionCheckpoint = state.CompactionCheckpoint.Clone()
+		if current.Summary == "" {
+			current.Summary = current.CompactionCheckpoint.Summary
+		}
+		if current.CompactedMessages == 0 {
+			current.CompactedMessages = current.CompactionCheckpoint.SourceEndMessage
+		}
+		if current.CompactionSourceHash == "" {
+			current.CompactionSourceHash = current.CompactionCheckpoint.SourceHistoryHash
+		}
+	}
 	if !hadMessages {
 		current.Messages = defaultMessages(state.SystemInstruction)
+	}
+	if current.CompactionCheckpoint != nil && !contextmgr.CompactionCheckpointMatchesCheckpoint(current.Messages, current.CompactionCheckpoint) {
+		// A persisted structured checkpoint has the same fail-open policy as the
+		// legacy fields: preserve messages and discard only the stale summary.
+		current.Summary = ""
+		current.CompactedMessages = 0
+		current.CompactionSourceHash = ""
+		current.CompactionCheckpoint = nil
+	} else if strings.TrimSpace(current.Summary) != "" && strings.TrimSpace(current.CompactionSourceHash) != "" {
+		actualHash := contextmgr.CompactionSourceHash(current.Messages, current.CompactedMessages)
+		if actualHash != current.CompactionSourceHash {
+			// Old summaries must never be applied to a changed message prefix.
+			current.Summary = ""
+			current.CompactedMessages = 0
+			current.CompactionSourceHash = ""
+		}
 	}
 	return current
 }

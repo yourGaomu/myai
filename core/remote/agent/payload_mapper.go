@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	sessionresult "myai/core/application/session/result"
+	compaction "myai/core/domain/compaction"
 	"myai/core/domain/generation"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
@@ -30,13 +31,37 @@ func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
 		SummaryVersion:    info.SummaryVersion,
 		SummaryHash:       info.SummaryHash,
 		PrefixHash:        info.PrefixHash,
+		Checkpoint:        compactionCheckpointPayload(info.Checkpoint),
 	}
 }
 
 func contextStatePayload(state service.ContextState) protocol.ContextInfo {
 	payload := contextInfoPayload(state.Info)
 	payload.Summary = state.Summary
+	if state.Checkpoint != nil {
+		payload.Summary = state.Checkpoint.DisplaySummary()
+	}
+	payload.Checkpoint = compactionCheckpointPayload(state.Checkpoint)
 	return payload
+}
+
+func compactionCheckpointPayload(checkpoint *compaction.Checkpoint) *protocol.CompactionCheckpoint {
+	if checkpoint == nil {
+		return nil
+	}
+	data := checkpoint.SummaryData
+	return &protocol.CompactionCheckpoint{
+		Version: checkpoint.Version, SourceStartMessage: checkpoint.SourceStartMessage,
+		SourceEndMessage: checkpoint.SourceEndMessage, SourceHistoryHash: checkpoint.SourceHistoryHash,
+		Summary: checkpoint.Summary, SummaryData: &protocol.CompactionSummary{
+			CurrentGoal: data.CurrentGoal, Preferences: append([]string(nil), data.Preferences...),
+			Constraints: append([]string(nil), data.Constraints...), Decisions: append([]string(nil), data.Decisions...),
+			CompletedWork: append([]string(nil), data.CompletedWork...), ModifiedFiles: append([]string(nil), data.ModifiedFiles...),
+			ToolVerification: append([]string(nil), data.ToolVerification...), Problems: append([]string(nil), data.Problems...),
+			OpenTasks: append([]string(nil), data.OpenTasks...), NextSteps: append([]string(nil), data.NextSteps...),
+			References: append([]string(nil), data.References...),
+		}, CreatedAt: checkpoint.CreatedAt,
+	}
 }
 
 func generationSettingsPayload(settings generation.Settings) protocol.GenerationSettings {
@@ -82,6 +107,7 @@ func compactInfoPayload(info service.CompactInfo) protocol.CompactInfo {
 		SummaryHash:       info.SummaryHash,
 		PrefixHash:        info.PrefixHash,
 		CacheableTokens:   info.CacheableTokens,
+		Checkpoint:        compactionCheckpointPayload(info.Checkpoint),
 	}
 }
 

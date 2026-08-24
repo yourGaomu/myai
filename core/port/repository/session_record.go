@@ -3,6 +3,7 @@ package repository
 import (
 	"time"
 
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	agentplan "myai/core/plan"
 	"myai/core/session"
@@ -27,6 +28,8 @@ type SessionRecord struct {
 	ContextWindowK       int
 	Summary              string
 	CompactedMessages    int
+	CompactionSourceHash string
+	CompactionCheckpoint *compaction.Checkpoint
 	CompactedAt          *time.Time
 	Title                string
 	Usage                *TokenUsageRecord

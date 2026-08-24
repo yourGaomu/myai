@@ -27,6 +27,7 @@ import (
 	settingscommand "myai/core/application/session/settings/command"
 	skillquery "myai/core/application/skill/query"
 	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -45,8 +46,9 @@ type ChatService struct {
 type ContextInfo = contextmgr.Info
 
 type ContextState struct {
-	Info    ContextInfo
-	Summary string
+	Info       ContextInfo
+	Summary    string
+	Checkpoint *compaction.Checkpoint
 }
 
 type CompactInfo = compactionresult.CompactInfo
@@ -699,10 +701,14 @@ func (s *ChatService) ContextStateForSession(ctx context.Context, sessionID stri
 	if err != nil {
 		return ContextState{Info: ContextInfo{WindowK: contextmgr.DefaultWindowK}}, err
 	}
-	return ContextState{
-		Info:    s.contextInfo(ctx, current),
-		Summary: current.Summary,
-	}, nil
+	info := s.contextInfo(ctx, current)
+	// 以已经完成校验的 Snapshot 为准，不能直接返回 Session 中可能失效的旧指针。
+	checkpoint := info.Checkpoint
+	summary := current.Summary
+	if checkpoint != nil {
+		summary = checkpoint.DisplaySummary()
+	}
+	return ContextState{Info: info, Summary: summary, Checkpoint: checkpoint}, nil
 }
 
 func (s *ChatService) ensureSessionInMemory(ctx context.Context, sessionID string, setCurrent bool) (*session.Session, error) {

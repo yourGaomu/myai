@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	"myai/core/session"
@@ -74,5 +75,29 @@ func TestContextSnapshotServiceIncludesCurrentPlanState(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected snapshot to contain %q, got:\n%s", expected, joined)
 		}
+	}
+}
+
+func TestContextSnapshotServiceDoesNotApplyStaleCompactionCheckpoint(t *testing.T) {
+	current := &session.Session{
+		ContextWindowK:       16,
+		Summary:              "summary for another history",
+		CompactedMessages:    3,
+		CompactionSourceHash: "stale-hash",
+		Messages: []domainmessage.Message{
+			domainmessage.Text(domainmessage.RoleSystem, "system"),
+			domainmessage.Text(domainmessage.RoleUser, "current request"),
+		},
+	}
+
+	snapshot := ContextSnapshotService{}.Snapshot(current)
+	if snapshot.Info.HasSummary {
+		t.Fatal("stale compaction checkpoint was applied")
+	}
+	if snapshot.Info.SelectedMessages != len(current.Messages) {
+		t.Fatalf("expected full history after invalidation, got %d messages", snapshot.Info.SelectedMessages)
+	}
+	if contextmgr.CompactionCheckpointMatches(current.Messages, current.Summary, current.CompactedMessages, current.CompactionSourceHash) {
+		t.Fatal("test checkpoint unexpectedly matched")
 	}
 }

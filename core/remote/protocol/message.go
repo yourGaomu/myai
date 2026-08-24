@@ -611,35 +611,61 @@ type SessionRegeneratePayload struct {
 }
 
 type ContextInfo struct {
-	WindowK           int    `json:"window_k"`
-	FullTokens        int    `json:"full_tokens"`
-	SelectedTokens    int    `json:"selected_tokens"`
-	SummaryTokens     int    `json:"summary_tokens"`
-	PrefixTokens      int    `json:"prefix_tokens"`
-	CacheableTokens   int    `json:"cacheable_tokens"`
-	FullMessages      int    `json:"full_messages"`
-	SelectedMessages  int    `json:"selected_messages"`
-	CompactedMessages int    `json:"compacted_messages"`
-	HasSummary        bool   `json:"has_summary"`
-	Truncated         bool   `json:"truncated"`
-	SummaryVersion    int    `json:"summary_version"`
-	SummaryHash       string `json:"summary_hash,omitempty"`
-	PrefixHash        string `json:"prefix_hash,omitempty"`
-	Summary           string `json:"summary,omitempty"`
+	WindowK           int                   `json:"window_k"`
+	FullTokens        int                   `json:"full_tokens"`
+	SelectedTokens    int                   `json:"selected_tokens"`
+	SummaryTokens     int                   `json:"summary_tokens"`
+	PrefixTokens      int                   `json:"prefix_tokens"`
+	CacheableTokens   int                   `json:"cacheable_tokens"`
+	FullMessages      int                   `json:"full_messages"`
+	SelectedMessages  int                   `json:"selected_messages"`
+	CompactedMessages int                   `json:"compacted_messages"`
+	HasSummary        bool                  `json:"has_summary"`
+	Truncated         bool                  `json:"truncated"`
+	SummaryVersion    int                   `json:"summary_version"`
+	SummaryHash       string                `json:"summary_hash,omitempty"`
+	PrefixHash        string                `json:"prefix_hash,omitempty"`
+	Summary           string                `json:"summary,omitempty"`
+	Checkpoint        *CompactionCheckpoint `json:"checkpoint,omitempty"`
+}
+
+type CompactionSummary struct {
+	CurrentGoal      string   `json:"current_goal,omitempty"`
+	Preferences      []string `json:"preferences,omitempty"`
+	Constraints      []string `json:"constraints,omitempty"`
+	Decisions        []string `json:"decisions,omitempty"`
+	CompletedWork    []string `json:"completed_work,omitempty"`
+	ModifiedFiles    []string `json:"modified_files,omitempty"`
+	ToolVerification []string `json:"tool_verification,omitempty"`
+	Problems         []string `json:"problems,omitempty"`
+	OpenTasks        []string `json:"open_tasks,omitempty"`
+	NextSteps        []string `json:"next_steps,omitempty"`
+	References       []string `json:"references,omitempty"`
+}
+
+type CompactionCheckpoint struct {
+	Version            int                `json:"version"`
+	SourceStartMessage int                `json:"source_start_message"`
+	SourceEndMessage   int                `json:"source_end_message"`
+	SourceHistoryHash  string             `json:"source_history_hash,omitempty"`
+	Summary            string             `json:"summary"`
+	SummaryData        *CompactionSummary `json:"summary_data,omitempty"`
+	CreatedAt          time.Time          `json:"created_at,omitempty"`
 }
 
 type CompactInfo struct {
-	Triggered         bool   `json:"triggered,omitempty"`
-	Reason            string `json:"reason,omitempty"`
-	BeforeTokens      int    `json:"before_tokens,omitempty"`
-	AfterTokens       int    `json:"after_tokens,omitempty"`
-	NewMessages       int    `json:"new_messages,omitempty"`
-	CompactedMessages int    `json:"compacted_messages,omitempty"`
-	SummaryTokens     int    `json:"summary_tokens,omitempty"`
-	SummaryVersion    int    `json:"summary_version,omitempty"`
-	SummaryHash       string `json:"summary_hash,omitempty"`
-	PrefixHash        string `json:"prefix_hash,omitempty"`
-	CacheableTokens   int    `json:"cacheable_tokens,omitempty"`
+	Triggered         bool                  `json:"triggered,omitempty"`
+	Reason            string                `json:"reason,omitempty"`
+	BeforeTokens      int                   `json:"before_tokens,omitempty"`
+	AfterTokens       int                   `json:"after_tokens,omitempty"`
+	NewMessages       int                   `json:"new_messages,omitempty"`
+	CompactedMessages int                   `json:"compacted_messages,omitempty"`
+	SummaryTokens     int                   `json:"summary_tokens,omitempty"`
+	SummaryVersion    int                   `json:"summary_version,omitempty"`
+	SummaryHash       string                `json:"summary_hash,omitempty"`
+	PrefixHash        string                `json:"prefix_hash,omitempty"`
+	CacheableTokens   int                   `json:"cacheable_tokens,omitempty"`
+	Checkpoint        *CompactionCheckpoint `json:"checkpoint,omitempty"`
 }
 
 type SessionSettingsResultPayload struct {

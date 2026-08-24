@@ -19,6 +19,7 @@ export type ChatMessageStatus =
   "streaming" | "done" | "paused" | "error" | "tool_running";
 
 export type ChatItem = {
+  attachments?: ChatAttachment[];
   completedAt?: string;
   id: string;
   requestID?: string;
