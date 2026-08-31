@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import * as Updates from "expo-updates";
 
 import { ButtonContent } from "../common/ButtonContent";
 import { SubagentPanel } from "../subagents/SubagentPanel";
-import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask } from "../../protocol";
+import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
+import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
@@ -65,6 +67,7 @@ type Props = {
   onApplySubagentTask: (taskID: string) => void;
   onCancelSubagentTask: (taskID: string) => void;
   onCheckSubagentTask: (taskID: string) => void;
+  onWaitSubagentTask: (taskID: string) => void;
   onCreateSubagentDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
   onDeleteSubagentDefinition: (definitionID: string) => void;
   onDiscardSubagentTask: (taskID: string) => void;
@@ -80,6 +83,7 @@ type Props = {
   skillRoot: string;
   skills: SkillSummary[];
   subagentDefinitions: SubagentDefinition[];
+  subagentEvents: Record<string, SubagentTaskEvent[]>;
   subagentMessage: string;
   subagentTasks: SubagentTask[];
   userID: string;
@@ -171,6 +175,7 @@ export function SettingsPanel({
   onApplySubagentTask,
   onCancelSubagentTask,
   onCheckSubagentTask,
+  onWaitSubagentTask,
   onCreateSubagentDefinition,
   onDeleteSubagentDefinition,
   onDiscardSubagentTask,
@@ -186,6 +191,7 @@ export function SettingsPanel({
   skillRoot,
   skills,
   subagentDefinitions,
+  subagentEvents,
   subagentMessage,
   subagentTasks,
   userID,
@@ -274,6 +280,10 @@ export function SettingsPanel({
   const canUseSessionSettings = Boolean(clientToken && sessionID);
   const wideLayout = width >= 760;
   const activeSectionMeta = settingSections.find((section) => section.key === activeSection);
+  const versionLabel = `v${mobileAppVersion} · Android ${mobileAndroidVersionCode}`;
+  const updateLabel = Updates.isEnabled
+    ? `${Updates.channel || "本地"} · ${Updates.updateId ? shortID(Updates.updateId) : "嵌入包"}`
+    : "开发模式 · OTA 未启用";
   const submitWindow = () => {
     const nextWindowK = Number.parseInt(windowInput, 10);
     if (Number.isNaN(nextWindowK)) {
@@ -1163,6 +1173,8 @@ export function SettingsPanel({
           <SummaryTile label="权限" value={permissionModeLabel(activePermission)} tone={activePermission === "full" ? "warn" : activePermission === "readonly" ? "quiet" : "normal"} />
         <SummaryTile label="上下文" value={`${currentWindowK}K`} />
         <SummaryTile label="设备" value={deviceID.trim() || "本地设备"} />
+        <SummaryTile label="版本" value={versionLabel} tone="quiet" />
+        <SummaryTile label="更新标识" value={updateLabel} />
       </View>
       <View style={styles.quickActions}>
         <Pressable
@@ -1205,6 +1217,7 @@ export function SettingsPanel({
       onApplyTask={onApplySubagentTask}
       onCancelTask={onCancelSubagentTask}
       onCheckTask={onCheckSubagentTask}
+      onWaitTask={onWaitSubagentTask}
       onCreateDefinition={onCreateSubagentDefinition}
       onDeleteDefinition={onDeleteSubagentDefinition}
       onDiscardTask={onDiscardSubagentTask}
@@ -1214,6 +1227,7 @@ export function SettingsPanel({
       pending={pendingActions.subagents}
       sessionID={sessionID}
       tasks={subagentTasks}
+      events={subagentEvents}
     />
   );
 

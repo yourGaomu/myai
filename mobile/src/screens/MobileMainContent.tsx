@@ -76,6 +76,7 @@ export function MobileMainContent({
           onApplySubagentTask={settings.onApplySubagentTask}
           onCancelSubagentTask={settings.onCancelSubagentTask}
           onCheckSubagentTask={settings.onCheckSubagentTask}
+          onWaitSubagentTask={settings.onWaitSubagentTask}
           onCreateSubagentDefinition={settings.onCreateSubagentDefinition}
           onDeleteSubagentDefinition={settings.onDeleteSubagentDefinition}
           onDiscardSubagentTask={settings.onDiscardSubagentTask}
@@ -91,6 +92,7 @@ export function MobileMainContent({
           skillRoot={settings.skillRoot}
           skills={settings.skills}
           subagentDefinitions={settings.subagentDefinitions}
+          subagentEvents={settings.subagentEvents}
           subagentMessage={settings.subagentMessage}
           subagentTasks={settings.subagentTasks}
           userID={settings.userID}

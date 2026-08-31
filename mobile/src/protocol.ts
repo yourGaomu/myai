@@ -119,6 +119,8 @@ export type MessageType =
   | "subagent_task_list"
   | "subagent_task_list_result"
   | "subagent_task_check"
+  | "subagent_task_wait"
+  | "subagent_task_wait_result"
   | "subagent_task_cancel"
   | "subagent_task_apply"
   | "subagent_task_discard"
@@ -207,6 +209,12 @@ export type SubagentChangeSet = {
 export type SubagentTask = {
   id: string;
   parent_session_id: string;
+  parent_task_id?: string;
+  parent_run_id?: string;
+  plan_id?: string;
+  step_id?: string;
+  agent_path?: string;
+  agent_nickname?: string;
   definition_id: string;
   definition_version: number;
   title: string;
@@ -220,6 +228,8 @@ export type SubagentTask = {
   updated_at: string;
   started_at?: string;
   completed_at?: string;
+  event_sequence?: number;
+  event_kind?: string;
 };
 
 export type SubagentTaskListResultPayload = {
@@ -230,6 +240,42 @@ export type SubagentTaskListResultPayload = {
 export type SubagentTaskResultPayload = {
   task: SubagentTask;
   message?: string;
+  timed_out?: boolean;
+  sequence?: number;
+  kind?: string;
+  emitted_at?: string;
+  run_id?: string;
+  content?: string;
+  tool_name?: string;
+  arguments?: string;
+  status?: string;
+  error_code?: string;
+  error_message?: string;
+  truncated?: boolean;
+  delta?: boolean;
+};
+
+export type SubagentTaskEvent = {
+  task_id: string;
+  sequence: number;
+  kind: string;
+  run_id?: string;
+  content?: string;
+  tool_name?: string;
+  arguments?: string;
+  status?: string;
+  error_code?: string;
+  error_message?: string;
+  truncated?: boolean;
+  delta?: boolean;
+  emitted_at?: string;
+};
+
+export type SubagentTaskWaitResultPayload = {
+  session_id: string;
+  task: SubagentTask;
+  timed_out: boolean;
+  sequence?: number;
 };
 
 export type PairResponse = {
@@ -273,6 +319,10 @@ export type AgentRun = {
   id: string;
   request_id?: string;
   session_id: string;
+  parent_run_id?: string;
+  plan_id?: string;
+  step_id?: string;
+  task_id?: string;
   kind: AgentRunKind;
   title?: string;
   reason?: string;
@@ -390,6 +440,7 @@ export type Plan = {
   session_id: string;
   goal?: string;
   status: string;
+  revision?: number;
   raw_content?: string;
   steps?: PlanStep[];
   created_at?: string;
@@ -401,7 +452,14 @@ export type PlanStep = {
   order: number;
   title: string;
   description?: string;
+  dependencies?: string[];
   status: string;
+  retry_count?: number;
+  max_retries?: number;
+  last_error?: string;
+  agent_task_id?: string;
+  started_at?: string;
+  completed_at?: string;
 };
 
 export type SessionListResultPayload = {

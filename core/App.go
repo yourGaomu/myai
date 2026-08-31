@@ -181,12 +181,15 @@ func InitApp() {
 		instance.InitAssetClient()
 		instance.InitMongoDb()
 		instance.InitRedisDb()
+		//这里选取存储模式
 		instance.InitStore()
 		instance.InitThreadPool()
 		instance.InitMemoryStorage()
 		instance.InitKnowledgeStorage()
 		instance.InitCache()
+		//初始化模型信息，有哪些模型可以调用
 		instance.InitClient()
+		//一次性初始化 4 大记忆相关服务
 		instance.InitMemoryServices()
 		instance.InitSessionMemory()
 		instance.InitSandbox()
@@ -254,10 +257,14 @@ func (app *Application) InitStore() {
 		app.agentRunRepository = agentrunmemory.New()
 		app.recoverAgentRuns()
 		// Mongo 未配置时允许以内存模式启动，持久化相关适配器会保持为空。
+		log.Print("agent run memory repository created")
 		return
 	}
 
 	database := app.properties.Mongo.Database
+	if database == "" {
+		panic("mongo database not exist")
+	}
 	app.store = adaptermongo.New(app.mongoDb, database)
 	app.agentRunRepository = agentrunmongo.New(app.mongoDb, database)
 	app.recoverAgentRuns()
@@ -275,6 +282,7 @@ func (app *Application) recoverAgentRuns() {
 
 func (app *Application) InitMemoryStorage() {
 	if app.mongoDb == nil {
+		//use memory to store
 		app.memoryStore = aimemory.New()
 		return
 	}
@@ -290,10 +298,14 @@ func (app *Application) InitMemoryServices() {
 		return
 	}
 	ids := uuidadapter.Generator{}
+	//初始化AI记忆存储服务，采用mongo和内存都可以
 	app.memoryCatalogService = memorycatalogservice.CatalogService{Store: app.memoryStore, IDs: ids}
+	//初始化当前问题相关的历史 AI 经验的服务
 	app.memoryRetrievalService = memoryretrievalservice.ContextService{
-		Memories: app.memoryStore, Usage: app.memoryCatalogService,
-		Scope: app.defaultMemoryScope(), TopK: 4,
+		Memories: app.memoryStore,
+		Usage:    app.memoryCatalogService,
+		Scope:    app.defaultMemoryScope(),
+		TopK:     4,
 		OnUsageError: func(err error) {
 			log.Printf("record AI memory use failed: %v", err)
 		},
@@ -301,6 +313,7 @@ func (app *Application) InitMemoryServices() {
 	if app.client == nil {
 		return
 	}
+	//选取记忆服务模型
 	extractionModelID := strings.TrimSpace(app.properties.Memory.Extraction.ModelID)
 	if extractionModelID == "" {
 		extractionModelID = app.defaultModelID
@@ -311,10 +324,18 @@ func (app *Application) InitMemoryServices() {
 	} else if app.agentRunRepository == nil {
 		log.Printf("AI memory extraction disabled: agent run repository is unavailable")
 	} else {
+		//依赖全部就绪，实例化记忆提取服务
 		extraction := &memoryextractionservice.Service{
-			Store: app.memoryStore, Runs: app.agentRunRepository, IDs: ids,
+			//  保存候选记忆和提取任务
+			Store: app.memoryStore,
+			//  读取 Agent 的运行记录和工具调用记录
+			Runs: app.agentRunRepository,
+			IDs:  ids,
+			//	调用大模型，把运行记录总结成候选记忆
 			Extractor: memoryextractor.ModelExtractor{
-				ModelID: extractionModelID, Model: model, DefaultScope: app.defaultMemoryScope(),
+				ModelID:      extractionModelID,
+				Model:        model,
+				DefaultScope: app.defaultMemoryScope(),
 			},
 			Async: adapterthreadpool.Executor{Pool: app.threadPool},
 			OnError: func(err error) {
@@ -650,9 +671,12 @@ func (app *Application) InitClient() {
 
 	// 启动时先从配置和持久层加载模型，再把具体模型注册进运行时 Registry。
 	result, err := (modelservice.BootstrapService{
+		//读取 MongoDB 中保存的模型配置
 		Repository: app.store,
-		Registry:   app.client,
-		Factory:    adaptermodel.NewFactory(),
+		//保存的模型配置
+		Registry: app.client,
+		//协议模型保存
+		Factory: adaptermodel.NewFactory(),
 	}).Bootstrap(context.Background(), modelcommand.Bootstrap{
 		Seed:            (appconfig.Mapper{}).ModelConfig(app.properties.Model),
 		FallbackModelID: app.properties.Model.ID,
@@ -691,10 +715,12 @@ func (app *Application) InitSandbox() {
 }
 
 func (app *Application) InitWorkspaceIsolation() {
+	//创建快照工作区管理器
 	snapshotManager, err := snapshotworkspace.New(app.properties.Subagent.SnapshotRoot, sqlitehistory.Factory{})
 	if err != nil {
 		panic(fmt.Errorf("init snapshot workspace manager failed: %w", err))
 	}
+	//创建工作区路由器：
 	router := &workspaceRouter.Manager{Snapshot: snapshotManager}
 	if app.isolatedSandboxManager != nil {
 		openSandboxManager, err := opensandboxworkspace.New(snapshotManager, app.isolatedSandboxManager)
@@ -742,16 +768,19 @@ func (app *Application) InitSubagents() {
 	var definitions subagentport.DefinitionRepository
 	var tasks subagentport.TaskRepository
 	var runs subagentport.RunRepository
+	var taskEvents subagentport.TaskEventRepository
 	if app.mongoDb != nil {
 		repository := subagentmongo.New(app.mongoDb, app.properties.Mongo.Database)
 		definitions = repository
 		tasks = repository
 		runs = repository
+		taskEvents = repository
 	} else {
 		repository := subagentmemory.NewRepository()
 		definitions = repository
 		tasks = repository
 		runs = repository
+		taskEvents = repository
 	}
 
 	sessionPersistence := sessionpersistenceservice.PersistenceService{
@@ -777,7 +806,7 @@ func (app *Application) InitSubagents() {
 			log.Printf("subagent background operation failed: %v", err)
 		},
 	}
-	eventBus := subagentevents.NewBus()
+	eventBus := subagentevents.NewBus(taskEvents)
 	applicationService.Events = eventBus
 	applicationService.Workspaces = app.workspaceIsolationManager
 	if _, err := applicationService.Bootstrap(context.Background(), subagentcommand.BootstrapDefinitions{}); err != nil {

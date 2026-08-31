@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	subagentevents "myai/core/adapter/subagent/events"
 	"myai/core/adapter/subagent/memory"
 	subagentcommand "myai/core/application/subagent/command"
+	subagentresult "myai/core/application/subagent/result"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
 	subagentport "myai/core/port/subagent"
@@ -59,6 +61,56 @@ func TestTaskUsesPreparedSnapshotAndCollectsChanges(t *testing.T) {
 	}
 }
 
+func TestListIncludesNestedTaskTree(t *testing.T) {
+	repository := memory.NewRepository()
+	root := domainsubagent.Task{ID: "root", ParentSessionID: "session-1", ChildSessionID: "child-session", Title: "root", Status: domainsubagent.TaskStatusRunning}
+	child := domainsubagent.Task{ID: "child", ParentSessionID: "child-session", ParentTaskID: "root", ChildSessionID: "grandchild-session", Title: "child", Status: domainsubagent.TaskStatusSucceeded}
+	grandchild := domainsubagent.Task{ID: "grandchild", ParentSessionID: "grandchild-session", ParentTaskID: "child", Title: "grandchild", Status: domainsubagent.TaskStatusQueued}
+	for _, task := range []domainsubagent.Task{root, child, grandchild} {
+		if err := repository.SaveTask(context.Background(), task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := (&Service{Tasks: repository}).List(context.Background(), subagentcommand.ListTasks{ParentSessionID: "session-1", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("expected complete nested task tree, got %d items", len(result.Items))
+	}
+}
+
+func TestNestedTaskRecordsParentAndHierarchicalAgentPath(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	parent := domainsubagent.Task{
+		ID: "parent-task", ParentSessionID: "root-session", ChildSessionID: "child-session",
+		AgentPath: "review/scan", DefinitionID: definition.ID, Instruction: "parent", Status: domainsubagent.TaskStatusRunning,
+	}
+	if err := repository.SaveTask(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: &fakeScheduler{}, Sessions: &fakeChildSessions{}, Runner: fakeRunner{}, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	result, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "child-session", ParentTaskID: parent.ID, DefinitionID: definition.ID,
+		Instruction: "nested", TaskName: "verify", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value.ParentTaskID != parent.ID || result.Value.AgentPath != "review/scan/verify" {
+		t.Fatalf("unexpected nested identity: %#v", result.Value)
+	}
+}
+
 func TestCheckRejectsPollingFromCreatingRequest(t *testing.T) {
 	repository := memory.NewRepository()
 	task := domainsubagent.Task{ID: "task-1", ParentSessionID: "parent-1", CreatedRequestID: "request-1", Status: domainsubagent.TaskStatusRunning}
@@ -71,6 +123,110 @@ func TestCheckRejectsPollingFromCreatingRequest(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected same-request polling to be rejected")
+	}
+}
+
+func TestWaitBlocksUntilTerminalTaskEvent(t *testing.T) {
+	repository := memory.NewRepository()
+	bus := subagentevents.NewBus()
+	task := domainsubagent.Task{ID: "task-1", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusRunning}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, Events: bus}
+	resultCh := make(chan struct {
+		result subagentresult.Wait
+		err    error
+	}, 1)
+	go func() {
+		result, err := service.Wait(context.Background(), subagentcommand.WaitTask{
+			TaskID: task.ID, ParentSessionID: task.ParentSessionID, Timeout: time.Second,
+		})
+		resultCh <- struct {
+			result subagentresult.Wait
+			err    error
+		}{result: result, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		t.Fatalf("wait returned before terminal event: %#v", result)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := task.MarkSucceeded("done", "", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	bus.TaskUpdated(context.Background(), task)
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil || result.result.Task.Status != domainsubagent.TaskStatusSucceeded || result.result.Sequence == 0 {
+			t.Fatalf("unexpected wait result: %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wait did not wake after terminal event")
+	}
+}
+
+func TestWaitMarksNestedParentAsWaitingAndRestoresIt(t *testing.T) {
+	repository := memory.NewRepository()
+	bus := subagentevents.NewBus()
+	parent := domainsubagent.Task{ID: "parent-task", ParentSessionID: "root-session", ChildSessionID: "parent-session", Status: domainsubagent.TaskStatusRunning}
+	child := domainsubagent.Task{ID: "child-task", ParentSessionID: "parent-session", ParentTaskID: parent.ID, Status: domainsubagent.TaskStatusRunning}
+	if err := repository.SaveTask(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveTask(context.Background(), child); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, Events: bus}
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := service.Wait(context.Background(), subagentcommand.WaitTask{
+			TaskID: child.ID, ParentSessionID: child.ParentSessionID, ParentTaskID: parent.ID, Timeout: time.Second,
+		})
+		resultCh <- err
+	}()
+	deadline := time.After(time.Second)
+	for {
+		current, err := repository.GetTask(context.Background(), parent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == domainsubagent.TaskStatusWaitingSubagents {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("parent task did not enter waiting_subagents")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if err := child.MarkSucceeded("done", "", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveTask(context.Background(), child); err != nil {
+		t.Fatal(err)
+	}
+	bus.TaskUpdated(context.Background(), child)
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wait did not complete")
+	}
+	current, err := repository.GetTask(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != domainsubagent.TaskStatusRunning {
+		t.Fatalf("expected parent to resume running, got %s", current.Status)
 	}
 }
 

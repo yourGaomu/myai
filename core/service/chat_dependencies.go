@@ -29,8 +29,15 @@ type ChatEventPublisher interface {
 
 type ChatDependencies struct {
 	// ChatDependencies 只组合应用接口和共享 port；具体 adapter 在 composition/chat 中注入。
-	Models        modelport.Registry
-	ModelMetadata modelport.MetadataProvider
+	// AutoPlanEnabled lets root user sessions automatically orchestrate
+	// development requests while leaving explicit plan mode available.
+	AutoPlanEnabled bool
+	// AutoPlanClassifier controls the structured decision that determines
+	// whether an incoming request enters autonomous planning. When nil, the
+	// compatibility RuleBasedAutoPlanClassifier is used.
+	AutoPlanClassifier AutoPlanClassifier
+	Models             modelport.Registry
+	ModelMetadata      modelport.MetadataProvider
 
 	GenerationTasks   generationapi.TaskService
 	PlanExecution     planapi.Service

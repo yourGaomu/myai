@@ -37,7 +37,13 @@ const (
 type Task struct {
 	ID                string
 	ParentSessionID   string
+	ParentTaskID      string
+	ParentRunID       string
+	PlanID            string
+	StepID            string
 	ChildSessionID    string
+	AgentPath         string
+	AgentNickname     string
 	CreatedRequestID  string
 	DefinitionID      string
 	DefinitionVersion int64

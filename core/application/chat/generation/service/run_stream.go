@@ -45,6 +45,7 @@ func (r *runStreamRecorder) Handler() modelport.ChatStreamHandler {
 		OnRunStarted:   r.base.OnRunStarted,
 		OnRunEvent:     r.base.OnRunEvent,
 		OnRunCompleted: r.base.OnRunCompleted,
+		OnPlanUpdate:   r.base.OnPlanUpdate,
 	}
 }
 

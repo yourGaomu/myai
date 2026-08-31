@@ -63,6 +63,12 @@ func TestTaskServicePublishesCapturedPlan(t *testing.T) {
 	}
 }
 
+func TestRunKindMarksAutonomousPlanningAsPlan(t *testing.T) {
+	if got := runKind("autonomous planning", &session.Session{AgentMode: session.AgentModePlan}, false); got != domainagentrun.KindPlan {
+		t.Fatalf("runKind(autonomous planning) = %q, want %q", got, domainagentrun.KindPlan)
+	}
+}
+
 type taskRequestIDStub struct{}
 
 func (taskRequestIDStub) NewRequestID() string { return "generation-request-1" }

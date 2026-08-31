@@ -3,6 +3,7 @@ package model
 import (
 	domainagentrun "myai/core/domain/agentrun"
 	domaintool "myai/core/domain/tool"
+	agentplan "myai/core/plan"
 )
 
 type ToolResultEvent struct {
@@ -21,4 +22,5 @@ type ChatStreamHandler struct {
 	OnRunStarted   func(run domainagentrun.Run)
 	OnRunEvent     func(event domainagentrun.Event)
 	OnRunCompleted func(run domainagentrun.Run)
+	OnPlanUpdate   func(plan *agentplan.Plan)
 }

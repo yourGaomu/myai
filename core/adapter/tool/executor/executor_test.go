@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	agentrunruntime "myai/core/application/agentrun/runtime"
 	generationcommand "myai/core/application/chat/generation/command"
 	toolcommand "myai/core/application/tool/command"
 	"myai/core/contextmgr"
@@ -15,6 +16,7 @@ import (
 	"myai/core/hook"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -48,6 +50,41 @@ func TestExecutorRejectsNilSession(t *testing.T) {
 	_, err := (Executor{}).Execute(context.Background(), generationcommand.ToolExecution{})
 	if err == nil {
 		t.Fatal("expected nil session error")
+	}
+}
+
+func TestExecutorPreservesCurrentTaskIDForNestedSubagents(t *testing.T) {
+	var execution toolruntime.Execution
+	executor := Executor{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"inspect_execution": fakeTool{
+				name:       "inspect_execution",
+				permission: tooldef.PermissionRead,
+				inspect: func(ctx context.Context) {
+					execution, _ = toolruntime.CurrentExecution(ctx)
+				},
+			},
+		}},
+	}
+	session := &session.Session{
+		ID: "child-session", Kind: session.KindSubagent, ParentTaskID: "parent-task",
+		PermissionMode: session.PermissionModeReadonly,
+	}
+	ctx := agentrunruntime.WithMetadata(context.Background(), agentrunruntime.Metadata{
+		TaskID: "current-task", ParentRunID: "parent-run", PlanID: "plan-1", StepID: "step-1",
+	})
+	_, err := executor.Execute(ctx, generationcommand.ToolExecution{
+		Session: session,
+		Calls:   []domainmessage.ToolCall{{ID: "call-1", Name: "inspect_execution"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.TaskID != "current-task" {
+		t.Fatalf("tool execution task id = %q, want current task id", execution.TaskID)
+	}
+	if execution.TaskID == session.ParentTaskID {
+		t.Fatal("tool execution must not expose the session parent task as the current task")
 	}
 }
 
@@ -177,6 +214,7 @@ type fakeTool struct {
 	name       string
 	permission tooldef.Permission
 	result     string
+	inspect    func(context.Context)
 }
 
 func (t fakeTool) Name() string {
@@ -195,7 +233,10 @@ func (t fakeTool) Permission() tooldef.Permission {
 	return t.permission
 }
 
-func (t fakeTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+func (t fakeTool) Call(ctx context.Context, _ json.RawMessage) (tooldef.ToolOutput, error) {
+	if t.inspect != nil {
+		t.inspect(ctx)
+	}
 	return tooldef.SuccessOutput(t.result), nil
 }
 

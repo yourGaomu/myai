@@ -42,8 +42,23 @@ export function useRelaySender({
         client_token: clientToken,
         payload: overrides.payload || {},
       };
-      socket.send(JSON.stringify(envelope));
-      return true;
+      try {
+        socket.send(JSON.stringify(envelope));
+        return true;
+      } catch (error) {
+        // A socket can transition away from OPEN between the state check and
+        // send(). Treat that race as a normal delivery failure so callers can
+        // clear their pending state and the connection hook can reconnect.
+        console.warn("Relay message send failed", error);
+        addErrorMessage("Relay 连接已断开，请等待自动重连后重试。");
+        try {
+          socket.close();
+        } catch {
+          // The socket may already be closing; the close handler will schedule
+          // reconnection when it observes the final state.
+        }
+        return false;
+      }
     },
     [activeRequestIDRef, addErrorMessage, clientToken, deviceID, sessionID, socketRef, userID],
   );

@@ -32,7 +32,7 @@ type Store struct {
 
 func New(client *gomongo.Client, database string) *Store {
 	if client == nil || database == "" {
-		return NewWithTemplate(mongotemplate.New(nil))
+		panic("mongo database not exist")
 	}
 	target := client.Database(database)
 	return &Store{template: mongotemplate.New(target), database: target}

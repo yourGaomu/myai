@@ -94,12 +94,15 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	// 模型成功返回后先提交内存状态，再异步保存 assistant 消息和当前会话指针。
 	commitResult, err := s.ResponseCommitter.Commit(generationcommand.Commit{
 		Session: command.Session, LatestInput: command.LatestInput, Result: result, CapturePlan: command.CapturePlan,
+		Internal: command.Internal,
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
 	}
 	if s.Persistence != nil {
-		s.Persistence.PersistAssistant(command.Session, result)
+		if !command.Internal {
+			s.Persistence.PersistAssistant(command.Session, result)
+		}
 	}
 	return generationresult.GenerationResponse{
 		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),

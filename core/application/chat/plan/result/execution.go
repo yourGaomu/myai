@@ -9,6 +9,7 @@ import (
 
 type Execution struct {
 	SessionID string
+	RunID     string
 	Result    modelport.ChatResult
 	Context   contextmgr.Info
 	Compact   compactionresult.CompactInfo

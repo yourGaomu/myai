@@ -4,7 +4,8 @@ import (
 	"context"
 
 	generationcommand "myai/core/application/chat/generation/command"
-	plancommand "myai/core/application/plan/command"
+	plancommand "myai/core/application/chat/plan/command"
+	planstatecommand "myai/core/application/plan/command"
 	messagecommand "myai/core/application/session/message/command"
 	messageresult "myai/core/application/session/message/result"
 	agentplan "myai/core/plan"
@@ -20,7 +21,7 @@ type MessageAppender interface {
 }
 
 type StateStore interface {
-	Save(ctx context.Context, command plancommand.SaveState) (*agentplan.Plan, error)
+	Save(ctx context.Context, command planstatecommand.SaveState) (*agentplan.Plan, error)
 }
 
 type UserMessagePersistence interface {
@@ -33,4 +34,11 @@ type SessionEventPublisher interface {
 
 type UpdateSink interface {
 	PlanUpdated(currentPlan *agentplan.Plan)
+}
+
+// RecoveryPlanner returns replacement work after a step has exhausted its
+// bounded retries. It is intentionally optional so existing integrations can
+// retain fail-fast behavior.
+type RecoveryPlanner interface {
+	Recover(ctx context.Context, request plancommand.RecoveryRequest) (*agentplan.Plan, error)
 }

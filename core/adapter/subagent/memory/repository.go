@@ -16,6 +16,7 @@ type Repository struct {
 	definitions map[string]domainsubagent.Definition
 	tasks       map[string]domainsubagent.Task
 	runs        map[string][]domainsubagent.Run
+	events      []subagentport.TaskEvent
 }
 
 var _ subagentport.DefinitionRepository = (*Repository)(nil)
@@ -23,12 +24,15 @@ var _ subagentport.TaskRepository = (*Repository)(nil)
 var _ subagentport.RunRepository = (*Repository)(nil)
 var _ subagentport.TaskRunRepository = (*Repository)(nil)
 var _ subagentport.InterruptedTaskRepository = (*Repository)(nil)
+var _ subagentport.TaskEventRepository = (*Repository)(nil)
+var _ subagentport.TaskEventTailRepository = (*Repository)(nil)
 
 func NewRepository() *Repository {
 	return &Repository{
 		definitions: make(map[string]domainsubagent.Definition),
 		tasks:       make(map[string]domainsubagent.Task),
 		runs:        make(map[string][]domainsubagent.Run),
+		events:      make([]subagentport.TaskEvent, 0),
 	}
 }
 
@@ -166,4 +170,56 @@ func (repository *Repository) ListRuns(_ context.Context, taskID string) ([]doma
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Sequence < result[j].Sequence })
 	return result, nil
+}
+
+func (repository *Repository) SaveTaskEvent(_ context.Context, event subagentport.TaskEvent) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	for index := range repository.events {
+		if repository.events[index].Sequence == event.Sequence {
+			repository.events[index] = cloneTaskEvent(event)
+			return nil
+		}
+	}
+	if len(repository.events) == 0 || repository.events[len(repository.events)-1].Sequence < event.Sequence {
+		repository.events = append(repository.events, cloneTaskEvent(event))
+		return nil
+	}
+	repository.events = append(repository.events, cloneTaskEvent(event))
+	sort.Slice(repository.events, func(i, j int) bool { return repository.events[i].Sequence < repository.events[j].Sequence })
+	return nil
+}
+
+func (repository *Repository) ListTaskEvents(_ context.Context, parentSessionID string, afterSequence uint64, limit int) ([]subagentport.TaskEvent, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	parentSessionID = strings.TrimSpace(parentSessionID)
+	items := make([]subagentport.TaskEvent, 0)
+	for _, event := range repository.events {
+		if event.Sequence <= afterSequence {
+			continue
+		}
+		if parentSessionID != "" && event.Task.ParentSessionID != parentSessionID {
+			continue
+		}
+		items = append(items, cloneTaskEvent(event))
+		if limit > 0 && len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
+}
+
+func (repository *Repository) LatestTaskEventSequence(_ context.Context) (uint64, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	if len(repository.events) == 0 {
+		return 0, nil
+	}
+	return repository.events[len(repository.events)-1].Sequence, nil
+}
+
+func cloneTaskEvent(event subagentport.TaskEvent) subagentport.TaskEvent {
+	event.Task = domainsubagent.CloneTask(event.Task)
+	return event
 }

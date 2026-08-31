@@ -7,7 +7,7 @@ import (
 
 func RunDocumentFromDomain(run domainagentrun.Run) po.RunDocument {
 	return po.RunDocument{
-		ID: run.ID, RequestID: run.RequestID, SessionID: run.SessionID, Kind: string(run.Kind),
+		ID: run.ID, RequestID: run.RequestID, SessionID: run.SessionID, ParentRunID: run.ParentRunID, PlanID: run.PlanID, StepID: run.StepID, TaskID: run.TaskID, Kind: string(run.Kind),
 		Title: run.Title, Reason: run.Reason, Status: string(run.Status), CurrentStep: run.CurrentStep,
 		TotalSteps: run.TotalSteps, LastSequence: run.LastSequence, ErrorMessage: run.ErrorMessage,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
@@ -16,7 +16,7 @@ func RunDocumentFromDomain(run domainagentrun.Run) po.RunDocument {
 
 func RunDomainFromDocument(document po.RunDocument) domainagentrun.Run {
 	return domainagentrun.Run{
-		ID: document.ID, RequestID: document.RequestID, SessionID: document.SessionID,
+		ID: document.ID, RequestID: document.RequestID, SessionID: document.SessionID, ParentRunID: document.ParentRunID, PlanID: document.PlanID, StepID: document.StepID, TaskID: document.TaskID,
 		Kind: domainagentrun.Kind(document.Kind), Title: document.Title, Reason: document.Reason,
 		Status: domainagentrun.Status(document.Status), CurrentStep: document.CurrentStep,
 		TotalSteps: document.TotalSteps, LastSequence: document.LastSequence,

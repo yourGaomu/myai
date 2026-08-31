@@ -133,6 +133,8 @@ const (
 	TypeSubagentTaskList                 MessageType = "subagent_task_list"
 	TypeSubagentTaskListResult           MessageType = "subagent_task_list_result"
 	TypeSubagentTaskCheck                MessageType = "subagent_task_check"
+	TypeSubagentTaskWait                 MessageType = "subagent_task_wait"
+	TypeSubagentTaskWaitResult           MessageType = "subagent_task_wait_result"
 	TypeSubagentTaskCancel               MessageType = "subagent_task_cancel"
 	TypeSubagentTaskApply                MessageType = "subagent_task_apply"
 	TypeSubagentTaskDiscard              MessageType = "subagent_task_discard"
@@ -214,9 +216,21 @@ type SubagentTaskPayload struct {
 	TaskID string `json:"task_id"`
 }
 
+type SubagentTaskWaitPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	TaskID    string `json:"task_id"`
+	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+}
+
 type SubagentTaskSummary struct {
 	ID                string            `json:"id"`
 	ParentSessionID   string            `json:"parent_session_id"`
+	ParentTaskID      string            `json:"parent_task_id,omitempty"`
+	ParentRunID       string            `json:"parent_run_id,omitempty"`
+	PlanID            string            `json:"plan_id,omitempty"`
+	StepID            string            `json:"step_id,omitempty"`
+	AgentPath         string            `json:"agent_path,omitempty"`
+	AgentNickname     string            `json:"agent_nickname,omitempty"`
 	DefinitionID      string            `json:"definition_id"`
 	DefinitionVersion int64             `json:"definition_version"`
 	Title             string            `json:"title"`
@@ -258,8 +272,27 @@ type SubagentTaskListResultPayload struct {
 }
 
 type SubagentTaskResultPayload struct {
-	Task    SubagentTaskSummary `json:"task"`
-	Message string              `json:"message,omitempty"`
+	Task         SubagentTaskSummary `json:"task"`
+	Message      string              `json:"message,omitempty"`
+	Sequence     uint64              `json:"sequence,omitempty"`
+	Kind         string              `json:"kind,omitempty"`
+	EmittedAt    time.Time           `json:"emitted_at,omitempty"`
+	RunID        string              `json:"run_id,omitempty"`
+	Content      string              `json:"content,omitempty"`
+	ToolName     string              `json:"tool_name,omitempty"`
+	Arguments    string              `json:"arguments,omitempty"`
+	Status       string              `json:"status,omitempty"`
+	ErrorCode    string              `json:"error_code,omitempty"`
+	ErrorMessage string              `json:"error_message,omitempty"`
+	Truncated    bool                `json:"truncated,omitempty"`
+	Delta        bool                `json:"delta,omitempty"`
+}
+
+type SubagentTaskWaitResultPayload struct {
+	SessionID string              `json:"session_id"`
+	Task      SubagentTaskSummary `json:"task"`
+	TimedOut  bool                `json:"timed_out"`
+	Sequence  uint64              `json:"sequence,omitempty"`
 }
 
 type AgentOnlinePayload struct {
@@ -292,6 +325,10 @@ type AgentRun struct {
 	ID           string     `json:"id"`
 	RequestID    string     `json:"request_id,omitempty"`
 	SessionID    string     `json:"session_id"`
+	ParentRunID  string     `json:"parent_run_id,omitempty"`
+	PlanID       string     `json:"plan_id,omitempty"`
+	StepID       string     `json:"step_id,omitempty"`
+	TaskID       string     `json:"task_id,omitempty"`
 	Kind         string     `json:"kind"`
 	Title        string     `json:"title,omitempty"`
 	Reason       string     `json:"reason,omitempty"`
@@ -431,6 +468,7 @@ type Plan struct {
 	SessionID  string     `json:"session_id"`
 	Goal       string     `json:"goal,omitempty"`
 	Status     string     `json:"status"`
+	Revision   int64      `json:"revision,omitempty"`
 	RawContent string     `json:"raw_content,omitempty"`
 	Steps      []PlanStep `json:"steps,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -438,11 +476,18 @@ type Plan struct {
 }
 
 type PlanStep struct {
-	ID          string `json:"id"`
-	Order       int    `json:"order"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status"`
+	ID           string     `json:"id"`
+	Order        int        `json:"order"`
+	Title        string     `json:"title"`
+	Description  string     `json:"description,omitempty"`
+	Dependencies []string   `json:"dependencies,omitempty"`
+	Status       string     `json:"status"`
+	RetryCount   int        `json:"retry_count,omitempty"`
+	MaxRetries   int        `json:"max_retries,omitempty"`
+	LastError    string     `json:"last_error,omitempty"`
+	AgentTaskID  string     `json:"agent_task_id,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 type SessionListResultPayload struct {

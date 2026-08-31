@@ -29,6 +29,10 @@ type Run struct {
 	ID           string
 	RequestID    string
 	SessionID    string
+	ParentRunID  string
+	PlanID       string
+	StepID       string
+	TaskID       string
 	Kind         Kind
 	Title        string
 	Reason       string

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 	definitionsCollection = "subagent_definitions"
 	tasksCollection       = "subagent_tasks"
 	runsCollection        = "subagent_runs"
+	eventsCollection      = "subagent_task_events"
 )
 
 type Repository struct {
@@ -33,6 +35,8 @@ var _ subagentport.TaskRepository = (*Repository)(nil)
 var _ subagentport.RunRepository = (*Repository)(nil)
 var _ subagentport.TaskRunRepository = (*Repository)(nil)
 var _ subagentport.InterruptedTaskRepository = (*Repository)(nil)
+var _ subagentport.TaskEventRepository = (*Repository)(nil)
+var _ subagentport.TaskEventTailRepository = (*Repository)(nil)
 
 func New(client *gomongo.Client, database string) *Repository {
 	if client == nil || strings.TrimSpace(database) == "" {
@@ -193,6 +197,49 @@ func (repository *Repository) ListRuns(ctx context.Context, taskID string) ([]do
 		items = append(items, mapper.RunDomainFromDocument(document))
 	}
 	return items, nil
+}
+
+func (repository *Repository) SaveTaskEvent(ctx context.Context, event subagentport.TaskEvent) error {
+	document := mapper.TaskEventDocumentFromDomain(event)
+	if document.Sequence == 0 {
+		return errors.New("subagent task event sequence is required")
+	}
+	update, err := replacementUpdate(document)
+	if err != nil {
+		return err
+	}
+	_, err = repository.template.UpdateOne(ctx, eventsCollection, bson.M{"_id": fmt.Sprintf("%020d", document.Sequence)}, update, options.UpdateOne().SetUpsert(true))
+	return err
+}
+
+func (repository *Repository) ListTaskEvents(ctx context.Context, parentSessionID string, afterSequence uint64, limit int) ([]subagentport.TaskEvent, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 512
+	}
+	filter := bson.M{"sequence": bson.M{"$gt": afterSequence}}
+	if parentSessionID = strings.TrimSpace(parentSessionID); parentSessionID != "" {
+		filter["task.parent_session_id"] = parentSessionID
+	}
+	var documents []po.TaskEventDocument
+	if err := repository.template.FindAll(ctx, eventsCollection, filter, &documents, options.Find().SetSort(bson.D{{Key: "sequence", Value: 1}}).SetLimit(int64(limit))); err != nil {
+		return nil, err
+	}
+	items := make([]subagentport.TaskEvent, 0, len(documents))
+	for _, document := range documents {
+		items = append(items, mapper.TaskEventDomainFromDocument(document))
+	}
+	return items, nil
+}
+
+func (repository *Repository) LatestTaskEventSequence(ctx context.Context) (uint64, error) {
+	var documents []po.TaskEventDocument
+	if err := repository.template.FindAll(ctx, eventsCollection, bson.M{}, &documents, options.Find().SetSort(bson.D{{Key: "sequence", Value: -1}}).SetLimit(1)); err != nil {
+		return 0, err
+	}
+	if len(documents) == 0 {
+		return 0, nil
+	}
+	return documents[0].Sequence, nil
 }
 
 func translateError(err error) error {

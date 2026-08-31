@@ -27,3 +27,9 @@ type Resume struct {
 	Reasoning string
 	Usage     modelport.TokenUsage
 }
+
+type Wait struct {
+	Task     domainsubagent.Task
+	TimedOut bool
+	Sequence uint64
+}

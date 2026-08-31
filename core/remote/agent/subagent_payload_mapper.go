@@ -52,7 +52,8 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 		})
 	}
 	return protocol.SubagentTaskSummary{
-		ID: task.ID, ParentSessionID: task.ParentSessionID, DefinitionID: task.DefinitionID,
+		ID: task.ID, ParentSessionID: task.ParentSessionID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID,
+		AgentPath: task.AgentPath, AgentNickname: task.AgentNickname, DefinitionID: task.DefinitionID,
 		DefinitionVersion: task.DefinitionVersion, Title: task.Title, Instruction: task.Instruction,
 		Status: string(task.Status), Unread: task.Unread, Result: task.Result, ErrorMessage: task.ErrorMessage,
 		ChangeSet: protocol.SubagentChangeSet{

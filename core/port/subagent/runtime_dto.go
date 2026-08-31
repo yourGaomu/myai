@@ -5,6 +5,7 @@ import (
 
 	domainsubagent "myai/core/domain/subagent"
 	"myai/core/llm"
+	modelport "myai/core/port/model"
 )
 
 type ScheduledTask func(ctx context.Context)
@@ -23,6 +24,7 @@ type AgentRunRequest struct {
 	SessionID   string
 	Instruction string
 	Title       string
+	Stream      modelport.ChatStreamHandler
 }
 
 type AgentRunResult struct {

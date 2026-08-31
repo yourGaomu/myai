@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	domainsubagent "myai/core/domain/subagent"
+	subagentport "myai/core/port/subagent"
 	"myai/core/remote/protocol"
 )
 
@@ -90,7 +91,40 @@ func (a *Agent) Run(ctx context.Context) error {
 	fmt.Println("binding code:", a.config.BindingCode)
 	fmt.Println("workspace:", a.fileService.Root())
 
-	// Agent 主动连接 Relay，适合电脑位于 NAT 或内网中的场景。
+	backoff := time.Second
+	for {
+		connected, err := a.runConnection(ctx)
+		if ctx.Err() != nil {
+			fmt.Println("agent stopped.")
+			return nil
+		}
+		if err != nil {
+			log.Printf("agent connection ended: %v; reconnecting in %s", err, backoff)
+		}
+		if connected {
+			backoff = time.Second
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			fmt.Println("agent stopped.")
+			return nil
+		case <-timer.C:
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	}
+}
+
+// runConnection owns one websocket lifetime. Keeping it separate makes a
+// dropped relay connection recoverable without losing the process and its
+// background subagent scheduler.
+func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+strings.TrimSpace(a.config.RelayToken))
 	headers.Set(protocol.HeaderAgentUserID, strings.TrimSpace(a.config.UserID))
@@ -98,43 +132,45 @@ func (a *Agent) Run(ctx context.Context) error {
 	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, headers)
 	if err != nil {
 		if response != nil {
-			return fmt.Errorf("connect relay failed: %w, status: %s", err, response.Status)
+			return false, fmt.Errorf("connect relay failed: %w, status: %s", err, response.Status)
 		}
-		return fmt.Errorf("connect relay failed: %w", err)
+		return false, fmt.Errorf("connect relay failed: %w", err)
 	}
 	defer conn.Close()
 
 	fmt.Println("agent connected.")
 	if err := a.writeMessage(conn, protocol.TypeAgentOnline, protocol.AgentOnlinePayload{
-		Status:   "online",
-		BindCode: a.config.BindingCode,
+		Status: "online", BindCode: a.config.BindingCode,
 	}); err != nil {
-		return err
+		return true, err
 	}
 	if a.subagentEvents != nil {
-		events, unsubscribe := a.subagentEvents.Subscribe(32)
-		defer unsubscribe()
-		go a.forwardSubagentEvents(ctx, conn, events)
+		if source, ok := a.subagentEvents.(SubagentTaskEventSource); ok {
+			events, unsubscribe := source.SubscribeTaskEvents("", 0, 32)
+			defer unsubscribe()
+			go a.forwardSubagentTaskEvents(ctx, conn, events)
+		} else {
+			events, unsubscribe := a.subagentEvents.Subscribe(32)
+			defer unsubscribe()
+			go a.forwardSubagentEvents(ctx, conn, events)
+		}
 	}
 
 	readDone := make(chan error, 1)
 	go a.readLoop(ctx, conn, readDone)
-
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			_ = a.writeMessage(conn, protocol.TypeAgentOffline, map[string]string{"status": "offline"})
 			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "agent stopped"))
-			fmt.Println("agent stopped.")
-			return nil
+			return true, nil
 		case err := <-readDone:
-			return err
+			return true, err
 		case <-ticker.C:
 			if err := a.writeMessage(conn, protocol.TypeHeartbeat, map[string]string{"time": time.Now().Format(time.RFC3339)}); err != nil {
-				return err
+				return true, err
 			}
 			fmt.Println("agent heartbeat sent.")
 		}
@@ -152,6 +188,28 @@ func (a *Agent) forwardSubagentEvents(ctx context.Context, conn *websocket.Conn,
 			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), task.ParentSessionID, protocol.SubagentTaskResultPayload{
 				Task: subagentTaskPayload(task),
+			}); err != nil {
+				log.Printf("send subagent task event failed: %v", err)
+				return
+			}
+		}
+	}
+}
+
+func (a *Agent) forwardSubagentTaskEvents(ctx context.Context, conn *websocket.Conn, events <-chan subagentport.TaskEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), event.Task.ParentSessionID, protocol.SubagentTaskResultPayload{
+				Task: subagentTaskPayload(event.Task), Sequence: event.Sequence, Kind: event.Kind, EmittedAt: event.EmittedAt,
+				RunID: event.RunID, Content: event.Content, ToolName: event.ToolName, Arguments: event.Arguments,
+				Status: event.Status, ErrorCode: event.ErrorCode, ErrorMessage: event.ErrorMessage,
+				Truncated: event.Truncated, Delta: event.Delta,
 			}); err != nil {
 				log.Printf("send subagent task event failed: %v", err)
 				return
@@ -338,6 +396,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSubagentTaskList(ctx, conn, message)
 	case protocol.TypeSubagentTaskCheck:
 		return a.handleSubagentTaskCheck(ctx, conn, message)
+	case protocol.TypeSubagentTaskWait:
+		return a.handleSubagentTaskWait(ctx, conn, message)
 	case protocol.TypeSubagentTaskCancel:
 		return a.handleSubagentTaskCancel(ctx, conn, message)
 	case protocol.TypeSubagentTaskApply:

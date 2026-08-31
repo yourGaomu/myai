@@ -174,6 +174,7 @@ func (service Service) AgentRunCompleted(ctx context.Context, run domainagentrun
 	}
 }
 
+// 它用于恢复上次程序异常退出时留下的任务。
 func (service Service) Recover(ctx context.Context, command memorycommand.Recover) error {
 	if err := service.validate(); err != nil {
 		return err
@@ -182,6 +183,7 @@ func (service Service) Recover(ctx context.Context, command memorycommand.Recove
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
+	//查询还有哪些任务在运行，限制最多100条
 	jobs, err := service.Store.ListExtractionJobs(ctx, []domainmemory.JobStatus{
 		domainmemory.JobPending, domainmemory.JobRunning, domainmemory.JobFailed,
 	}, limit)
@@ -190,6 +192,7 @@ func (service Service) Recover(ctx context.Context, command memorycommand.Recove
 	}
 	var recoveryErrors []error
 	for _, job := range jobs {
+		//检测这个任务是否超过了最大的重试次数
 		if job.Attempts >= maxAutomaticExtractionAttempts {
 			if job.Status != domainmemory.JobFailed {
 				job.Status = domainmemory.JobFailed
@@ -203,6 +206,7 @@ func (service Service) Recover(ctx context.Context, command memorycommand.Recove
 			}
 			continue
 		}
+		//修改运行的任务为等待，因为之前的执行线程不存在了，所有需要重新提交任务
 		if job.Status == domainmemory.JobRunning {
 			job.Status = domainmemory.JobPending
 			job.UpdatedAt = service.now()

@@ -38,3 +38,15 @@ type RunRepository interface {
 	SaveRun(ctx context.Context, run domainsubagent.Run) error
 	ListRuns(ctx context.Context, taskID string) ([]domainsubagent.Run, error)
 }
+
+// TaskEventRepository stores the ordered task event log used for reconnect
+// and replay. Sequence is assigned by the event publisher and is global to a
+// runtime, which keeps ordering deterministic across parent sessions.
+type TaskEventRepository interface {
+	SaveTaskEvent(ctx context.Context, event TaskEvent) error
+	ListTaskEvents(ctx context.Context, parentSessionID string, afterSequence uint64, limit int) ([]TaskEvent, error)
+}
+
+type TaskEventTailRepository interface {
+	LatestTaskEventSequence(ctx context.Context) (uint64, error)
+}

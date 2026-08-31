@@ -3,6 +3,7 @@ package threadpool
 import (
 	"errors"
 	"log"
+	"runtime"
 	"runtime/debug"
 	"sync"
 
@@ -18,6 +19,13 @@ type Pool struct {
 }
 
 func New(workers int, queueSize int) *Pool {
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	if queueSize < 0 {
+		queueSize = runtime.NumCPU()
+	}
+
 	pool := &Pool{
 		workers: workers,
 		tasks:   make(chan func(), queueSize),

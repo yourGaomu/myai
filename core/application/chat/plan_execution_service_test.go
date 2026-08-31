@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	plancommandchat "myai/core/application/chat/plan/command"
 	plancommand "myai/core/application/plan/command"
 	messagecommand "myai/core/application/session/message/command"
 	messageresult "myai/core/application/session/message/result"
@@ -142,6 +143,41 @@ func TestPlanExecutionServiceMarksCancellationWithoutFailingStep(t *testing.T) {
 	}
 }
 
+func TestPlanExecutionServiceRetriesConfiguredStep(t *testing.T) {
+	current := planExecutionSession()
+	current.CurrentPlan.Steps[0].MaxRetries = 1
+	generation := &flakyPlanGeneration{remainingFailures: 1}
+	states := &recordingPlanStateStore{}
+	result, err := (PlanExecutionService{
+		Models: &assistantModelProvider{}, Sessions: staticPlanSessionLoader{current: current},
+		Messages: &planMessageAppender{current: current}, Generation: generation, PlanStates: states,
+	}).Execute(context.Background(), PlanExecutionCommand{SessionID: current.ID}, nil)
+	if err != nil || result.Plan == nil || result.Plan.Status != agentplan.StatusDone {
+		t.Fatalf("expected retry to complete plan, result=%#v err=%v", result, err)
+	}
+	if generation.calls != 3 || result.Plan.Steps[0].RetryCount != 1 || result.Plan.Steps[0].Status != agentplan.StepStatusDone {
+		t.Fatalf("unexpected retry execution: calls=%d plan=%#v", generation.calls, result.Plan)
+	}
+}
+
+func TestPlanExecutionServiceReplansAfterFailure(t *testing.T) {
+	current := planExecutionSession()
+	current.CurrentPlan.Steps = current.CurrentPlan.Steps[:1]
+	generation := &flakyPlanGeneration{remainingFailures: 1}
+	recovery := &recoveryPlanStub{}
+	result, err := (PlanExecutionService{
+		Models: &assistantModelProvider{}, Sessions: staticPlanSessionLoader{current: current},
+		Messages: &planMessageAppender{current: current}, Generation: generation,
+		PlanStates: &recordingPlanStateStore{}, Recovery: recovery, MaxReplans: 1,
+	}).Execute(context.Background(), PlanExecutionCommand{SessionID: current.ID}, nil)
+	if err != nil || result.Plan == nil || result.Plan.Status != agentplan.StatusDone {
+		t.Fatalf("expected replan to complete plan, result=%#v err=%v", result, err)
+	}
+	if recovery.calls != 1 || generation.calls != 2 || len(result.Plan.Steps) != 2 || result.Plan.Steps[0].Status != agentplan.StepStatusSkipped || result.Plan.Steps[1].Status != agentplan.StepStatusDone {
+		t.Fatalf("unexpected replan execution: recovery=%d generation=%d plan=%#v", recovery.calls, generation.calls, result.Plan)
+	}
+}
+
 func planExecutionSession() *session.Session {
 	return &session.Session{
 		ID:    "session-1",
@@ -180,6 +216,27 @@ type recordingPlanGeneration struct {
 	commands  []GenerationTaskCommand
 	responses []GenerationResponse
 	err       error
+}
+
+type flakyPlanGeneration struct {
+	calls             int
+	remainingFailures int
+}
+
+func (g *flakyPlanGeneration) Generate(_ context.Context, command GenerationTaskCommand) (GenerationResponse, error) {
+	g.calls++
+	if g.remainingFailures > 0 {
+		g.remainingFailures--
+		return GenerationResponse{}, errors.New("transient generation failure")
+	}
+	return GenerationResponse{SessionID: command.Session.ID, Result: modelport.ChatResult{Content: "recovered"}}, nil
+}
+
+type recoveryPlanStub struct{ calls int }
+
+func (r *recoveryPlanStub) Recover(_ context.Context, request plancommandchat.RecoveryRequest) (*agentplan.Plan, error) {
+	r.calls++
+	return &agentplan.Plan{RawContent: "recovery", Steps: []agentplan.Step{{ID: "replacement", Title: "Replacement", Status: agentplan.StepStatusPending}}}, nil
 }
 
 func (g *recordingPlanGeneration) Generate(_ context.Context, command GenerationTaskCommand) (GenerationResponse, error) {

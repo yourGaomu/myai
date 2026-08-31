@@ -2,7 +2,15 @@
   "expo": {
     "name": "MyAI Mobile",
     "slug": "myai-mobile",
-    "version": "1.0.0",
+    "version": "1.0.2",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3af2913f-516c-42c9-9f13-c1847c9a1a6d",
+      "checkAutomatically": "NEVER",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "splash": {
@@ -16,7 +24,7 @@
     },
     "android": {
       "package": "com.myai.mobile",
-      "versionCode": 4,
+      "versionCode": 6,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -41,14 +49,16 @@
         }
       ],
       [
-        "expo-navigation-bar",
+      "expo-navigation-bar",
         {
           "hidden": false,
           "style": "dark",
           "enforceContrast": false
         }
       ],
-      "expo-sqlite"
+      "expo-updates",
+      "expo-sqlite",
+      "./plugins/withRelayForegroundService"
     ],
     "extra": {
       "eas": {

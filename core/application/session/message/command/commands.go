@@ -6,6 +6,7 @@ type AppendUserMessage struct {
 	SessionID            string
 	Input                string
 	ForceChatMode        bool
+	ForcePlanMode        bool
 	RAGContext           string
 	SyntheticReason      domainmessage.SyntheticReason
 	DeduplicateSynthetic bool

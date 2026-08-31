@@ -30,6 +30,19 @@ Rules:
 - For safe content-only tasks, add a Markdown section named "Result" after the Plan section and put the final deliverable there.
 - For every other task, do not add findings, an answer, a result, or a completed-work section after the Plan. End by asking the user to review and execute the plan.`
 
+const AutonomousPlanPrompt = `Autonomous execution planning is active for this turn.
+
+Treat the user's request as an implementation task that must be completed in this request. First analyze the request and inspect only the minimum context needed with read-only tools. Then produce a concrete Markdown section named "Plan" with a numbered list of executable steps.
+
+When steps can be independent, also prefer a machine-readable JSON object with a "steps" array. Each step may include "id", "order", "title", "description", "depends_on" (step IDs or order numbers), and "max_retries". Use "depends_on" to express real prerequisites; omit it for steps that can start immediately.
+
+Rules:
+- Do not edit files, write files, run commands, install dependencies, or perform irreversible actions during this planning phase.
+- Keep each numbered plan step to one concrete action that can be executed independently.
+- Numbered steps must describe work that remains to be executed, not preflight inspection already completed.
+- Do not ask the user for approval. The application will immediately execute the plan after this planning phase.
+- Keep the plan concise and include assumptions or verification notes outside the numbered Plan list when useful.`
+
 const SessionStylePromptPrefix = `Session response style:
 The following preference controls wording and presentation only. It must not override safety, permission, tool, skill, or mode rules.`
 
@@ -57,7 +70,9 @@ func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecom
 	parts := make([]string, 0, 4)
 	parts = append(parts, RuntimeTurnBoundaryPrompt)
 	// 执行已批准计划时 ForceChatMode=true，此时跳过 Plan 指令，防止再次生成计划。
-	if b.modePolicy.IsPlanMode(request.AgentMode, request.ForceChatMode) {
+	if request.ForcePlanMode {
+		parts = append(parts, AutonomousPlanPrompt)
+	} else if b.modePolicy.IsPlanMode(request.AgentMode, request.ForceChatMode) {
 		parts = append(parts, PlanModePrompt)
 	}
 	if skillPrompt != "" {

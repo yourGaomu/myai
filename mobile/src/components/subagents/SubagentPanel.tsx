@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { LayoutAnimation, Platform, Pressable, StyleSheet, Switch, Text, TextInput, UIManager, View } from "react-native";
 
-import type { SubagentDefinition, SubagentTask } from "../../protocol";
+import type { SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
@@ -9,6 +9,7 @@ import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
 type Props = {
   buttonFeedback: ButtonFeedback;
   definitions: SubagentDefinition[];
+  events: Record<string, SubagentTaskEvent[]>;
   message: string;
   onApplyTask: (taskID: string) => void;
   onCancelTask: (taskID: string) => void;
@@ -17,6 +18,7 @@ type Props = {
   onDeleteDefinition: (definitionID: string) => void;
   onDiscardTask: (taskID: string) => void;
   onResumeTask: (taskID: string) => void;
+  onWaitTask: (taskID: string) => void;
   onRefresh: () => void;
   onUpdateDefinition: (definition: SubagentDefinition) => boolean;
   pending: boolean;
@@ -69,6 +71,7 @@ const taskStatusLabels: Record<SubagentTask["status"], string> = {
 export function SubagentPanel({
   buttonFeedback,
   definitions,
+  events,
   message,
   onApplyTask,
   onCancelTask,
@@ -77,6 +80,7 @@ export function SubagentPanel({
   onDeleteDefinition,
   onDiscardTask,
   onResumeTask,
+  onWaitTask,
   onRefresh,
   onUpdateDefinition,
   pending,
@@ -86,10 +90,52 @@ export function SubagentPanel({
   const [draft, setDraft] = useState<DefinitionDraft>(emptyDraft);
   const [showEditor, setShowEditor] = useState(false);
   const editing = Boolean(draft.id);
-  const visibleTasks = useMemo(
-    () => tasks.filter((task) => !sessionID || task.parent_session_id === sessionID),
-    [sessionID, tasks],
-  );
+  const visibleTasks = useMemo(() => {
+    if (!sessionID) return tasks;
+    const visible = new Map<string, SubagentTask>();
+    const pending = tasks.filter((task) => task.parent_session_id === sessionID);
+    while (pending.length) {
+      const task = pending.shift();
+      if (!task || visible.has(task.id)) continue;
+      visible.set(task.id, task);
+      for (const child of tasks) {
+        if (child.parent_task_id === task.id && !visible.has(child.id)) pending.push(child);
+      }
+    }
+    return Array.from(visible.values());
+  }, [sessionID, tasks]);
+  const taskTree = useMemo(() => {
+    const byParent = new Map<string, SubagentTask[]>();
+    const visibleIDs = new Set(visibleTasks.map((task) => task.id));
+    for (const task of visibleTasks) {
+      const parentID = task.parent_task_id && visibleIDs.has(task.parent_task_id) ? task.parent_task_id : "";
+      const siblings = byParent.get(parentID) || [];
+      siblings.push(task);
+      byParent.set(parentID, siblings);
+    }
+    return byParent;
+  }, [visibleTasks]);
+
+  const renderTaskTree = (task: SubagentTask, depth = 0): ReactElement[] => {
+    const children = taskTree.get(task.id) || [];
+    return [
+      <TaskItem
+        buttonFeedback={buttonFeedback}
+        depth={depth}
+        key={task.id}
+        onApply={() => onApplyTask(task.id)}
+        onCancel={() => onCancelTask(task.id)}
+        onCheck={() => onCheckTask(task.id)}
+        onDiscard={() => onDiscardTask(task.id)}
+        onResume={() => onResumeTask(task.id)}
+        onWait={() => onWaitTask(task.id)}
+        pending={pending}
+        task={task}
+        events={events[task.id] || []}
+      />,
+      ...children.flatMap((child) => renderTaskTree(child, depth + 1)),
+    ];
+  };
 
   const editDefinition = (definition: SubagentDefinition) => {
     setDraft({
@@ -176,19 +222,7 @@ export function SubagentPanel({
         ))}
 
         <Text style={styles.sectionTitle}>后台任务</Text>
-        {visibleTasks.length === 0 ? <Text style={styles.empty}>当前会话还没有子智能体任务。</Text> : visibleTasks.map((task) => (
-          <TaskItem
-            buttonFeedback={buttonFeedback}
-            key={task.id}
-            onApply={() => onApplyTask(task.id)}
-            onCancel={() => onCancelTask(task.id)}
-            onCheck={() => onCheckTask(task.id)}
-            onDiscard={() => onDiscardTask(task.id)}
-            onResume={() => onResumeTask(task.id)}
-            pending={pending}
-            task={task}
-          />
-        ))}
+        {visibleTasks.length === 0 ? <Text style={styles.empty}>当前会话还没有子智能体任务。</Text> : (taskTree.get("") || []).flatMap((task) => renderTaskTree(task))}
       </View>
 
       <ResponsiveFormModal
@@ -251,13 +285,16 @@ function Segment({ label, onPress, selected }: { label: string; onPress: () => v
   return <Pressable onPress={onPress} style={[styles.segment, selected && styles.segmentActive]}><Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{label}</Text></Pressable>;
 }
 
-function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onResume, pending, task }: {
+function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, onDiscard, onResume, onWait, pending, task }: {
   buttonFeedback: ButtonFeedback;
+  depth: number;
+  events: SubagentTaskEvent[];
   onApply: () => void;
   onCancel: () => void;
   onCheck: () => void;
   onDiscard: () => void;
   onResume: () => void;
+  onWait: () => void;
   pending: boolean;
   task: SubagentTask;
 }) {
@@ -265,13 +302,14 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onRes
   const running = task.status === "queued" || task.status === "running" || task.status === "waiting_subagents" || task.status === "waiting_permission";
   const pendingChanges = task.change_set?.status === "pending";
   const canResume = task.unread && (task.status === "succeeded" || task.status === "failed");
-  const summary = task.error_message || task.result || (running ? "子智能体正在执行。" : "子智能体未返回文本结果。");
+  const latestEvent = compactTaskEvents(events).slice(-1)[0];
+  const summary = task.error_message || task.result || (running && latestEvent ? eventSummary(latestEvent) : running ? "子智能体正在执行。" : "子智能体未返回文本结果。");
   const toggleExpanded = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpanded((current) => !current);
   };
   return (
-    <View style={[styles.item, styles.taskItem]}>
+    <View style={[styles.item, styles.taskItem, { marginLeft: Math.min(depth, 4) * 18 }]}>
       <Pressable
         accessibilityLabel={expanded ? "收起任务详情" : "展开任务详情"}
         accessibilityRole="button"
@@ -284,7 +322,7 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onRes
             <Text numberOfLines={2} style={[styles.itemTitle, styles.taskTitle]}>{task.title}</Text>
             {canResume ? <View style={styles.unreadDot} /> : null}
           </View>
-          <Text style={styles.meta}>{task.definition_id} · {taskStatusLabels[task.status]}</Text>
+          <Text style={styles.meta}>{depth > 0 ? `子任务 ${depth} · ` : ""}{task.definition_id} · {taskStatusLabels[task.status]}</Text>
         </View>
         <View style={styles.taskHeaderSide}>
           <Text style={styles.badge}>{task.change_set?.files?.length || 0} 文件</Text>
@@ -309,10 +347,14 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onRes
             )}
           </View>
           {task.error_message ? <Text style={styles.errorText}>{task.error_message}</Text> : null}
+          {task.agent_path ? <Text style={styles.codeText}>路径：{task.agent_path}</Text> : null}
+          {task.plan_id || task.step_id ? <Text style={styles.codeText}>编排：{task.plan_id || "-"} / {task.step_id || "-"}</Text> : null}
+          <TaskEventTimeline events={events} />
           {(task.change_set?.files || []).map((file) => <Text key={file.path} style={styles.codeText}>{file.change_type}  {file.path}</Text>)}
           <View style={styles.actionRow}>
             {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
             <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
+            {running ? <Pressable disabled={pending} onPress={onWait} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="等待完成" /></Pressable> : null}
             {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="取消" /></Pressable> : null}
             {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="应用变更" /></Pressable> : null}
             {pendingChanges ? <Pressable disabled={pending} onPress={onDiscard} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="丢弃" /></Pressable> : null}
@@ -325,6 +367,84 @@ function TaskItem({ buttonFeedback, onApply, onCancel, onCheck, onDiscard, onRes
       )}
     </View>
   );
+}
+
+function TaskEventTimeline({ events }: { events: SubagentTaskEvent[] }) {
+  const visibleEvents = compactTaskEvents(events).slice(-24);
+  return (
+    <View style={styles.eventTimeline}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.fieldLabel}>运行事件</Text>
+        <Text style={styles.meta}>{events.length ? `最近 ${visibleEvents.length} 条` : "暂无事件"}</Text>
+      </View>
+      {visibleEvents.length === 0 ? <Text style={styles.emptyResult}>连接后会显示思考、工具调用和结果。</Text> : visibleEvents.map((event) => (
+        <View key={`${event.task_id}-${event.sequence}`} style={styles.eventItem}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.eventKind}>{eventKindLabel(event.kind)}</Text>
+            <Text style={styles.meta}>#{event.sequence}{event.emitted_at ? ` · ${formatEventTime(event.emitted_at)}` : ""}</Text>
+          </View>
+          {event.tool_name ? <Text style={styles.codeText}>{event.tool_name}{event.arguments ? `  ${clipText(event.arguments, 600)}` : ""}</Text> : null}
+          {event.content ? <Text style={styles.eventContent}>{clipText(event.content, 1800)}</Text> : null}
+          {event.status ? <Text style={styles.eventStatus}>状态：{event.status}</Text> : null}
+          {event.error_message ? <Text style={styles.errorText}>{clipText(event.error_message, 600)}</Text> : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function compactTaskEvents(events: SubagentTaskEvent[]) {
+  const compacted: SubagentTaskEvent[] = [];
+  for (const event of events) {
+    const previous = compacted[compacted.length - 1];
+    const canMerge = previous && previous.kind === event.kind && previous.run_id === event.run_id
+      && (event.kind === "task.reasoning" || event.kind === "task.answer");
+    if (!canMerge) {
+      compacted.push(event);
+      continue;
+    }
+    const content = `${previous.content || ""}${event.content || ""}`;
+    compacted[compacted.length - 1] = {
+      ...previous,
+      sequence: event.sequence,
+      emitted_at: event.emitted_at,
+      content: content.length > 1800 ? `${content.slice(0, 1797)}...` : content,
+      truncated: previous.truncated || event.truncated || content.length > 1800,
+    };
+  }
+  return compacted;
+}
+
+function eventKindLabel(kind: string) {
+  switch (kind) {
+    case "task.started": return "开始执行";
+    case "task.reasoning": return "思考";
+    case "task.answer": return "回答";
+    case "task.tool_call": return "调用工具";
+    case "task.tool_result": return "工具结果";
+    case "task.permission": return "等待授权";
+    case "task.completed": return "已完成";
+    case "task.failed": return "执行失败";
+    case "task.canceled": return "已取消";
+    default: return "状态更新";
+  }
+}
+
+function eventSummary(event: SubagentTaskEvent) {
+  const label = eventKindLabel(event.kind);
+  const detail = event.content || event.tool_name || event.status || "";
+  return detail ? `${label}：${clipText(detail, 180)}` : label;
+}
+
+function clipText(value: string, limit: number) {
+  const text = value.trim();
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
+}
+
+function formatEventTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "";
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 const styles = StyleSheet.create({
@@ -341,6 +461,11 @@ const styles = StyleSheet.create({
   empty: { color: "#756d64", fontSize: 13, paddingVertical: 12 },
   emptyResult: { color: "#756d64", fontSize: 12, lineHeight: 18, marginTop: 5 },
   errorText: { color: "#9f352d", fontSize: 12, marginTop: 7 },
+  eventContent: { color: "#38332d", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  eventItem: { borderBottomColor: "#e8ded1", borderBottomWidth: 1, paddingBottom: 8, paddingTop: 8 },
+  eventKind: { color: "#214222", fontSize: 11, fontWeight: "900" },
+  eventStatus: { color: "#756d64", fontSize: 11, marginTop: 4 },
+  eventTimeline: { backgroundColor: "#f7f1e8", borderColor: "#ded4c7", borderRadius: 5, borderWidth: 1, marginTop: 11, padding: 9 },
   fieldLabel: { color: "#38332d", fontSize: 12, fontWeight: "800" },
   flex: { flex: 1 },
   input: { backgroundColor: "#fffdf8", borderColor: "#b8aa98", borderRadius: 5, borderWidth: 1, color: "#171411", fontSize: 13, minHeight: 42, paddingHorizontal: 11, paddingVertical: 9 },

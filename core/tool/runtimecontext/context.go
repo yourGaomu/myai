@@ -11,7 +11,12 @@ type executionKey struct{}
 
 type Execution struct {
 	SessionID     string
+	TaskID        string
 	RequestID     string
+	RunID         string
+	ParentRunID   string
+	PlanID        string
+	StepID        string
 	WorkspaceRoot string
 	SandboxID     string
 	ModelID       string

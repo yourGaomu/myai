@@ -39,7 +39,7 @@ func New(client *gomongo.Client, database string) *Repository {
 func (r *Repository) SaveRun(ctx context.Context, run domainagentrun.Run) error {
 	document := mapper.RunDocumentFromDomain(run)
 	set := bson.M{
-		"request_id": document.RequestID, "session_id": document.SessionID, "kind": document.Kind,
+		"request_id": document.RequestID, "session_id": document.SessionID, "parent_run_id": document.ParentRunID, "plan_id": document.PlanID, "step_id": document.StepID, "task_id": document.TaskID, "kind": document.Kind,
 		"title": document.Title, "reason": document.Reason, "status": document.Status,
 		"current_step": document.CurrentStep, "total_steps": document.TotalSteps,
 		"last_sequence": document.LastSequence, "error_message": document.ErrorMessage,

@@ -10,4 +10,5 @@ type Commit struct {
 	LatestInput string
 	Result      modelport.ChatResult
 	CapturePlan bool
+	Internal    bool
 }

@@ -15,9 +15,12 @@ import (
 
 type BootstrapService struct {
 	// 启动时把持久化模型配置实例化为运行时模型，并注册到 Registry。
+	//读取 MongoDB 中保存的模型配置
 	Repository modelport.ConfigRepository
-	Registry   modelport.MutableRegistry
-	Factory    modelport.Factory
+	//保存启动后可以使用的模型对象
+	Registry modelport.MutableRegistry
+	//根据协议创建具体模型实现
+	Factory modelport.Factory
 }
 
 var _ modelapi.BootstrapService = BootstrapService{}
@@ -40,8 +43,9 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 	if err != nil {
 		return modelresult.Bootstrap{}, err
 	}
-
+	//选取默认的模型
 	defaultModelID := DefaultModelID(configs, command.FallbackModelID)
+	//进行获取到的所有模型进行校验，才能进入到模型配置里面去
 	for _, config := range configs {
 		config = normalizeModelConfig(config)
 		modelID := config.ID

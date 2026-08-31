@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,7 @@ import (
 )
 
 var errModelAddCanceled = errors.New("model add canceled")
+var chatWorkspace = "."
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
@@ -33,10 +35,17 @@ var chatCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
+	chatCmd.Flags().StringVarP(&chatWorkspace, "workspace", "w", ".", "workspace directory for local tools and relative configuration")
 }
 
 func runChat() {
 	// CLI 与手机 Agent 共用同一个 ChatService，只是输入输出适配器不同。
+	workspace, err := filepath.Abs(chatWorkspace)
+	if err != nil {
+		fmt.Println("workspace error:", err)
+		return
+	}
+	core.SetWorkspace(workspace)
 	core.InitApp()
 	defer func() { _ = core.GetApp().Close() }()
 

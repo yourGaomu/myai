@@ -46,12 +46,17 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	runID := agentrunruntime.RunID(ctx)
 	ownsRun := false
 	if runID == "" && s.Runs != nil {
+		metadata := agentrunruntime.MetadataFrom(ctx)
 		run, err := s.Runs.Start(ctx, agentruncommand.Start{
-			RequestID: command.Stream.CorrelationID,
-			SessionID: command.Session.ID,
-			Kind:      runKind(command.Reason, command.Session, command.ForceChatMode),
-			Title:     runTitle(command.Title, command.Reason),
-			Reason:    command.Reason,
+			RequestID:   command.Stream.CorrelationID,
+			SessionID:   command.Session.ID,
+			ParentRunID: metadata.ParentRunID,
+			PlanID:      metadata.PlanID,
+			StepID:      metadata.StepID,
+			TaskID:      metadata.TaskID,
+			Kind:        runKind(command.Reason, command.Session, command.ForceChatMode),
+			Title:       runTitle(command.Title, command.Reason),
+			Reason:      command.Reason,
 		})
 		if err != nil {
 			s.reportRunError(err)
@@ -59,6 +64,9 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 			runID = run.ID
 			ownsRun = true
 			ctx = agentrunruntime.WithRunID(ctx, runID)
+			metadata := agentrunruntime.MetadataFrom(ctx)
+			metadata.RunID = runID
+			ctx = agentrunruntime.WithMetadata(ctx, metadata)
 			if command.Stream.OnRunStarted != nil {
 				command.Stream.OnRunStarted(run)
 			}
@@ -105,10 +113,11 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	}
 	response, resultErr = s.Generator.Generate(ctx, generationcommand.AssistantGeneration{
 		Session: command.Session, LatestInput: command.LatestInput, RequestID: requestID,
-		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode,
+		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode, Internal: command.Internal,
 	})
+	response.RunID = runID
 	if resultErr == nil {
-		s.recordCapturedPlan(context.WithoutCancel(ctx), runID, response.Plan, command.Stream)
+		s.recordCapturedPlan(context.WithoutCancel(ctx), runID, response.Plan, command.Reason, command.Stream)
 	}
 	return response, resultErr
 }
@@ -118,6 +127,8 @@ func runKind(reason string, current *session.Session, forceChatMode bool) domain
 	case "regenerate response":
 		return domainagentrun.KindRegenerate
 	case "execute plan step":
+		return domainagentrun.KindPlan
+	case "autonomous planning":
 		return domainagentrun.KindPlan
 	case "user request":
 		if !forceChatMode && current != nil && session.NormalizeAgentMode(current.AgentMode) == session.AgentModePlan {
@@ -129,12 +140,21 @@ func runKind(reason string, current *session.Session, forceChatMode bool) domain
 	}
 }
 
-func (s TaskService) recordCapturedPlan(ctx context.Context, runID string, currentPlan *agentplan.Plan, stream modelport.ChatStreamHandler) {
-	if strings.TrimSpace(runID) == "" || currentPlan == nil || s.Runs == nil {
+func (s TaskService) recordCapturedPlan(ctx context.Context, runID string, currentPlan *agentplan.Plan, reason string, stream modelport.ChatStreamHandler) {
+	if currentPlan == nil {
+		return
+	}
+	if stream.OnPlanUpdate != nil {
+		stream.OnPlanUpdate(agentplan.Clone(currentPlan))
+	}
+	if strings.TrimSpace(runID) == "" || s.Runs == nil {
 		return
 	}
 	currentStep := 0
 	title := "Plan ready for review"
+	if strings.TrimSpace(reason) == "autonomous planning" {
+		title = "Plan ready for execution"
+	}
 	if currentPlan.Status == agentplan.StatusDone {
 		currentStep = len(currentPlan.Steps)
 		title = "Plan completed"

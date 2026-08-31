@@ -6,6 +6,10 @@ type RunDocument struct {
 	ID           string     `bson:"_id"`
 	RequestID    string     `bson:"request_id,omitempty"`
 	SessionID    string     `bson:"session_id"`
+	ParentRunID  string     `bson:"parent_run_id,omitempty"`
+	PlanID       string     `bson:"plan_id,omitempty"`
+	StepID       string     `bson:"step_id,omitempty"`
+	TaskID       string     `bson:"task_id,omitempty"`
 	Kind         string     `bson:"kind"`
 	Title        string     `bson:"title,omitempty"`
 	Reason       string     `bson:"reason,omitempty"`

@@ -1,8 +1,19 @@
 package command
 
-import modelport "myai/core/port/model"
+import (
+	agentplan "myai/core/plan"
+	modelport "myai/core/port/model"
+)
 
 type Execute struct {
-	SessionID string
-	Stream    modelport.ChatStreamHandler
+	SessionID   string
+	ParentRunID string
+	Stream      modelport.ChatStreamHandler
+}
+
+type RecoveryRequest struct {
+	Plan    *agentplan.Plan
+	Step    agentplan.Step
+	Error   string
+	Attempt int
 }

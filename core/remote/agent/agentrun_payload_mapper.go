@@ -8,7 +8,7 @@ import (
 
 func agentRunPayload(run domainagentrun.Run) protocol.AgentRun {
 	return protocol.AgentRun{
-		ID: run.ID, RequestID: run.RequestID, SessionID: run.SessionID, Kind: string(run.Kind),
+		ID: run.ID, RequestID: run.RequestID, SessionID: run.SessionID, ParentRunID: run.ParentRunID, PlanID: run.PlanID, StepID: run.StepID, TaskID: run.TaskID, Kind: string(run.Kind),
 		Title: run.Title, Reason: run.Reason, Status: string(run.Status), CurrentStep: run.CurrentStep,
 		TotalSteps: run.TotalSteps, LastSequence: run.LastSequence, ErrorMessage: run.ErrorMessage,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,

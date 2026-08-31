@@ -68,6 +68,25 @@ For a Google Play release build, use:
 npm run build:android:aab
 ```
 
+## OTA Updates
+
+OTA updates are enabled for JavaScript, UI, and bundled assets. The first APK/AAB built with this configuration must be installed once; later compatible changes can be published without rebuilding the APK.
+
+Publish an internal preview update:
+
+```powershell
+cd D:\Go_All\myai\mobile
+npm run update:android:preview -- --message "Describe the change"
+```
+
+Publish a production update:
+
+```powershell
+npm run update:android:production -- --message "Describe the change"
+```
+
+The app checks for updates shortly after launch and when returning to the foreground. It downloads an available update in the background and asks the user to restart. Native Android changes still require a new APK/AAB and an incremented app version.
+
 ## Local Android Build
 
 Cloud build is the easiest path. Local builds need Android Studio, JDK, Android SDK, and more environment setup.

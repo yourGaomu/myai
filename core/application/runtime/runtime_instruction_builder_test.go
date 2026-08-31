@@ -53,6 +53,22 @@ func TestRuntimeInstructionBuilderForceChatSkipsPlanPrompt(t *testing.T) {
 	}
 }
 
+func TestRuntimeInstructionBuilderAddsAutonomousPlanPrompt(t *testing.T) {
+	builder := NewRuntimeInstructionBuilder(stubSkillPromptProvider{})
+
+	prompt := builder.Build(context.Background(), InstructionRequest{
+		ForcePlanMode: true,
+		Input:         "implement a feature",
+	})
+
+	if !strings.Contains(prompt, AutonomousPlanPrompt) {
+		t.Fatalf("expected autonomous planning instructions, got %q", prompt)
+	}
+	if strings.Contains(prompt, PlanModePrompt) || strings.Contains(prompt, "wait for the user to execute") {
+		t.Fatalf("autonomous planning must not require manual approval, got %q", prompt)
+	}
+}
+
 func TestSessionPromptProviderUsesSessionAgentMode(t *testing.T) {
 	provider := NewSessionPromptProvider(stubSkillPromptProvider{prompt: "Skill instruction"})
 

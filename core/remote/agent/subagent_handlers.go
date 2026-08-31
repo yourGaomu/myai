@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -111,6 +112,27 @@ func (agent *Agent) handleSubagentTaskCheck(ctx context.Context, conn *websocket
 		return err
 	}
 	return agent.writeSubagentTaskResult(conn, message, result.Value, "Subagent task refreshed.")
+}
+
+func (agent *Agent) handleSubagentTaskWait(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SubagentTaskWaitPayload](message)
+	if err != nil {
+		return fmt.Errorf("decode subagent task wait: %w", err)
+	}
+	sessionID := agent.subagentSessionID(message, payload.SessionID)
+	var timeout time.Duration
+	if payload.TimeoutMS > 0 {
+		timeout = time.Duration(payload.TimeoutMS) * time.Millisecond
+	}
+	result, err := agent.subagentService.Wait(ctx, subagentcommand.WaitTask{
+		TaskID: payload.TaskID, ParentSessionID: sessionID, Timeout: timeout,
+	})
+	if err != nil {
+		return err
+	}
+	return agent.writeRemoteMessage(conn, protocol.TypeSubagentTaskWaitResult, message.RequestID, sessionID, protocol.SubagentTaskWaitResultPayload{
+		SessionID: sessionID, Task: subagentTaskPayload(result.Task), TimedOut: result.TimedOut, Sequence: result.Sequence,
+	})
 }
 
 func (agent *Agent) handleSubagentTaskCancel(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {

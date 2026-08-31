@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"myai/core/llm"
 	subagentport "myai/core/port/subagent"
 	"myai/core/service"
 )
@@ -19,7 +18,7 @@ func (runner Runner) Run(ctx context.Context, request subagentport.AgentRunReque
 	if runner.Chat == nil {
 		return subagentport.AgentRunResult{}, errors.New("subagent chat runner is nil")
 	}
-	response, err := runner.Chat.SendMessageStreamForSession(ctx, request.SessionID, request.Instruction, llm.ChatStreamHandler{})
+	response, err := runner.Chat.SendMessageStreamForSession(ctx, request.SessionID, request.Instruction, request.Stream)
 	if err != nil {
 		return subagentport.AgentRunResult{}, err
 	}

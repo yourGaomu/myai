@@ -13,6 +13,7 @@ type GenerationTask struct {
 	Stream        modelport.ChatStreamHandler
 	CapturePlan   bool
 	ForceChatMode bool
+	Internal      bool
 }
 
 type TaskRecord struct {

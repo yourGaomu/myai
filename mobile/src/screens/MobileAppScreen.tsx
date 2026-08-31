@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { AppState, type AppStateStatus, type ScrollView } from "react-native";
+import { AppState, Platform, type AppStateStatus, type ScrollView } from "react-native";
 
 import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
@@ -26,6 +26,11 @@ import { useNormalizedRelayUrl } from "../hooks/useNormalizedRelayUrl";
 import { usePairingActions } from "../hooks/usePairingActions";
 import { usePendingActions } from "../hooks/usePendingActions";
 import { useRelayConnection } from "../hooks/useRelayConnection";
+import {
+  startRelayForegroundService,
+  stopRelayForegroundService,
+  updateRelayForegroundServiceStatus,
+} from "../native/relayForegroundService";
 import { useRemoteResultAppliers } from "../hooks/useRemoteResultAppliers";
 import { useRemoteMessageHandler } from "../hooks/useRemoteMessageHandler";
 import { useRemoteRuntimeRefs } from "../hooks/useRemoteRuntimeRefs";
@@ -149,6 +154,7 @@ export function MobileAppScreen() {
     applyTaskList: applySubagentTaskList,
     applyTaskResult: applySubagentTaskResult,
     definitions: subagentDefinitions,
+    events: subagentEvents,
     message: subagentMessage,
     setMessage: setSubagentMessage,
     tasks: subagentTasks,
@@ -220,8 +226,10 @@ export function MobileAppScreen() {
   const { isBusy, pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
+  const appActiveRef = useRef(AppState.currentState === "active");
   const reconnectOnForegroundRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
   const connectRef = useRef<() => void>(() => undefined);
   // 远程运行时引用不触发重渲染，用来关联 WebSocket 请求、当前 Session 和流式回答。
   const {
@@ -292,6 +300,7 @@ export function MobileAppScreen() {
     requestTasks: requestSubagentTasks,
     resumeTask: resumeSubagentTask,
     updateDefinition: updateSubagentDefinition,
+    waitTask: waitSubagentTask,
   } = useSubagentActions({
     activeRequestIDRef,
     clientToken,
@@ -668,11 +677,64 @@ export function MobileAppScreen() {
     requestSubagentDefinitions();
     requestSubagentTasks();
   }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
+
+  const scheduleReconnect = useCallback(() => {
+    if (!clientToken) {
+      return;
+    }
+    void updateRelayForegroundServiceStatus("Relay 正在重连").catch((error) => {
+      console.warn("Relay foreground service status update failed", error);
+    });
+    // Android's foreground service keeps the app process eligible to run while
+    // backgrounded, so reconnect there as soon as the socket drops. iOS has no
+    // equivalent long-lived execution window; defer until it is foregrounded.
+    if (!appActiveRef.current && Platform.OS !== "android") {
+      reconnectOnForegroundRef.current = true;
+      return;
+    }
+    if (reconnectTimerRef.current) {
+      return;
+    }
+
+    const attempt = reconnectAttemptRef.current;
+    reconnectAttemptRef.current = Math.min(attempt + 1, 6);
+    const delay = Math.min(30000, 500 * 2 ** attempt);
+    setStatus(attempt === 0 ? "Reconnecting" : `Reconnecting (${attempt + 1})`);
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if ((!appActiveRef.current && Platform.OS !== "android") || !clientToken) {
+        reconnectOnForegroundRef.current = Boolean(clientToken);
+        return;
+      }
+      connectRef.current();
+    }, delay);
+  }, [clientToken, setStatus]);
+
+  const handleConnected = useCallback(() => {
+    reconnectAttemptRef.current = 0;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    // Start the service while the activity is still visible. Android 12+ restricts
+    // creating a new foreground service from a background AppState callback.
+    if (appActiveRef.current && clientToken) {
+      void startRelayForegroundService().catch((error) => {
+        console.warn("Relay foreground service start failed", error);
+      });
+      void updateRelayForegroundServiceStatus("Relay 已连接").catch((error) => {
+        console.warn("Relay foreground service status update failed", error);
+      });
+    }
+    refreshAllRemoteState();
+  }, [clientToken, refreshAllRemoteState]);
+
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
     normalizedRelayURL,
-    onConnected: refreshAllRemoteState,
+    onConnected: handleConnected,
+    onDisconnected: scheduleReconnect,
     onMessage: handleRemoteMessage,
     setConnected,
     setStatus,
@@ -700,12 +762,15 @@ export function MobileAppScreen() {
   }, [clientToken, settingsLoaded, socketRef]);
 
   useEffect(() => {
+    appActiveRef.current = AppState.currentState === "active";
     let previousState: AppStateStatus = AppState.currentState;
 
     const subscription = AppState.addEventListener("change", (nextState) => {
       const enteringBackground = nextState === "background" || nextState === "inactive";
       const returningToForeground =
         (previousState === "background" || previousState === "inactive") && nextState === "active";
+
+      appActiveRef.current = nextState === "active";
 
       if (enteringBackground) {
         // Android/iOS may suspend or close the socket while the app is backgrounded.
@@ -718,6 +783,7 @@ export function MobileAppScreen() {
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current);
         }
+        setStatus("Restoring connection");
         // Let the OS restore network interfaces before opening the replacement socket.
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
@@ -735,6 +801,15 @@ export function MobileAppScreen() {
         reconnectTimerRef.current = null;
       }
     };
+  }, [clientToken]);
+
+  useEffect(() => {
+    if (clientToken) {
+      return;
+    }
+    void stopRelayForegroundService().catch((error) => {
+      console.warn("Relay foreground service stop failed", error);
+    });
   }, [clientToken]);
   const {
     openChanges,
@@ -971,6 +1046,7 @@ export function MobileAppScreen() {
           onApplySubagentTask: applySubagentTask,
           onCancelSubagentTask: cancelSubagentTask,
           onCheckSubagentTask: checkSubagentTask,
+          onWaitSubagentTask: waitSubagentTask,
           onCreateSubagentDefinition: createSubagentDefinition,
           onDeleteSubagentDefinition: deleteSubagentDefinition,
           onDiscardSubagentTask: discardSubagentTask,
@@ -986,6 +1062,7 @@ export function MobileAppScreen() {
           skillRoot,
           skills,
           subagentDefinitions,
+          subagentEvents,
           subagentMessage,
           subagentTasks,
           userID,

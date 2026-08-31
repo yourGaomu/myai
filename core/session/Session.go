@@ -30,6 +30,7 @@ Tool usage:
 - Use edit_file for small, targeted changes to existing files.
 - Use write_file for new files or when replacing a whole file is clearly safer.
 - Use install_skill when the user explicitly asks to install a SkillHub skill by name.
+- Use spawn_agent for focused parallel research or implementation, wait_agent for a child result, and apply_task_changes when an isolated child has completed changes.
 - Do not claim you have inspected an uploaded file until read_asset returns parsed content or metadata.
 - Do not use shell to edit files through echo, cat, sed, powershell redirection, or similar text-writing commands when edit_file or write_file can do the job.
 - Use shell only for running commands, such as tests, builds, dependency installation, project scripts, git status, gofmt, formatters, generators, or linters.

@@ -29,8 +29,10 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 	if s.Memory == nil {
 		return generationresult.Commit{}, errors.New("session memory is nil")
 	}
-	if err := s.Memory.AddAssistantMessageTo(command.Session.ID, command.Result.Content); err != nil {
-		return generationresult.Commit{}, err
+	if !command.Internal {
+		if err := s.Memory.AddAssistantMessageTo(command.Session.ID, command.Result.Content); err != nil {
+			return generationresult.Commit{}, err
+		}
 	}
 	if err := s.Memory.AddUsageTo(command.Session.ID, command.Result.Usage); err != nil {
 		return generationresult.Commit{}, err

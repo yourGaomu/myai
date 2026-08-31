@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
+
+	"github.com/google/uuid"
 
 	agentrunapi "myai/core/application/agentrun/api"
 	agentruncommand "myai/core/application/agentrun/command"
@@ -27,7 +31,7 @@ import (
 )
 
 type ExecutionService struct {
-	// ExecutionService 只执行已经保存在 Session.CurrentPlan 中且由用户批准的计划。
+	// ExecutionService 执行已经保存在 Session.CurrentPlan 中的计划；草稿计划会在执行前自动批准。
 	Models       chatport.ModelProvider
 	Sessions     planport.SessionLoader
 	Messages     planport.MessageAppender
@@ -40,6 +44,11 @@ type ExecutionService struct {
 	State        planserviceapp.StateService
 	Inputs       planserviceapp.ExecutionInputBuilder
 	Responses    planserviceapp.ResponseCombiner
+	Recovery     planport.RecoveryPlanner
+	MaxReplans   int
+	// MaxParallelSteps limits the number of dependency-ready steps executed in
+	// one batch. Zero preserves the legacy sequential behavior.
+	MaxParallelSteps int
 }
 
 var _ planapi.Service = ExecutionService{}
@@ -79,7 +88,7 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	currentStep := 0
 	if runID == "" && s.Runs != nil {
 		run, runErr := s.Runs.Start(ctx, agentruncommand.Start{
-			RequestID: command.Stream.CorrelationID, SessionID: current.ID, Kind: domainagentrun.KindPlan,
+			RequestID: command.Stream.CorrelationID, SessionID: current.ID, ParentRunID: command.ParentRunID, PlanID: currentPlan.ID, Kind: domainagentrun.KindPlan,
 			Title: "Execute plan", Reason: "execute approved plan", TotalSteps: len(currentPlan.Steps),
 		})
 		if runErr != nil {
@@ -93,11 +102,15 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			}
 		}
 	}
+	if command.Stream.OnPlanUpdate != nil {
+		updates = streamPlanUpdateSink{base: updates, stream: command.Stream}
+	}
 	if runID != "" && s.Runs != nil {
 		updates = runPlanUpdateSink{
 			base: updates, ctx: ctx, runID: runID, runs: s.Runs, stream: command.Stream, onError: s.reportRunError,
 		}
 	}
+	ctx = agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{RunID: runID, ParentRunID: command.ParentRunID, PlanID: currentPlan.ID})
 	if ownsRun {
 		defer func() {
 			status := domainagentrun.StatusSucceeded
@@ -136,57 +149,104 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 		return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
 	}
 
-	combined := planresult.Execution{SessionID: current.ID}
+	combined := planresult.Execution{SessionID: current.ID, RunID: runID}
 	executedSteps := 0
-	for index := range currentPlan.Steps {
-		if currentPlan.Steps[index].Status == agentplan.StepStatusDone || currentPlan.Steps[index].Status == agentplan.StepStatusSkipped {
+	replans := 0
+	// A plan is executed in dependency-ready batches. A zero MaxParallelSteps
+	// intentionally retains the old one-step-at-a-time behavior for callers
+	// that have not opted into parallel execution.
+	for {
+		if err := ctx.Err(); err != nil {
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, currentStep-1, err, updates)
+		}
+		ready := readyStepIndexes(currentPlan)
+		if len(ready) == 0 {
+			if allStepsTerminal(currentPlan) {
+				break
+			}
+			err := errors.New("plan has an unsatisfied or cyclic step dependency")
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, firstUnfinishedStep(currentPlan), err, updates)
+		}
+		if limit := s.maxParallelSteps(currentPlan); len(ready) > limit {
+			ready = ready[:limit]
+		}
+		for _, index := range ready {
+			currentPlan = s.State.MarkStepRunning(currentPlan, index)
 			currentStep = index + 1
+		}
+		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, ready[0], err, updates)
+		}
+
+		batchResults := s.executeReadyBatch(ctx, current, currentPlan, ready, runID, command.Stream, executedSteps == 0)
+		sort.Slice(batchResults, func(left, right int) bool { return batchResults[left].Index < batchResults[right].Index })
+		var firstFailure *stepExecutionResult
+		failureCount := 0
+		for index := range batchResults {
+			item := &batchResults[index]
+			if item.Err != nil {
+				failureCount++
+				if firstFailure == nil {
+					firstFailure = item
+				}
+				continue
+			}
+			if item.Output != nil {
+				item.Output.Flush(command.Stream)
+			}
+			currentPlan = s.State.MarkStepDone(currentPlan, item.Index)
+			combined = s.combine(combined, item.Response)
+			executedSteps++
+		}
+		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
+		}
+		if firstFailure == nil {
 			continue
 		}
-		// 每个步骤都是独立生成任务；中途取消时保留已完成步骤，并把整体计划标记为 canceled。
-		if err := ctx.Err(); err != nil {
-			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
+		index := firstFailure.Index
+		if failureCount > 1 {
+			if errors.Is(firstFailure.Err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				// Cancellation is a resumable pause, even when several parallel
+				// branches observe it at once. Do not convert those branches into
+				// terminal failures.
+				return planresult.Execution{}, s.finishWithError(current, currentPlan, firstFailure.Index, firstFailure.Err, updates)
+			}
+			// A parallel batch can fail in more than one independent branch. Do
+			// not retry or recover only the first branch while leaving another
+			// branch in running state; mark every failed branch terminal so a
+			// resume has an honest, deterministic starting point.
+			for _, item := range batchResults {
+				if item.Err != nil {
+					currentPlan = s.State.MarkStepFailed(currentPlan, item.Index, item.Err.Error())
+				}
+			}
+			if _, saveErr := s.savePlanState(ctx, current, currentPlan, updates); saveErr != nil {
+				return planresult.Execution{}, s.finishWithError(current, currentPlan, index, errors.Join(firstFailure.Err, saveErr), updates)
+			}
+			return planresult.Execution{}, firstFailure.Err
 		}
-
-		currentPlan = s.State.MarkStepRunning(currentPlan, index)
-		currentStep = index + 1
-		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
+		if maxRetries := currentPlan.Steps[index].MaxRetries; maxRetries > 0 && currentPlan.Steps[index].RetryCount < maxRetries && ctx.Err() == nil {
+			currentPlan = s.State.MarkStepRetry(currentPlan, index, firstFailure.Err.Error())
+			if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+				return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
+			}
+			continue
 		}
-
-		// 把目标、当前步骤和完整计划转换成一条明确的用户消息，保证模型只处理当前步骤。
-		input := s.Inputs.BuildStepInput(currentPlan, currentPlan.Steps[index], index, len(currentPlan.Steps))
-		prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
-		if err != nil {
-			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
-		}
-		current = prepared.Session
-		title := ""
-		if executedSteps == 0 {
-			title = "Execute plan"
-		}
-		if s.UserMessages != nil {
-			s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
-				SessionID: current.ID, Model: current.Model, Title: title, Input: input,
-				RuntimeInstruction: prepared.RuntimeInstruction,
-				SessionSnapshot:    session.Clone(current),
+		if s.Recovery != nil && replans < s.maxReplans() && ctx.Err() == nil {
+			replacement, recoveryErr := s.Recovery.Recover(ctx, plancommand.RecoveryRequest{
+				Plan: currentPlan, Step: currentPlan.Steps[index], Error: firstFailure.Err.Error(), Attempt: replans + 1,
 			})
+			if recoveryErr == nil && replacement != nil && len(replacement.Steps) > 0 {
+				currentPlan = mergeRecoveryPlan(currentPlan, replacement, index, firstFailure.Err.Error())
+				replans++
+				if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+					return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
+				}
+				continue
+			}
 		}
-
-		// ForceChatMode 跳过 Plan 提示和只读限制，避免执行阶段再次产出一份计划。
-		response, err := s.Generation.Generate(ctx, generationcommand.GenerationTask{
-			Session: current, LatestInput: input, Title: title, Reason: "execute plan step", Stream: command.Stream, ForceChatMode: true,
-		})
-		if err != nil {
-			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
-		}
-
-		currentPlan = s.State.MarkStepDone(currentPlan, index)
-		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
-		}
-		combined = s.combine(combined, response)
-		executedSteps++
+		return planresult.Execution{}, s.finishWithError(current, currentPlan, index, firstFailure.Err, updates)
 	}
 
 	currentPlan = s.State.MarkDone(currentPlan)
@@ -195,6 +255,327 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	}
 	combined.Plan = agentplan.Clone(currentPlan)
 	return combined, nil
+}
+
+func (s ExecutionService) maxReplans() int {
+	if s.MaxReplans > 0 {
+		return s.MaxReplans
+	}
+	return 1
+}
+
+func (s ExecutionService) maxParallelSteps(currentPlan *agentplan.Plan) int {
+	// Plans produced before dependency metadata was introduced are implicitly
+	// ordered by their list position. Keep those plans serial even when the
+	// application enables parallel scheduling for newer structured plans.
+	if !planHasDependencies(currentPlan) {
+		return 1
+	}
+	if s.MaxParallelSteps > 0 {
+		return s.MaxParallelSteps
+	}
+	return 1
+}
+
+func planHasDependencies(currentPlan *agentplan.Plan) bool {
+	if currentPlan == nil {
+		return false
+	}
+	for _, step := range currentPlan.Steps {
+		if len(step.Dependencies) > 0 {
+			return true
+		}
+	}
+	// A structured plan can legitimately contain only independent steps. The
+	// dependency slices are then empty, so use the preserved raw payload to
+	// distinguish it from legacy Markdown plans, which remain sequential for
+	// backwards compatibility.
+	return len(agentplan.ExtractSteps(currentPlan.RawContent)) == len(currentPlan.Steps) &&
+		strings.Contains(currentPlan.RawContent, "\"steps\"")
+}
+
+type stepExecutionResult struct {
+	Index    int
+	Response generationresult.GenerationResponse
+	Err      error
+	Output   *bufferedStepOutput
+}
+
+func (s ExecutionService) executeReadyBatch(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, indexes []int, runID string, stream modelport.ChatStreamHandler, titleFirst bool) []stepExecutionResult {
+	results := make([]stepExecutionResult, len(indexes))
+	var appendMu sync.Mutex
+	serializedStream := synchronizedStream{base: stream}
+	parallel := len(indexes) > 1
+	var waitGroup sync.WaitGroup
+	for resultIndex, stepIndex := range indexes {
+		resultIndex, stepIndex := resultIndex, stepIndex
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			stepStream := serializedStream.Handler()
+			var output *bufferedStepOutput
+			if parallel {
+				output = &bufferedStepOutput{}
+				stepStream = output.Handler(stepStream)
+			}
+			results[resultIndex] = s.executePlanStep(ctx, current, currentPlan, stepIndex, runID, stepStream, &appendMu, titleFirst && resultIndex == 0)
+			results[resultIndex].Output = output
+		}()
+	}
+	waitGroup.Wait()
+	return results
+}
+
+type bufferedStepOutput struct {
+	mu        sync.Mutex
+	reasoning []string
+	answer    []string
+}
+
+func (b *bufferedStepOutput) Handler(base modelport.ChatStreamHandler) modelport.ChatStreamHandler {
+	if b == nil {
+		return base
+	}
+	handler := base
+	handler.OnReasoning = func(text string) {
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		b.mu.Lock()
+		b.reasoning = append(b.reasoning, text)
+		b.mu.Unlock()
+	}
+	handler.OnAnswer = func(text string) {
+		if text == "" {
+			return
+		}
+		b.mu.Lock()
+		b.answer = append(b.answer, text)
+		b.mu.Unlock()
+	}
+	return handler
+}
+
+func (b *bufferedStepOutput) Flush(stream modelport.ChatStreamHandler) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	reasoning := append([]string(nil), b.reasoning...)
+	answer := append([]string(nil), b.answer...)
+	b.mu.Unlock()
+	if stream.OnReasoning != nil {
+		for _, text := range reasoning {
+			stream.OnReasoning(text)
+		}
+	}
+	if stream.OnAnswer != nil {
+		for _, text := range answer {
+			stream.OnAnswer(text)
+		}
+	}
+}
+
+// synchronizedStream keeps transport callbacks and permission prompts
+// serialized when multiple dependency-ready steps finish concurrently. The
+// underlying model/tool execution remains parallel, but WebSocket writers and
+// UI state consumers receive a coherent callback sequence.
+type synchronizedStream struct {
+	mu   sync.Mutex
+	base modelport.ChatStreamHandler
+}
+
+func (s *synchronizedStream) Handler() modelport.ChatStreamHandler {
+	if s == nil {
+		return modelport.ChatStreamHandler{}
+	}
+	handler := s.base
+	if s.base.OnReasoning != nil {
+		handler.OnReasoning = func(text string) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnReasoning(text) }
+	}
+	if s.base.OnAnswer != nil {
+		handler.OnAnswer = func(text string) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnAnswer(text) }
+	}
+	if s.base.OnToolCall != nil {
+		handler.OnToolCall = func(name string, arguments string) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			s.base.OnToolCall(name, arguments)
+		}
+	}
+	if s.base.OnToolResult != nil {
+		handler.OnToolResult = func(event modelport.ToolResultEvent) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnToolResult(event) }
+	}
+	if s.base.OnToolAsk != nil {
+		handler.OnToolAsk = func(request modelport.ToolPermissionRequest) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.base.OnToolAsk(request)
+		}
+	}
+	if s.base.OnRunStarted != nil {
+		handler.OnRunStarted = func(run domainagentrun.Run) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnRunStarted(run) }
+	}
+	if s.base.OnRunEvent != nil {
+		handler.OnRunEvent = func(event domainagentrun.Event) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnRunEvent(event) }
+	}
+	if s.base.OnRunCompleted != nil {
+		handler.OnRunCompleted = func(run domainagentrun.Run) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnRunCompleted(run) }
+	}
+	if s.base.OnPlanUpdate != nil {
+		handler.OnPlanUpdate = func(plan *agentplan.Plan) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnPlanUpdate(plan) }
+	}
+	return handler
+}
+
+func (s ExecutionService) executePlanStep(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, index int, runID string, stream modelport.ChatStreamHandler, appendMu *sync.Mutex, titleFirst bool) stepExecutionResult {
+	result := stepExecutionResult{Index: index}
+	step := currentPlan.Steps[index]
+	input := s.Inputs.BuildStepInput(currentPlan, step, index, len(currentPlan.Steps))
+	// Message append and its persistence snapshot are serialized because most
+	// session adapters expose a single mutable aggregate. The model/tool turn
+	// itself runs outside this critical section, allowing independent steps to
+	// overlap.
+	appendMu.Lock()
+	prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
+	if err == nil && prepared.Session == nil {
+		err = errors.New("message appender returned nil session")
+	}
+	if err == nil && s.UserMessages != nil {
+		title := ""
+		if titleFirst {
+			title = "Execute plan"
+		}
+		s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+			SessionID: prepared.Session.ID, Model: prepared.Session.Model, Title: title, Input: input,
+			RuntimeInstruction: prepared.RuntimeInstruction, SessionSnapshot: session.Clone(prepared.Session),
+		})
+	}
+	appendMu.Unlock()
+	if err != nil {
+		result.Err = err
+		return result
+	}
+	stepSession := session.Clone(prepared.Session)
+	stepContext := agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{
+		ParentRunID: runID, PlanID: currentPlan.ID, StepID: step.ID,
+	})
+	stepContext = agentrunruntime.WithRunID(stepContext, "")
+	title := ""
+	if titleFirst {
+		title = "Execute plan"
+	}
+	result.Response, result.Err = s.Generation.Generate(stepContext, generationcommand.GenerationTask{
+		Session: stepSession, LatestInput: input, Title: title, Reason: "execute plan step", Stream: stream, ForceChatMode: true,
+	})
+	return result
+}
+
+func readyStepIndexes(currentPlan *agentplan.Plan) []int {
+	if currentPlan == nil {
+		return nil
+	}
+	ready := make([]int, 0, len(currentPlan.Steps))
+	for index, step := range currentPlan.Steps {
+		if step.Status != agentplan.StepStatusPending {
+			continue
+		}
+		if dependenciesSatisfied(currentPlan, step) {
+			ready = append(ready, index)
+		}
+	}
+	return ready
+}
+
+func dependenciesSatisfied(currentPlan *agentplan.Plan, step agentplan.Step) bool {
+	for _, dependency := range step.Dependencies {
+		dependency = strings.TrimSpace(dependency)
+		found := false
+		for _, candidate := range currentPlan.Steps {
+			if candidate.ID != dependency && fmt.Sprintf("%d", candidate.Order) != dependency {
+				continue
+			}
+			found = true
+			if candidate.Status != agentplan.StepStatusDone && candidate.Status != agentplan.StepStatusSkipped {
+				return false
+			}
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func allStepsTerminal(currentPlan *agentplan.Plan) bool {
+	if currentPlan == nil {
+		return true
+	}
+	for _, step := range currentPlan.Steps {
+		if step.Status != agentplan.StepStatusDone && step.Status != agentplan.StepStatusSkipped {
+			return false
+		}
+	}
+	return true
+}
+
+func firstUnfinishedStep(currentPlan *agentplan.Plan) int {
+	if currentPlan == nil {
+		return -1
+	}
+	for index, step := range currentPlan.Steps {
+		if step.Status != agentplan.StepStatusDone && step.Status != agentplan.StepStatusSkipped {
+			return index
+		}
+	}
+	return -1
+}
+
+func mergeRecoveryPlan(current *agentplan.Plan, replacement *agentplan.Plan, failedIndex int, failure string) *agentplan.Plan {
+	merged := agentplan.Clone(current)
+	if merged == nil {
+		return agentplan.Clone(replacement)
+	}
+	if failedIndex >= 0 && failedIndex < len(merged.Steps) {
+		merged.Steps[failedIndex].Status = agentplan.StepStatusSkipped
+		merged.Steps[failedIndex].LastError = strings.TrimSpace(failure)
+	}
+	failedTitle := ""
+	if failedIndex >= 0 && failedIndex < len(merged.Steps) {
+		failedTitle = strings.ToLower(strings.TrimSpace(merged.Steps[failedIndex].Title))
+	}
+	seen := make(map[string]struct{}, len(merged.Steps))
+	for _, step := range merged.Steps {
+		seen[strings.ToLower(strings.TrimSpace(step.Title))] = struct{}{}
+	}
+	for _, step := range replacement.Steps {
+		titleKey := strings.ToLower(strings.TrimSpace(step.Title))
+		if titleKey == "" || titleKey == failedTitle {
+			continue
+		}
+		if _, exists := seen[titleKey]; exists {
+			continue
+		}
+		step.ID = strings.TrimSpace(step.ID)
+		if step.ID == "" {
+			step.ID = uuid.NewString()
+		}
+		step.Order = len(merged.Steps) + 1
+		step.Status = agentplan.StepStatusPending
+		step.RetryCount = 0
+		step.LastError = ""
+		merged.Steps = append(merged.Steps, step)
+		seen[titleKey] = struct{}{}
+		if len(merged.Steps) >= 12 {
+			break
+		}
+	}
+	merged.Status = agentplan.StatusRunning
+	if strings.TrimSpace(replacement.RawContent) != "" {
+		merged.RawContent = strings.TrimSpace(merged.RawContent + "\n\nRecovery plan:\n" + replacement.RawContent)
+	}
+	return merged
 }
 
 type runPlanUpdateSink struct {
@@ -230,6 +611,20 @@ func (s runPlanUpdateSink) PlanUpdated(currentPlan *agentplan.Plan) {
 	}
 }
 
+type streamPlanUpdateSink struct {
+	base   planport.UpdateSink
+	stream modelport.ChatStreamHandler
+}
+
+func (s streamPlanUpdateSink) PlanUpdated(currentPlan *agentplan.Plan) {
+	if s.base != nil {
+		s.base.PlanUpdated(currentPlan)
+	}
+	if s.stream.OnPlanUpdate != nil {
+		s.stream.OnPlanUpdate(agentplan.Clone(currentPlan))
+	}
+}
+
 func planProgress(currentPlan *agentplan.Plan) (int, string) {
 	current := 0
 	title := "Plan updated"
@@ -255,7 +650,7 @@ func (s ExecutionService) finishWithError(current *session.Session, currentPlan 
 	if errors.Is(cause, context.Canceled) {
 		currentPlan = s.State.MarkCanceled(currentPlan)
 	} else {
-		currentPlan = s.State.MarkStepFailed(currentPlan, stepIndex)
+		currentPlan = s.State.MarkStepFailed(currentPlan, stepIndex, cause.Error())
 	}
 	if _, err := s.savePlanState(context.Background(), current, currentPlan, updates); err == nil {
 		return cause
@@ -285,6 +680,11 @@ func (s ExecutionService) savePlanState(ctx context.Context, current *session.Se
 			return currentPlan, err
 		}
 		currentPlan = saved
+	} else {
+		currentPlan = agentplan.Clone(currentPlan)
+		if currentPlan != nil {
+			currentPlan.Revision++
+		}
 	}
 	// 每次状态变化同时更新内存、持久层、手机推送和 Hook，四处看到的是同一份 Plan 快照。
 	current.CurrentPlan = agentplan.Clone(currentPlan)

@@ -1,6 +1,8 @@
 package command
 
 import (
+	"time"
+
 	domainsubagent "myai/core/domain/subagent"
 	modelport "myai/core/port/model"
 )
@@ -21,10 +23,18 @@ type DeleteDefinition struct {
 
 type StartTask struct {
 	ParentSessionID  string
+	ParentTaskID     string
+	ParentRunID      string
+	PlanID           string
+	StepID           string
 	CreatedRequestID string
 	DefinitionID     string
 	Instruction      string
 	Title            string
+	TaskName         string
+	AgentPath        string
+	AgentNickname    string
+	ModelID          string
 	FallbackModelID  string
 	WorkspaceRoot    string
 }
@@ -61,4 +71,13 @@ type ResumeTask struct {
 	TaskID          string
 	ParentSessionID string
 	Stream          modelport.ChatStreamHandler
+}
+
+// WaitTask waits for a child task's next terminal state change. The wait is
+// event-driven when the configured publisher supports TaskEventSource.
+type WaitTask struct {
+	TaskID          string
+	ParentSessionID string
+	ParentTaskID    string
+	Timeout         time.Duration
 }

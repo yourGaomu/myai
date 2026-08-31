@@ -55,6 +55,7 @@ type CompactInfo = compactionresult.CompactInfo
 
 type ChatResponse struct {
 	SessionID string
+	RunID     string
 	Result    llm.ChatResult
 	Context   ContextInfo
 	Compact   CompactInfo
@@ -120,6 +121,22 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	}
 	defer unlock()
 
+	var currentBefore *session.Session
+	autoPlan := false
+	resumePlan := false
+	if s.dependencies.AutoPlanEnabled {
+		if s.dependencies.SessionLoader == nil {
+			return ChatResponse{}, errors.New("session loader is nil")
+		}
+		currentBefore, err = s.dependencies.SessionLoader.Load(ctx, sessionID)
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		autoPlanDecision := s.classifyAutoPlanRequest(ctx, currentBefore, input)
+		autoPlan = autoPlanDecision.ShouldPlan
+		resumePlan = shouldResumePlanRequest(currentBefore, input)
+	}
+
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
 	var retrievalInfo chatretrievalresult.Context
 	if s.dependencies.RetrievalContext != nil {
@@ -135,9 +152,10 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		}
 	}
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
-		SessionID:  sessionID,
-		Input:      input,
-		RAGContext: retrievalInfo.Prompt,
+		SessionID:     sessionID,
+		Input:         input,
+		ForcePlanMode: autoPlan,
+		RAGContext:    retrievalInfo.Prompt,
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -161,7 +179,194 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		})
 	}
 
+	if autoPlan {
+		return s.generateAndExecutePlan(ctx, current, input, title, retrievalInfo, stream)
+	}
+	if resumePlan {
+		return s.executeExistingPlan(ctx, current.ID, stream, retrievalInfo)
+	}
 	return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream, true, false)
+}
+
+func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *session.Session, input string) AutoPlanDecision {
+	classifier := s.dependencies.AutoPlanClassifier
+	if classifier == nil {
+		classifier = RuleBasedAutoPlanClassifier{}
+	}
+	decision, err := classifier.Classify(ctx, current, input)
+	if err != nil {
+		// Classification failure must fail closed. A normal chat turn is safer
+		// than unexpectedly entering a workflow that can modify the workspace.
+		return AutoPlanDecision{
+			Intent: AutoPlanIntentConversation,
+			Reason: "auto-plan classification failed: " + err.Error(),
+		}
+	}
+	return decision
+}
+
+// generateAndExecutePlan performs the Codex-style two-phase loop inside one
+// user request: a read-only planning generation is immediately followed by
+// the existing step executor. The planning snapshot is isolated from the
+// live session, while its captured plan is persisted to the same session.
+func (s *ChatService) generateAndExecutePlan(ctx context.Context, current *session.Session, input string, title string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	planningSession := session.Clone(current)
+	planningSession.AgentMode = session.AgentModePlan
+	// The plan is delivered through OnPlanUpdate. Keeping the planning answer
+	// out of OnAnswer prevents it from being concatenated with the real step
+	// results in the single assistant response shown to the user.
+	planningStream := stream
+	planningStream.OnAnswer = nil
+	planning, err := s.generateAssistantForSession(ctx, planningSession, input, title, "autonomous planning", retrievalInfo, planningStream, true, false)
+	if err != nil {
+		return planning, err
+	}
+	if planning.Plan == nil || len(planning.Plan.Steps) == 0 {
+		return planning, errors.New("autonomous planning did not produce executable steps")
+	}
+	if planning.Plan.Status == agentplan.StatusDone {
+		return planning, nil
+	}
+	if s.dependencies.PlanExecution == nil {
+		return planning, errors.New("plan execution service is nil")
+	}
+
+	execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
+		SessionID: current.ID, ParentRunID: planning.RunID,
+		Stream: stream,
+	}, nil)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	return ChatResponse{
+		SessionID: execution.SessionID,
+		RunID:     execution.RunID,
+		Result:    execution.Result,
+		Context:   execution.Context,
+		Compact:   execution.Compact,
+		Plan:      execution.Plan,
+		Retrieval: retrievalInfo,
+	}, nil
+}
+
+func (s *ChatService) executeExistingPlan(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, retrievalInfo chatretrievalresult.Context) (ChatResponse, error) {
+	if s.dependencies.PlanExecution == nil {
+		return ChatResponse{}, errors.New("plan execution service is nil")
+	}
+	execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
+		SessionID: sessionID,
+		Stream:    stream,
+	}, nil)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	return ChatResponse{
+		SessionID: execution.SessionID,
+		RunID:     execution.RunID,
+		Result:    execution.Result,
+		Context:   execution.Context,
+		Compact:   execution.Compact,
+		Plan:      execution.Plan,
+		Retrieval: retrievalInfo,
+	}, nil
+}
+
+func shouldAutoPlanRequest(current *session.Session, input string) bool {
+	if current != nil && current.Kind == session.KindSubagent {
+		return false
+	}
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return false
+	}
+	// Questions about implementation should receive a normal explanation. Only
+	// imperative requests are promoted to the autonomous implementation loop;
+	// otherwise phrases such as "为什么要重构" would unexpectedly edit files.
+	if isImplementationQuestion(input) {
+		return false
+	}
+	action := false
+	for _, keyword := range []string{"实现", "开发", "添加", "新增", "加上", "增加", "修改", "改造", "重构", "重写", "修复", "完善", "优化", "升级", "补充", "接入", "支持", "集成", "构建", "编写", "配置", "部署", "删除", "替换", "迁移", "做一个", "写一个", "implement", "develop", "build", "add", "create", "delete", "remove", "fix", "refactor", "rewrite", "improve", "upgrade", "migrate", "feature"} {
+		if strings.Contains(input, keyword) {
+			action = true
+			break
+		}
+	}
+	if !action {
+		return false
+	}
+	for _, contextKeyword := range []string{"代码", "代码库", "仓库", "项目", "功能", "需求", "组件", "接口", "后端", "前端", "安卓", "android", "api", "数据库", "文件", "git", "app", "应用", "工程", "服务", "页面", "界面", "脚本", "模块", "任务", "流程", "逻辑", "更新", "版本", "登录", "认证", "上传", "下载", "通知", "动画", "长连接", "websocket", "ws", "ota", "子智能体", "agent", "test", "测试", "编译", "部署", "repository", "service", "frontend", "backend", "typescript", "javascript", "golang", "kotlin", "java", "swift", "css", "html", "sql", "bug", "错误", "问题", "消息"} {
+		if strings.Contains(input, contextKeyword) {
+			return true
+		}
+	}
+	return hasImplementationContext(current)
+}
+
+func isImplementationQuestion(input string) bool {
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input == "" {
+		return false
+	}
+	question := strings.HasSuffix(input, "吗") || strings.HasSuffix(input, "？") || strings.HasSuffix(input, "?")
+	for _, marker := range []string{"为什么", "为何", "如何", "怎么", "能否", "是否", "可不可以", "可以吗", "能不能", "why ", "how ", "can ", "could ", "should ", "is it "} {
+		if strings.HasPrefix(input, marker) || strings.Contains(input, marker) {
+			question = true
+			break
+		}
+	}
+	if !question {
+		return false
+	}
+	// Explicit imperative cues keep requests such as "能不能帮我修复" and
+	// "请直接实现" in the implementation path, even when punctuated as a
+	// question. "请问/请告诉" remain explanatory questions.
+	for _, cue := range []string{"帮我", "请你", "请直接", "直接", "开始", "现在", "落地", "执行"} {
+		if strings.Contains(input, cue) {
+			return false
+		}
+	}
+	if strings.HasPrefix(input, "请") && !strings.HasPrefix(input, "请问") && !strings.HasPrefix(input, "请告诉") && !strings.HasPrefix(input, "请解释") {
+		return false
+	}
+	return true
+}
+
+func hasImplementationContext(current *session.Session) bool {
+	if current == nil {
+		return false
+	}
+	const maxRecentUserMessages = 8
+	seen := 0
+	for index := len(current.Messages) - 1; index >= 0 && seen < maxRecentUserMessages; index-- {
+		message := current.Messages[index]
+		if message.Role != domainmessage.RoleUser || message.IsSynthetic() {
+			continue
+		}
+		seen++
+		text := strings.ToLower(message.Text())
+		for _, keyword := range []string{"代码", "代码库", "仓库", "项目", "功能", "组件", "接口", "后端", "前端", "安卓", "android", "api", "数据库", "文件", "git", "app", "应用", "工程", "服务", "页面", "脚本", "模块", "websocket", "ota", "agent", "test", "测试", "编译", "部署", "repository", "service", "typescript", "javascript", "golang", "kotlin", "java", "swift", "css", "html", "sql", "bug"} {
+			if strings.Contains(text, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shouldResumePlanRequest(current *session.Session, input string) bool {
+	if current == nil || current.Kind == session.KindSubagent || current.CurrentPlan == nil {
+		return false
+	}
+	if !agentplan.IsExecutableStatus(current.CurrentPlan.Status) || current.CurrentPlan.Status == agentplan.StatusDone {
+		return false
+	}
+	switch strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(input)), " ")) {
+	case "继续", "继续执行", "恢复计划", "执行计划", "开始执行", "continue", "resume", "resume plan", "execute plan", "run plan":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessionID string, input string, syntheticReason domainmessage.SyntheticReason, stream llm.ChatStreamHandler) (ChatResponse, error) {
@@ -290,6 +495,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Stream:        stream,
 		CapturePlan:   capturePlan,
 		ForceChatMode: forceChatMode,
+		Internal:      reason == "autonomous planning" || reason == "recover plan",
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -297,6 +503,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 
 	return ChatResponse{
 		SessionID: response.SessionID,
+		RunID:     response.RunID,
 		Result:    response.Result,
 		Context:   response.Context,
 		Compact:   response.Compact,

@@ -84,6 +84,22 @@ func TestResponseCommitServiceCapturesPlanInPlanMode(t *testing.T) {
 	}
 }
 
+func TestResponseCommitServiceKeepsInternalPlanningOutOfChatHistory(t *testing.T) {
+	memory := &responseMemoryRecorder{}
+	result, err := ResponseCommitService{Memory: memory, PlanCapturer: &planCapturerRecorder{plan: &agentplan.Plan{
+		ID: "plan-1", SessionID: "session-1", Status: agentplan.StatusDraft,
+	}}}.Commit(CommitCommand{
+		Session: responseCommitSession(session.AgentModePlan), LatestInput: "implement feature",
+		Result: modelport.ChatResult{Content: "## Plan\n1. Implement"}, CapturePlan: true, Internal: true,
+	})
+	if err != nil || result.Plan == nil {
+		t.Fatalf("expected internal plan capture, result=%#v err=%v", result, err)
+	}
+	if memory.assistantContent != "" || !memory.usageWritten {
+		t.Fatalf("internal planning should skip assistant history but retain usage: %#v", memory)
+	}
+}
+
 func TestResponseCommitServiceStopsWhenAssistantWriteFails(t *testing.T) {
 	expected := errors.New("write failed")
 	memory := &responseMemoryRecorder{assistantErr: expected}

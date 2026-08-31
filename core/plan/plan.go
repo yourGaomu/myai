@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -26,10 +27,13 @@ const (
 
 type Plan struct {
 	// RawContent 保留模型原始回复，Steps 是供状态机和手机界面使用的结构化结果。
-	ID         string
-	SessionID  string
-	Goal       string
-	Status     string
+	ID        string
+	SessionID string
+	Goal      string
+	Status    string
+	// Revision increases whenever a plan snapshot is persisted. It lets
+	// clients order updates even when transport events arrive out of order.
+	Revision   int64
 	RawContent string
 	Steps      []Step
 	CreatedAt  time.Time
@@ -41,7 +45,16 @@ type Step struct {
 	Order       int
 	Title       string
 	Description string
-	Status      string
+	// Dependencies contains step IDs (or legacy order numbers) that must be
+	// completed before this step becomes runnable.
+	Dependencies []string
+	Status       string
+	RetryCount   int
+	MaxRetries   int
+	LastError    string
+	AgentTaskID  string
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
 }
 
 var stepLinePattern = regexp.MustCompile(`^\s*(?:[-*]\s+\[[ xX-]\]\s+|[-*]\s+|\d+[\.)]\s+)(.+?)\s*$`)
@@ -75,6 +88,9 @@ func IsExecutableStatus(status string) bool {
 }
 
 func ExtractSteps(content string) []Step {
+	if steps := extractStructuredSteps(content); len(steps) > 0 {
+		return steps
+	}
 	// 只提取 Plan/计划标题下的列表项，最多 12 步，防止模型输出被无限扩张为执行任务。
 	lines := planSectionLines(content)
 	steps := make([]Step, 0, 8)
@@ -101,6 +117,83 @@ func ExtractSteps(content string) []Step {
 	return steps
 }
 
+// extractStructuredSteps accepts the machine-readable plan shape emitted by
+// newer models while retaining Markdown parsing as a backwards-compatible
+// fallback for existing sessions.
+func extractStructuredSteps(content string) []Step {
+	trimmed := strings.TrimSpace(content)
+	if start := strings.Index(trimmed, "{"); start >= 0 {
+		if end := strings.LastIndex(trimmed, "}"); end > start {
+			trimmed = trimmed[start : end+1]
+		}
+	}
+	var payload struct {
+		Steps []struct {
+			ID           string   `json:"id"`
+			Order        int      `json:"order"`
+			Title        string   `json:"title"`
+			Description  string   `json:"description"`
+			DependsOn    []string `json:"depends_on"`
+			Dependencies []string `json:"dependencies"`
+			Status       string   `json:"status"`
+			MaxRetries   int      `json:"max_retries"`
+		} `json:"steps"`
+	}
+	if json.Unmarshal([]byte(trimmed), &payload) != nil || len(payload.Steps) == 0 {
+		return nil
+	}
+	steps := make([]Step, 0, len(payload.Steps))
+	for index, item := range payload.Steps {
+		title := summarizeLine(item.Title, "")
+		if title == "" {
+			continue
+		}
+		status := item.Status
+		if status == "" {
+			status = StepStatusPending
+		}
+		order := item.Order
+		if order <= 0 {
+			order = len(steps) + 1
+		}
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			id = uuid.NewString()
+		}
+		dependencies := append([]string(nil), item.DependsOn...)
+		if len(dependencies) == 0 {
+			dependencies = append(dependencies, item.Dependencies...)
+		}
+		steps = append(steps, Step{ID: id, Order: order, Title: title,
+			Description: strings.TrimSpace(item.Description), Dependencies: normalizeDependencies(dependencies),
+			Status: status, MaxRetries: item.MaxRetries})
+		if index >= 11 {
+			break
+		}
+	}
+	return steps
+}
+
+func normalizeDependencies(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func Clone(p *Plan) *Plan {
 	if p == nil {
 		return nil
@@ -108,8 +201,21 @@ func Clone(p *Plan) *Plan {
 	next := *p
 	if len(p.Steps) > 0 {
 		next.Steps = append([]Step(nil), p.Steps...)
+		for index := range next.Steps {
+			next.Steps[index].Dependencies = append([]string(nil), p.Steps[index].Dependencies...)
+			next.Steps[index].StartedAt = cloneTime(next.Steps[index].StartedAt)
+			next.Steps[index].CompletedAt = cloneTime(next.Steps[index].CompletedAt)
+		}
 	}
 	return &next
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func planSectionLines(content string) []string {

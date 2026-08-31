@@ -19,6 +19,12 @@ func NewSessionPromptProvider(skillPrompts runtimeport.SkillPromptProvider) Sess
 }
 
 func (p SessionPromptProvider) Prompt(ctx context.Context, current *session.Session, input string, forceChatMode bool) string {
+	return p.PromptForMode(ctx, current, input, forceChatMode, false)
+}
+
+// PromptForMode is the optional extended prompt contract used by autonomous
+// planning. Prompt remains unchanged for existing callers and integrations.
+func (p SessionPromptProvider) PromptForMode(ctx context.Context, current *session.Session, input string, forceChatMode bool, forcePlanMode bool) string {
 	agentMode := session.AgentModeChat
 	styleInstruction := ""
 	if current != nil {
@@ -28,6 +34,7 @@ func (p SessionPromptProvider) Prompt(ctx context.Context, current *session.Sess
 	return p.Builder.Build(ctx, runtimecommand.InstructionRequest{
 		AgentMode:        agentMode,
 		ForceChatMode:    forceChatMode,
+		ForcePlanMode:    forcePlanMode,
 		Input:            input,
 		StyleInstruction: styleInstruction,
 	})

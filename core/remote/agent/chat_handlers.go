@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -76,14 +75,9 @@ func (a *Agent) handleRegenerateMessage(ctx context.Context, conn *websocket.Con
 }
 
 func (a *Agent) handleSessionPlanExecute(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string) error {
-	// 步骤状态变化先发送 plan_update；全部完成后再发送 assistant_done 和最终 result。
+	// 步骤状态变化由 streamChatResponse 的 OnPlanUpdate 实时发送；全部完成后再发送 assistant_done 和最终 result。
 	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
-		return a.chatService.ExecutePlanStreamForSession(ctx, sessionID, stream, func(currentPlan *agentplan.Plan) {
-			payload := sessionPlanExecuteUpdatePayload(sessionID, currentPlan)
-			if err := a.writeRemoteMessage(conn, protocol.TypeSessionPlanExecuteUpdate, message.RequestID, sessionID, payload); err != nil {
-				log.Printf("send plan update failed: %v", err)
-			}
-		})
+		return a.chatService.ExecutePlanStreamForSession(ctx, sessionID, stream, nil)
 	})
 	if err != nil {
 		return err
@@ -176,6 +170,9 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 		},
 		OnRunCompleted: func(run domainagentrun.Run) {
 			send(protocol.TypeAgentRunCompleted, protocol.AgentRunCompletedPayload{Run: agentRunPayload(run)})
+		},
+		OnPlanUpdate: func(plan *agentplan.Plan) {
+			send(protocol.TypeSessionPlanExecuteUpdate, sessionPlanExecuteUpdatePayload(sessionID, plan))
 		},
 	})
 	if err != nil {

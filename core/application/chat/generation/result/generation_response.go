@@ -9,6 +9,7 @@ import (
 
 type GenerationResponse struct {
 	SessionID string
+	RunID     string
 	Result    modelport.ChatResult
 	Context   contextmgr.Info
 	Compact   compactionresult.CompactInfo

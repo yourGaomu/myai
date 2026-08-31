@@ -12,4 +12,5 @@ type AssistantGeneration struct {
 	Stream        modelport.ChatStreamHandler
 	CapturePlan   bool
 	ForceChatMode bool
+	Internal      bool
 }

@@ -22,6 +22,7 @@ func (s StatePersistenceService) Save(ctx context.Context, command plancommand.S
 			now = s.Now()
 		}
 		currentPlan.UpdatedAt = now
+		currentPlan.Revision++
 	}
 	if s.Repository != nil {
 		if err := s.Repository.SaveCurrentPlan(ctx, command.SessionID, command.Model, currentPlan); err != nil {

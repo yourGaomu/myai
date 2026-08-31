@@ -89,3 +89,25 @@ func TestRunningPlanCanResumeAfterRestart(t *testing.T) {
 		t.Fatal("expected a running plan to be resumable")
 	}
 }
+
+func TestExtractStepsFromStructuredJSON(t *testing.T) {
+	steps := ExtractSteps(`{"goal":"ship it","steps":[{"id":"stable-step","title":"Implement","description":"edit files","max_retries":2},{"title":"Verify","status":"pending","depends_on":["stable-step","stable-step"]}]}`)
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 structured steps, got %d", len(steps))
+	}
+	if steps[0].ID != "stable-step" || steps[0].MaxRetries != 2 || steps[1].Order != 2 {
+		t.Fatalf("unexpected structured steps: %#v", steps)
+	}
+	if len(steps[1].Dependencies) != 1 || steps[1].Dependencies[0] != "stable-step" {
+		t.Fatalf("unexpected step dependencies: %#v", steps[1].Dependencies)
+	}
+}
+
+func TestCloneCopiesStepDependencies(t *testing.T) {
+	original := &Plan{Steps: []Step{{ID: "step-2", Dependencies: []string{"step-1"}}}}
+	cloned := Clone(original)
+	cloned.Steps[0].Dependencies[0] = "changed"
+	if original.Steps[0].Dependencies[0] != "step-1" {
+		t.Fatal("clone must not share dependency slices")
+	}
+}

@@ -14,6 +14,7 @@ type RuntimeInstructionBuilder = runtimeservice.RuntimeInstructionBuilder
 type SessionPromptProvider = runtimeservice.SessionPromptProvider
 
 const PlanModePrompt = runtimeservice.PlanModePrompt
+const AutonomousPlanPrompt = runtimeservice.AutonomousPlanPrompt
 const SessionStylePromptPrefix = runtimeservice.SessionStylePromptPrefix
 const RuntimeTurnBoundaryPrompt = runtimeservice.RuntimeTurnBoundaryPrompt
 const RuntimeInstructionPrefix = runtimeservice.RuntimeInstructionPrefix

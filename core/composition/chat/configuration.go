@@ -310,14 +310,17 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Events:      events,
 	}
 	planExecution := planservice.ExecutionService{
-		Models:       configuration.Models,
-		Sessions:     loader,
-		Messages:     messageCommands,
-		Generation:   generationTasks,
-		PlanStates:   planStates,
-		UserMessages: userMessages,
-		Events:       events,
-		Runs:         runCommands,
+		Models:           configuration.Models,
+		Sessions:         loader,
+		Messages:         messageCommands,
+		Generation:       generationTasks,
+		PlanStates:       planStates,
+		UserMessages:     userMessages,
+		Events:           events,
+		Recovery:         planservice.GenerationRecoveryPlanner{Messages: messageCommands, Generation: generationTasks},
+		MaxReplans:       1,
+		MaxParallelSteps: 3,
+		Runs:             runCommands,
 		OnRunError: func(err error) {
 			log.Printf("record plan run failed: %v", err)
 		},
@@ -325,7 +328,11 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 
 	// ChatService 只拿接口，不知道 Mongo、Redis、LangChainGo 等具体技术实现。
 	return service.ChatDependencies{
-		Models:        configuration.Models,
+		Models:          configuration.Models,
+		AutoPlanEnabled: true,
+		AutoPlanClassifier: service.ModelAutoPlanClassifier{
+			Models: configuration.Models, Metadata: configuration.Models,
+		},
 		ModelMetadata: configuration.Models,
 
 		GenerationTasks: generationTasks,

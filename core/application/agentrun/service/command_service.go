@@ -40,6 +40,8 @@ func (s CommandService) Start(ctx context.Context, command agentruncommand.Start
 	}
 	run := domainagentrun.Run{
 		ID: runID, RequestID: requestID, SessionID: strings.TrimSpace(command.SessionID),
+		ParentRunID: strings.TrimSpace(command.ParentRunID), PlanID: strings.TrimSpace(command.PlanID),
+		StepID: strings.TrimSpace(command.StepID), TaskID: strings.TrimSpace(command.TaskID),
 		Kind: command.Kind, Title: strings.TrimSpace(command.Title), Reason: strings.TrimSpace(command.Reason),
 		Status: domainagentrun.StatusRunning, TotalSteps: command.TotalSteps, StartedAt: s.now(),
 	}

@@ -1,0 +1,7 @@
+# Dependencies and generated output are installed/generated on the EAS builder.
+node_modules/
+.expo/
+dist/
+android/
+.tmp/
+*.log

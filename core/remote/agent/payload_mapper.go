@@ -247,6 +247,7 @@ func planPayload(currentPlan *agentplan.Plan) *protocol.Plan {
 		SessionID:  currentPlan.SessionID,
 		Goal:       currentPlan.Goal,
 		Status:     currentPlan.Status,
+		Revision:   currentPlan.Revision,
 		RawContent: currentPlan.RawContent,
 		Steps:      make([]protocol.PlanStep, 0, len(currentPlan.Steps)),
 		CreatedAt:  currentPlan.CreatedAt,
@@ -254,11 +255,18 @@ func planPayload(currentPlan *agentplan.Plan) *protocol.Plan {
 	}
 	for _, step := range currentPlan.Steps {
 		payload.Steps = append(payload.Steps, protocol.PlanStep{
-			ID:          step.ID,
-			Order:       step.Order,
-			Title:       step.Title,
-			Description: step.Description,
-			Status:      step.Status,
+			ID:           step.ID,
+			Order:        step.Order,
+			Title:        step.Title,
+			Description:  step.Description,
+			Dependencies: append([]string(nil), step.Dependencies...),
+			Status:       step.Status,
+			RetryCount:   step.RetryCount,
+			MaxRetries:   step.MaxRetries,
+			LastError:    step.LastError,
+			AgentTaskID:  step.AgentTaskID,
+			StartedAt:    step.StartedAt,
+			CompletedAt:  step.CompletedAt,
 		})
 	}
 	return payload

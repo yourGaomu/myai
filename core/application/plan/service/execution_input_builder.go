@@ -25,6 +25,10 @@ func (ExecutionInputBuilder) BuildStepInput(currentPlan *agentplan.Plan, step ag
 		builder.WriteString("\n")
 		builder.WriteString(step.Description)
 	}
+	if len(step.Dependencies) > 0 {
+		builder.WriteString("\nPrerequisites: ")
+		builder.WriteString(strings.Join(step.Dependencies, ", "))
+	}
 	builder.WriteString("\n\nFull plan:\n")
 	if currentPlan != nil {
 		for _, item := range currentPlan.Steps {
@@ -36,6 +40,6 @@ func (ExecutionInputBuilder) BuildStepInput(currentPlan *agentplan.Plan, step ag
 			builder.WriteString("\n")
 		}
 	}
-	builder.WriteString("\nFocus on the current step. Use tools when needed, report what changed, and stop after this step is complete.")
+	builder.WriteString("\nFocus on the current step. Use the available tools to inspect, edit, and verify the workspace when needed. If a focused investigation or implementation can be delegated, use spawn_agent and wait_agent; use definition_id=implementer for isolated coding work, then apply_task_changes after the child succeeds. Do not ask the user to manually execute this step; report what changed and stop after the step is complete.")
 	return builder.String()
 }

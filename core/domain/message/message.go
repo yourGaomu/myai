@@ -25,6 +25,7 @@ const (
 	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
 	SyntheticReasonMemoryContext      SyntheticReason = "memory_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
+	SyntheticReasonAutonomousPlanning SyntheticReason = "autonomous_planning"
 )
 
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"

@@ -65,7 +65,13 @@ type ChangeSetDocument struct {
 type TaskDocument struct {
 	ID                string                     `bson:"_id"`
 	ParentSessionID   string                     `bson:"parent_session_id"`
+	ParentTaskID      string                     `bson:"parent_task_id,omitempty"`
+	ParentRunID       string                     `bson:"parent_run_id,omitempty"`
+	PlanID            string                     `bson:"plan_id,omitempty"`
+	StepID            string                     `bson:"step_id,omitempty"`
 	ChildSessionID    string                     `bson:"child_session_id"`
+	AgentPath         string                     `bson:"agent_path,omitempty"`
+	AgentNickname     string                     `bson:"agent_nickname,omitempty"`
 	CreatedRequestID  string                     `bson:"created_request_id,omitempty"`
 	DefinitionID      string                     `bson:"definition_id"`
 	DefinitionVersion int64                      `bson:"definition_version"`
@@ -97,4 +103,24 @@ type RunDocument struct {
 	CreatedAt    time.Time  `bson:"created_at"`
 	StartedAt    *time.Time `bson:"started_at,omitempty"`
 	CompletedAt  *time.Time `bson:"completed_at,omitempty"`
+}
+
+// TaskEventDocument is an append-only replay record. The task snapshot keeps
+// reconnecting clients useful even when they missed intermediate state
+// updates; runtime fields carry reasoning/tool deltas for live rendering.
+type TaskEventDocument struct {
+	ID           string       `bson:"_id"`
+	Sequence     uint64       `bson:"sequence"`
+	Kind         string       `bson:"kind"`
+	Task         TaskDocument `bson:"task"`
+	RunID        string       `bson:"run_id,omitempty"`
+	Content      string       `bson:"content,omitempty"`
+	ToolName     string       `bson:"tool_name,omitempty"`
+	Arguments    string       `bson:"arguments,omitempty"`
+	Status       string       `bson:"status,omitempty"`
+	ErrorCode    string       `bson:"error_code,omitempty"`
+	ErrorMessage string       `bson:"error_message,omitempty"`
+	Truncated    bool         `bson:"truncated,omitempty"`
+	Delta        bool         `bson:"delta,omitempty"`
+	EmittedAt    time.Time    `bson:"emitted_at"`
 }

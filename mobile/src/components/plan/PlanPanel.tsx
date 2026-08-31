@@ -52,7 +52,7 @@ export function PlanPanel({
       {!plan ? (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyTitle}>还没有结构化计划</Text>
-          <Text style={styles.emptyText}>将当前会话切换为计划模式，请求生成计划后，再回到这里查看和执行。</Text>
+          <Text style={styles.emptyText}>开发类请求会自动生成并执行计划；需要查看过程时，计划和子智能体状态会在这里持续更新。</Text>
         </View>
       ) : (
         <>
@@ -66,7 +66,7 @@ export function PlanPanel({
               <Text style={styles.progressText}>
                 已完成 {progress.done}/{progress.total}
               </Text>
-              <Text style={styles.progressMeta}>{progress.running ? "执行中" : progress.failed ? "需要处理" : "就绪"}</Text>
+              <Text style={styles.progressMeta}>{progress.running ? "执行中" : progress.failed ? "需要处理" : progress.waiting ? "等待依赖" : "就绪"}</Text>
             </View>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${progress.percent}%` }]} />
@@ -75,7 +75,7 @@ export function PlanPanel({
 
           <View style={styles.stepList}>
             {(plan.steps || []).map((step) => (
-              <PlanStepRow key={step.id || step.order} step={step} />
+              <PlanStepRow key={step.id || step.order} plan={plan} step={step} />
             ))}
           </View>
         </>
@@ -100,18 +100,26 @@ export function PlanPanel({
   );
 }
 
-function PlanStepRow({ step }: { step: PlanStep }) {
+function PlanStepRow({ plan, step }: { plan: Plan; step: PlanStep }) {
   const running = step.status === "running";
+  const waitingForDependency = step.status === "pending" && hasUnfinishedDependency(plan, step);
+  const displayStatus = waitingForDependency ? "waiting_dependency" : step.status;
   return (
-    <View style={[styles.stepRow, stepStatusStyle(step.status)]}>
+    <View style={[styles.stepRow, stepStatusStyle(displayStatus)]}>
       <View style={styles.stepIndex}>
         {running ? <ActivityIndicator color="#12100e" size="small" /> : <Text style={styles.stepIndexText}>{step.order}</Text>}
       </View>
       <View style={styles.flex}>
         <Text style={styles.stepTitle}>{step.title}</Text>
         {step.description ? <Text style={styles.stepDescription}>{step.description}</Text> : null}
+        {step.dependencies?.length ? <Text style={styles.stepDependency}>依赖：{step.dependencies.join(", ")}</Text> : null}
+        {step.last_error ? <Text style={styles.stepError}>{step.last_error}</Text> : null}
+        {step.agent_task_id ? <Text style={styles.stepAgent}>子智能体：{step.agent_task_id}</Text> : null}
       </View>
-      <Text style={styles.stepStatus}>{stepStatusLabel(step.status)}</Text>
+      <View style={styles.stepMeta}>
+        {step.retry_count ? <Text style={styles.stepRetry}>重试 {step.retry_count}{step.max_retries ? `/${step.max_retries}` : ""}</Text> : null}
+        <Text style={styles.stepStatus}>{stepStatusLabel(displayStatus)}</Text>
+      </View>
     </View>
   );
 }
@@ -119,11 +127,12 @@ function PlanStepRow({ step }: { step: PlanStep }) {
 function planProgress(plan?: Plan) {
   const steps = plan?.steps || [];
   const total = steps.length;
-  const done = steps.filter((step) => step.status === "done").length;
+  const done = steps.filter((step) => step.status === "done" || step.status === "skipped").length;
   const failed = steps.some((step) => step.status === "failed");
   const running = steps.some((step) => step.status === "running");
+  const waiting = steps.some((step) => step.status === "pending" && hasUnfinishedDependency(plan, step));
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-  return { done, failed, percent, running, total };
+  return { done, failed, percent, running, total, waiting };
 }
 
 function statusBadgeStyle(status?: string) {
@@ -156,6 +165,8 @@ function stepStatusLabel(status?: string) {
     case "pending": return "待执行";
     case "running": return "执行中";
     case "done": return "已完成";
+    case "skipped": return "已跳过";
+    case "waiting_dependency": return "等待依赖";
     case "failed": return "失败";
     case "canceled": return "已取消";
     default: return status || "未知";
@@ -172,7 +183,25 @@ function stepStatusStyle(status?: string) {
   if (status === "failed") {
     return styles.stepFailed;
   }
+  if (status === "skipped") {
+    return styles.stepDone;
+  }
+  if (status === "waiting_dependency") {
+    return styles.stepWaiting;
+  }
   return styles.stepPending;
+}
+
+function hasUnfinishedDependency(plan: Plan | undefined, step: PlanStep) {
+  if (!plan || !step.dependencies?.length) {
+    return false;
+  }
+  return step.dependencies.some((dependency) => {
+    const candidate = plan.steps?.find(
+      (item) => item.id === dependency || String(item.order) === dependency,
+    );
+    return Boolean(candidate && candidate.status !== "done" && candidate.status !== "skipped");
+  });
 }
 
 const styles = StyleSheet.create({
@@ -332,6 +361,9 @@ const styles = StyleSheet.create({
   stepDone: {
     backgroundColor: "#edf9e8",
   },
+  stepWaiting: {
+    backgroundColor: "#f1efff",
+  },
   stepFailed: {
     backgroundColor: "#ffe1db",
   },
@@ -361,6 +393,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 3,
+  },
+  stepDependency: {
+    color: "#766e65",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  stepError: {
+    color: "#9b3b2f",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  stepAgent: {
+    color: "#286177",
+    fontSize: 11,
+    marginTop: 4,
+  },
+  stepMeta: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  stepRetry: {
+    color: "#8b6f2b",
+    fontSize: 11,
   },
   stepStatus: {
     color: "#12100e",

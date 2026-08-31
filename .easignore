@@ -1,0 +1,9 @@
+# EAS builds the mobile project from this repository root. Exclude local caches,
+# generated native output, and installed dependencies; the builder recreates them.
+.git/
+.gocache/
+.tmp/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/android/

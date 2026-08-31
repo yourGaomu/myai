@@ -3,13 +3,17 @@ package command
 import domainagentrun "myai/core/domain/agentrun"
 
 type Start struct {
-	RunID      string
-	RequestID  string
-	SessionID  string
-	Kind       domainagentrun.Kind
-	Title      string
-	Reason     string
-	TotalSteps int
+	RunID       string
+	RequestID   string
+	SessionID   string
+	ParentRunID string
+	PlanID      string
+	StepID      string
+	TaskID      string
+	Kind        domainagentrun.Kind
+	Title       string
+	Reason      string
+	TotalSteps  int
 }
 
 type Append struct {

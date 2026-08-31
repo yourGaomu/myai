@@ -31,6 +31,7 @@ import type {
   AIMemoryListPayload,
   RAGSettings,
   SubagentDefinition,
+  SubagentTaskEvent,
   SubagentTask,
 } from "../protocol";
 import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, ViewMode } from "../types/app";
@@ -97,6 +98,7 @@ export type SettingsContentProps = {
   onApplySubagentTask: (taskID: string) => void;
   onCancelSubagentTask: (taskID: string) => void;
   onCheckSubagentTask: (taskID: string) => void;
+  onWaitSubagentTask: (taskID: string) => void;
   onCreateSubagentDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
   onDeleteSubagentDefinition: (definitionID: string) => void;
   onDiscardSubagentTask: (taskID: string) => void;
@@ -111,6 +113,7 @@ export type SettingsContentProps = {
   skillRoot: string;
   skills: SkillSummary[];
   subagentDefinitions: SubagentDefinition[];
+  subagentEvents: Record<string, SubagentTaskEvent[]>;
   subagentMessage: string;
   subagentTasks: SubagentTask[];
   setupVisible: boolean;

@@ -366,11 +366,18 @@ func PlanDocumentFromDomain(value *agentplan.Plan) *po.PlanDocument {
 	steps := make([]po.PlanStepDocument, 0, len(value.Steps))
 	for _, step := range value.Steps {
 		steps = append(steps, po.PlanStepDocument{
-			ID:          step.ID,
-			Order:       step.Order,
-			Title:       step.Title,
-			Description: step.Description,
-			Status:      step.Status,
+			ID:           step.ID,
+			Order:        step.Order,
+			Title:        step.Title,
+			Description:  step.Description,
+			Dependencies: append([]string(nil), step.Dependencies...),
+			Status:       step.Status,
+			RetryCount:   step.RetryCount,
+			MaxRetries:   step.MaxRetries,
+			LastError:    step.LastError,
+			AgentTaskID:  step.AgentTaskID,
+			StartedAt:    step.StartedAt,
+			CompletedAt:  step.CompletedAt,
 		})
 	}
 	return &po.PlanDocument{
@@ -378,6 +385,7 @@ func PlanDocumentFromDomain(value *agentplan.Plan) *po.PlanDocument {
 		SessionID:  value.SessionID,
 		Goal:       value.Goal,
 		Status:     value.Status,
+		Revision:   value.Revision,
 		RawContent: value.RawContent,
 		Steps:      steps,
 		CreatedAt:  value.CreatedAt,
@@ -392,11 +400,18 @@ func PlanDomainFromDocument(document *po.PlanDocument) *agentplan.Plan {
 	steps := make([]agentplan.Step, 0, len(document.Steps))
 	for _, step := range document.Steps {
 		steps = append(steps, agentplan.Step{
-			ID:          step.ID,
-			Order:       step.Order,
-			Title:       step.Title,
-			Description: step.Description,
-			Status:      step.Status,
+			ID:           step.ID,
+			Order:        step.Order,
+			Title:        step.Title,
+			Description:  step.Description,
+			Dependencies: append([]string(nil), step.Dependencies...),
+			Status:       step.Status,
+			RetryCount:   step.RetryCount,
+			MaxRetries:   step.MaxRetries,
+			LastError:    step.LastError,
+			AgentTaskID:  step.AgentTaskID,
+			StartedAt:    step.StartedAt,
+			CompletedAt:  step.CompletedAt,
 		})
 	}
 	return &agentplan.Plan{
@@ -404,6 +419,7 @@ func PlanDomainFromDocument(document *po.PlanDocument) *agentplan.Plan {
 		SessionID:  document.SessionID,
 		Goal:       document.Goal,
 		Status:     document.Status,
+		Revision:   document.Revision,
 		RawContent: document.RawContent,
 		Steps:      steps,
 		CreatedAt:  document.CreatedAt,

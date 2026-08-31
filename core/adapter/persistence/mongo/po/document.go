@@ -152,6 +152,7 @@ type PlanDocument struct {
 	SessionID  string             `bson:"session_id"`
 	Goal       string             `bson:"goal,omitempty"`
 	Status     string             `bson:"status"`
+	Revision   int64              `bson:"revision,omitempty"`
 	RawContent string             `bson:"raw_content,omitempty"`
 	Steps      []PlanStepDocument `bson:"steps,omitempty"`
 	CreatedAt  time.Time          `bson:"created_at"`
@@ -159,9 +160,16 @@ type PlanDocument struct {
 }
 
 type PlanStepDocument struct {
-	ID          string `bson:"id"`
-	Order       int    `bson:"order"`
-	Title       string `bson:"title"`
-	Description string `bson:"description,omitempty"`
-	Status      string `bson:"status"`
+	ID           string     `bson:"id"`
+	Order        int        `bson:"order"`
+	Title        string     `bson:"title"`
+	Description  string     `bson:"description,omitempty"`
+	Dependencies []string   `bson:"dependencies,omitempty"`
+	Status       string     `bson:"status"`
+	RetryCount   int        `bson:"retry_count,omitempty"`
+	MaxRetries   int        `bson:"max_retries,omitempty"`
+	LastError    string     `bson:"last_error,omitempty"`
+	AgentTaskID  string     `bson:"agent_task_id,omitempty"`
+	StartedAt    *time.Time `bson:"started_at,omitempty"`
+	CompletedAt  *time.Time `bson:"completed_at,omitempty"`
 }

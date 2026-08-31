@@ -1,0 +1,50 @@
+name: myai-opensearch
+
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.3
+    container_name: myai-opensearch
+    restart: unless-stopped
+    init: true
+    mem_limit: ${OPENSEARCH_MEMORY_LIMIT:-1g}
+    environment:
+      discovery.type: single-node
+      node.name: myai-opensearch
+      cluster.name: myai-opensearch
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD:?set OPENSEARCH_INITIAL_ADMIN_PASSWORD in .env}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "${OPENSEARCH_BIND:-127.0.0.1}:${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - myai-shared
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -k
+          -u "admin:$${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
+          https://127.0.0.1:9200/_cluster/health
+          >/dev/null || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  opensearch-data:
+    name: ${OPENSEARCH_VOLUME_NAME:-myai-opensearch-data}
+
+networks:
+  myai-shared:
+    external: true
+    name: ${INFRA_NETWORK:-myai-shared}
