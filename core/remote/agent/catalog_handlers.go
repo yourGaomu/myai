@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
 	modelcommand "myai/core/application/model/command"
 	"myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
+	pluginruntime "myai/core/plugin"
 	"myai/core/remote/protocol"
 	"myai/core/skill"
 )
@@ -41,6 +43,91 @@ func (a *Agent) handleSkillReload(ctx context.Context, conn *websocket.Conn, mes
 		return err
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSkillReloadResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) handlePluginList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.PluginListPayload](message); err != nil {
+		return fmt.Errorf("decode plugin list failed: %w", err)
+	}
+	if a.pluginManager == nil {
+		return fmt.Errorf("plugin manager is not configured")
+	}
+	return a.writeRemoteMessage(conn, protocol.TypePluginListResult, message.RequestID, message.SessionID, a.pluginListPayload(false, ""))
+}
+
+func (a *Agent) handlePluginReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.PluginListPayload](message); err != nil {
+		return fmt.Errorf("decode plugin reload failed: %w", err)
+	}
+	if a.pluginManager == nil {
+		return fmt.Errorf("plugin manager is not configured")
+	}
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+	if err := a.pluginManager.Reload(ctx); err != nil {
+		return err
+	}
+	payload := a.pluginListPayload(true, "插件已重载。")
+	return a.writeRemoteMessage(conn, protocol.TypePluginReloadResult, message.RequestID, message.SessionID, payload)
+}
+
+func (a *Agent) handlePluginToggle(ctx context.Context, conn *websocket.Conn, message protocol.Message, enabled bool) error {
+	payload, err := protocol.DecodePayload[protocol.PluginTogglePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode plugin toggle failed: %w", err)
+	}
+	if a.pluginManager == nil {
+		return fmt.Errorf("plugin manager is not configured")
+	}
+	if strings.TrimSpace(payload.PluginID) == "" {
+		return fmt.Errorf("plugin id is required")
+	}
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+	if err := a.pluginManager.SetEnabled(ctx, payload.PluginID, enabled); err != nil {
+		return err
+	}
+	state := "已禁用"
+	if enabled {
+		state = "已启用"
+	}
+	return a.writeRemoteMessage(conn, protocol.TypePluginMutationResult, message.RequestID, message.SessionID, protocol.PluginMutationResultPayload{
+		PluginID: payload.PluginID,
+		Enabled:  enabled,
+		Plugins:  mapPluginInfos(a.pluginManager.List()),
+		Count:    len(a.pluginManager.List()),
+		Message:  fmt.Sprintf("插件 %s %s。", payload.PluginID, state),
+	})
+}
+
+func (a *Agent) pluginListPayload(reloaded bool, message string) protocol.PluginListResultPayload {
+	if a.pluginManager == nil {
+		return protocol.PluginListResultPayload{Message: "插件管理器未配置。"}
+	}
+	items := a.pluginManager.List()
+	if message == "" && reloaded {
+		message = fmt.Sprintf("已重载 %d 个插件。", len(items))
+	}
+	return protocol.PluginListResultPayload{
+		Root:     a.pluginManager.Root(),
+		Plugins:  mapPluginInfos(items),
+		Count:    len(items),
+		Reloaded: reloaded,
+		Message:  message,
+	}
+}
+
+func mapPluginInfos(items []pluginruntime.Info) []protocol.PluginInfo {
+	result := make([]protocol.PluginInfo, 0, len(items))
+	for _, item := range items {
+		result = append(result, protocol.PluginInfo{
+			ID: item.Manifest.ID, Name: item.Manifest.Name, Version: item.Manifest.Version,
+			Protocol: item.Manifest.Protocol, Entrypoint: item.Manifest.Entrypoint,
+			Directory: item.Directory, Status: string(item.Status), Error: item.Error,
+			Enabled: item.Manifest.Enabled == nil || *item.Manifest.Enabled, Required: item.Manifest.Required,
+		})
+	}
+	return result
 }
 
 func (a *Agent) modelListPayload() protocol.ModelListResultPayload {

@@ -5,8 +5,9 @@ import * as Updates from "expo-updates";
 
 import { ButtonContent } from "../common/ButtonContent";
 import { SubagentPanel } from "../subagents/SubagentPanel";
+import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
-import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
+import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, PluginInfo, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
@@ -56,6 +57,9 @@ type Props = {
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
+  onRefreshPlugins: () => void;
+  onReloadPlugins: () => void;
+  onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -76,6 +80,9 @@ type Props = {
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
   pendingActions: Record<PendingAction, boolean>;
+  plugins: PluginInfo[];
+  pluginMessage: string;
+  pluginRoot: string;
   relayURL: string;
   sessionID: string;
   sessions: SessionSummary[];
@@ -99,7 +106,7 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "skill" | "subagent" | "session" | "permission" | "context" | "generation";
+type SettingsSection = "general" | "connection" | "model" | "skill" | "plugin" | "subagent" | "session" | "permission" | "context" | "generation";
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
 
 const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtocol }> = [
@@ -117,6 +124,7 @@ const settingSections: Array<{ icon: string; key: SettingsSection; label: string
   { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
   { icon: "T", key: "generation", label: "生成", meta: "采样与回复风格" },
   { icon: "SK", key: "skill", label: "技能", meta: "本地技能中心" },
+  { icon: "PL", key: "plugin", label: "插件", meta: "本地工具插件" },
   { icon: "S", key: "session", label: "会话", meta: "新建与切换" },
   { icon: "P", key: "permission", label: "权限", meta: "工具调用策略" },
   { icon: "K", key: "context", label: "上下文", meta: "窗口与压缩" },
@@ -164,6 +172,9 @@ export function SettingsPanel({
   onRefreshSessions,
   onRefreshSkills,
   onReloadSkills,
+  onRefreshPlugins,
+  onReloadPlugins,
+  onSetPluginEnabled,
   onAssetBaseURLChange,
   onRelayURLChange,
   onSetAgentMode,
@@ -184,6 +195,9 @@ export function SettingsPanel({
   onUpdateSubagentDefinition,
   onUserIDChange,
   pendingActions,
+  plugins,
+  pluginMessage,
+  pluginRoot,
   relayURL,
   sessionID,
   sessions,
@@ -410,7 +424,7 @@ export function SettingsPanel({
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={onRelayURLChange}
-        placeholder="http://server:18080"
+        placeholder="https://relay.mikasa.wiki"
         placeholderTextColor="#776f66"
         style={styles.input}
         value={relayURL}
@@ -419,7 +433,7 @@ export function SettingsPanel({
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={onAssetBaseURLChange}
-        placeholder="资源服务地址，例如 http://server:18081"
+        placeholder="资源服务地址，例如 https://assets.mikasa.wiki"
         placeholderTextColor="#776f66"
         style={styles.input}
         value={assetBaseURL}
@@ -881,6 +895,19 @@ export function SettingsPanel({
     </View>
   );
 
+  const pluginSection = (
+    <PluginPanel
+      buttonFeedback={buttonFeedback}
+      message={pluginMessage}
+      onRefresh={onRefreshPlugins}
+      onReload={onReloadPlugins}
+      onSetEnabled={onSetPluginEnabled}
+      pending={pendingActions.plugins}
+      plugins={plugins}
+      root={pluginRoot}
+    />
+  );
+
   const sessionSection = (
     <View style={styles.sectionStack}>
       <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
@@ -1237,6 +1264,7 @@ export function SettingsPanel({
     generation: generationSection,
     general: generalSection,
     model: modelSection,
+    plugin: pluginSection,
     permission: permissionSection,
     session: sessionSection,
     skill: skillSection,

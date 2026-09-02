@@ -13,6 +13,18 @@ Then open the app with Expo Go or an Android emulator.
 
 ## Relay URL
 
+The current deployed services use:
+
+```text
+https://relay.mikasa.wiki
+https://assets.mikasa.wiki
+```
+
+These are also the defaults in the app. Enter the six-digit Agent bind code,
+tap `Pair`, and then tap `Connect`. Pairing fills the correct user/device
+identity and exchanges a client token; the bind code is not used as the
+WebSocket token.
+
 If the Relay runs on the same PC and you test in an Android emulator, use:
 
 ```text

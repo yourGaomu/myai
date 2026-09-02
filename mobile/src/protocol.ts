@@ -69,6 +69,13 @@ export type MessageType =
   | "skill_list_result"
   | "skill_reload"
   | "skill_reload_result"
+  | "plugin_list"
+  | "plugin_list_result"
+  | "plugin_reload"
+  | "plugin_reload_result"
+  | "plugin_enable"
+  | "plugin_disable"
+  | "plugin_mutation_result"
   | "asset_list"
   | "asset_list_result"
   | "knowledge_catalog_list"
@@ -784,6 +791,39 @@ export type SkillListResultPayload = {
   skills?: SkillSummary[];
   count?: number;
   reloaded?: boolean;
+  message?: string;
+};
+
+export type PluginInfo = {
+  id: string;
+  name: string;
+  version: string;
+  protocol: string;
+  entrypoint?: string;
+  directory?: string;
+  status: "loaded" | "disabled" | "failed" | string;
+  error?: string;
+  enabled: boolean;
+  required: boolean;
+};
+
+export type PluginListResultPayload = {
+  root?: string;
+  plugins?: PluginInfo[];
+  count?: number;
+  reloaded?: boolean;
+  message?: string;
+};
+
+export type PluginTogglePayload = {
+  plugin_id: string;
+};
+
+export type PluginMutationResultPayload = {
+  plugin_id?: string;
+  enabled?: boolean;
+  plugins?: PluginInfo[];
+  count?: number;
   message?: string;
 };
 

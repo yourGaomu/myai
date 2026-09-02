@@ -2,6 +2,7 @@ package relay
 
 import (
 	"crypto/subtle"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,8 +56,14 @@ func (s *Server) originAllowed(request *http.Request) bool {
 	if strings.EqualFold(parsed.Host, request.Host) {
 		return true
 	}
-	_, allowed := s.origins[normalized]
-	return allowed
+	if _, allowed := s.origins[normalized]; allowed {
+		return true
+	}
+	if loopbackKey, ok := loopbackOriginKey(parsed); ok {
+		_, allowed := s.loopbackOrigins[loopbackKey]
+		return allowed
+	}
+	return false
 }
 
 func normalizeOrigin(origin string) (string, bool) {
@@ -71,4 +78,41 @@ func normalizeOrigin(origin string) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host), true
+}
+
+// Loopback wildcard patterns are intentionally limited to localhost addresses.
+// They make Expo's changing development port usable without allowing arbitrary
+// websites to call a public Relay.
+func normalizeLoopbackOriginPattern(origin string) (string, bool) {
+	value := strings.ToLower(strings.TrimSpace(origin))
+	scheme, hostPattern, found := strings.Cut(value, "://")
+	if !found || (scheme != "http" && scheme != "https") || !strings.HasSuffix(hostPattern, ":*") {
+		return "", false
+	}
+	host := strings.TrimSuffix(hostPattern, ":*")
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if !isLoopbackHost(host) {
+		return "", false
+	}
+	return scheme + "://" + host, true
+}
+
+func loopbackOriginKey(origin *url.URL) (string, bool) {
+	if origin == nil {
+		return "", false
+	}
+	host := strings.ToLower(origin.Hostname())
+	if !isLoopbackHost(host) {
+		return "", false
+	}
+	return strings.ToLower(origin.Scheme) + "://" + host, true
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

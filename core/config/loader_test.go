@@ -56,6 +56,8 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	v.Set("subagent.worker_count", 3)
 	v.Set("subagent.queue_size", 24)
 	v.Set("skill.root", " custom-skills ")
+	v.Set("plugin.enabled", false)
+	v.Set("plugin.root", " .plugins ")
 
 	properties, err := (ViperLoader{}).Map(v, "C:/workspace")
 	if err != nil {
@@ -75,6 +77,9 @@ func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	}
 	if properties.Subagent.SnapshotRoot != filepath.Join("C:/workspace", DefaultSubagentSnapshotRoot) {
 		t.Fatalf("unexpected subagent snapshot root: %q", properties.Subagent.SnapshotRoot)
+	}
+	if properties.Plugin.Enabled || properties.Plugin.Root != filepath.Join("C:/workspace", ".plugins") {
+		t.Fatalf("unexpected plugin properties: %#v", properties.Plugin)
 	}
 	if properties.RAG.IDNode != 7 {
 		t.Fatalf("unexpected RAG snowflake node: %d", properties.RAG.IDNode)
@@ -141,6 +146,9 @@ func TestViperLoaderAppliesDefaults(t *testing.T) {
 	}
 	if properties.Subagent.SnapshotRoot != DefaultSubagentSnapshotRoot {
 		t.Fatalf("unexpected subagent snapshot root default: %q", properties.Subagent.SnapshotRoot)
+	}
+	if !properties.Plugin.Enabled || properties.Plugin.Root != DefaultPluginRoot {
+		t.Fatalf("unexpected plugin defaults: %#v", properties.Plugin)
 	}
 	retrieval := properties.RAG.Retrieval
 	if retrieval.CandidateMultiplier != 3 || retrieval.MaxCandidates != 100 || retrieval.MinLocalResults != 3 || retrieval.MinLocalScore != 0.55 || retrieval.RRFK != 60 || !retrieval.CacheRemoteResults {

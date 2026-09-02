@@ -31,6 +31,8 @@ go run . help
 go run . chat
 ```
 
+可用的顶层命令包括：`agent`、`chat`、`client`、`completion`、`help`、`relay`、`sandbox` 和 `skill`。其中 `completion`、`help` 由 Cobra 提供，`sandbox` 还包含 `doctor` 子命令。
+
 When MongoDB persistence is enabled, run MongoDB as a replica set. A single-node
 replica set is sufficient. Subagent `Task + Run` transitions and transcript
 replacement use MongoDB transactions; standalone MongoDB rejects these flows.
@@ -45,6 +47,13 @@ Start the relay:
 go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" --agent-user local --agent-device pc-local
 ```
 
+When using the Expo Web client from a local development server, allow its
+browser origins on the Relay (native Android clients do not send an Origin):
+
+```powershell
+$env:MYAI_RELAY_ALLOWED_ORIGINS = "http://localhost:*,http://127.0.0.1:*"
+```
+
 Start the PC agent and choose the workspace that clients can preview:
 
 ```powershell
@@ -57,8 +66,14 @@ After pairing the Android app, open `Files` to browse and preview files from tha
 
 ## Current Commands
 
-- `myai help`: shows command help
+- `myai agent`: starts the PC Agent and connects to Relay
 - `myai chat`: starts a simple interactive chat loop
+- `myai client`: starts the remote client simulator
+- `myai completion`: generates shell completion scripts
+- `myai help`: shows command help
+- `myai relay`: starts the mobile/Agent Relay
+- `myai sandbox doctor`: runs a temporary OpenSandbox smoke test
+- `myai skill`: lists, searches, reloads, or installs Skills
 
 Inside chat:
 
@@ -67,7 +82,7 @@ Inside chat:
 
 ## Main Capabilities
 
-- OpenAI-compatible model providers and streaming responses
+- OpenAI Chat Completions、Anthropic Messages、Google Generative AI、Mistral Chat 和 Ollama Chat 协议及流式响应
 - Chat and Plan session modes
 - Local tools, permission approval, Skills, Hooks, and MCP tools
 - MongoDB persistence, Redis current-session cache, and SQLite workspace history

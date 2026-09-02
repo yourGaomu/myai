@@ -30,6 +30,7 @@ type Server struct {
 	connections      map[*peer]*clientConnection
 	agentCredentials map[string]string
 	origins          map[string]struct{}
+	loopbackOrigins  map[string]struct{}
 	allowAllOrigins  bool
 }
 
@@ -62,6 +63,10 @@ func WithAllowedOrigins(origins ...string) Option {
 				server.allowAllOrigins = true
 				continue
 			}
+			if pattern, ok := normalizeLoopbackOriginPattern(origin); ok {
+				server.loopbackOrigins[pattern] = struct{}{}
+				continue
+			}
 			if normalized, ok := normalizeOrigin(origin); ok {
 				server.origins[normalized] = struct{}{}
 			}
@@ -83,6 +88,7 @@ func NewServer(addr string, authStore authorizationport.Store, options ...Option
 		connections:      make(map[*peer]*clientConnection),
 		agentCredentials: make(map[string]string),
 		origins:          make(map[string]struct{}),
+		loopbackOrigins:  make(map[string]struct{}),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -328,7 +334,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
 	case protocol.TypeSubagentTaskEvent:
 		return s.forwardEventToClients(message)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	default:
 		return fmt.Errorf("unsupported agent message type: %s", message.Type)
@@ -351,7 +357,7 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
-	case protocol.TypeUserMessage, protocol.TypeAgentRunList, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationSet, protocol.TypeSessionStyleSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeModelConfigAdd, protocol.TypeModelConfigTest, protocol.TypeModelConfigUpdate, protocol.TypeModelConfigDelete, protocol.TypeModelConfigEnabledSet, protocol.TypeModelConfigDefaultSet, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeAIMemoryList, protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryDreamRun, protocol.TypeAIMemoryDreamList, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskWait, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeSubagentTaskResume, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypeAgentRunList, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationSet, protocol.TypeSessionStyleSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeModelConfigAdd, protocol.TypeModelConfigTest, protocol.TypeModelConfigUpdate, protocol.TypeModelConfigDelete, protocol.TypeModelConfigEnabledSet, protocol.TypeModelConfigDefaultSet, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypePluginList, protocol.TypePluginReload, protocol.TypePluginEnable, protocol.TypePluginDisable, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeAIMemoryList, protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryDreamRun, protocol.TypeAIMemoryDreamList, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskWait, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeSubagentTaskResume, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
@@ -360,7 +366,20 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeHeartbeat:
-		s.touchClient(message.RequestID)
+		// Heartbeats also keep an idle mobile connection registered for push-style
+		// events (for example subagent_task_event).  Validate the paired identity
+		// before refreshing the connection; request_id is optional for heartbeats.
+		// Keep accepting the legacy empty heartbeat emitted by older APKs while they
+		// are being upgraded; it can only touch an already-registered request route.
+		if message.UserID == "" && message.DeviceID == "" && message.ClientToken == "" {
+			s.touchClient(message.RequestID)
+			return nil
+		}
+		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
+			return fmt.Errorf("client token is invalid or expired")
+		}
+		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
+		s.touchClientPeer(p)
 	default:
 		return fmt.Errorf("unsupported client message type: %s", message.Type)
 	}
@@ -464,6 +483,12 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSkillListResult
 	case protocol.TypeSkillReload:
 		return responseType == protocol.TypeSkillReloadResult
+	case protocol.TypePluginList:
+		return responseType == protocol.TypePluginListResult
+	case protocol.TypePluginReload:
+		return responseType == protocol.TypePluginReloadResult
+	case protocol.TypePluginEnable, protocol.TypePluginDisable:
+		return responseType == protocol.TypePluginMutationResult
 	case protocol.TypeAssetList:
 		return responseType == protocol.TypeAssetListResult
 	case protocol.TypeKnowledgeCatalogList:

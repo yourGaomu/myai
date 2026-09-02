@@ -7,7 +7,7 @@ import { newRequestID } from "../utils/ids";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 const remoteStateTimeoutMs = 8000;
-const timeoutActions: PendingAction[] = ["sessions", "models", "skills", "assets"];
+const timeoutActions: PendingAction[] = ["sessions", "models", "skills", "plugins", "assets"];
 
 type Args = {
   clearAssets: () => void;
@@ -16,6 +16,7 @@ type Args = {
   clearModels: () => void;
   clearSessions: () => void;
   clearSkills: () => void;
+	clearPlugins: () => void;
   clearWorkspaceChanges: () => void;
   clientToken: string;
   currentFilePath: string;
@@ -35,6 +36,7 @@ export function useRemoteRequests({
   clearModels,
   clearSessions,
   clearSkills,
+	clearPlugins,
   clearWorkspaceChanges,
   clientToken,
   currentFilePath,
@@ -135,6 +137,34 @@ export function useRemoteRequests({
     }
     return true;
   }, [clearSkills, clientToken, sendEnvelope, startPending, stopPending]);
+
+  const requestPlugins = useCallback(() => {
+    if (!clientToken) {
+      clearPlugins();
+      stopPending("plugins");
+      return false;
+    }
+    startPending("plugins");
+    if (!sendEnvelope("plugin_list", { request_id: newRequestID() })) {
+      stopPending("plugins");
+      return false;
+    }
+    return true;
+  }, [clearPlugins, clientToken, sendEnvelope, startPending, stopPending]);
+
+  const reloadPlugins = useCallback(() => {
+    if (!clientToken) {
+      clearPlugins();
+      stopPending("plugins");
+      return false;
+    }
+    startPending("plugins");
+    if (!sendEnvelope("plugin_reload", { request_id: newRequestID() })) {
+      stopPending("plugins");
+      return false;
+    }
+    return true;
+  }, [clearPlugins, clientToken, sendEnvelope, startPending, stopPending]);
 
   const requestAgentRuns = useCallback(
     (nextSessionID = currentSessionID) => {
@@ -345,9 +375,10 @@ export function useRemoteRequests({
     requestSessions();
     requestModels();
     requestSkills();
+    requestPlugins();
     requestAssets();
     stopRemoteStateLoadingLater();
-  }, [requestAssets, requestModels, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
+  }, [requestAssets, requestModels, requestPlugins, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
 
   return {
     reloadSkills,
@@ -358,6 +389,8 @@ export function useRemoteRequests({
     requestFiles,
     requestHistory,
     requestModels,
+    requestPlugins,
+    reloadPlugins,
     requestSkills,
     requestDeletedSessions,
     requestSessionHistoryDelta,

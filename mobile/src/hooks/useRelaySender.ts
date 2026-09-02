@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from "react";
 
 import type { RelayMessage } from "../protocol";
 import { newRequestID } from "../utils/ids";
+import type { RelaySocketHandle } from "./useRemoteRuntimeRefs";
 
 type Args = {
   activeRequestIDRef: RefObject<string>;
@@ -10,7 +11,7 @@ type Args = {
   deviceID: string;
   sessionID: string;
   userID: string;
-  socketRef: RefObject<WebSocket | null>;
+  socketRef: RefObject<RelaySocketHandle | null>;
 };
 
 // 统一构造跨端消息信封，确保所有请求都携带 user/device/session/token 路由信息。

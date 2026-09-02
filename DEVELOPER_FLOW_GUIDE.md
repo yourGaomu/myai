@@ -88,7 +88,7 @@ Relay **不调用模型、不读写会话、不执行工具**。Agent 才是远�
 |---|---|---|
 | Go 1.25 | 后端、CLI、Relay、Agent | 是 |
 | Node.js + npm | Expo 手机端 | 手机端需要 |
-| OpenAI-compatible 模型地址与密钥 | 模型生成 | 是 |
+| 已配置且受支持的模型协议与凭据 | 模型生成 | 是 |
 | MongoDB | 会话、消息、模型、资源持久化 | 推荐，可选 |
 | Redis | 当前会话 ID 缓存 | 推荐，可选 |
 | SQLite | 工作区变更基线和任务检查点 | Agent 自动使用 |
@@ -197,7 +197,7 @@ main.main
         -> core.InitApp()
         -> files.New(agentWorkspace)
         -> changes.NewWithStoreFactory(... SQLite ...)
-        -> remoteagent.New(config, ChatService, fileService, changeService)
+        -> remoteagent.New(config, ChatService, fileService, changeService, Knowledge, Memory, MemoryExtraction, MemoryDream, Subagent, SubagentEvents)
         -> Agent.Run(ctx)
 ```
 
@@ -206,22 +206,26 @@ main.main
 包级入口 `core.InitApp()` 使用 `sync.Once`，同一进程只会执行一次；它按顺序调用 `Application` 上的各个初始化方法：
 
 ```text
-1. InitConfig           读取 application.yaml
-2. InitAssetClient      初始化短链接/上传客户端（可选）
-3. InitMongoDb          初始化 Mongo Client（可选）
-4. InitRedisDb          初始化 Redis Client（可选）
-5. InitStore            创建 Mongo persistence Store（Mongo 存在时）
-6. InitCache            创建 Redis CurrentSessionCache（Redis 存在时）
-7. InitThreadPool       创建异步持久化执行器
-8. InitClient           读取/注册模型配置
-9. InitSessionMemory    创建进程内 Session Store
-10. InitSandbox         创建受 workspace 限制的 Shell Sandbox
-11. InitSkillManager    加载本地 Skill 根目录
-12. InitHookManager     加载命令 Hook
-13. InitRegister        注册本地工具
-14. InitMCP             启动 MCP 并把工具注册进同一 Registry
-15. InitChatService     composition/chat 显式装配所有用例
-16. ChatService.Bootstrap 恢复或创建当前会话
+1. InitConfig             读取 application.yaml
+2. InitAssetClient        初始化短链接/上传客户端（可选）
+3. InitMongoDb            初始化 Mongo Client（可选）
+4. InitRedisDb            初始化 Redis Client（可选）
+5. InitStore              创建 Mongo persistence Store（Mongo 存在时）
+6. InitThreadPool         创建异步持久化执行器
+7. InitMemoryStorage      创建 Mongo 或内存 AI Memory Store
+8. InitKnowledgeStorage   创建知识库 Repository、Embedding、Vector、Keyword 和索引/检索服务
+9. InitCache              创建 Redis CurrentSessionCache（Redis 存在时）
+10. InitClient            读取/注册模型配置
+11. InitMemoryServices    创建 AI Memory Catalog、Extraction、Dream 等服务
+12. InitSessionMemory     创建进程内 Session Store
+13. InitSandbox            创建本地执行器及可选 OpenSandbox
+14. InitWorkspaceIsolation 创建 Snapshot/OpenSandbox 工作区路由
+15. InitSkillManager      加载本地 Skill 根目录
+16. InitHookManager       加载命令 Hook
+17. InitRegister          注册本地工具
+18. InitMCP               启动 MCP 并把工具注册进同一 Registry
+19. InitChatService       composition/chat 显式装配所有用例并 Bootstrap 当前会话
+20. InitSubagents         创建子智能体调度器、仓储、事件总线并恢复中断任务
 ```
 
 实现位置：
@@ -288,7 +292,7 @@ go run . relay --addr 0.0.0.0:18080 --agent-token "replace-with-a-strong-token" 
 | `--agent-user` | `MYAI_RELAY_AGENT_USER` 或 `local` | `--agent-token` 允许声明的用户身份 |
 | `--agent-device` | `MYAI_RELAY_AGENT_DEVICE` 或 `pc-local` | `--agent-token` 允许声明的设备身份 |
 | `--agent-credential` | `MYAI_RELAY_AGENT_CREDENTIALS` | 额外凭据，可重复设置，格式为 `user/device=token` |
-| `--allowed-origin` | 空 | 允许跨域访问 Relay 的额外浏览器 Origin，可重复指定 |
+| `--allowed-origin` | `MYAI_RELAY_ALLOWED_ORIGINS` | 允许跨域访问 Relay 的额外浏览器 Origin，可重复指定；多个值可用逗号或分号分隔；本地 Expo 可用 `http://localhost:*` 和 `http://127.0.0.1:*` |
 | `--urlConfig` | `./resource/application.yaml` | Relay 读取 Mongo 授权仓库的配置文件 |
 
 注意：参数名当前是 `urlConfig`，这是代码中的实际命名，不是文档笔误。
@@ -1134,7 +1138,7 @@ Agent.processUserMessage / processRegenerateMessage / processPlanExecuteMessage
   -> runtime.start
 ```
 
-同一 Session 已运行时返回 busy。会话设置、删除等 Handler 同样获取该 Session 的锁，防止在生成过程中切换/删除同一会话。
+当前代码先获取 `runtime.mu` 再调用 `runtime.start`。因此同一 Session 的第二个生成请求通常会阻塞等待前一个请求释放锁，而不是立即返回 busy；只有拿到锁后仍发现运行状态未清理时才会返回 `session is already running`。会话设置、删除等 Handler 同样获取该 Session 的锁，防止在生成过程中切换/删除同一会话。
 
 ### 15.2 暂停
 
@@ -1191,7 +1195,7 @@ Plan 执行发现取消后，会将 Plan 标记为 `canceled` 并推送最新状
 ```text
 Mobile useChatActions 是否建立 requestSessionMap
 -> Relay clients[request_id] 是否登记
--> Agent 是否因同 Session 正在运行而返回 busy
+-> Agent 是否因同 Session 正在运行而等待锁，或在状态未清理时返回 busy
 -> 模型是否报错
 -> Agent 是否发送 assistant_done 或 error
 -> Relay isTerminalResponseForRequest 是否包含该请求类型

@@ -149,7 +149,10 @@ myai/
 │   ├── tool/                       # 工具定义、注册及本地工具
 │   ├── contextmgr/                 # 上下文窗口、摘要和 token 计算
 │   ├── history/                    # 工作区任务历史与快照
-│   ├── sandbox/                    # 本地命令执行边界
+│   ├── adapter/execution/local/    # 本地宿主机命令执行 Adapter
+│   ├── adapter/sandbox/opensandbox/ # OpenSandbox 隔离环境 Adapter
+│   ├── port/execution/             # 命令执行 Port
+│   ├── port/sandbox/               # 隔离环境 Port
 │   ├── skill/、skillhub/           # Skill 加载和安装
 │   ├── hook/                       # 生命周期和工具事件 Hook
 │   ├── mcp/                        # MCP 客户端和工具注册
@@ -280,12 +283,13 @@ sequenceDiagram
     Main->>Cmd: Execute()
     Cmd->>App: SetWorkspace + InitApp
     App->>App: 加载配置
-    App->>App: 初始化 Mongo / Redis / 线程池 / LLM
-    App->>App: 初始化 Session / Sandbox / Skill / Hook / Tool / MCP
+    App->>App: 初始化 Mongo / Redis / 线程池 / Memory / Knowledge / LLM
+    App->>App: 初始化 Session / Sandbox / Workspace / Skill / Hook / Tool / MCP
     App->>Comp: NewService(Configuration)
     Comp->>Comp: 创建 use cases 与 adapters
     Comp->>Facade: NewChatService(ChatDependencies)
     App->>Facade: Bootstrap()
+    App->>App: 初始化 Subagents 与 TaskEvent bus
 ```
 
 ### 8.1 `core/App.go` 的职责
@@ -296,7 +300,7 @@ sequenceDiagram
 - 创建数据库和缓存客户端。
 - 创建模型注册表、内存会话、工具、Skill、Hook、MCP。
 - 调用 composition root 创建 ChatService。
-- 在退出时关闭 MCP 和线程池。
+- 在退出时停止 Subagent Scheduler、线程池，并关闭 MCP、Workspace、DocumentProcessor、Vector/Keyword Store。
 
 它不应该承载聊天业务规则。
 
@@ -364,8 +368,8 @@ sequenceDiagram
 Plan 模式不是把用户输入改写成另一段用户输入，也不是替换整个固定系统提示词。它由三部分协作完成：
 
 1. **会话状态**：`Session.AgentMode = plan`。
-2. **运行时提示词**：在本轮最新 user message 之前临时插入 Plan 指令。
-3. **代码层编排**：捕获结构化计划，并在用户批准后逐步骤执行。
+2. **运行时提示词**：在本轮最新 user message 之前追加一条 Synthetic runtime message。
+3. **代码层编排**：捕获结构化计划，并按手动批准或自动 Plan 策略执行。
 
 ### 10.1 手机切换 Chat / Plan
 
@@ -400,24 +404,24 @@ sequenceDiagram
 ...
 ```
 
-Plan 模式下，在构建本轮模型快照时临时形成：
+Plan 模式下，本轮消息命令会先持久化一条 Synthetic runtime message，再形成模型快照：
 
 ```text
 [system] 固定的 MyAI 系统提示词
 [历史消息 ...]
-[system] Runtime instructions for this turn: Plan mode rules...
+[system] Runtime instructions for this turn: Plan mode rules... (Synthetic)
 [user]   本轮最新输入
 ```
 
-临时运行时指令不会写回历史消息，因此：
+这条 Synthetic message 与 user message 一起写入 `Session.Messages` 并持久化；它不是普通用户消息，查询历史时会被过滤，因此 Mobile 历史不会显示它。这样：
 
 - 固定系统提示词不变。
 - 旧消息顺序不变。
-- 模式切换不需要重写整个会话。
+- 模式切换不需要重写整个会话，旧 turn 的 runtime 规则也不会自动作用于新 turn。
 - 大模型看到的稳定前缀可以继续命中 prompt cache。
 - 变化内容只位于靠近本轮输入的尾部。
 
-Skill 指令也通过同一运行时构建器按当前输入追加，而不是污染固定前缀。
+Skill 指令也通过同一运行时构建器按当前输入追加，并作为同一条 Synthetic runtime message 保存。
 
 ### 10.3 生成计划
 
@@ -429,9 +433,9 @@ Plan 指令要求模型输出：
 2. 第二步
 ```
 
-`ResponseCommitService` 保存 assistant 消息后，`CaptureService` 从回复中捕获 Plan，生成 `Plan` 和 `PlanStep`，再保存到 `Session.CurrentPlan`。
+`ResponseCommitService` 保存 assistant 消息后，`CaptureService` 从回复中捕获 Plan，生成 `Plan` 和 `plan.Step`，再保存到 `Session.CurrentPlan`。
 
-对于需要写文件、执行命令或产生外部副作用的任务，模型应在 Plan 后停止，等待用户点击执行。
+手动 Plan 对于需要写文件、执行命令或产生外部副作用的任务，会在 Plan 后停止，等待用户点击 Execute。启用 `ChatDependencies.AutoPlanEnabled` 后，根用户会话中的实现类请求可在同一请求内先生成只读 Plan，再自动进入执行阶段；分类失败时会安全地回退为普通聊天。
 
 ### 10.4 执行已批准计划
 
@@ -442,7 +446,7 @@ Plan 指令要求模型输出：
 3. 把当前步骤标记为 `running` 并推送 `session_plan_update`。
 4. 为当前步骤构造一条明确的执行输入。
 5. 调用正常生成链路，并设置 `ForceChatMode=true`。
-6. 允许该步骤按照权限策略调用写文件、Shell 等工具。
+6. 允许该步骤按照权限策略调用写文件、Shell 等工具；有依赖的结构化 Plan 按 dependency-ready batch 执行，默认最多 3 个步骤并行，并支持步骤重试与 Recovery planner。
 7. 完成后将步骤标记为 `done`。
 8. 所有步骤结束后将 Plan 标记为 `done`。
 
@@ -706,7 +710,8 @@ myai:
   model: "your-model"
 
 mongo:
-  uri: "mongodb://localhost:27017"
+  # 事务相关流程要求副本集；单节点副本集可用
+  uri: "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
   database: "myai"
 
 redis:

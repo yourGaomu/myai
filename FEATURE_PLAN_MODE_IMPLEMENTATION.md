@@ -2,19 +2,23 @@
 
 > 本文解释 Session 如何切换到 Plan 模式、模型如何生成结构化 Plan、纯文本任务为何可以直接完成，以及用户点击 Execute 后每个步骤如何执行。普通聊天见 [普通聊天消息功能实现](FEATURE_CHAT_MESSAGE_IMPLEMENTATION.md)，模型底层见 [模型生成功能实现](FEATURE_MODEL_GENERATION_IMPLEMENTATION.md)，工具权限见 [工具执行功能实现](FEATURE_TOOL_EXECUTION_IMPLEMENTATION.md)。
 
-## 1. 两个独立阶段
+## 1. 规划与执行阶段
 
-Plan 模式不是“一次模型调用自动完成所有操作”，而是两个阶段：
+显式 Plan 模式仍然保留“先规划、再执行”的两个阶段；另外，根用户会话可以通过 `AutoPlanEnabled` 在同一条请求内自动串起这两个阶段。
 
 ```text
 阶段 A：生成计划
-用户消息 -> Plan prompt -> 只读检查 -> Markdown Plan -> Capture -> draft/done
+用户消息 -> Plan prompt -> 只读检查 -> 结构化/Markdown Plan -> Capture -> draft/done
 
 阶段 B：执行计划
-用户点击 Execute -> 逐步骤生成任务 -> 可写工具 -> running/done/failed/canceled
+用户点击 Execute，或 AutoPlan 同请求自动触发 -> 逐步骤生成任务 -> 可写工具 -> running/done/failed/canceled
 ```
 
 内容创作等安全纯文本任务可以在阶段 A 同时输出 `Plan` 和 `Result`，直接标记 done，不进入阶段 B。
+
+`ChatDependencies.AutoPlanEnabled` 只作用于根用户会话。分类器返回结构化意图（`conversation`、`explanation`、`implementation`）并要求足够置信度；分类失败或信号不足时安全地走普通 Chat。子智能体不会递归触发 AutoPlan。
+
+自动规划使用 `core/application/runtime/service.AutonomousPlanPrompt`，与手动 Plan prompt 分开：它要求先做只读规划，随后由 `ChatService` 调用已有 `PlanExecution`，而不是让一次模型回复自行声称已完成副作用操作。
 
 ## 2. 核心对象
 
@@ -40,6 +44,7 @@ type Plan struct {
 	SessionID  string
 	Goal       string
 	Status     string
+	Revision   int64
 	RawContent string
 	Steps      []Step
 	CreatedAt  time.Time
@@ -51,9 +56,18 @@ type Step struct {
 	Order       int
 	Title       string
 	Description string
-	Status      string
+	Dependencies []string
+	Status       string
+	RetryCount   int
+	MaxRetries   int
+	LastError    string
+	AgentTaskID  string
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
 }
 ```
+
+结构化 Plan 还接受 JSON `steps` 数组（字段 `id`、`order`、`title`、`description`、`depends_on`/`dependencies`、`max_retries`）；旧会话或普通模型仍可使用 Markdown 列表作为兼容回退。每个 Plan 最多保留 12 个步骤。
 
 Plan 状态：
 
@@ -165,7 +179,7 @@ Plan prompt 要求模型：
 - 只能使用只读检查工具。
 - 必须输出名为 `Plan` 的 Markdown 章节和编号步骤。
 - 纯文本安全任务在同一回复增加 `Result` 并完成产出。
-- 有副作用任务在 Plan 后停止，等待用户批准。
+- 手动 Plan 的副作用任务在 Plan 后停止，等待用户批准；AutoPlan 由 ChatService 在同一请求内继续执行已捕获的计划。
 
 该 prompt 是代码常量；每次用户发送消息时，`MessageCommandService` 会把本轮构建结果写成 `SyntheticReasonRuntimeInstruction` 消息，再追加真实 user message。
 
@@ -308,7 +322,7 @@ result / final result / output / final output / answer / final answer
 
 ## 19. Action Plan 为什么停在 draft
 
-文件编辑、Shell、安装等请求按 PlanModePrompt 只能输出 Plan，不输出 Result。Capture 后：
+手动 Plan 下，文件编辑、Shell、安装等请求按 PlanModePrompt 只能输出 Plan，不输出 Result。Capture 后：
 
 ```text
 Plan.Status = draft
@@ -316,6 +330,18 @@ Steps[*].Status = pending
 ```
 
 手机 PlanPanel 显示目标、步骤和 Execute 按钮，等待用户显式批准。
+
+启用 AutoPlan 时，`ChatService.SendMessageStreamForSession` 会：
+
+```text
+分类实现类请求
+-> Clone Session 并以 Plan 模式做只读规划
+-> 捕获并持久化 CurrentPlan
+-> PlanExecution.Execute(ParentRunID=planning.RunID)
+-> 返回合并后的执行结果
+```
+
+规划流的正文不会拼进最终回答，但 Plan/Step 进度仍通过回调和 AgentRun 记录；纯文本 Plan+Result 仍可直接完成。
 
 ## 20. PlanPanel
 
@@ -440,7 +466,22 @@ running/failed/pending Step 重置为 pending
 
 ## 27. 每步执行状态机
 
-对每个 Step：
+ExecutionService 按依赖就绪批次执行 Step；没有依赖的旧 Markdown Plan 仍按顺序串行执行，声明依赖的结构化 Plan 可并行。
+
+```text
+选择 dependency-ready batch（默认最多 3 个并行步骤）
+-> 每个 Step 检查 ctx
+-> Step = running
+-> save + update
+-> BuildStepInput
+-> AppendUserMessage
+-> PersistUserMessage
+-> GenerationTasks.Generate(ForceChatMode=true)
+-> 成功: Step = done -> save + update
+-> 失败: 按 MaxRetries 重试；耗尽后调用 Recovery planner 或标记 Step/Plan failed
+```
+
+每个 Step：
 
 ```text
 检查 ctx
@@ -451,7 +492,7 @@ running/failed/pending Step 重置为 pending
 -> PersistUserMessage
 -> GenerationTasks.Generate(ForceChatMode=true)
 -> 成功: Step = done -> save + update
--> 失败: Step = failed, Plan = failed -> save + error
+-> 失败: 按 MaxRetries 重试；耗尽后调用 Recovery planner 或标记 Step/Plan failed
 ```
 
 全部步骤成功后：
@@ -683,11 +724,11 @@ Plan 模式只读工具检查源码
 
 ```text
 固定 Session system 不变
-本轮 Snapshot 临时插入 PlanPrompt
-下一轮 Chat 不插入
+本轮先追加 Synthetic runtime message，再构建 Snapshot
+下一轮 Chat 追加自己的 turn boundary/runtime message，不重写旧消息
 ```
 
-因此固定前缀和已持久化历史不会因模式开关被重写。
+Synthetic runtime message 会进入 `Session.Messages` 并持久化，但历史查询会过滤它；因此固定 system 和已持久化历史不会因模式开关被重写，Mobile 也不会看到伪造的普通用户消息。
 
 ## 41. 问题清理结果
 

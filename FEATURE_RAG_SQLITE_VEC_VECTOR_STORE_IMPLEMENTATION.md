@@ -452,9 +452,9 @@ go test ./core/architecture
 - 当前只支持 COSINE 和 L2，不支持 Milvus 的 IP Metric；
 - 本地容量上限、`last_accessed_at` 和 LRU 淘汰尚未实现；
 - 本地损坏后的隔离、Snapshot 和增量恢复尚未实现；
-- LocalQualityGate、本地优先回退和 RRF 已实现，但尚未接入 ChatService；
+- LocalQualityGate、本地优先回退、RRF 和 ChatService 的 Session RAG 接入已实现；
 - vec0 当前没有暴露 HNSW/IVF 等可调 ANN Index，`VectorIndexDefinition.Options` 不参与本地建表；
 - WASM 和原生 Milvus 的性能对比仍需要使用真实知识量级做 Benchmark；
-- 尚未提供 CLI、手机端知识库管理和检索入口。
+- Mobile 已提供知识库管理、文档导入、索引进度、重试、删除和检索预览；当前仍未提供独立 CLI 检索命令。
 
-下一阶段应实现显式知识检索入口、Chat RetrievalTriggerPolicy 和 LRU。不要在 ChatService 中直接调用两个 VectorStore，否则会把检索策略重新耦合进聊天主链路。
+下一阶段可继续实现独立 CLI 检索命令、检索触发规则的可配置化和 LRU。不要在 ChatService 中直接调用两个 VectorStore，否则会把检索策略重新耦合进聊天主链路。

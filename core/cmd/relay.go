@@ -72,7 +72,7 @@ func init() {
 	relayCmd.Flags().StringVar(&relayAgentUser, "agent-user", environmentOrDefault("MYAI_RELAY_AGENT_USER", "local"), "user id bound to --agent-token")
 	relayCmd.Flags().StringVar(&relayAgentDevice, "agent-device", environmentOrDefault("MYAI_RELAY_AGENT_DEVICE", "pc-local"), "device id bound to --agent-token")
 	relayCmd.Flags().StringSliceVar(&relayCredentials, "agent-credential", splitRelayCredentialList(os.Getenv("MYAI_RELAY_AGENT_CREDENTIALS")), "additional identity-bound credential in user/device=token format")
-	relayCmd.Flags().StringSliceVar(&relayOrigins, "allowed-origin", nil, "additional browser origins allowed by CORS and WebSocket checks; use * to allow all HTTP/HTTPS origins")
+	relayCmd.Flags().StringSliceVar(&relayOrigins, "allowed-origin", splitRelayOriginList(os.Getenv("MYAI_RELAY_ALLOWED_ORIGINS")), "additional browser origins allowed by CORS and WebSocket checks; use * to allow all HTTP/HTTPS origins")
 }
 
 func configuredRelayAgentCredentials() ([]relay.AgentCredential, error) {
@@ -120,6 +120,17 @@ func configuredRelayAgentCredentials() ([]relay.AgentCredential, error) {
 
 func splitRelayCredentialList(value string) []string {
 	return strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' })
+}
+
+func splitRelayOriginList(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' })
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }
 
 func environmentOrDefault(name string, fallback string) string {

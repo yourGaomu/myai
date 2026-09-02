@@ -336,7 +336,8 @@ Query 当前严格要求一个输入。Provider 返回统一的 `EmbedResult`，
 - Jina、Voyage、HuggingFace 等独立 Adapter；
 - Provider 级限流、指数退避和指标统计；
 - 本地 Tokenizer 的 MaxInputTokens 预检查；
-- sqlite-vec 本地热点 VectorStore。
+
+sqlite-vec 本地热点 VectorStore 已由其他文档说明并完成 Adapter，不属于 Embedding Model 管家的未完成功能。
 
 Provider 扩展时应新增 Adapter，并只在 Composition Root 注册实现，不能向 `EmbeddingProvider` 接口加入供应商 DTO。
 

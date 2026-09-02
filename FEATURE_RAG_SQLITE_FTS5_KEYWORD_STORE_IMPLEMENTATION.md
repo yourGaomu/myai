@@ -350,6 +350,6 @@ go test ./core/architecture
 
 - `unicode61` 不是中文专业分词器；
 - 本地 KeywordStore 目前是完整写入，不含 LRU 容量淘汰；
-- sqlite-vec、本地优先 RetrievalService、热点回填、LocalQualityGate 和 RRF 已实现；
-- LRU、远程关键词检索和 ChatService 接入尚未实现；
-- 当前没有 CLI/手机端的知识导入和检索入口。
+- sqlite-vec、本地优先 RetrievalService、热点回填、LocalQualityGate、RRF 和 Chat RAG 接入已实现；
+- LRU 和远程关键词检索仍未实现；
+- Mobile 已提供知识库文档导入、索引状态、重试、删除和检索预览，当前没有独立 CLI 检索命令。

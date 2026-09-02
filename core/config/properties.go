@@ -11,6 +11,7 @@ type Properties struct {
 	Skill    SkillProperties
 	Sandbox  SandboxProperties
 	Subagent SubagentProperties
+	Plugin   PluginProperties
 	Hooks    HookProperties
 	MCP      MCPProperties
 }
@@ -178,6 +179,11 @@ type SubagentProperties struct {
 	WorkerCount  int
 	QueueSize    int
 	SnapshotRoot string
+}
+
+type PluginProperties struct {
+	Enabled bool
+	Root    string
 }
 
 type HookProperties struct {

@@ -31,6 +31,7 @@ type Agent struct {
 	memoryDream       MemoryDreamFacade
 	subagentService   SubagentFacade
 	subagentEvents    SubagentEventSource
+	pluginManager     PluginManagerFacade
 	runtimes          *sessionRuntimeManager
 	writeMu           sync.Mutex
 	requestMu         sync.Mutex
@@ -38,7 +39,7 @@ type Agent struct {
 	permissionTimeout time.Duration
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource, pluginManager PluginManagerFacade) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
@@ -54,6 +55,7 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		memoryDream:       memoryDream,
 		subagentService:   subagentService,
 		subagentEvents:    subagentEvents,
+		pluginManager:     pluginManager,
 		runtimes:          newSessionRuntimeManager(),
 		permissionWaiters: newPermissionWaiterRegistry(),
 		permissionTimeout: 60 * time.Second,
@@ -332,6 +334,14 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSkillList(ctx, conn, message)
 	case protocol.TypeSkillReload:
 		return a.handleSkillReload(ctx, conn, message)
+	case protocol.TypePluginList:
+		return a.handlePluginList(ctx, conn, message)
+	case protocol.TypePluginReload:
+		return a.handlePluginReload(ctx, conn, message)
+	case protocol.TypePluginEnable:
+		return a.handlePluginToggle(ctx, conn, message, true)
+	case protocol.TypePluginDisable:
+		return a.handlePluginToggle(ctx, conn, message, false)
 	case protocol.TypeAssetList:
 		return a.handleAssetList(ctx, conn, message)
 	case protocol.TypeKnowledgeCatalogList:

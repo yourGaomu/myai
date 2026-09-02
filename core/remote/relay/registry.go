@@ -254,6 +254,25 @@ func (s *Server) touchClient(requestID string) {
 	}
 }
 
+func (s *Server) touchClientPeer(p *peer) {
+	if p == nil {
+		return
+	}
+
+	now := time.Now()
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	for _, client := range s.clients {
+		if client.peer == p {
+			client.LastSeenAt = now
+		}
+	}
+	if connection := s.connections[p]; connection != nil {
+		connection.LastSeenAt = now
+	}
+}
+
 func (s *Server) unregisterClient(requestID string) {
 	if requestID == "" {
 		return

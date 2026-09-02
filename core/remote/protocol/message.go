@@ -83,6 +83,13 @@ const (
 	TypeSkillListResult                  MessageType = "skill_list_result"
 	TypeSkillReload                      MessageType = "skill_reload"
 	TypeSkillReloadResult                MessageType = "skill_reload_result"
+	TypePluginList                       MessageType = "plugin_list"
+	TypePluginListResult                 MessageType = "plugin_list_result"
+	TypePluginReload                     MessageType = "plugin_reload"
+	TypePluginReloadResult               MessageType = "plugin_reload_result"
+	TypePluginEnable                     MessageType = "plugin_enable"
+	TypePluginDisable                    MessageType = "plugin_disable"
+	TypePluginMutationResult             MessageType = "plugin_mutation_result"
 	TypeAssetList                        MessageType = "asset_list"
 	TypeAssetListResult                  MessageType = "asset_list_result"
 	TypeKnowledgeCatalogList             MessageType = "knowledge_catalog_list"
@@ -825,6 +832,41 @@ type SkillListResultPayload struct {
 	Count    int            `json:"count"`
 	Reloaded bool           `json:"reloaded,omitempty"`
 	Message  string         `json:"message,omitempty"`
+}
+
+type PluginListPayload struct{}
+
+type PluginTogglePayload struct {
+	PluginID string `json:"plugin_id"`
+}
+
+type PluginInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	Protocol   string `json:"protocol"`
+	Entrypoint string `json:"entrypoint,omitempty"`
+	Directory  string `json:"directory,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	Required   bool   `json:"required"`
+}
+
+type PluginListResultPayload struct {
+	Root     string       `json:"root"`
+	Plugins  []PluginInfo `json:"plugins"`
+	Count    int          `json:"count"`
+	Reloaded bool         `json:"reloaded,omitempty"`
+	Message  string       `json:"message,omitempty"`
+}
+
+type PluginMutationResultPayload struct {
+	PluginID string       `json:"plugin_id"`
+	Enabled  bool         `json:"enabled"`
+	Plugins  []PluginInfo `json:"plugins"`
+	Count    int          `json:"count"`
+	Message  string       `json:"message,omitempty"`
 }
 
 type AssetListPayload struct {

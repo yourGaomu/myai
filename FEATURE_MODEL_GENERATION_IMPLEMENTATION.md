@@ -24,7 +24,7 @@
 | Go 对象 | Spring Boot 类比 | 作用 |
 |---|---|---|
 | `ChatModelPort` | 模型 Gateway 接口 | 隔离具体模型 SDK |
-| `llm.Model` | Gateway 实现类 | 调用 LangChainGo/OpenAI-compatible provider |
+| `llm.Model` | Gateway 实现类 | 通过协议 Adapter 调用 LangChainGo 模型 provider |
 | `llm.Client` | Bean Registry | 保存 model ID 到运行时模型的映射 |
 | `TaskService` | 带审计切面的应用 Service | 创建任务 ID 和文件检查点 |
 | `AssistantGenerationService` | UseCase Service | 编排一次完整回答 |
@@ -139,7 +139,19 @@ Mongo 不可用
 -> 直接使用 YAML seed
 ```
 
-每个启用配置通过 Factory 创建：
+每个启用配置由 `adapter/model/langchaingo.Factory` 按 `Protocol` 选择 Adapter 创建。当前内置协议为：
+
+| 协议值 | 典型服务 | 认证/地址说明 |
+|---|---|---|
+| `openai-chat-completions` | OpenAI、DeepSeek、兼容 OpenAI 的网关 | HTTP API 根地址，可 Bearer 或无认证 |
+| `anthropic-messages` | Anthropic/Claude Messages API | 配置 `AuthType=bearer` 和 API key，使用 Anthropic 原生消息格式 |
+| `google-generative-ai` | Google Gemini Generative AI | 配置 `AuthType=bearer` 和 API key，使用 Google 默认原生生成接口；不支持自定义 `BaseURL` |
+| `mistral-chat` | Mistral Chat API | 配置 `AuthType=bearer` 和 API key，使用 Mistral 原生接口 |
+| `ollama-chat` | Ollama 本地服务 | 无认证，使用 Ollama Chat API |
+
+Provider 标签只是展示和筛选用的厂商字符串，不能替代协议选择。
+
+例如 OpenAI Chat Completions Adapter：
 
 ```go
 openai.New(
@@ -149,7 +161,7 @@ openai.New(
 )
 ```
 
-当前 provider 字符串最终都进入这个 OpenAI-compatible Adapter。
+其他协议由各自 Adapter 负责 endpoint、认证头和请求/响应映射；不能假设所有 provider 都共享 OpenAI-compatible 的 URL 或消息格式。
 
 ## 7. TaskService 的职责
 
@@ -378,6 +390,7 @@ type GenerateRequest struct {
 	Messages []domainmessage.Message
 	Tools    []Tool
 	Stream   ChatStreamHandler
+	Settings generation.ResolvedSettings
 }
 
 type ChatResult struct {
@@ -486,7 +499,7 @@ SettingsPanel
 
 ### 21.2 添加第三方模型
 
-当前新增模型只支持 OpenAI Chat Completions 兼容协议。这里的 `BaseURL` 是 API 根地址，例如：
+当前新增模型支持 Factory 已注册的五种协议。这里的 `BaseURL` 是对应协议的 API 根地址；OpenAI Chat Completions 例如：
 
 ```text
 https://api.example.com/v1
@@ -498,7 +511,7 @@ https://api.example.com/v1
 | 字段 | 含义 |
 |---|---|
 | `Provider` | 厂商标签，可填写 `deepseek`、`ollama` 等自由文本 |
-| `Protocol` | 当前固定为 `openai-chat-completions` |
+| `Protocol` | 选择具体请求协议，例如 `openai-chat-completions`、`anthropic-messages`、`google-generative-ai`、`mistral-chat` 或 `ollama-chat` |
 | `AuthType` | `bearer` 或 `none` |
 | `BaseURL` | API 根地址，不包含凭据、Query 或 Fragment |
 | `ModelName` | 厂商识别的模型名 |
@@ -584,7 +597,7 @@ Mobile 空输入框会被编码为 JSON `null`，表示继承；字符串 `"0"` 
 
 回复风格单独使用 `session_style_set`，避免参数有效但风格超过 2000 字符时出现一半成功、一半失败的状态。成功结果会回传最新 Preferences 和可见提示；服务端错误通过统一 `error` 协议回到当前设置区域。保存期间按钮进入 loading 并禁止重复提交。
 
-当前 Mobile 可以选择模型并修改 Session 覆盖值，但没有编辑 Model 默认生成参数的独立界面。Model 默认值仍由模型配置入口维护。`StyleInstruction` 只注入本轮 Runtime Instruction，不写入 `Session.Messages`，因此不会污染聊天历史或固定缓存前缀。
+当前 Mobile 可以选择模型并修改 Session 覆盖值，但没有编辑 Model 默认生成参数的独立界面。Model 默认值仍由模型配置入口维护。`StyleInstruction` 会作为本轮 Synthetic Runtime Instruction 写入并持久化到 `Session.Messages`，但历史查询会过滤 Synthetic Message，Mobile 不会把它展示为普通聊天消息。
 
 ## 22. 流式正文
 

@@ -3,6 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { defaultAssetBaseURL, defaultRelayURL, mobileSettingsKey } from "../constants/app";
 
+const legacyDefaultRelayURL = "http://127.0.0.1:18080";
+const legacyDefaultAssetBaseURL = "http://127.0.0.1:18081";
+
 type MobileSettings = {
   assetBaseURL: string;
   clientToken: string;
@@ -33,10 +36,10 @@ export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions 
         }
         const settings = JSON.parse(raw) as Partial<MobileSettings>;
         if (settings.relayURL) {
-          setRelayURL(settings.relayURL);
+          setRelayURL(settings.relayURL === legacyDefaultRelayURL ? defaultRelayURL : settings.relayURL);
         }
         if (settings.assetBaseURL) {
-          setAssetBaseURL(settings.assetBaseURL);
+          setAssetBaseURL(settings.assetBaseURL === legacyDefaultAssetBaseURL ? defaultAssetBaseURL : settings.assetBaseURL);
         }
         if (settings.userID) {
           setUserID(settings.userID);

@@ -15,6 +15,7 @@ import type {
   HistoryCheckpoint,
   HistoryDiffResultPayload,
   ModelSummary,
+  PluginInfo,
   SkillSummary,
   SessionSummary,
   KnowledgeBase,
@@ -87,6 +88,9 @@ export type SettingsContentProps = {
   onRefreshSessions: () => void;
   onRefreshSkills: () => void;
   onReloadSkills: () => void;
+  onRefreshPlugins: () => void;
+  onReloadPlugins: () => void;
+  onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -112,6 +116,9 @@ export type SettingsContentProps = {
   skillMessage: string;
   skillRoot: string;
   skills: SkillSummary[];
+  pluginRoot: string;
+  pluginMessage: string;
+  plugins: PluginInfo[];
   subagentDefinitions: SubagentDefinition[];
   subagentEvents: Record<string, SubagentTaskEvent[]>;
   subagentMessage: string;

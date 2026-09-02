@@ -25,11 +25,11 @@ import { useNavigationActions } from "../hooks/useNavigationActions";
 import { useNormalizedRelayUrl } from "../hooks/useNormalizedRelayUrl";
 import { usePairingActions } from "../hooks/usePairingActions";
 import { usePendingActions } from "../hooks/usePendingActions";
+import { usePluginActions } from "../hooks/usePluginActions";
+import { usePluginState } from "../hooks/usePluginState";
 import { useRelayConnection } from "../hooks/useRelayConnection";
 import {
-  startRelayForegroundService,
   stopRelayForegroundService,
-  updateRelayForegroundServiceStatus,
 } from "../native/relayForegroundService";
 import { useRemoteResultAppliers } from "../hooks/useRemoteResultAppliers";
 import { useRemoteMessageHandler } from "../hooks/useRemoteMessageHandler";
@@ -114,6 +114,13 @@ export function MobileAppScreen() {
     skillRoot,
     skills,
   } = useSkillState();
+  const {
+    applyPluginList,
+    clearPlugins,
+    pluginMessage,
+    pluginRoot,
+    plugins,
+  } = usePluginState();
   const {
     assets,
     clearAssets,
@@ -319,6 +326,14 @@ export function MobileAppScreen() {
     stopPending,
   });
 
+  const { setPluginEnabled } = usePluginActions({
+    clientToken,
+    onError: (message) => addMessage(sessionID, "error", message),
+    sendEnvelope,
+    startPending,
+    stopPending,
+  });
+
   const {
     refreshRemoteState,
     requestAssets,
@@ -326,6 +341,8 @@ export function MobileAppScreen() {
     requestFiles,
     requestHistory,
     requestModels,
+    requestPlugins,
+    reloadPlugins,
     reloadSkills,
     requestDeletedSessions,
     requestSkills,
@@ -340,6 +357,7 @@ export function MobileAppScreen() {
     clearModels,
     clearSessions,
     clearSkills,
+    clearPlugins,
     clearWorkspaceChanges,
     clientToken,
     currentFilePath: filePath,
@@ -623,6 +641,7 @@ export function MobileAppScreen() {
     isModelOperationPending: pendingActions.models,
     applyModelSwitch,
     applySkillList,
+    applyPluginList,
     applySubagentDefinitionList,
     applySubagentDefinitionMutation,
     applySubagentTaskList,
@@ -682,13 +701,13 @@ export function MobileAppScreen() {
     if (!clientToken) {
       return;
     }
-    void updateRelayForegroundServiceStatus("Relay 正在重连").catch((error) => {
-      console.warn("Relay foreground service status update failed", error);
-    });
-    // Android's foreground service keeps the app process eligible to run while
-    // backgrounded, so reconnect there as soon as the socket drops. iOS has no
-    // equivalent long-lived execution window; defer until it is foregrounded.
-    if (!appActiveRef.current && Platform.OS !== "android") {
+    // Android's native Foreground Service owns the socket and its reconnect loop.
+    // Do not create a second JS connection when its state changes in the background.
+    if (Platform.OS === "android") {
+      setStatus("Reconnecting");
+      return;
+    }
+    if (!appActiveRef.current) {
       reconnectOnForegroundRef.current = true;
       return;
     }
@@ -716,22 +735,13 @@ export function MobileAppScreen() {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    // Start the service while the activity is still visible. Android 12+ restricts
-    // creating a new foreground service from a background AppState callback.
-    if (appActiveRef.current && clientToken) {
-      void startRelayForegroundService().catch((error) => {
-        console.warn("Relay foreground service start failed", error);
-      });
-      void updateRelayForegroundServiceStatus("Relay 已连接").catch((error) => {
-        console.warn("Relay foreground service status update failed", error);
-      });
-    }
     refreshAllRemoteState();
-  }, [clientToken, refreshAllRemoteState]);
+  }, [refreshAllRemoteState]);
 
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
     clientToken,
+    deviceID,
     normalizedRelayURL,
     onConnected: handleConnected,
     onDisconnected: scheduleReconnect,
@@ -741,6 +751,7 @@ export function MobileAppScreen() {
     socketRef,
     startPending,
     stopPending,
+    userID,
   });
 
   useEffect(() => {
@@ -748,7 +759,7 @@ export function MobileAppScreen() {
   }, [connect]);
 
   useEffect(() => {
-    if (!settingsLoaded || !clientToken || AppState.currentState !== "active" || socketRef.current) {
+    if (!settingsLoaded || !clientToken || AppState.currentState !== "active") {
       return;
     }
 
@@ -759,7 +770,7 @@ export function MobileAppScreen() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [clientToken, settingsLoaded, socketRef]);
+  }, [clientToken, deviceID, normalizedRelayURL, settingsLoaded, userID]);
 
   useEffect(() => {
     appActiveRef.current = AppState.currentState === "active";
@@ -804,13 +815,16 @@ export function MobileAppScreen() {
   }, [clientToken]);
 
   useEffect(() => {
-    if (clientToken) {
+    if (!settingsLoaded) {
+      return;
+    }
+    if (clientToken && normalizedRelayURL && userID.trim() && deviceID.trim()) {
       return;
     }
     void stopRelayForegroundService().catch((error) => {
       console.warn("Relay foreground service stop failed", error);
     });
-  }, [clientToken]);
+  }, [clientToken, deviceID, normalizedRelayURL, settingsLoaded, userID]);
   const {
     openChanges,
     openChat,
@@ -1035,6 +1049,9 @@ export function MobileAppScreen() {
           onRefreshSessions: requestSessions,
           onRefreshSkills: requestSkills,
           onReloadSkills: reloadSkills,
+          onRefreshPlugins: requestPlugins,
+          onReloadPlugins: reloadPlugins,
+          onSetPluginEnabled: setPluginEnabled,
           onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,
           onSetAgentMode: setAgentMode,
@@ -1061,6 +1078,9 @@ export function MobileAppScreen() {
           skillMessage,
           skillRoot,
           skills,
+          plugins,
+          pluginMessage,
+          pluginRoot,
           subagentDefinitions,
           subagentEvents,
           subagentMessage,

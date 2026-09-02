@@ -31,6 +31,8 @@ import type {
   ModelConfigMutationResultPayload,
   ModelConfigTestResultPayload,
   ModelSwitchResultPayload,
+  PluginListResultPayload,
+  PluginMutationResultPayload,
   PermissionAskPayload,
   RelayMessage,
   SessionChangedPayload,
@@ -126,6 +128,7 @@ type Args = {
   applySessionGenerationPreferences: (payload?: SessionGenerationResultPayload) => void;
   applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
+  applyPluginList: (payload?: PluginListResultPayload | PluginMutationResultPayload) => void;
   applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
   applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
@@ -233,6 +236,7 @@ export function useRemoteMessageHandler({
   applySessionGenerationPreferences,
   applySessionGenerationError,
   applySkillList,
+  applyPluginList,
   applySubagentDefinitionList,
   applySubagentDefinitionMutation,
   applySubagentTaskList,
@@ -573,6 +577,12 @@ export function useRemoteMessageHandler({
           stopPending("skills");
           applySkillList(message.payload as SkillListResultPayload | undefined);
           break;
+        case "plugin_list_result":
+        case "plugin_reload_result":
+        case "plugin_mutation_result":
+          stopPending("plugins");
+          applyPluginList(message.payload as PluginListResultPayload | PluginMutationResultPayload | undefined);
+          break;
         case "asset_list_result":
           stopPending("assets");
           applyAssetList(message.payload as AssetListResultPayload | undefined);
@@ -726,6 +736,7 @@ export function useRemoteMessageHandler({
           stopPending("sessions");
           stopPending("models");
           stopPending("skills");
+          stopPending("plugins");
           stopPending("assets");
           stopPending("files");
           stopPending("changes");
@@ -803,6 +814,7 @@ export function useRemoteMessageHandler({
       applySessionGenerationPreferences,
       applySessionGenerationError,
       applySkillList,
+      applyPluginList,
       applySubagentDefinitionList,
       applySubagentDefinitionMutation,
       applySubagentTaskList,

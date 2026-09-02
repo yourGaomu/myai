@@ -19,6 +19,7 @@ function withRelayForegroundService(config) {
       "android.permission.FOREGROUND_SERVICE",
       "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING",
       "android.permission.POST_NOTIFICATIONS",
+      "android.permission.ACCESS_NETWORK_STATE",
     ]) {
       if (!permissionNames.has(name)) {
         permissions.push({ $: { "android:name": name } });

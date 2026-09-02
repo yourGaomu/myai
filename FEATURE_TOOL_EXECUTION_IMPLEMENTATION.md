@@ -42,7 +42,7 @@ type Tool interface {
 	Description() string
 	Schema() any
 	Permission() Permission
-	Call(ctx context.Context, args json.RawMessage) (string, error)
+	Call(ctx context.Context, args json.RawMessage) (ToolOutput, error)
 }
 ```
 

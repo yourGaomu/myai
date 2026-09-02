@@ -2,7 +2,7 @@
 
 本文说明当前源码中 `IndexingService` 的真实实现。阅读对象是熟悉 Java/Spring Boot、需要快速理解 Go 分层和 RAG 导入链路的开发人员。
 
-本文只描述 IndexingService。Milvus、SQLite FTS5、sqlite-vec、Embedding HTTP Provider、RetrievalService 和热点回填已经实现；用户侧入口和 Chat 接入仍未实现。
+本文只描述 IndexingService。Milvus、SQLite FTS5、sqlite-vec、Embedding HTTP Provider、RetrievalService 和热点回填已经实现。Mobile 已提供知识库分类/文档上传、索引状态、失败重试、删除和检索预览，Chat 也可按 Session RAG 设置接入检索；Profile CRUD 和真实 Milvus 服务器 E2E 仍属于未完成边界。
 
 ## 1. 当前职责边界
 
@@ -111,7 +111,7 @@ completed, err := service.Run(ctx, indexingcommand.Run{
 })
 ```
 
-当前 App 已初始化 Mongo Knowledge Repository、MinIO ObjectStore、gRPC DocumentProcessor、EmbeddingModelResolver，并可按配置初始化 Milvus VectorStore 和 SQLite FTS5 KeywordStore。上述依赖全部存在时会最终装配 IndexingService。由于上传入口、Profile 管理和真实 Milvus 服务器验证尚未完成，生产启动仍不能声称已经完成用户可用的端到端 RAG。所有基础设施继续由 Composition/Application 初始化层创建，`IndexingService` 不直接 `new` Mongo、Milvus 或 SQLite 客户端。
+当前 App 已初始化 Mongo Knowledge Repository、MinIO ObjectStore、gRPC DocumentProcessor、EmbeddingModelResolver，并可按配置初始化 Milvus VectorStore 和 SQLite FTS5 KeywordStore。上述依赖全部存在时会最终装配 IndexingService。Mobile 上传/索引/重试/删除/检索预览和 Chat RAG 已接入；Profile CRUD 与真实 Milvus 服务器验证仍未完成，因此不能把当前状态表述为已完成真实生产级端到端 RAG。所有基础设施继续由 Composition/Application 初始化层创建，`IndexingService` 不直接 `new` Mongo、Milvus 或 SQLite 客户端。
 
 ## 4. Submit 流程
 
@@ -447,7 +447,9 @@ Chunk.EmbeddingProfileIDs = [embedding-old]
 
 - sqlite-vec LRU 和增量同步；
 - 跨 Go 进程的 Job claim/lease；
-- 上传 API、CLI 和手机端索引进度协议。
+- Index Profile 的完整 CRUD；
+- 独立 CLI 导入/检索命令；
+- 真实 Milvus 服务器端到端集成测试。
 
 这些实现应继续放在对应 Adapter/Composition 目录，不能把 SDK 调用塞进当前 `service` 包。
 

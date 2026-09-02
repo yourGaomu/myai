@@ -8,7 +8,7 @@
 
 Agent 是运行在用户电脑上的执行进程。它负责：
 
-1. 加载模型、会话、工具、Skill、Hook、MCP 等应用能力。
+1. 加载模型、会话、工具、Skill、Hook、MCP 和本地插件等应用能力。
 2. 绑定一个本地工作区，提供文件浏览、Changes 和历史恢复能力。
 3. 主动连接 Relay WebSocket。
 4. 向 Relay 注册 `user_id`、`device_id` 和配对码。
@@ -119,7 +119,7 @@ sequenceDiagram
     Cobra->>Cobra: 解析 agent 与 flags
     Cobra->>RunE: agentCmd.RunE(cmd, args)
     RunE->>App: SetWorkspace + InitApp
-    App->>App: 配置/数据库/缓存/模型/工具初始化
+    App->>App: 配置/数据库/缓存/模型/知识库/记忆/工具初始化
     App->>Compose: NewService(Configuration)
     Compose-->>App: ChatService
     App->>App: ChatService.Bootstrap()
@@ -150,20 +150,26 @@ main.main
       -> Application.InitMongoDb
       -> Application.InitRedisDb
       -> Application.InitStore
-      -> Application.InitCache
       -> Application.InitThreadPool
+      -> Application.InitMemoryStorage
+      -> Application.InitKnowledgeStorage
+      -> Application.InitCache
       -> Application.InitClient
+      -> Application.InitMemoryServices
       -> Application.InitSessionMemory
       -> Application.InitSandbox
+      -> Application.InitWorkspaceIsolation
       -> Application.InitSkillManager
       -> Application.InitHookManager
       -> Application.InitRegister
       -> Application.InitMCP
+      -> Application.InitPlugins
       -> Application.InitChatService
          -> composition/chat.NewService
          -> composition/chat.BuildDependencies
          -> service.NewChatService
          -> ChatService.Bootstrap
+      -> Application.InitSubagents
    -> files.New
    -> changes.NewWithStoreFactory
    -> agent.New
@@ -274,11 +280,12 @@ RunE: func(cmd *cobra.Command, args []string) error {
 
 	a := remoteagent.New(remoteagent.Config{
 		ServerURL:   agentServerURL,
+		RelayToken:  agentRelayToken,
 		UserID:      agentUserID,
 		DeviceID:    agentDeviceID,
 		BindingCode: agentBindCode,
 		Workspace:   agentWorkspace,
-	}, core.GetApp().GetChatService(), fileService, changeService)
+	}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetMemoryCatalogService(), core.GetApp().GetMemoryExtractionService(), core.GetApp().GetMemoryDreamService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents())
 
 	return a.Run(ctx)
 },
@@ -310,7 +317,7 @@ func SetWorkspace(workspace string) {
 core.InitApp()
 ```
 
-它创建模型、会话、工具和 ChatService。详细过程见第 8 节。
+它创建模型、知识库、AI Memory、会话、工具、ChatService 和子智能体服务。详细过程见第 8 节。
 
 ### 7.3 注册退出清理
 
@@ -320,8 +327,9 @@ defer func() { _ = core.GetApp().Close() }()
 
 `defer` 会在 `RunE` 返回前执行。当前 `Application.Close()` 会：
 
-1. 关闭 MCP Manager。
+1. 停止子智能体 Scheduler。
 2. 停止线程池并等待已提交任务结束。
+3. 关闭 Plugin Manager、MCP Manager、Workspace Isolation、DocumentProcessor、远程/本地 VectorStore 和 FTS5 KeywordStore。
 
 Mongo 和 Redis Client 当前没有在 `Application.Close()` 中显式关闭；进程退出时连接会由操作系统释放。这是当前代码行为，不应误认为 `Close()` 已经管理所有资源。
 
@@ -353,7 +361,18 @@ changeService, err := changes.NewWithStoreFactory(
 ### 7.6 创建并运行 Agent
 
 ```go
-a := remoteagent.New(config, chatService, fileService, changeService)
+a := remoteagent.New(
+    config,
+    chatService,
+    fileService,
+    changeService,
+    knowledgeService,
+    memoryService,
+    memoryExtraction,
+    memoryDream,
+    subagentService,
+    subagentEvents,
+)
 return a.Run(ctx)
 ```
 
@@ -393,8 +412,8 @@ type Application struct {
 |---|---|---|
 | 配置 | `properties`、`workspace` | 其他对象的创建参数 |
 | 基础设施 | `mongoDb`、`redisDb`、`threadPool`、`localCommandExecutor` | 技术资源；`localCommandExecutor` 在宿主机执行命令，不提供沙箱隔离 |
-| Adapter | `store`、`cache`、`assetClient`、`client` | 对应用层接口的具体实现 |
-| 应用入口 | `chatService`、`toolRegister`、`skillManager`、`hookManager`、`mcpManager` | 业务门面与扩展能力 |
+| Adapter | `store`、`cache`、`assetClient`、`client`、知识库存储、Memory Store | 对应用层接口的具体实现 |
+| 应用入口 | `chatService`、`knowledgeService`、Memory 服务、`toolRegister`、`skillManager`、`hookManager`、`mcpManager`、`subagentService` | 业务门面与扩展能力 |
 
 `Application` 不应实现“发送消息”“执行 Plan”这样的业务规则。它只创建、装配和持有对象。
 
@@ -431,16 +450,22 @@ instance.InitAssetClient()
 instance.InitMongoDb()
 instance.InitRedisDb()
 instance.InitStore()
-instance.InitCache()
 instance.InitThreadPool()
+instance.InitMemoryStorage()
+instance.InitKnowledgeStorage()
+instance.InitCache()
 instance.InitClient()
+instance.InitMemoryServices()
 instance.InitSessionMemory()
 instance.InitSandbox()
+instance.InitWorkspaceIsolation()
 instance.InitSkillManager()
 instance.InitHookManager()
 instance.InitRegister()
 instance.InitMCP()
+instance.InitPlugins()
 instance.InitChatService()
+instance.InitSubagents()
 ```
 
 | 顺序 | 方法 | 读取的对象 | 创建或写入的对象 |
@@ -450,18 +475,24 @@ instance.InitChatService()
 | 3 | `InitMongoDb` | `properties.Mongo` | 可选 `mongoDb` |
 | 4 | `InitRedisDb` | `properties.Redis` | 可选 `redisDb` |
 | 5 | `InitStore` | `mongoDb` | 可选 Mongo `store` |
-| 6 | `InitCache` | `redisDb` | 可选 Redis `cache` |
-| 7 | `InitThreadPool` | `properties.Thread` | `threadPool` |
-| 8 | `InitClient` | model 配置、`store` | `client`、`defaultModelID` |
-| 9 | `InitSessionMemory` | `defaultModelID` | `sessionMemory` |
-| 10 | `InitSandbox` | workspace | `sandbox` |
-| 11 | `InitSkillManager` | skill root | `skillManager` |
-| 12 | `InitHookManager` | hook 配置 | `hookManager` |
-| 13 | `InitRegister` | workspace、sandbox 等 | `toolRegister` |
-| 14 | `InitMCP` | MCP 配置、`toolRegister` | `mcpManager` 和 MCP tools |
-| 15 | `InitChatService` | 前面所有对象 | `chatService`、当前 Session |
+| 6 | `InitThreadPool` | `properties.Thread` | `threadPool` |
+| 7 | `InitMemoryStorage` | `mongoDb` | Mongo 或内存 AI Memory Store |
+| 8 | `InitKnowledgeStorage` | Mongo、Asset、RAG 配置 | 知识库存储、Embedding、Vector/Keyword、索引/检索服务 |
+| 9 | `InitCache` | `redisDb` | 可选 Redis `cache` |
+| 10 | `InitClient` | model 配置、`store` | `client`、`defaultModelID` |
+| 11 | `InitMemoryServices` | Memory Store、模型、线程池 | AI Memory Catalog/Extraction/Dream |
+| 12 | `InitSessionMemory` | `defaultModelID` | `sessionMemory` |
+| 13 | `InitSandbox` | workspace、Sandbox 配置 | 本地执行器及可选 OpenSandbox |
+| 14 | `InitWorkspaceIsolation` | Snapshot/OpenSandbox | 工作区隔离路由和命令运行器 |
+| 15 | `InitSkillManager` | skill root | `skillManager` |
+| 16 | `InitHookManager` | hook 配置 | `hookManager` |
+| 17 | `InitRegister` | workspace、执行器、Skill/Hook、知识库 | `toolRegister` |
+| 18 | `InitMCP` | MCP 配置、`toolRegister` | `mcpManager` 和 MCP tools |
+| 19 | `InitPlugins` | plugin 配置、workspace、`toolRegister` | `pluginManager` 和本地插件 tools |
+| 20 | `InitChatService` | 前面所有对象 | `chatService`、当前 Session |
+| 21 | `InitSubagents` | Chat、Workspace、Mongo/内存仓储 | 子智能体服务、Scheduler、事件总线 |
 
-这个顺序有依赖约束。例如 `InitRegister` 必须晚于 `InitSandbox`，因为 Shell Tool 的构造函数需要 Sandbox；`InitChatService` 必须最后执行，因为它需要模型、会话、Store、Cache、工具、Skill 和 Hook。
+这个顺序有依赖约束。例如 `InitRegister` 必须晚于 `InitSandbox` 和 `InitWorkspaceIsolation`，因为 Shell Tool 需要本地执行器及工作区路由；`InitPlugins` 必须晚于 `InitRegister` 和 `InitMCP`，因为插件工具要注册到现有 `toolRegister`；`InitChatService` 必须晚于模型、会话、RAG、Memory、工具、Skill、Hook 和插件；`InitSubagents` 最后创建依赖 ChatService 的子智能体运行链路。
 
 ## 9. 配置是如何加载的
 
@@ -644,7 +675,7 @@ Mongo 不可用
 
 如果最终没有任何启用模型，Agent 会在 `core.InitApp()` 阶段 panic，尚未连接 Relay。
 
-## 12. 工具、Skill、Hook 和 MCP 如何进入应用
+## 12. 工具、Skill、Hook、MCP 和插件如何进入应用
 
 ### 12.1 本地工具注册
 
@@ -658,7 +689,11 @@ localTools := []tooldef.Tool{
 	local.NewSearchFilesToolWithWorkspace(app.workspace),
 	local.NewWriteFileToolWithWorkspace(app.workspace),
 	local.NewEditFileToolWithWorkspace(app.workspace),
-	local.NewShellToolWithWorkspace(app.workspace, app.sandbox),
+	local.NewShellToolWithWorkspaceAndRemote(
+		app.workspace,
+		app.localCommandExecutor,
+		app.workspaceCommandRunner,
+	),
 	local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(...),
 }
 tools.RegisterSource("local", localTools)
@@ -674,6 +709,12 @@ app.mcpManager.RegisterAll(context.Background(), app.toolRegister)
 ```
 
 MCP Manager 会启动配置的 MCP Server、读取工具列表，并把工具注册到同一个 `toolRegister`。因此应用层不需要区分本地 Tool 和 MCP Tool。
+
+### 12.3 本地插件工具注册
+
+`Application.InitPlugins` 创建 `plugin.Manager`，扫描 `plugin.root` 下的直接子目录。包含 `plugin.json` 的启用插件会被转换为 MCP Server 配置，启动后复用 MCP 的握手、工具发现、权限和注销流程。
+
+插件工具同样进入 `toolRegister`，所以模型无需区分配置文件中的 MCP Server 和本地插件。插件进程在 Agent 退出时由 `PluginManager.Close` 停止。
 
 ### 12.3 Skill 和 Hook
 
@@ -691,7 +732,7 @@ Skill Manager 给每轮模型请求提供匹配后的运行时指令；Hook Mana
 ```go
 app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
 	Models:       app.client,
-	ModelFactory: adaptermodel.Factory{},
+	ModelFactory: adaptermodel.NewFactory(),
 	Sessions:     app.sessionMemory,
 	Store:        app.store,
 	Cache:        app.cache,
@@ -700,6 +741,10 @@ app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
 	Skills:       app.skillManager,
 	Hooks:        app.hookManager,
 	DefaultModel: app.defaultModelID,
+	KnowledgeSearch:  app.knowledgeSearchService,
+	AgentRuns:        app.agentRunRepository,
+	AgentRunObserver: app.memoryExtractionService,
+	MemoryContext:    app.memoryRetrievalService,
 })
 ```
 
@@ -866,6 +911,7 @@ Agent 的输入配置对象：
 ```go
 type Config struct {
 	ServerURL   string
+	RelayToken  string
 	UserID      string
 	DeviceID    string
 	BindingCode string
@@ -881,6 +927,12 @@ func New(
 	chatService ChatFacade,
 	fileService WorkspaceFileFacade,
 	changeService WorkspaceChangeFacade,
+	knowledgeService KnowledgeFacade,
+	memoryService MemoryFacade,
+	memoryExtraction MemoryExtractionFacade,
+	memoryDream MemoryDreamFacade,
+	subagentService SubagentFacade,
+	subagentEvents SubagentEventSource,
 ) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
@@ -891,6 +943,12 @@ func New(
 		chatService:       chatService,
 		fileService:       fileService,
 		changeService:     changeService,
+		knowledgeService:  knowledgeService,
+		memoryService:     memoryService,
+		memoryExtraction:  memoryExtraction,
+		memoryDream:       memoryDream,
+		subagentService:   subagentService,
+		subagentEvents:    subagentEvents,
 		runtimes:          newSessionRuntimeManager(),
 		permissionWaiters: newPermissionWaiterRegistry(),
 		permissionTimeout: 60 * time.Second,
@@ -938,6 +996,9 @@ Agent 只知道这些方法，不知道 ChatService 内部如何使用 Mongo、�
 if a.config.ServerURL == "" {
 	return fmt.Errorf("server url is empty")
 }
+if strings.TrimSpace(a.config.RelayToken) == "" {
+	return fmt.Errorf("relay agent token is empty")
+}
 if a.config.UserID == "" {
 	return fmt.Errorf("user id is empty")
 }
@@ -957,7 +1018,11 @@ if a.chatService == nil || a.fileService == nil || a.changeService == nil {
 conn, response, err := websocket.DefaultDialer.DialContext(
 	ctx,
 	a.config.ServerURL,
-	nil,
+	http.Header{
+		"Authorization": []string{"Bearer " + strings.TrimSpace(a.config.RelayToken)},
+		protocol.HeaderAgentUserID: []string{a.config.UserID},
+		protocol.HeaderAgentDeviceID: []string{a.config.DeviceID},
+	},
 )
 ```
 
@@ -968,6 +1033,8 @@ conn, response, err := websocket.DefaultDialer.DialContext(
 ```go
 return fmt.Errorf("connect relay failed: %w", err)
 ```
+
+连接中断后，`Agent.Run` 会按 1 秒起步、上限 30 秒的退避循环重新连接；每次新连接都会重新发送 `agent_online`，不会因为 Relay 短暂断线而退出进程。
 
 ### 18.3 发送上线消息
 
@@ -1044,20 +1111,20 @@ for {
 	case <-ctx.Done():
 		// 发送 offline 并退出
 	case err := <-readDone:
-		return err
+		// 关闭本次连接，Run 进入退避重连
 	case <-ticker.C:
 		// 发送 heartbeat
 	}
 }
 ```
 
-三种退出条件：
+主连接循环的三种事件：
 
 | 条件 | 来源 | 处理 |
 |---|---|---|
 | `ctx.Done()` | Ctrl+C、SIGTERM | 发 `agent_offline`、WebSocket Close、返回 nil |
-| `readDone` 返回错误 | Relay 断开或读取失败 | 将错误返回到 `main` |
-| 心跳写入失败 | 网络断开 | 将错误返回到 `main` |
+| `readDone` 返回错误 | Relay 断开或读取失败 | 关闭本次连接并进入退避重连 |
+| 心跳写入失败 | 网络断开 | 关闭本次连接并进入退避重连 |
 
 每 60 秒发送一次 `heartbeat`。Relay 收到后调用 `touchAgent` 更新 `LastSeenAt`。
 
@@ -1113,7 +1180,8 @@ Application.defaultModelID = 当前默认模型
 Application.sessionMemory = current Session in memory
 Application.localCommandExecutor = local host CommandExecutor(workspace, isolated=false)
 Application.isolatedSandboxManager = OpenSandbox manager（仅 provider=opensandbox）
-Application.toolRegister = local tools + MCP tools
+Application.toolRegister = local tools + MCP tools + plugin tools
+Application.pluginManager = loaded/disabled/failed local plugin runtimes
 Application.chatService = fully composed ChatService
 
 Agent.config = CLI 参数和配对码
@@ -1180,6 +1248,7 @@ signal.NotifyContext 取消 ctx
 -> Agent.Run return nil
 -> Agent.Run 内 defer changeService.Close
 -> RunE 内 defer Application.Close
+   -> Plugin Manager.Close
    -> MCP Manager.Close
    -> ThreadPool.Shutdown
 -> RunE return nil
@@ -1252,7 +1321,7 @@ go run . agent `
 
 | 顺序 | 文件 | 函数 | 观察内容 |
 |---|---|---|---|
-| 1 | `core/cmd/agent.go` | `agentCmd.RunE` | Cobra 是否正确写入五个参数变量 |
+| 1 | `core/cmd/agent.go` | `agentCmd.RunE` | Cobra 是否正确写入六个参数变量（含 Relay Token） |
 | 2 | `core/App.go` | `InitApp` | workspace 是否在第一次初始化前设置 |
 | 3 | `core/config/loader.go` | `ViperLoader.Map` | YAML 和环境变量映射结果 |
 | 4 | `core/App.go` | `InitClient` | 模型列表和 `defaultModelID` |

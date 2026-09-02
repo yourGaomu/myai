@@ -105,6 +105,10 @@ subagent:
   queue_size: 32
   snapshot_root: "/workspace/.myai/subagent-snapshots"
 
+plugin:
+  enabled: true
+  root: "/workspace/plugins"
+
 hooks:
   commands: []
 

@@ -358,6 +358,6 @@ go test ./core/architecture
 - 一个 EmbeddingProfile 同一时刻维护一个活动向量索引结构；
 - stale Upsert 的通用 compare-and-set 尚未实现，目前删除路径已保护 SyncSequence；
 - sqlite-vec、RetrievalService 和本地热点回填已完成，但 Milvus 原向量读取 Port 尚未实现；
-- IndexingService 已可在完整配置下装配，但尚无用户侧上传入口。
+- IndexingService 已可在完整配置下装配；Mobile 已提供文档上传、索引状态、失败重试和删除入口，真实 Milvus 服务器集成测试仍未完成。
 
 真实服务器启用前应先在测试 Collection 验证 Milvus 版本、认证、TLS、AUTOINDEX 可用性和资源占用。

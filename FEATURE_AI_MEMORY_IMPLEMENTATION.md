@@ -163,10 +163,12 @@ DeletionReason = 删除原因
 入口位于 `core/App.go`。
 
 ```text
-Application.NewApplication
--> InitMemoryStorage
--> InitMemoryServices
--> InitChatService
+core.SetWorkspace（可选）
+-> core.InitApp()（sync.Once 单例）
+   -> InitMemoryStorage
+   -> InitClient
+   -> InitMemoryServices
+   -> InitChatService
 ```
 
 ### 4.1 InitMemoryStorage

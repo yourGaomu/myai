@@ -55,3 +55,10 @@ func TestConfiguredRelayAgentCredentialsRejectsDuplicateIdentity(t *testing.T) {
 		t.Fatal("expected duplicate identity to be rejected")
 	}
 }
+
+func TestSplitRelayOriginList(t *testing.T) {
+	origins := splitRelayOriginList("http://localhost:8081, http://127.0.0.1:8081;https://example.test")
+	if len(origins) != 3 || origins[0] != "http://localhost:8081" || origins[1] != "http://127.0.0.1:8081" || origins[2] != "https://example.test" {
+		t.Fatalf("unexpected origin list: %#v", origins)
+	}
+}

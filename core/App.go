@@ -84,6 +84,7 @@ import (
 	"myai/core/infra"
 	"myai/core/llm"
 	"myai/core/mcp"
+	pluginruntime "myai/core/plugin"
 	agentrunport "myai/core/port/agentrun"
 	cacheport "myai/core/port/cache"
 	executionport "myai/core/port/execution"
@@ -150,6 +151,7 @@ type Application struct {
 	skillManager                *skill.Manager
 	hookManager                 *hook.Manager
 	mcpManager                  *mcp.Manager
+	pluginManager               *pluginruntime.Manager
 	localCommandExecutor        executionport.CommandExecutor
 	isolatedSandboxManager      sandboxport.Manager
 	subagentService             subagentapi.Service
@@ -198,6 +200,7 @@ func InitApp() {
 		instance.InitHookManager()
 		instance.InitRegister()
 		instance.InitMCP()
+		instance.InitPlugins()
 		instance.InitChatService()
 		instance.InitSubagents()
 	})
@@ -838,6 +841,9 @@ func (app *Application) Close() error {
 	if app.threadPool != nil {
 		app.threadPool.Shutdown()
 	}
+	if app.pluginManager != nil {
+		errs = append(errs, app.pluginManager.Close())
+	}
 	if app.mcpManager != nil {
 		errs = append(errs, app.mcpManager.Close())
 	}
@@ -873,6 +879,10 @@ func (app *Application) GetSubagentService() subagentapi.Service {
 
 func (app *Application) GetSubagentEvents() *subagentevents.Bus {
 	return app.subagentEvents
+}
+
+func (app *Application) GetPluginManager() *pluginruntime.Manager {
+	return app.pluginManager
 }
 
 func (app *Application) GetKnowledgeBaseRepository() knowledgeport.KnowledgeBaseRepository {
@@ -999,6 +1009,18 @@ func (app *Application) InitMCP() *mcp.Manager {
 		panic(fmt.Errorf("init mcp failed: %w", err))
 	}
 	return app.mcpManager
+}
+
+func (app *Application) InitPlugins() *pluginruntime.Manager {
+	manager := pluginruntime.NewManager(app.properties.Plugin.Root)
+	app.pluginManager = manager
+	if !app.properties.Plugin.Enabled {
+		return manager
+	}
+	if err := manager.Load(context.Background(), app.toolRegister); err != nil {
+		panic(fmt.Errorf("init plugins failed: %w", err))
+	}
+	return manager
 }
 
 func (app *Application) InitSkillManager() *skill.Manager {

@@ -65,6 +65,9 @@ export function MobileMainContent({
           onRefreshSessions={settings.onRefreshSessions}
           onRefreshSkills={settings.onRefreshSkills}
           onReloadSkills={settings.onReloadSkills}
+          onRefreshPlugins={settings.onRefreshPlugins}
+          onReloadPlugins={settings.onReloadPlugins}
+          onSetPluginEnabled={settings.onSetPluginEnabled}
           onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}
@@ -91,6 +94,9 @@ export function MobileMainContent({
           skillMessage={settings.skillMessage}
           skillRoot={settings.skillRoot}
           skills={settings.skills}
+          plugins={settings.plugins}
+          pluginMessage={settings.pluginMessage}
+          pluginRoot={settings.pluginRoot}
           subagentDefinitions={settings.subagentDefinitions}
           subagentEvents={settings.subagentEvents}
           subagentMessage={settings.subagentMessage}

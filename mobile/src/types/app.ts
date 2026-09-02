@@ -17,6 +17,7 @@ export type PendingAction =
   | "sessions"
   | "models"
   | "skills"
+	| "plugins"
   | "settings"
   | "generation"
   | "context"

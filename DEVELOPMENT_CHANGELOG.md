@@ -1,5 +1,26 @@
 # MyAI 开发变更记录
 
+## 2026-08-31：自动 Plan、协议模型与远程运行可靠性
+
+本次文档对应的源码已把“自动规划执行”、多协议模型和长连接运行边界补齐，以下行为以当前实现为准：
+
+- `ChatService` 默认启用 `AutoPlanEnabled`，通过结构化分类器区分 conversation、explanation 和 implementation；实现类请求在同一条请求内先以只读 Plan 规划，再执行已捕获的步骤，分类失败时安全回退为普通 Chat，子智能体不会递归触发。
+- `AutonomousPlanPrompt`、结构化 JSON Plan、步骤依赖、dependency-ready 批次、最多 3 个并行步骤、`MaxRetries`/`RetryCount` 和 Recovery planner 已进入 Plan 执行链；旧 Markdown Plan 仍兼容并按顺序执行。
+- Plan/Step 持久化增加 `Revision`、依赖、重试、错误、时间戳和 `AgentTaskID` 等状态字段；Plan 执行的 AgentRun 通过 `ParentRunID`、`PlanID`、`StepID` 关联规划与步骤运行。
+- Agent 连接 Relay 时使用 `Authorization: Bearer`、user/device headers；断线后按 1 秒起步、30 秒封顶的退避策略自动重连，并在每次新连接重新发送 `agent_online`。
+- 子智能体改用带序列和父会话范围的 `TaskEvent` 事件流；异步 `subagent_task_event` 使用独立 request ID，普通请求响应仍复用原 request ID。
+- 模型 Factory 已支持 OpenAI Chat Completions、Anthropic Messages、Google Generative AI、Mistral Chat 和 Ollama Chat 五种协议；`GenerateRequest` 携带解析后的生成参数。
+- Mobile Android 前台 Relay Service 现在接收 WebSocket 地址、用户/设备身份和 client token，支持发送消息、读取连接状态、消息排空和状态/消息事件订阅。
+
+验证命令：
+
+```powershell
+go test ./...
+go vet ./...
+cd mobile
+npm run typecheck
+```
+
 ## 2026-08-15：移动端响应式表单弹层
 
 修复长列表中的内嵌编辑器与当前滚动位置脱节的问题。此前点击 AI 记忆或子智能体条目中的“编辑”后，表单会插入列表顶部，用户必须手动向上滚动才能开始操作。
@@ -121,7 +142,7 @@ npm run typecheck
 - 当前界面实际支持什么，哪些内容仍未展示。
 - 开发人员应使用哪些命令验证变更。
 
-记录按日期倒序排列。架构原理和完整调用链仍以
+最新修订章节置于文档前部，历史章节保留其原有记录顺序。架构原理和完整调用链仍以
 [PROJECT_ARCHITECTURE_GUIDE.md](PROJECT_ARCHITECTURE_GUIDE.md) 与
 [DEVELOPER_FLOW_GUIDE.md](DEVELOPER_FLOW_GUIDE.md) 为准。
 

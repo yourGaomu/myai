@@ -13,6 +13,7 @@ const (
 	DefaultConfigFile           = "./resource/application.yaml"
 	DefaultModelID              = "gpt-5.5"
 	DefaultSkillRoot            = "skills"
+	DefaultPluginRoot           = "plugins"
 	DefaultSubagentSnapshotRoot = ".myai/subagent-snapshots"
 )
 
@@ -181,6 +182,10 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			QueueSize:    v.GetInt("subagent.queue_size"),
 			SnapshotRoot: strings.TrimSpace(v.GetString("subagent.snapshot_root")),
 		},
+		Plugin: PluginProperties{
+			Enabled: pluginEnabled(v),
+			Root:    strings.TrimSpace(v.GetString("plugin.root")),
+		},
 	}
 	if properties.Model.ID == "" {
 		properties.Model.ID = DefaultModelID
@@ -223,6 +228,9 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	}
 	if properties.Subagent.SnapshotRoot == "" {
 		properties.Subagent.SnapshotRoot = DefaultSubagentSnapshotRoot
+	}
+	if properties.Plugin.Root == "" {
+		properties.Plugin.Root = DefaultPluginRoot
 	}
 	if properties.RAG.DocumentProcessor.TimeoutSeconds == 0 {
 		properties.RAG.DocumentProcessor.TimeoutSeconds = 120
@@ -293,6 +301,7 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	}
 	properties.Skill.Root = resolveWorkspacePath(workspace, properties.Skill.Root)
 	properties.Subagent.SnapshotRoot = resolveWorkspacePath(workspace, properties.Subagent.SnapshotRoot)
+	properties.Plugin.Root = resolveWorkspacePath(workspace, properties.Plugin.Root)
 
 	if err := v.UnmarshalKey("hooks.commands", &properties.Hooks.Commands); err != nil {
 		return Properties{}, err
@@ -301,6 +310,13 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 		return Properties{}, err
 	}
 	return properties, nil
+}
+
+func pluginEnabled(v *viper.Viper) bool {
+	if v == nil || !v.IsSet("plugin.enabled") {
+		return true
+	}
+	return v.GetBool("plugin.enabled")
 }
 
 func optionalFloat64(v *viper.Viper, key string) *float64 {

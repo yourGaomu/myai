@@ -1200,6 +1200,27 @@ func TestRelayAllowsAnyWebSocketOriginWhenWildcardIsConfigured(t *testing.T) {
 	defer conn.Close()
 }
 
+func TestRelayAllowsAnyLocalExpoPortWhenLoopbackWildcardIsConfigured(t *testing.T) {
+	server := NewServer(
+		"",
+		memoryauthorization.NewStore(),
+		WithAllowedOrigins("http://localhost:*", "http://127.0.0.1:*"),
+	)
+	request := httptest.NewRequest(http.MethodGet, "http://relay.test/ws/client", nil)
+	request.Header.Set("Origin", "http://localhost:8083")
+	if !server.originAllowed(request) {
+		t.Fatal("expected localhost development origin to be allowed")
+	}
+	request.Header.Set("Origin", "http://127.0.0.1:19006")
+	if !server.originAllowed(request) {
+		t.Fatal("expected loopback development origin to be allowed")
+	}
+	request.Header.Set("Origin", "http://192.168.1.20:8083")
+	if server.originAllowed(request) {
+		t.Fatal("did not expect LAN origin to match loopback wildcard")
+	}
+}
+
 func TestRelayProtectsAgentInventory(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
@@ -1328,7 +1349,12 @@ func TestRelayPairsAgentByBindCode(t *testing.T) {
 }
 
 func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
-	server := newTestServer()
+	server := NewServer(
+		"",
+		memoryauthorization.NewStore(),
+		WithAgentCredentials(AgentCredential{UserID: "local", DeviceID: "pc-local", Token: "test-agent-token"}),
+		WithAllowedOrigins("http://localhost:*", "http://127.0.0.1:*"),
+	)
 	testServer := httptest.NewServer(server.routes())
 	defer testServer.Close()
 
@@ -1336,7 +1362,7 @@ func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new preflight request failed: %v", err)
 	}
-	request.Header.Set("Origin", "http://localhost:19006")
+	request.Header.Set("Origin", "http://localhost:8083")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
 	request.Header.Set("Access-Control-Request-Headers", "content-type")
 
@@ -1349,8 +1375,8 @@ func TestRelayAllowsBrowserCorsPreflight(t *testing.T) {
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected status %d, got %d", http.StatusNoContent, response.StatusCode)
 	}
-	if got := response.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:19006" {
-		t.Fatalf("expected CORS origin http://localhost:19006, got %q", got)
+	if got := response.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:8083" {
+		t.Fatalf("expected CORS origin http://localhost:8083, got %q", got)
 	}
 	if got := response.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "content-type") {
 		t.Fatalf("expected CORS headers to include content-type, got %q", got)

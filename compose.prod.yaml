@@ -12,6 +12,9 @@ services:
       MYAI_RELAY_AGENT_TOKEN: ${MYAI_RELAY_AGENT_TOKEN}
       MYAI_RELAY_AGENT_USER: ${MYAI_AGENT_USER:-local}
       MYAI_RELAY_AGENT_DEVICE: ${MYAI_AGENT_DEVICE:-server-agent}
+      # Allow local Expo Web development clients to upgrade WebSockets. Native
+      # Android clients do not send an Origin header and are unaffected.
+      MYAI_RELAY_ALLOWED_ORIGINS: "${MYAI_RELAY_ALLOWED_ORIGINS:-http://localhost:*,http://127.0.0.1:*}"
       MONGO_URI: ${MONGO_URI:-}
       MONGO_DATABASE: ${MONGO_DATABASE:-myai}
     command:
