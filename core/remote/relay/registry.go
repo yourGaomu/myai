@@ -10,6 +10,12 @@ import (
 	"myai/core/remote/protocol"
 )
 
+// A client request may outlive the WebSocket that created it (for example when
+// a mobile browser is backgrounded while the agent is waiting for permission).
+// Keep the route for a bounded period so a newly authenticated connection can
+// take it over, while still preventing abandoned requests from accumulating.
+const clientRouteTTL = 30 * time.Minute
+
 type peer struct {
 	conn    *websocket.Conn
 	writeMu sync.Mutex
@@ -23,6 +29,15 @@ func (p *peer) writeJSON(value any) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	return p.conn.WriteJSON(value)
+}
+
+func (p *peer) writeControl(messageType int, data []byte, deadline time.Time) error {
+	if p == nil || p.conn == nil {
+		return nil
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	return p.conn.WriteControl(messageType, data, deadline)
 }
 
 func (p *peer) close() error {
@@ -47,6 +62,7 @@ type clientEntry struct {
 	RequestType protocol.MessageType
 	UserID      string
 	DeviceID    string
+	ClientID    string
 	RemoteAddr  string
 	ConnectedAt time.Time
 	LastSeenAt  time.Time
@@ -56,6 +72,7 @@ type clientEntry struct {
 type clientConnection struct {
 	UserID     string
 	DeviceID   string
+	ClientID   string
 	RemoteAddr string
 	LastSeenAt time.Time
 }
@@ -219,26 +236,45 @@ func (s *Server) agentInfo(userID string, deviceID string) (AgentInfo, bool) {
 	}, true
 }
 
-func (s *Server) registerClient(requestID string, requestType protocol.MessageType, p *peer, userID string, deviceID string, remoteAddr string) {
+// registerClient installs a request route, or idempotently reattaches an
+// existing route owned by the same paired client. A request ID cannot be
+// reassigned across identities because doing so would let one client steal
+// another client's in-flight response stream.
+func (s *Server) registerClient(requestID string, requestType protocol.MessageType, p *peer, userID string, deviceID string, clientToken string, remoteAddr string) bool {
 	if requestID == "" {
-		return
+		return false
 	}
 
 	now := time.Now()
 
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
+	s.pruneExpiredClientRoutesLocked(now)
+	clientID := clientTokenHash(clientToken)
+	if previous := s.clients[requestID]; previous != nil {
+		if previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
+			return false
+		}
+		// Same-client retries keep the original request type so an eventual
+		// terminal response still releases the first route correctly.
+		previous.peer = p
+		previous.RemoteAddr = remoteAddr
+		previous.LastSeenAt = now
+		return true
+	}
 
 	s.clients[requestID] = &clientEntry{
 		RequestID:   requestID,
 		RequestType: requestType,
 		UserID:      userID,
 		DeviceID:    deviceID,
+		ClientID:    clientID,
 		RemoteAddr:  remoteAddr,
 		ConnectedAt: now,
 		LastSeenAt:  now,
 		peer:        p,
 	}
+	return true
 }
 
 func (s *Server) touchClient(requestID string) {
@@ -288,9 +324,12 @@ func (s *Server) unregisterClientPeer(p *peer) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	for requestID, client := range s.clients {
+	for _, client := range s.clients {
 		if client.peer == p {
-			delete(s.clients, requestID)
+			// Do not discard an in-flight request just because its transport
+			// disappeared. A replacement connection for the same paired
+			// user/device can reclaim it below.
+			client.peer = nil
 		}
 	}
 	delete(s.connections, p)
@@ -301,14 +340,101 @@ func (s *Server) getClient(requestID string) *clientEntry {
 		return nil
 	}
 
-	s.clientLock.RLock()
-	defer s.clientLock.RUnlock()
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
 
-	return s.clients[requestID]
+	client := s.clients[requestID]
+	if client != nil && time.Since(client.LastSeenAt) > clientRouteTTL {
+		delete(s.clients, requestID)
+		return nil
+	}
+	if client == nil {
+		return nil
+	}
+	entry := *client
+	return &entry
 }
 
-func (s *Server) registerClientConnection(p *peer, userID string, deviceID string, remoteAddr string) {
-	if p == nil || userID == "" || deviceID == "" {
+// rebindClientRequest verifies that a reconnecting client owns the request and
+// attaches the request route to its current WebSocket peer.
+func (s *Server) rebindClientRequest(requestID string, userID string, deviceID string, clientToken string, p *peer) bool {
+	if requestID == "" || userID == "" || deviceID == "" || clientToken == "" || p == nil {
+		return false
+	}
+
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	client := s.clients[requestID]
+	if client == nil || time.Since(client.LastSeenAt) > clientRouteTTL {
+		if client != nil {
+			delete(s.clients, requestID)
+		}
+		return false
+	}
+	if client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
+		return false
+	}
+	client.peer = p
+	client.LastSeenAt = time.Now()
+	return true
+}
+
+// clientPeerForMessage returns the live peer for a request. If the original
+// peer went away, the most recently active connection for the same paired
+// identity takes over the route.
+func (s *Server) clientPeerForMessage(requestID string, userID string, deviceID string) (*clientEntry, *peer, bool) {
+	if requestID == "" {
+		return nil, nil, false
+	}
+
+	now := time.Now()
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	client := s.clients[requestID]
+	if client == nil || now.Sub(client.LastSeenAt) > clientRouteTTL {
+		if client != nil {
+			delete(s.clients, requestID)
+		}
+		return nil, nil, false
+	}
+	if userID != "" && client.UserID != userID || deviceID != "" && client.DeviceID != deviceID {
+		return nil, nil, false
+	}
+
+	target := client.peer
+	if target != nil {
+		connection := s.connections[target]
+		if connection == nil || connection.UserID != client.UserID || connection.DeviceID != client.DeviceID || connection.ClientID != client.ClientID {
+			target = nil
+		}
+	}
+	if target == nil {
+		var latest time.Time
+		for candidate, connection := range s.connections {
+			if connection.UserID != client.UserID || connection.DeviceID != client.DeviceID || connection.ClientID != client.ClientID {
+				continue
+			}
+			if target == nil || connection.LastSeenAt.After(latest) {
+				target = candidate
+				latest = connection.LastSeenAt
+			}
+		}
+		client.peer = target
+	}
+	if target == nil {
+		return nil, nil, false
+	}
+	client.LastSeenAt = now
+	// Return a value copy so the caller can safely use the route after the
+	// registry lock is released.
+	entry := *client
+	return &entry, target, true
+}
+
+func (s *Server) registerClientConnection(p *peer, userID string, deviceID string, clientToken string, remoteAddr string) {
+	if p == nil || userID == "" || deviceID == "" || clientToken == "" {
 		return
 	}
 	s.clientLock.Lock()
@@ -317,7 +443,15 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 		s.connections = make(map[*peer]*clientConnection)
 	}
 	s.connections[p] = &clientConnection{
-		UserID: userID, DeviceID: deviceID, RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
+		UserID: userID, DeviceID: deviceID, ClientID: clientTokenHash(clientToken), RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
+	}
+}
+
+func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {
+	for requestID, client := range s.clients {
+		if now.Sub(client.LastSeenAt) > clientRouteTTL {
+			delete(s.clients, requestID)
+		}
 	}
 }
 

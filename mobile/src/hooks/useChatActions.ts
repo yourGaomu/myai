@@ -104,11 +104,16 @@ export function useChatActions({
         requestSessionMapRef.current[pendingPermission.requestID] ||
         sessionID;
       const payload: PermissionResultPayload = { allowed };
-      sendEnvelope("permission_result", {
+      const sent = sendEnvelope("permission_result", {
         request_id: pendingPermission.requestID,
         session_id: permissionSessionID,
         payload,
       });
+      if (!sent) {
+        // Keep the prompt visible so the user can retry after the automatic
+        // reconnect instead of losing the only way to resume the request.
+        return;
+      }
       addEventMessage(permissionSessionID, `${allowed ? "Allowed" : "Denied"} ${pendingPermission.name}`);
       setSessionPendingPermission(permissionSessionID, null);
     },

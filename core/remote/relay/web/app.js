@@ -7,6 +7,9 @@ const state = {
   pendingSessionRequestID: "",
   sessions: [],
   clientToken: localStorage.getItem("myai_client_token") || "",
+  reconnectAttempt: 0,
+  reconnectTimer: null,
+  heartbeatTimer: null,
 };
 
 const el = {
@@ -52,6 +55,10 @@ function setConnected(connected) {
 }
 
 function connect() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
   if (state.socket) {
     state.socket.close();
   }
@@ -61,11 +68,28 @@ function connect() {
   el.connectionText.textContent = "Connecting";
 
   socket.addEventListener("open", () => {
+    if (state.socket !== socket) {
+      return;
+    }
+    state.reconnectAttempt = 0;
     setConnected(true);
+    startHeartbeat(socket);
     requestSessions();
   });
-  socket.addEventListener("close", () => setConnected(false));
-  socket.addEventListener("error", () => addMessage("error", "WebSocket connection error"));
+  socket.addEventListener("close", () => {
+    if (state.socket !== socket) {
+      return;
+    }
+    state.socket = null;
+    stopHeartbeat();
+    setConnected(false);
+    scheduleReconnect();
+  });
+  socket.addEventListener("error", () => {
+    if (state.socket === socket) {
+      addMessage("error", "WebSocket connection error; reconnecting automatically");
+    }
+  });
   socket.addEventListener("message", (event) => {
     try {
       handleMessage(JSON.parse(event.data));
@@ -73,6 +97,44 @@ function connect() {
       addMessage("error", `Invalid relay message: ${err.message}`);
     }
   });
+}
+
+function startHeartbeat(socket) {
+  stopHeartbeat();
+  const sendHeartbeat = () => {
+    if (state.socket !== socket || socket.readyState !== WebSocket.OPEN || !state.clientToken) {
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: "heartbeat",
+      user_id: el.userId.value.trim(),
+      device_id: el.deviceId.value.trim(),
+      client_token: state.clientToken,
+      payload: { time: new Date().toISOString() },
+    }));
+  };
+  sendHeartbeat();
+  state.heartbeatTimer = setInterval(sendHeartbeat, 25000);
+}
+
+function stopHeartbeat() {
+  if (state.heartbeatTimer) {
+    clearInterval(state.heartbeatTimer);
+    state.heartbeatTimer = null;
+  }
+}
+
+function scheduleReconnect() {
+  if (state.reconnectTimer) {
+    return;
+  }
+  const delay = Math.min(30000, 500 * 2 ** state.reconnectAttempt);
+  state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 6);
+  el.connectionText.textContent = "Reconnecting";
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    connect();
+  }, delay);
 }
 
 async function loadAgents() {
@@ -125,6 +187,14 @@ async function pairDevice(bindCode) {
     localStorage.setItem("myai_device_id", el.deviceId.value);
     el.pairText.textContent = `Paired ${el.userId.value}/${el.deviceId.value}`;
     el.bindCode.value = "";
+    // Pairing can happen after the initial unauthenticated socket was opened.
+    // Rebind that socket so the periodic authenticated heartbeat starts
+    // immediately and the Relay can reclaim in-flight requests after a retry.
+    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+      startHeartbeat(state.socket);
+    } else {
+      connect();
+    }
     await loadAgents();
     await loadAuthorizations();
     requestSessions();
@@ -372,11 +442,14 @@ function sendPermissionResult(allowed) {
     return;
   }
 
-  sendEnvelope("permission_result", {
+  const sent = sendEnvelope("permission_result", {
     request_id: state.pendingPermission.requestID,
     session_id: state.pendingPermission.sessionID,
     payload: { allowed },
   });
+  if (!sent) {
+    return;
+  }
   addMessage("event", `${allowed ? "Allowed" : "Denied"} ${state.pendingPermission.name}`);
   hidePermission();
 }
@@ -384,7 +457,7 @@ function sendPermissionResult(allowed) {
 function sendEnvelope(type, overrides) {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
     addMessage("error", "WebSocket is not connected");
-    return;
+    return false;
   }
 
   const message = {
@@ -396,7 +469,14 @@ function sendEnvelope(type, overrides) {
     client_token: state.clientToken,
     payload: overrides.payload || {},
   };
-  state.socket.send(JSON.stringify(message));
+  try {
+    state.socket.send(JSON.stringify(message));
+    return true;
+  } catch (err) {
+    addMessage("error", `WebSocket send failed: ${err.message}`);
+    state.socket.close();
+    return false;
+  }
 }
 
 function handleMessage(message) {

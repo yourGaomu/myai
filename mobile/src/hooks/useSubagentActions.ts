@@ -69,6 +69,10 @@ export function useSubagentActions({
   const requestTasks = useCallback((targetSessionID = sessionID) =>
     send("subagent_task_list", { session_id: targetSessionID, limit: 100 }, targetSessionID), [send, sessionID]);
   const checkTask = useCallback((taskID: string) => send("subagent_task_check", { task_id: taskID }), [send]);
+  const messageTask = useCallback((taskID: string, message: string) =>
+    send("subagent_task_message", { task_id: taskID, message }), [send]);
+  const followupTask = useCallback((taskID: string, message: string) =>
+    send("subagent_task_followup", { task_id: taskID, message }), [send]);
   const waitTask = useCallback((taskID: string) => send("subagent_task_wait", { task_id: taskID, timeout_ms: 30000 }), [send]);
   const cancelTask = useCallback((taskID: string) => send("subagent_task_cancel", { task_id: taskID }), [send]);
   const applyTask = useCallback((taskID: string) => send("subagent_task_apply", { task_id: taskID }), [send]);
@@ -128,6 +132,8 @@ export function useSubagentActions({
     createDefinition,
     deleteDefinition,
     discardTask,
+    followupTask,
+    messageTask,
     requestDefinitions,
     requestTasks,
     resumeTask,

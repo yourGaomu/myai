@@ -228,6 +228,135 @@ func TestRelayPermissionResultPreservesOriginalChatRoute(t *testing.T) {
 	}
 }
 
+func TestRelayResumesChatRouteAfterClientReconnect(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	clientToken := pairTestClient(t, testServer, "123456")
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeUserMessage,
+		RequestID:   "reconnect-chat-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+	readTestMessage(t, agentConn, protocol.TypeUserMessage)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+	_ = clientConn.Close()
+
+	// A reconnect must be able to answer a permission prompt belonging to the
+	// original request, even if the old peer has already been removed.
+	clientConn = dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypeHeartbeat,
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+	})
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type:        protocol.TypePermissionResult,
+		RequestID:   "reconnect-chat-1",
+		UserID:      "local",
+		DeviceID:    "pc-local",
+		ClientToken: clientToken,
+		Payload:     json.RawMessage([]byte("{\"allowed\":true}")),
+	})
+	readTestMessage(t, agentConn, protocol.TypePermissionResult)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeAssistantDelta,
+		RequestID: "reconnect-chat-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDelta)
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type:      protocol.TypeAssistantDone,
+		RequestID: "reconnect-chat-1",
+		UserID:    "local",
+		DeviceID:  "pc-local",
+	})
+	readTestMessage(t, clientConn, protocol.TypeAssistantDone)
+	deadline := time.Now().Add(time.Second)
+	for server.getClient("reconnect-chat-1") != nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if server.getClient("reconnect-chat-1") != nil {
+		t.Fatal("reconnected chat route was not released after assistant_done")
+	}
+}
+
+func TestRelayDoesNotAllowDifferentIdentityToReclaimRoute(t *testing.T) {
+	server := newTestServer()
+	peerA := &peer{}
+	peerB := &peer{}
+	server.registerClient("identity-route-1", protocol.TypeUserMessage, peerA, "local", "pc-local", "client-token-a", "old")
+	if server.rebindClientRequest("identity-route-1", "other", "device", "client-token-a", peerB) {
+		t.Fatal("different user/device reclaimed a client route")
+	}
+	if server.rebindClientRequest("identity-route-1", "local", "pc-local", "client-token-b", peerB) {
+		t.Fatal("different paired client reclaimed a client route")
+	}
+	if client := server.getClient("identity-route-1"); client == nil || client.peer != peerA {
+		t.Fatal("route was changed after an unauthorized reclaim attempt")
+	}
+}
+
+func TestRelaySameClientRequestRetryIsIdempotent(t *testing.T) {
+	server := newTestServer()
+	first := &peer{}
+	second := &peer{}
+	if !server.registerClient("retry-route-1", protocol.TypeUserMessage, first, "local", "pc-local", "client-token-a", "old") {
+		t.Fatal("initial route registration failed")
+	}
+	if !server.registerClient("retry-route-1", protocol.TypeSubagentTaskMessage, second, "local", "pc-local", "client-token-a", "new") {
+		t.Fatal("same-client retry should be accepted")
+	}
+	client := server.getClient("retry-route-1")
+	if client == nil || client.peer != second || client.RequestType != protocol.TypeUserMessage {
+		t.Fatalf("retry replaced route semantics: %#v", client)
+	}
+}
+
+func TestRelayRejectsDuplicateRequestIDFromDifferentClient(t *testing.T) {
+	server := newTestServer()
+	first := &peer{}
+	second := &peer{}
+	if !server.registerClient("duplicate-route-1", protocol.TypeUserMessage, first, "local", "pc-local", "client-token-a", "old") {
+		t.Fatal("initial route registration failed")
+	}
+	if server.registerClient("duplicate-route-1", protocol.TypeUserMessage, second, "local", "pc-local", "client-token-b", "new") {
+		t.Fatal("different client should not overwrite an existing route")
+	}
+	client := server.getClient("duplicate-route-1")
+	if client == nil || client.peer != first || client.ClientID != clientTokenHash("client-token-a") {
+		t.Fatalf("duplicate request changed route ownership: %#v", client)
+	}
+}
+
+func TestRelayDoesNotDeliverRouteToSocketWithChangedIdentity(t *testing.T) {
+	server := newTestServer()
+	oldPeer := &peer{}
+	server.registerClient("changed-identity-route-1", protocol.TypeUserMessage, oldPeer, "local", "pc-local", "client-token-a", "old")
+	server.registerClientConnection(oldPeer, "other", "other-device", "client-token-b", "new")
+
+	if _, target, ok := server.clientPeerForMessage("changed-identity-route-1", "local", "pc-local"); ok || target != nil {
+		t.Fatal("route was delivered to a socket whose identity changed")
+	}
+}
+
 func TestRelayForwardsPlanExecutionUntilFinalResult(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())
@@ -288,6 +417,38 @@ func TestRelayForwardsPlanExecutionUntilFinalResult(t *testing.T) {
 	readTestMessage(t, clientConn, protocol.TypeSessionPlanExecuteResult)
 	if !isTerminalResponseForRequest(protocol.TypeSessionPlanExecute, protocol.TypeSessionPlanExecuteResult) {
 		t.Fatal("plan execute result must close the request route")
+	}
+}
+
+func TestRelayForwardsSubagentTaskWaitResult(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskWait, RequestID: "wait-route-1", UserID: "local", DeviceID: "pc-local",
+		ClientToken: clientToken, SessionID: "session-1",
+	})
+	readTestMessage(t, agentConn, protocol.TypeSubagentTaskWait)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeSubagentTaskWaitResult, RequestID: "wait-route-1", UserID: "local", DeviceID: "pc-local", SessionID: "session-1",
+	})
+	if result := readTestMessage(t, clientConn, protocol.TypeSubagentTaskWaitResult); result.RequestID != "wait-route-1" {
+		t.Fatalf("expected wait result request id, got %s", result.RequestID)
+	}
+	if server.getClient("wait-route-1") != nil {
+		t.Fatal("wait result did not release its request route")
 	}
 }
 

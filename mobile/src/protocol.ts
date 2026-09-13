@@ -126,6 +126,8 @@ export type MessageType =
   | "subagent_task_list"
   | "subagent_task_list_result"
   | "subagent_task_check"
+  | "subagent_task_message"
+  | "subagent_task_followup"
   | "subagent_task_wait"
   | "subagent_task_wait_result"
   | "subagent_task_cancel"
@@ -231,6 +233,7 @@ export type SubagentTask = {
   result?: string;
   error_message?: string;
   change_set: SubagentChangeSet;
+  can_followup?: boolean;
   created_at: string;
   updated_at: string;
   started_at?: string;
@@ -282,6 +285,7 @@ export type SubagentTaskWaitResultPayload = {
   session_id: string;
   task: SubagentTask;
   timed_out: boolean;
+  woken_by_mailbox?: boolean;
   sequence?: number;
 };
 

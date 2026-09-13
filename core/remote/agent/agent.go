@@ -160,7 +160,10 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 
 	readDone := make(chan error, 1)
 	go a.readLoop(ctx, conn, readDone)
-	ticker := time.NewTicker(60 * time.Second)
+	// Keep an application-level heartbeat comfortably below common reverse proxy
+	// idle timeouts. Relay also sends protocol-level ping frames, but this
+	// heartbeat updates the agent registry's last-seen timestamp.
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -406,6 +409,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSubagentTaskList(ctx, conn, message)
 	case protocol.TypeSubagentTaskCheck:
 		return a.handleSubagentTaskCheck(ctx, conn, message)
+	case protocol.TypeSubagentTaskMessage:
+		return a.handleSubagentTaskMessage(ctx, conn, message)
+	case protocol.TypeSubagentTaskFollowup:
+		return a.handleSubagentTaskFollowup(ctx, conn, message)
 	case protocol.TypeSubagentTaskWait:
 		return a.handleSubagentTaskWait(ctx, conn, message)
 	case protocol.TypeSubagentTaskCancel:

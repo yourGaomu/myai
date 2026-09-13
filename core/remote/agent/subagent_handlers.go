@@ -114,6 +114,35 @@ func (agent *Agent) handleSubagentTaskCheck(ctx context.Context, conn *websocket
 	return agent.writeSubagentTaskResult(conn, message, result.Value, "Subagent task refreshed.")
 }
 
+func (agent *Agent) handleSubagentTaskMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SubagentTaskMessagePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode subagent task message: %w", err)
+	}
+	result, err := agent.subagentService.SendMessage(ctx, subagentcommand.SendMessage{
+		TaskID: payload.TaskID, ParentSessionID: agent.subagentSessionID(message, ""), Content: payload.Message,
+	})
+	if err != nil {
+		return err
+	}
+	return agent.writeSubagentTaskResult(conn, message, result.Value, "Message queued for subagent.")
+}
+
+func (agent *Agent) handleSubagentTaskFollowup(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.DecodePayload[protocol.SubagentTaskMessagePayload](message)
+	if err != nil {
+		return fmt.Errorf("decode subagent task follow-up: %w", err)
+	}
+	result, err := agent.subagentService.Followup(ctx, subagentcommand.FollowupTask{
+		TaskID: payload.TaskID, ParentSessionID: agent.subagentSessionID(message, ""),
+		RequestID: message.RequestID, Content: payload.Message,
+	})
+	if err != nil {
+		return err
+	}
+	return agent.writeSubagentTaskResult(conn, message, result.Value, "Subagent follow-up scheduled.")
+}
+
 func (agent *Agent) handleSubagentTaskWait(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.SubagentTaskWaitPayload](message)
 	if err != nil {
@@ -131,7 +160,7 @@ func (agent *Agent) handleSubagentTaskWait(ctx context.Context, conn *websocket.
 		return err
 	}
 	return agent.writeRemoteMessage(conn, protocol.TypeSubagentTaskWaitResult, message.RequestID, sessionID, protocol.SubagentTaskWaitResultPayload{
-		SessionID: sessionID, Task: subagentTaskPayload(result.Task), TimedOut: result.TimedOut, Sequence: result.Sequence,
+		SessionID: sessionID, Task: subagentTaskPayload(result.Task), TimedOut: result.TimedOut, WokenByMailbox: result.WokenByMailbox, Sequence: result.Sequence,
 	})
 }
 

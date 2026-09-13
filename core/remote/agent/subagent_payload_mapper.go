@@ -56,6 +56,7 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 		AgentPath: task.AgentPath, AgentNickname: task.AgentNickname, DefinitionID: task.DefinitionID,
 		DefinitionVersion: task.DefinitionVersion, Title: task.Title, Instruction: task.Instruction,
 		Status: string(task.Status), Unread: task.Unread, Result: task.Result, ErrorMessage: task.ErrorMessage,
+		CanFollowup: task.CanFollowup(),
 		ChangeSet: protocol.SubagentChangeSet{
 			WorkspaceID: task.ChangeSet.WorkspaceID, Status: string(task.ChangeSet.Status), Files: files,
 			CheckpointID: task.ChangeSet.CheckpointID, Message: task.ChangeSet.Message,

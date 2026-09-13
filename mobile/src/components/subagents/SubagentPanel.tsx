@@ -17,6 +17,8 @@ type Props = {
   onCreateDefinition: (definition: Omit<SubagentDefinition, "id"> & { id?: string }) => boolean;
   onDeleteDefinition: (definitionID: string) => void;
   onDiscardTask: (taskID: string) => void;
+  onFollowupTask: (taskID: string, message: string) => boolean;
+  onMessageTask: (taskID: string, message: string) => boolean;
   onResumeTask: (taskID: string) => void;
   onWaitTask: (taskID: string) => void;
   onRefresh: () => void;
@@ -79,6 +81,8 @@ export function SubagentPanel({
   onCreateDefinition,
   onDeleteDefinition,
   onDiscardTask,
+  onFollowupTask,
+  onMessageTask,
   onResumeTask,
   onWaitTask,
   onRefresh,
@@ -127,6 +131,8 @@ export function SubagentPanel({
         onCancel={() => onCancelTask(task.id)}
         onCheck={() => onCheckTask(task.id)}
         onDiscard={() => onDiscardTask(task.id)}
+        onFollowup={(message) => onFollowupTask(task.id, message)}
+        onMessage={(message) => onMessageTask(task.id, message)}
         onResume={() => onResumeTask(task.id)}
         onWait={() => onWaitTask(task.id)}
         pending={pending}
@@ -285,7 +291,7 @@ function Segment({ label, onPress, selected }: { label: string; onPress: () => v
   return <Pressable onPress={onPress} style={[styles.segment, selected && styles.segmentActive]}><Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{label}</Text></Pressable>;
 }
 
-function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, onDiscard, onResume, onWait, pending, task }: {
+function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, onDiscard, onFollowup, onMessage, onResume, onWait, pending, task }: {
   buttonFeedback: ButtonFeedback;
   depth: number;
   events: SubagentTaskEvent[];
@@ -293,20 +299,31 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
   onCancel: () => void;
   onCheck: () => void;
   onDiscard: () => void;
+  onFollowup: (message: string) => boolean;
+  onMessage: (message: string) => boolean;
   onResume: () => void;
   onWait: () => void;
   pending: boolean;
   task: SubagentTask;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [messageDraft, setMessageDraft] = useState("");
   const running = task.status === "queued" || task.status === "running" || task.status === "waiting_subagents" || task.status === "waiting_permission";
-  const pendingChanges = task.change_set?.status === "pending";
+  const canMessage = running && task.status !== "waiting_permission";
+  const pendingChanges = task.status === "succeeded" && (task.change_set?.status === "pending" || task.change_set?.status === "conflict");
   const canResume = task.unread && (task.status === "succeeded" || task.status === "failed");
+  const canFollowup = task.can_followup === true;
   const latestEvent = compactTaskEvents(events).slice(-1)[0];
   const summary = task.error_message || task.result || (running && latestEvent ? eventSummary(latestEvent) : running ? "子智能体正在执行。" : "子智能体未返回文本结果。");
   const toggleExpanded = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpanded((current) => !current);
+  };
+  const sendMessage = () => {
+    const message = messageDraft.trim();
+    if (!message) return;
+    const sent = canMessage ? onMessage(message) : canFollowup ? onFollowup(message) : false;
+    if (sent) setMessageDraft("");
   };
   return (
     <View style={[styles.item, styles.taskItem, { marginLeft: Math.min(depth, 4) * 18 }]}>
@@ -351,6 +368,26 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
           {task.plan_id || task.step_id ? <Text style={styles.codeText}>编排：{task.plan_id || "-"} / {task.step_id || "-"}</Text> : null}
           <TaskEventTimeline events={events} />
           {(task.change_set?.files || []).map((file) => <Text key={file.path} style={styles.codeText}>{file.change_type}  {file.path}</Text>)}
+          {canMessage || canFollowup ? (
+            <View style={styles.messageComposer}>
+              <TextInput
+                multiline
+                onChangeText={setMessageDraft}
+                placeholder={running ? "给子智能体追加要求" : "继续执行子智能体任务"}
+                placeholderTextColor="#776f66"
+                style={[styles.input, styles.messageInput]}
+                textAlignVertical="top"
+                value={messageDraft}
+              />
+              <Pressable
+                disabled={pending || !messageDraft.trim()}
+                onPress={sendMessage}
+                style={({ pressed }) => buttonFeedback([styles.primaryButton, (pending || !messageDraft.trim()) && styles.disabled], pressed)}
+              >
+                  <ButtonContent color="#ffffff" loading={pending} text={running ? "发送" : "继续执行"} />
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.actionRow}>
             {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
             <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
@@ -475,6 +512,8 @@ const styles = StyleSheet.create({
   modalCancelText: { color: "#4f4841", fontSize: 12, fontWeight: "800" },
   modalSubmitButton: { minHeight: 42, minWidth: 120 },
   meta: { color: "#756d64", fontSize: 11, lineHeight: 16 },
+  messageComposer: { alignItems: "stretch", flexDirection: "row", gap: 8, marginTop: 11 },
+  messageInput: { flex: 1, maxHeight: 100, minHeight: 42 },
   notice: { backgroundColor: "#e6efe4", borderRadius: 5, color: "#2c5030", fontSize: 12, padding: 9 },
   primaryButton: { alignItems: "center", backgroundColor: "#1d5c45", borderRadius: 5, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
   primaryButtonText: { color: "#ffffff", fontSize: 12, fontWeight: "900" },

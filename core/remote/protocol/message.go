@@ -140,6 +140,8 @@ const (
 	TypeSubagentTaskList                 MessageType = "subagent_task_list"
 	TypeSubagentTaskListResult           MessageType = "subagent_task_list_result"
 	TypeSubagentTaskCheck                MessageType = "subagent_task_check"
+	TypeSubagentTaskMessage              MessageType = "subagent_task_message"
+	TypeSubagentTaskFollowup             MessageType = "subagent_task_followup"
 	TypeSubagentTaskWait                 MessageType = "subagent_task_wait"
 	TypeSubagentTaskWaitResult           MessageType = "subagent_task_wait_result"
 	TypeSubagentTaskCancel               MessageType = "subagent_task_cancel"
@@ -223,6 +225,11 @@ type SubagentTaskPayload struct {
 	TaskID string `json:"task_id"`
 }
 
+type SubagentTaskMessagePayload struct {
+	TaskID  string `json:"task_id"`
+	Message string `json:"message"`
+}
+
 type SubagentTaskWaitPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 	TaskID    string `json:"task_id"`
@@ -247,6 +254,7 @@ type SubagentTaskSummary struct {
 	Result            string            `json:"result,omitempty"`
 	ErrorMessage      string            `json:"error_message,omitempty"`
 	ChangeSet         SubagentChangeSet `json:"change_set"`
+	CanFollowup       bool              `json:"can_followup"`
 	CreatedAt         time.Time         `json:"created_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`
 	StartedAt         *time.Time        `json:"started_at,omitempty"`
@@ -296,10 +304,11 @@ type SubagentTaskResultPayload struct {
 }
 
 type SubagentTaskWaitResultPayload struct {
-	SessionID string              `json:"session_id"`
-	Task      SubagentTaskSummary `json:"task"`
-	TimedOut  bool                `json:"timed_out"`
-	Sequence  uint64              `json:"sequence,omitempty"`
+	SessionID      string              `json:"session_id"`
+	Task           SubagentTaskSummary `json:"task"`
+	TimedOut       bool                `json:"timed_out"`
+	WokenByMailbox bool                `json:"woken_by_mailbox,omitempty"`
+	Sequence       uint64              `json:"sequence,omitempty"`
 }
 
 type AgentOnlinePayload struct {

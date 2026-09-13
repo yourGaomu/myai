@@ -17,6 +17,12 @@ import (
 	"myai/core/remote/protocol"
 )
 
+const (
+	websocketPingInterval = 20 * time.Second
+	websocketPongWait     = 60 * time.Second
+	websocketWriteWait    = 10 * time.Second
+)
+
 type Server struct {
 	// Relay 只管理连接、配对和消息路由，不依赖 ChatService，也不执行模型或工具逻辑。
 	addr             string
@@ -233,6 +239,27 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 	}
 	defer conn.Close()
 	peer := newPeer(conn)
+	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	})
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+	go func() {
+		ticker := time.NewTicker(websocketPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := peer.writeControl(websocket.PingMessage, nil, time.Now().Add(websocketWriteWait)); err != nil {
+					_ = peer.close()
+					return
+				}
+			case <-stopPing:
+				return
+			}
+		}
+	}()
 
 	remoteAddr := r.RemoteAddr
 	log.Printf("%s connected: %s", role, remoteAddr)
@@ -259,6 +286,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 			log.Printf("%s read failed: %v", role, err)
 			return
 		}
+		// A compliant client normally answers Relay pings with a Pong, but some
+		// mobile/proxy combinations only reliably deliver application messages.
+		// Count any valid message as activity as well, so an active heartbeat or
+		// request cannot be closed by the read deadline while its Pong is delayed.
+		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 
 		log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
 		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, authenticatedAgent, &agentUserID, &agentDeviceID); err != nil {
@@ -334,7 +366,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
 	case protocol.TypeSubagentTaskEvent:
 		return s.forwardEventToClients(message)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskWaitResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
 		return s.forwardToClient(message)
 	default:
 		return fmt.Errorf("unsupported agent message type: %s", message.Type)
@@ -351,19 +383,20 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		// permission_result 属于原聊天请求，不能覆盖 request_id 已登记的请求类型，
 		// 否则后续 assistant_done 无法按 user_message 终态释放路由。
-		client := s.getClient(message.RequestID)
-		if client == nil || client.peer != p {
+		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
+		if !s.rebindClientRequest(message.RequestID, message.UserID, message.DeviceID, message.ClientToken, p) {
 			return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 		}
-		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
 		return s.forwardToAgent(message)
-	case protocol.TypeUserMessage, protocol.TypeAgentRunList, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationSet, protocol.TypeSessionStyleSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeModelConfigAdd, protocol.TypeModelConfigTest, protocol.TypeModelConfigUpdate, protocol.TypeModelConfigDelete, protocol.TypeModelConfigEnabledSet, protocol.TypeModelConfigDefaultSet, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypePluginList, protocol.TypePluginReload, protocol.TypePluginEnable, protocol.TypePluginDisable, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeAIMemoryList, protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryDreamRun, protocol.TypeAIMemoryDreamList, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskWait, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeSubagentTaskResume, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
+	case protocol.TypeUserMessage, protocol.TypeAgentRunList, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationSet, protocol.TypeSessionStyleSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeModelConfigAdd, protocol.TypeModelConfigTest, protocol.TypeModelConfigUpdate, protocol.TypeModelConfigDelete, protocol.TypeModelConfigEnabledSet, protocol.TypeModelConfigDefaultSet, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypePluginList, protocol.TypePluginReload, protocol.TypePluginEnable, protocol.TypePluginDisable, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeAIMemoryList, protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryDreamRun, protocol.TypeAIMemoryDreamList, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskMessage, protocol.TypeSubagentTaskFollowup, protocol.TypeSubagentTaskWait, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeSubagentTaskResume, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
-		s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, remoteAddr)
-		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
+		if !s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr) {
+			return fmt.Errorf("client request id is already owned by another client: request=%s", message.RequestID)
+		}
+		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeHeartbeat:
 		// Heartbeats also keep an idle mobile connection registered for push-style
@@ -378,7 +411,7 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
-		s.registerClientConnection(p, message.UserID, message.DeviceID, remoteAddr)
+		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		s.touchClientPeer(p)
 	default:
 		return fmt.Errorf("unsupported client message type: %s", message.Type)
@@ -398,15 +431,35 @@ func (s *Server) forwardToAgent(message protocol.Message) error {
 }
 
 func (s *Server) forwardToClient(message protocol.Message) error {
-	client := s.getClient(message.RequestID)
-	if client == nil {
+	client, target, ok := s.clientPeerForMessage(
+		message.RequestID,
+		message.UserID,
+		message.DeviceID,
+	)
+	if !ok {
 		return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 	}
 
-	if isTerminalResponseForRequest(client.RequestType, message.Type) {
-		defer s.unregisterClient(message.RequestID)
+	if err := target.writeJSON(message); err != nil {
+		// The TCP close can race with an agent response. Retire the stale peer
+		// and retry once against a replacement connection for the same identity.
+		s.unregisterClientPeer(target)
+		_, replacement, found := s.clientPeerForMessage(
+			message.RequestID,
+			message.UserID,
+			message.DeviceID,
+		)
+		if !found || replacement == target {
+			return err
+		}
+		if err := replacement.writeJSON(message); err != nil {
+			return err
+		}
 	}
-	return client.peer.writeJSON(message)
+	if isTerminalResponseForRequest(client.RequestType, message.Type) {
+		s.unregisterClient(message.RequestID)
+	}
+	return nil
 }
 
 func (s *Server) forwardEventToClients(message protocol.Message) error {
@@ -533,6 +586,10 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 	case protocol.TypeSubagentTaskList:
 		return responseType == protocol.TypeSubagentTaskListResult
 	case protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard:
+		return responseType == protocol.TypeSubagentTaskResult
+	case protocol.TypeSubagentTaskMessage:
+		return responseType == protocol.TypeSubagentTaskResult
+	case protocol.TypeSubagentTaskFollowup:
 		return responseType == protocol.TypeSubagentTaskResult
 	case protocol.TypeSubagentTaskWait:
 		return responseType == protocol.TypeSubagentTaskWaitResult
