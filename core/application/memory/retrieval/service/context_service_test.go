@@ -61,6 +61,22 @@ func TestContextServiceSkipsGreeting(t *testing.T) {
 	}
 }
 
+func TestSelectDiverseMemoriesAvoidsRedundantTopK(t *testing.T) {
+	now := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	first := testMemory("first", "Retry extraction", domainmemory.KindExperience, domainmemory.Scope{Type: domainmemory.ScopeGlobal}, "persist jobs before retry", now)
+	duplicate := testMemory("duplicate", "Retry extraction", domainmemory.KindExperience, domainmemory.Scope{Type: domainmemory.ScopeGlobal}, "persist jobs before retry", now)
+	distinct := testMemory("distinct", "Validate schema", domainmemory.KindExperience, domainmemory.Scope{Type: domainmemory.ScopeGlobal}, "validate input before indexing", now)
+	selected := selectDiverseMemories([]rankedMemory{
+		{memory: first, score: 10}, {memory: duplicate, score: 9.9}, {memory: distinct, score: 9.8},
+	}, 2)
+	if len(selected) != 2 {
+		t.Fatalf("expected two selected memories, got %#v", selected)
+	}
+	if selected[0].memory.ID != "first" || selected[1].memory.ID != "distinct" {
+		t.Fatalf("expected redundant candidate to be replaced by distinct memory, got %#v", selected)
+	}
+}
+
 type recordingUsage struct{ ids []string }
 
 func (usage *recordingUsage) RecordUse(_ context.Context, command memorycatalogcommand.RecordUse) error {

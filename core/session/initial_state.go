@@ -73,7 +73,7 @@ func NewFromState(state InitialState) *Session {
 		if current.Summary == "" {
 			current.Summary = current.CompactionCheckpoint.Summary
 		}
-		if current.CompactedMessages == 0 {
+		if current.CompactionCheckpoint.SourceEndMessage > 0 {
 			current.CompactedMessages = current.CompactionCheckpoint.SourceEndMessage
 		}
 		if current.CompactionSourceHash == "" {
@@ -83,21 +83,39 @@ func NewFromState(state InitialState) *Session {
 	if !hadMessages {
 		current.Messages = defaultMessages(state.SystemInstruction)
 	}
+	if current.CompactionCheckpoint != nil && current.CompactionCheckpoint.Version == 0 && strings.TrimSpace(current.CompactionCheckpoint.SourceHistoryHash) == "" {
+		if hash := rebuildLegacyCompactionHash(current.Messages, current.CompactionCheckpoint.SourceEndMessage); hash != "" {
+			current.CompactionCheckpoint.SourceHistoryHash = hash
+			current.CompactionSourceHash = hash
+		} else {
+			current.CompactionCheckpoint = nil
+		}
+	}
 	if current.CompactionCheckpoint != nil && !contextmgr.CompactionCheckpointMatchesCheckpoint(current.Messages, current.CompactionCheckpoint) {
-		// A persisted structured checkpoint has the same fail-open policy as the
-		// legacy fields: preserve messages and discard only the stale summary.
+		// A checkpoint that cannot be tied to the current history is discarded,
+		// while the original messages remain available for a fresh compaction.
 		current.Summary = ""
 		current.CompactedMessages = 0
 		current.CompactionSourceHash = ""
 		current.CompactionCheckpoint = nil
-	} else if strings.TrimSpace(current.Summary) != "" && strings.TrimSpace(current.CompactionSourceHash) != "" {
-		actualHash := contextmgr.CompactionSourceHash(current.Messages, current.CompactedMessages)
-		if actualHash != current.CompactionSourceHash {
-			// Old summaries must never be applied to a changed message prefix.
+	} else if strings.TrimSpace(current.Summary) != "" {
+		if strings.TrimSpace(current.CompactionSourceHash) == "" {
+			current.CompactionSourceHash = rebuildLegacyCompactionHash(current.Messages, current.CompactedMessages)
+		}
+		if strings.TrimSpace(current.CompactionSourceHash) == "" ||
+			contextmgr.CompactionSourceHash(current.Messages, current.CompactedMessages) != current.CompactionSourceHash {
+			// Legacy summaries with no reconstructable source prefix are not applied.
 			current.Summary = ""
 			current.CompactedMessages = 0
 			current.CompactionSourceHash = ""
 		}
 	}
 	return current
+}
+
+func rebuildLegacyCompactionHash(messages []domainmessage.Message, compactedMessages int) string {
+	if len(messages) == 0 || compactedMessages <= 0 || compactedMessages > len(messages) {
+		return ""
+	}
+	return contextmgr.CompactionSourceHash(messages, compactedMessages)
 }

@@ -112,6 +112,28 @@ func TestBuildSnapshotCapsLongSummary(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotTreatsCompactionSummaryAsContextualUserFragment(t *testing.T) {
+	snapshot := BuildSnapshot([]domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system"),
+		domainmessage.Text(domainmessage.RoleUser, "latest request"),
+	}, "historical facts", 0, 16)
+	if len(snapshot.Messages) < 2 {
+		t.Fatalf("expected system and summary context, got %#v", snapshot.Messages)
+	}
+	var found bool
+	for _, message := range snapshot.Messages {
+		if message.IsSyntheticReason(domainmessage.SyntheticReasonCompactionSummary) {
+			found = true
+			if message.Role != domainmessage.RoleUser {
+				t.Fatalf("compaction summary role = %q, want user context", message.Role)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("compaction summary was not included: %#v", snapshot.Messages)
+	}
+}
+
 func TestCurrentTurnTokensStartsAtAttachedRuntimeContext(t *testing.T) {
 	messages := []domainmessage.Message{
 		domainmessage.Text(domainmessage.RoleSystem, "system"),

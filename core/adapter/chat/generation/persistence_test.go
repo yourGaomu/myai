@@ -97,6 +97,24 @@ func TestSummaryStoreUpdatesMemoryAndPersistence(t *testing.T) {
 	}
 }
 
+func TestSummaryStoreRollsBackMemoryWhenPersistenceFails(t *testing.T) {
+	memory := &recordingSummaryMemory{summary: "old", compacted: 2}
+	expected := errors.New("durable session write failed")
+	current := &session.Session{ID: "session-1", Model: "gpt-test", Summary: "old", CompactedMessages: 2}
+	store := SummaryStore{Memory: memory, Sessions: failingSummaryPersistence{err: expected}}
+
+	err := store.SaveSummary(context.Background(), current, "new", 5)
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	if current.Summary != "old" || current.CompactedMessages != 2 {
+		t.Fatalf("session state was not rolled back: %#v", current)
+	}
+	if memory.summary != "old" || memory.compacted != 2 {
+		t.Fatalf("memory state was not rolled back: %#v", memory)
+	}
+}
+
 func TestUserMessagePersistenceDelegatesAsyncSave(t *testing.T) {
 	messages := &recordingMessageSaver{}
 	sessions := &recordingSessionPersistence{}
@@ -150,6 +168,14 @@ func (s *recordingMessageSaver) SaveMessage(_ context.Context, record repository
 type recordingSessionPersistence struct {
 	command sessioncommand.SaveSession
 	record  repository.SessionRecord
+}
+
+type failingSummaryPersistence struct {
+	err error
+}
+
+func (p failingSummaryPersistence) Save(context.Context, sessioncommand.SaveSession) error {
+	return p.err
 }
 
 func (s *recordingSessionPersistence) Save(_ context.Context, command sessioncommand.SaveSession) error {

@@ -174,13 +174,16 @@ func buildBaseAndRecent(messages []domainmessage.Message, summary string, compac
 	base = append(base, system...)
 
 	summary = strings.TrimSpace(summary)
-	if summary != "" {
-		base = append(base, domainmessage.Text(domainmessage.RoleSystem, "Previous conversation summary:\n"+summary))
-	}
 	for _, item := range fixedContext {
 		if item = strings.TrimSpace(item); item != "" {
 			base = append(base, domainmessage.Text(domainmessage.RoleSystem, item))
 		}
+	}
+	if summary != "" {
+		// A compaction summary is historical context. It must not be promoted to
+		// the system role, otherwise stale facts in the summary can override the
+		// current system/user instructions.
+		base = append(base, domainmessage.CompactionSummary(summary))
 	}
 
 	start := NormalizeCompactedMessages(messages, compactedMessages)

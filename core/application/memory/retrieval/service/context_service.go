@@ -53,9 +53,7 @@ func (service ContextService) Prepare(ctx context.Context, command memoryretriev
 	if topK <= 0 || topK > 8 {
 		topK = defaultMemoryTopK
 	}
-	if len(ranked) > topK {
-		ranked = ranked[:topK]
-	}
+	ranked = selectDiverseMemories(ranked, topK)
 	ids := make([]string, 0, len(ranked))
 	selected := make([]domainmemory.Memory, 0, len(ranked))
 	for _, item := range ranked {
@@ -82,6 +80,71 @@ func (service ContextService) recordUses(ctx context.Context, memories []domainm
 type rankedMemory struct {
 	memory domainmemory.Memory
 	score  float64
+}
+
+func selectDiverseMemories(ranked []rankedMemory, topK int) []rankedMemory {
+	if topK <= 0 || len(ranked) <= topK {
+		return ranked
+	}
+	selected := make([]rankedMemory, 0, topK)
+	remaining := append([]rankedMemory(nil), ranked...)
+	for len(selected) < topK && len(remaining) > 0 {
+		bestIndex := 0
+		bestUtility := -1.0
+		for index, candidate := range remaining {
+			redundancy := 0.0
+			for _, existing := range selected {
+				if similarity := memorySimilarity(candidate.memory, existing.memory); similarity > redundancy {
+					redundancy = similarity
+				}
+			}
+			// Keep relevance dominant, while applying a bounded MMR-style penalty
+			// to memories that repeat an already selected experience.
+			utility := candidate.score - 0.35*redundancy
+			if utility > bestUtility {
+				bestUtility = utility
+				bestIndex = index
+			}
+		}
+		selected = append(selected, remaining[bestIndex])
+		remaining = append(remaining[:bestIndex], remaining[bestIndex+1:]...)
+	}
+	return selected
+}
+
+func memorySimilarity(left domainmemory.Memory, right domainmemory.Memory) float64 {
+	leftTerms := memorySearchTerms(left)
+	rightTerms := memorySearchTerms(right)
+	if len(leftTerms) == 0 || len(rightTerms) == 0 {
+		return 0
+	}
+	intersection := 0
+	union := make(map[string]struct{}, len(leftTerms)+len(rightTerms))
+	for term := range leftTerms {
+		union[term] = struct{}{}
+		if _, ok := rightTerms[term]; ok {
+			intersection++
+		}
+	}
+	for term := range rightTerms {
+		union[term] = struct{}{}
+	}
+	if len(union) == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(len(union))
+}
+
+func memorySearchTerms(memory domainmemory.Memory) map[string]struct{} {
+	revision, ok := memory.CurrentRevision()
+	if !ok {
+		return nil
+	}
+	content := revision.Content
+	return termSet(strings.Join([]string{
+		memory.Title, strings.Join(memory.Tags, " "), content.Goal, content.ApplicableContext,
+		content.Approach, content.Result, content.PainPoints, content.RootCause, content.Lessons, content.Verification,
+	}, "\n"))
 }
 
 func rankMemories(query string, sessionID string, scope domainmemory.Scope, memories []domainmemory.Memory) []rankedMemory {
@@ -115,9 +178,6 @@ func rankMemories(query string, sessionID string, scope domainmemory.Scope, memo
 			}
 		}
 		score += revision.Confidence * 2
-		if memory.UseCount > 0 {
-			score += 0.5
-		}
 		items = append(items, rankedMemory{memory: memory, score: score})
 	}
 	sort.SliceStable(items, func(left, right int) bool {

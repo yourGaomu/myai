@@ -28,6 +28,13 @@ type SummaryStore struct {
 	Sessions SummaryPersistence
 }
 
+type summaryState struct {
+	summary           string
+	compactedMessages int
+	sourceHash        string
+	checkpoint        *compaction.Checkpoint
+}
+
 func (s SummaryStore) SaveSummary(ctx context.Context, current *session.Session, summary string, compactedMessages int) error {
 	if current == nil {
 		return errors.New("session is nil")
@@ -35,17 +42,18 @@ func (s SummaryStore) SaveSummary(ctx context.Context, current *session.Session,
 	if s.Memory == nil {
 		return errors.New("session manager is nil")
 	}
-	if err := s.Memory.SetSummaryForSession(current.ID, summary, compactedMessages); err != nil {
+	previous := captureSummaryState(current)
+	if err := s.setMemorySummary(current.ID, summary, compactedMessages, "", nil); err != nil {
 		return err
 	}
-	current.Summary = summary
-	current.CompactedMessages = compactedMessages
-	current.CompactionSourceHash = ""
-	current.CompactionCheckpoint = nil
+	applySummaryState(current, summaryState{summary: summary, compactedMessages: compactedMessages})
 	if s.Sessions == nil {
 		return nil
 	}
-	return s.Sessions.Save(ctx, sessioncommand.SaveSession{SessionID: current.ID, Model: current.Model})
+	if err := s.Sessions.Save(ctx, sessioncommand.SaveSession{SessionID: current.ID, Model: current.Model}); err != nil {
+		return errors.Join(err, s.rollbackSummary(current, previous))
+	}
+	return nil
 }
 
 func (s SummaryStore) SaveSummaryWithCheckpoint(ctx context.Context, current *session.Session, summary string, compactedMessages int, sourceHash string) error {
@@ -63,27 +71,68 @@ func (s SummaryStore) SaveSummaryWithCheckpoint(ctx context.Context, current *se
 			return checkpointErr
 		}
 	}
-	if checkpointMemory, ok := s.Memory.(SummaryMemoryWithCheckpointObject); ok {
-		if err := checkpointMemory.SetSummaryForSessionWithCheckpointObject(current.ID, summary, compactedMessages, sourceHash, &checkpoint); err != nil {
-			return err
-		}
-	} else if checkpointMemory, ok := s.Memory.(SummaryMemoryWithCheckpoint); ok {
-		if err := checkpointMemory.SetSummaryForSessionWithCheckpoint(current.ID, summary, compactedMessages, sourceHash); err != nil {
-			return err
-		}
-	} else {
-		if err := s.Memory.SetSummaryForSession(current.ID, summary, compactedMessages); err != nil {
-			return err
-		}
-		current.CompactionSourceHash = sourceHash
+	previous := captureSummaryState(current)
+	if err := s.setMemorySummary(current.ID, summary, compactedMessages, sourceHash, &checkpoint); err != nil {
+		return err
 	}
-	current.CompactionSourceHash = sourceHash
-	current.CompactionCheckpoint = checkpoint.Clone()
+	applySummaryState(current, summaryState{
+		summary: summary, compactedMessages: compactedMessages,
+		sourceHash: sourceHash, checkpoint: checkpoint.Clone(),
+	})
 	if s.Sessions == nil {
 		return nil
 	}
-	return s.Sessions.Save(ctx, sessioncommand.SaveSession{
+	if err := s.Sessions.Save(ctx, sessioncommand.SaveSession{
 		SessionID: current.ID,
 		Model:     current.Model,
-	})
+	}); err != nil {
+		return errors.Join(err, s.rollbackSummary(current, previous))
+	}
+	return nil
+}
+
+func (s SummaryStore) setMemorySummary(sessionID string, summary string, compactedMessages int, sourceHash string, checkpoint *compaction.Checkpoint) error {
+	if checkpointMemory, ok := s.Memory.(SummaryMemoryWithCheckpointObject); ok {
+		return checkpointMemory.SetSummaryForSessionWithCheckpointObject(sessionID, summary, compactedMessages, sourceHash, checkpoint)
+	}
+	if checkpointMemory, ok := s.Memory.(SummaryMemoryWithCheckpoint); ok {
+		return checkpointMemory.SetSummaryForSessionWithCheckpoint(sessionID, summary, compactedMessages, sourceHash)
+	}
+	return s.Memory.SetSummaryForSession(sessionID, summary, compactedMessages)
+}
+
+func (s SummaryStore) rollbackSummary(current *session.Session, previous summaryState) error {
+	if current == nil {
+		return nil
+	}
+	rollbackErr := s.setMemorySummary(current.ID, previous.summary, previous.compactedMessages, previous.sourceHash, previous.checkpoint)
+	applySummaryState(current, previous)
+	return rollbackErr
+}
+
+func captureSummaryState(current *session.Session) summaryState {
+	if current == nil {
+		return summaryState{}
+	}
+	return summaryState{
+		summary: current.Summary, compactedMessages: current.CompactedMessages,
+		sourceHash: current.CompactionSourceHash, checkpoint: cloneCheckpoint(current.CompactionCheckpoint),
+	}
+}
+
+func applySummaryState(current *session.Session, state summaryState) {
+	if current == nil {
+		return
+	}
+	current.Summary = state.summary
+	current.CompactedMessages = state.compactedMessages
+	current.CompactionSourceHash = state.sourceHash
+	current.CompactionCheckpoint = cloneCheckpoint(state.checkpoint)
+}
+
+func cloneCheckpoint(checkpoint *compaction.Checkpoint) *compaction.Checkpoint {
+	if checkpoint == nil {
+		return nil
+	}
+	return checkpoint.Clone()
 }
