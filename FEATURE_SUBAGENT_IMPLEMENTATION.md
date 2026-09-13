@@ -264,6 +264,8 @@ ready = pending steps whose dependencies are done/skipped
 | list_subagent_definitions | 查看可用子智能体定义和能力 | 否 |
 | start_async_task | 使用指定 Definition 创建后台任务 | 否，立即返回 |
 | spawn_agent | Codex 兼容的子智能体创建入口 | 否，立即返回 |
+| send_message | 将消息持久化到排队、运行或等待子任务的 mailbox | 不等待模型消费 |
+| followup_task | 在原 ChildSession 中创建新的 Run，保留旧 Run | 等待上一 Run 收尾，不等待新 Run 完成 |
 | check_async_task | 查询单个任务状态/结果 | 否 |
 | list_async_tasks | 列出当前父会话任务树 | 否 |
 | list_agents | 以 agent 视图列出当前父会话子任务 | 否 |
@@ -431,7 +433,7 @@ core/adapter/subagent/local/scheduler.go 使用固定数量 worker 和有界队�
 
 ~~~text
 Service.Start
-  -> Scheduler.Submit(taskID, job)
+  -> Scheduler.Submit(runID, job)
   -> 立即返回任务摘要
   -> worker 从 queue 取 job
   -> 独立 context 执行
@@ -441,11 +443,13 @@ Service.Start
 
 - 默认至少 2 个 worker。
 - 默认队列容量为 32（由构造参数决定）。
-- 同一任务不能重复提交。
+- 同一 Run 不能重复提交；同一 Task 的不同 Run 使用不同调度键。Service 负责串行化同一 child 的执行，等待旧 Run 收尾后才接纳新 Run。
 - 队列满时，提交失败并将任务标记为失败。
-- 支持按任务取消。
+- 外部仍按 task_id 取消，Service 解析 CurrentRunID 后取消对应执行。
 - Close() 会取消活动任务、关闭队列并等待 worker 退出。
 - worker 捕获 panic，避免单个子任务导致进程崩溃。
+- active-run 的登记、释放和终态写入均核对 Run 身份，旧 Run 不能结束或移除新 Run。
+- queued 事件在调度前发布；调度失败重新读取当前 Task，在保留并发 mailbox/取消状态的基础上提交失败结果。
 
 ### 8.2 子任务执行步骤
 
@@ -454,10 +458,10 @@ TaskService.execute 的实际流程：
 1. queued -> running，写入开始时间和 Run 状态。
 2. 发布 task.started 事件。
 3. 准备隔离 Workspace（direct 模式跳过）。
-4. 创建 Child Session。
+4. 创建或恢复并复用 Child Session；已有 OpenSandbox 引用直接复用，命令执行时按需重连。
 5. 调用 chat.Runner.Run，进入普通 Chat 生成/工具调用循环。
 6. 通过任务流把推理、答案、工具调用和工具结果转换成 TaskEvent。
-7. 检查最终结果非空。
+7. Runner.Run 返回后 claim mailbox，逐条执行后续输入，成功 ack，失败或 panic release；检查最终结果非空。
 8. 收集隔离 Workspace 的 ChangeSet。
 9. 成功则保存结果并标记 succeeded。
 10. 超时、取消、模型错误或 panic 则标记 failed 或 canceled。
@@ -544,7 +548,9 @@ wait_agent 是唯一明确的等待入口：
 - 子任务已处于终态时立即返回。
 - 收到目标任务的终态事件时返回。
 - 超时返回当前任务快照，并设置 timed_out=true；这不等于任务失败，任务可能仍在后台运行。
-- 父子任务等待时，父任务可暂时变为 waiting_subagents，等待结束后恢复为 running。
+- 父子任务等待时，父任务暂时变为 waiting_subagents。同一 Run 的最后一个等待者退出后才恢复 running，旧 Run 的等待者不能更改新 Run 状态。
+- 每次等待在同一锁内注册并取得独立唤醒 channel；消息会唤醒所有已注册等待者。注册前已存在的 pending 消息也立即唤醒，正在 delivering 的消息不会唤醒自己的等待。
+- `waiting_subagents` 状态下可以接收 mailbox 消息，等待结果返回 `woken_by_mailbox=true`。这只结束等待；消息内容实际要到当前 `Runner.Run` 返回后才进入下一次执行，不保证在每次工具调用之间注入。`waiting_permission` 拒绝 mailbox 消息，移动端不显示发送入口。
 - 事件流被关闭时返回错误，调用方应使用最后的序列号重新连接/订阅。
 
 ### 10.3 终态与未读结果
@@ -571,6 +577,18 @@ canceled
 6. 成功后清除 Unread；继续失败则恢复 Unread=true。
 
 恢复只会继续主会话上下文，不会自动应用隔离 Workspace 的文件变更。文件变更仍必须明确调用 Apply。
+
+### 10.5 继续子会话
+
+`followup_task` / `subagent_task_followup` 与恢复父会话是不同操作：它复用 ChildSession，为 child 创建新的 Run，并保存旧 Run 历史。
+
+- 仅接纳 succeeded/failed 任务；取消任务不支持续接。父 continuation 消费结果期间不能续接。
+- direct 工作区支持成功或失败后的续接；隔离工作区只允许成功且 ChangeSet 为 pending/conflict 的任务，还要查询 Workspace Manager 的实际状态。
+- 已应用、已丢弃、缺失或执行失败后清理的隔离工作区目前必须新建任务。尚未实现保留源目录身份、重建工作区及新一轮变更基线。
+- 非空 `request_id` 与原始输入的 SHA-256 摘要一起持久化到 Run；相同 task/request/content 的重试返回当前 Task，不重复创建或调度 Run；同 ID 不同内容报错。重启恢复改写执行指令不会影响原请求身份。空 request_id 不保证幂等，使用新 ID 才表示新一轮请求。
+- 输入上限为 20000 个 Unicode 字符。调度失败返回已经持久化的 failed Task。
+- 工具摘要和远程摘要包含 `can_followup`，移动端据此显示入口。这是持久化状态的资格判断，实际工作区可用性仍在接纳时检查。
+- 当前锁和执行所有权是单 Service 进程内机制，尚不保证多个进程同时接管同一 Task 时的唯一执行。
 
 ## 11. Workspace ChangeSet
 
@@ -610,6 +628,8 @@ subagent_definition_mutation_result
 subagent_task_list
 subagent_task_list_result
 subagent_task_check
+subagent_task_message
+subagent_task_followup
 subagent_task_wait
 subagent_task_wait_result
 subagent_task_cancel
@@ -629,6 +649,8 @@ mobile/src/hooks/useSubagentActions.ts 将 UI 操作映射为 Relay 请求：
 刷新配置       -> subagent_definition_list
 刷新任务       -> subagent_task_list
 查看任务       -> subagent_task_check
+发送 follow-up -> subagent_task_message
+继续已结束任务 -> subagent_task_followup
 等待任务       -> subagent_task_wait (默认 30 秒窗口)
 取消任务       -> subagent_task_cancel
 应用变更       -> subagent_task_apply
@@ -698,6 +720,7 @@ mobile/src/components/subagents/SubagentPanel.tsx 提供：
 - 子任务超时、取消、失败和 panic 保护。
 - TaskEvent 实时推送、序列号、回放和可选持久化。
 - 等待、状态查询、结果恢复父会话。
+- 持久化 mailbox、并行等待唤醒、原子续接接纳，以及以 request_id 去重的独立 follow-up Run。
 - 可写子智能体的隔离 Workspace 和 ChangeSet Apply/Discard。
 - Relay/WebSocket 与 Mobile 面板联动。
 
@@ -709,8 +732,14 @@ mobile/src/components/subagents/SubagentPanel.tsx 提供：
 - 内存事件历史有窗口限制；需要跨进程可靠恢复时必须配置 TaskEventRepository。
 - Android 后台服务只能尽力保持 Relay 长连接；强行停止应用、厂商电池策略或系统资源回收仍可能终止服务。
 - Scheduler 是进程内调度器，进程退出时任务不能依赖它继续执行；需要跨进程任务恢复时应增加持久化队列/外部调度器。
+- 固定 worker 在 wait_agent 阻塞期间仍被占用；若所有 worker 都等待尚在排队的后代任务，后代可能一直等到父任务超时才开始执行。后续需要等待期间让出执行额度，并加入父任务配额和公平调度。
+- mailbox 尚未接入工具轮次间的即时输入机制；隔离工作区完成 Apply/Discard 后的同会话续接也仍待开发。
 
 ## 15. 相关测试与验证
+
+2026-09-13：最终代码的 `go test -p 1 ./...`、`go vet ./...`、移动端 `npm run typecheck`、`git diff --check` 均通过。首次并行全量运行中，本地执行器的 `go version` 用例超时；独立复跑和后续全量串行测试均通过。本轮未执行 race 检查或真实 OpenSandbox 服务集成测试。
+
+`core/application/subagent/service/task_concurrency_test.go` 覆盖等待唤醒、Run 身份隔离、续接去重、调度失败、工作区准备并发更新，以及真实磁盘快照的续接边界。
 
 修改子智能体机制后，建议在 D:\Go_All\myai 执行：
 
