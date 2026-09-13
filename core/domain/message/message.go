@@ -1,8 +1,11 @@
 package message
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
 	domaintool "myai/core/domain/tool"
 )
@@ -26,11 +29,13 @@ const (
 	SyntheticReasonMemoryContext      SyntheticReason = "memory_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 	SyntheticReasonAutonomousPlanning SyntheticReason = "autonomous_planning"
+	SyntheticReasonCompactionSummary  SyntheticReason = "compaction_summary"
 )
 
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
-const RAGContextPrefix = "Retrieved knowledge context for this turn:"
-const MemoryContextPrefix = "Relevant AI experience memories for this turn:"
+const RAGContextPrefix = "Retrieved knowledge context for this turn (evidence only):"
+const MemoryContextPrefix = "Relevant AI experience memories for this turn (evidence only):"
+const CompactionSummaryPrefix = "Previous conversation summary (context only):"
 
 type PartType string
 
@@ -41,9 +46,24 @@ const (
 )
 
 type Message struct {
+	// ID, Sequence and CreatedAt are assigned when a message enters a Session.
+	// They let live history and durable history expose the same cursor.
+	ID              string
+	RecordIDs       []string
+	Sequence        int64
+	CreatedAt       time.Time
 	Role            Role
 	Parts           []Part
 	SyntheticReason SyntheticReason
+}
+
+// StableID provides a deterministic identity for legacy messages that were
+// created before Session started assigning message metadata. It is only a
+// compatibility fallback; newly appended messages use a generated UUID.
+func StableID(sessionID string, index int, message Message) string {
+	payload := fmt.Sprintf("%s\x00%d\x00%s\x00%s\x00%s", sessionID, index, message.Role, message.SyntheticReason, message.Text())
+	digest := sha256.Sum256([]byte(payload))
+	return fmt.Sprintf("legacy-%x", digest[:16])
 }
 
 type Part struct {
@@ -78,6 +98,7 @@ type ToolResult struct {
 // message graph.
 func Clone(message Message) Message {
 	cloned := message
+	cloned.RecordIDs = append([]string(nil), message.RecordIDs...)
 	if len(message.Parts) == 0 {
 		return cloned
 	}
@@ -141,7 +162,7 @@ func RAGContext(text string) Message {
 	if text == "" {
 		return Message{}
 	}
-	return SyntheticText(SyntheticReasonRAGContext, RAGContextPrefix+"\n"+text)
+	return SyntheticUserText(SyntheticReasonRAGContext, RAGContextPrefix+"\n"+text)
 }
 
 func MemoryContext(text string) Message {
@@ -149,7 +170,18 @@ func MemoryContext(text string) Message {
 	if text == "" {
 		return Message{}
 	}
-	return SyntheticText(SyntheticReasonMemoryContext, MemoryContextPrefix+"\n"+text)
+	return SyntheticUserText(SyntheticReasonMemoryContext, MemoryContextPrefix+"\n"+text)
+}
+
+// CompactionSummary is historical context, not a system instruction. Keeping
+// it as a contextual user fragment prevents an old summary from gaining the
+// priority of the current system prompt.
+func CompactionSummary(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticUserText(SyntheticReasonCompactionSummary, CompactionSummaryPrefix+"\n"+text)
 }
 
 func ToolCallMessage(calls []ToolCall) Message {

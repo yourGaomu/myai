@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	generationcommand "myai/core/application/chat/generation/command"
 	domainmessage "myai/core/domain/message"
 	repository "myai/core/port/repository"
 	"myai/core/session"
@@ -76,6 +77,28 @@ func TestMapperPersistsEveryToolCallPart(t *testing.T) {
 	}
 }
 
+func TestMapperKeepsLiveMessageIdentityStableAcrossReadsAndPersistence(t *testing.T) {
+	createdAt := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
+	message := domainmessage.Text(domainmessage.RoleUser, "hello")
+	message.ID = "message-live-1"
+	message.Sequence = 42
+	message.CreatedAt = createdAt
+	current := &session.Session{ID: "session-1", Messages: []domainmessage.Message{message}}
+	mapper := Mapper{IDs: &sequentialIDs{}, Now: func() time.Time { return createdAt.Add(time.Hour) }}
+
+	first := mapper.MemoryMessages(current)
+	second := mapper.MemoryMessages(current)
+	persisted := mapper.UserTurn(generationcommand.PersistUserMessage{
+		SessionID: "session-1", Input: "hello", AppendedMessages: []domainmessage.Message{message},
+	}, createdAt.Add(time.Minute))
+
+	for name, records := range map[string][]repository.MessageRecord{"first": first, "second": second, "persisted": persisted} {
+		if len(records) != 1 || records[0].ID != message.ID || records[0].Sequence != message.Sequence || !records[0].CreatedAt.Equal(createdAt) {
+			t.Fatalf("%s records lost stable identity: %#v", name, records)
+		}
+	}
+}
+
 func TestMapperPersistsSyntheticUserReason(t *testing.T) {
 	mapper := Mapper{IDs: &sequentialIDs{}}
 	current := &session.Session{
@@ -88,6 +111,16 @@ func TestMapperPersistsSyntheticUserReason(t *testing.T) {
 	records := mapper.MemoryMessages(current)
 	if len(records) != 1 || records[0].Role != repository.RoleUser || records[0].SyntheticReason != "subagent_result" {
 		t.Fatalf("unexpected synthetic user record: %#v", records)
+	}
+}
+
+func TestMapperPersistsRAGContextAsEvidenceUserFragment(t *testing.T) {
+	mapper := Mapper{IDs: &sequentialIDs{}}
+	records := mapper.UserTurn(generationcommand.PersistUserMessage{
+		SessionID: "session-1", RAGContext: "document evidence", Input: "question",
+	}, time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC))
+	if len(records) != 2 || records[0].Role != repository.RoleUser || records[0].SyntheticReason != string(domainmessage.SyntheticReasonRAGContext) {
+		t.Fatalf("expected RAG context as synthetic user evidence, got %#v", records)
 	}
 }
 

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -312,7 +313,7 @@ func (m *Store) ListMessages(ctx context.Context, sessionID string) ([]repositor
 }
 
 func (m *Store) GetMessageHistoryMeta(ctx context.Context, sessionID string) (repository.MessageHistoryMeta, error) {
-	filter := bson.M{"session_id": sessionID}
+	filter := visibleMessageFilter(sessionID)
 	count, err := m.template.Count(ctx, messagesCollection, filter)
 	if err != nil {
 		return repository.MessageHistoryMeta{}, repositoryError(err)
@@ -341,7 +342,20 @@ func (m *Store) GetMessageHistoryMeta(ctx context.Context, sessionID string) (re
 
 	meta.LastMessageID = last.ID
 	meta.LastMessageCreatedAt = &last.CreatedAt
+	if last.Sequence > meta.HistoryVersion {
+		meta.HistoryVersion = last.Sequence
+	}
 	return meta, nil
+}
+
+func visibleMessageFilter(sessionID string) bson.M {
+	return bson.M{
+		"session_id": sessionID,
+		"$or": []bson.M{
+			{"synthetic_reason": bson.M{"$exists": false}},
+			{"synthetic_reason": ""},
+		},
+	}
 }
 
 func messageSort(direction int) bson.D {
@@ -360,39 +374,66 @@ func repositoryError(err error) error {
 }
 
 func (m *Store) ListMessagesAfter(ctx context.Context, sessionID string, afterMessageID string, limit int) ([]repository.MessageRecord, bool, error) {
-	messages, err := m.ListMessages(ctx, sessionID)
-	if err != nil {
-		return nil, false, err
-	}
 	if limit <= 0 || limit > 300 {
 		limit = 100
 	}
-	if afterMessageID == "" {
-		if len(messages) <= limit {
-			return messages, false, nil
+
+	filter := visibleMessageFilter(sessionID)
+	afterMessageID = strings.TrimSpace(afterMessageID)
+	if afterMessageID != "" {
+		var cursor po.MessageDocument
+		cursorFilter := bson.M{
+			"_id":        afterMessageID,
+			"session_id": sessionID,
+			"$or": bson.A{
+				bson.M{"synthetic_reason": bson.M{"$exists": false}},
+				bson.M{"synthetic_reason": ""},
+			},
 		}
-		return messages[:limit], false, nil
+		if err := m.template.FindOne(ctx, messagesCollection, cursorFilter, &cursor); err != nil {
+			if errors.Is(err, mongotemplate.ErrNotFound) {
+				return nil, true, nil
+			}
+			return nil, false, repositoryError(err)
+		}
+		filter = bson.M{"$and": bson.A{filter, messageAfterFilter(cursor)}}
 	}
 
-	start := -1
-	for index, message := range messages {
-		if message.ID == afterMessageID {
-			start = index + 1
-			break
-		}
+	var documents []po.MessageDocument
+	if err := m.template.FindAll(
+		ctx,
+		messagesCollection,
+		filter,
+		&documents,
+		options.Find().SetSort(messageSort(1)).SetLimit(int64(limit)),
+	); err != nil {
+		return nil, false, err
 	}
-	if start < 0 {
-		return nil, true, nil
+	messages := make([]repository.MessageRecord, 0, len(documents))
+	for _, document := range documents {
+		messages = append(messages, mongomapper.MessageRecordFromDocument(document))
 	}
-	if start >= len(messages) {
-		return nil, false, nil
-	}
+	return messages, false, nil
+}
 
-	end := start + limit
-	if end > len(messages) {
-		end = len(messages)
+func messageAfterFilter(cursor po.MessageDocument) bson.M {
+	sameSequence := bson.M{"sequence": cursor.Sequence}
+	if cursor.Sequence == 0 {
+		sameSequence = bson.M{"$or": bson.A{
+			bson.M{"sequence": bson.M{"$exists": false}},
+			bson.M{"sequence": 0},
+		}}
 	}
-	return messages[start:end], false, nil
+	return bson.M{"$or": bson.A{
+		bson.M{"sequence": bson.M{"$gt": cursor.Sequence}},
+		bson.M{"$and": bson.A{
+			sameSequence,
+			bson.M{"$or": bson.A{
+				bson.M{"created_at": bson.M{"$gt": cursor.CreatedAt}},
+				bson.M{"created_at": cursor.CreatedAt, "_id": bson.M{"$gt": cursor.ID}},
+			}},
+		}},
+	}}
 }
 
 func (m *Store) ListAssets(ctx context.Context, sessionID string, limit int) ([]repository.AssetRecord, error) {

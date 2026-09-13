@@ -36,6 +36,7 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 		return messageresult.Command{Session: current, Input: command.Input, Appended: false}, nil
 	}
 	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForcePlanMode)
+	messageCount := len(current.Messages)
 	if err := s.Memory.AddUserTurnWithReasonTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason); err != nil {
 		return messageresult.Command{}, err
 	}
@@ -43,7 +44,8 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext), Appended: true}, nil
+	appended := domainmessage.CloneAll(current.Messages[messageCount:])
+	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext), AppendedMessages: appended, Appended: true}, nil
 }
 
 func (s CommandService) PrepareRegeneration(ctx context.Context, command messagecommand.PrepareRegeneration) (messageresult.Command, error) {

@@ -25,6 +25,7 @@ import (
 	planserviceapp "myai/core/application/plan/service"
 	messagecommand "myai/core/application/session/message/command"
 	domainagentrun "myai/core/domain/agentrun"
+	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -448,7 +449,7 @@ func (s ExecutionService) executePlanStep(ctx context.Context, current *session.
 		}
 		s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 			SessionID: prepared.Session.ID, Model: prepared.Session.Model, Title: title, Input: input,
-			RuntimeInstruction: prepared.RuntimeInstruction, SessionSnapshot: session.Clone(prepared.Session),
+			RuntimeInstruction: prepared.RuntimeInstruction, AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(prepared.Session),
 		})
 	}
 	appendMu.Unlock()

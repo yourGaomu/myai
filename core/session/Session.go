@@ -2,6 +2,9 @@ package session
 
 import (
 	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	"myai/core/contextmgr"
 	compaction "myai/core/domain/compaction"
@@ -119,6 +122,7 @@ func newSession(id, model string, agentMode AgentMode, permissionMode Permission
 	if len(messages) == 0 {
 		messages = defaultMessages()
 	}
+	messages = normalizeMessageMetadata(id, messages)
 	agentMode = NormalizeAgentMode(agentMode)
 	permissionMode = NormalizePermissionMode(permissionMode)
 	contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
@@ -155,22 +159,52 @@ func (s *Session) AddUserTurnWithContext(ragContext string, runtimeInstruction s
 
 func (s *Session) AddUserTurnWithReason(ragContext string, runtimeInstruction string, content string, reason domainmessage.SyntheticReason) {
 	if ragMessage := domainmessage.RAGContext(ragContext); ragMessage.IsSynthetic() {
-		s.Messages = append(s.Messages, ragMessage)
+		s.AppendMessage(ragMessage)
 	}
 	if runtimeMessage := domainmessage.RuntimeInstruction(runtimeInstruction); runtimeMessage.IsSynthetic() {
-		s.Messages = append(s.Messages, runtimeMessage)
+		s.AppendMessage(runtimeMessage)
 	}
 	message := domainmessage.Text(domainmessage.RoleUser, content)
 	if reason != "" {
 		message = domainmessage.SyntheticUserText(reason, content)
 	}
-	s.Messages = append(s.Messages, message)
+	s.AppendMessage(message)
 }
 
 func (s *Session) AddAssistantMessage(content string) {
-	s.Messages = append(s.Messages,
-		domainmessage.Text(domainmessage.RoleAssistant, content),
-	)
+	s.AppendMessage(domainmessage.Text(domainmessage.RoleAssistant, content))
+}
+
+// AppendMessage assigns durable identity metadata once, at the aggregate
+// boundary. Persistence adapters must reuse these values instead of generating
+// new IDs while reading a live session.
+func (s *Session) AppendMessage(message domainmessage.Message) {
+	if s == nil {
+		return
+	}
+	if message.ID == "" {
+		message.ID = uuid.NewString()
+	}
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	lastSequence := int64(0)
+	if len(s.Messages) > 0 {
+		lastSequence = s.Messages[len(s.Messages)-1].Sequence
+	}
+	if message.Sequence <= lastSequence {
+		message.Sequence = message.CreatedAt.UnixNano()
+		if message.Sequence <= lastSequence {
+			message.Sequence = lastSequence + 1
+		}
+	}
+	s.Messages = append(s.Messages, message)
+}
+
+func (s *Session) AppendMessages(messages ...domainmessage.Message) {
+	for _, message := range messages {
+		s.AppendMessage(message)
+	}
 }
 
 func (s *Session) AddUsage(usage llm.TokenUsage) {
@@ -180,7 +214,7 @@ func (s *Session) AddUsage(usage llm.TokenUsage) {
 
 func (s *Session) Clear() {
 	// 清空会话时恢复固定 system 消息，同时移除摘要、用量和未完成计划。
-	s.Messages = defaultMessages(s.SystemInstruction)
+	s.Messages = normalizeMessageMetadata(s.ID, defaultMessages(s.SystemInstruction))
 	s.Summary = ""
 	s.CompactedMessages = 0
 	s.CompactionSourceHash = ""
@@ -188,6 +222,35 @@ func (s *Session) Clear() {
 	s.Usage = llm.TokenUsage{}
 	s.LastUsage = llm.TokenUsage{}
 	s.CurrentPlan = nil
+}
+
+func normalizeMessageMetadata(sessionID string, messages []domainmessage.Message) []domainmessage.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	result := domainmessage.CloneAll(messages)
+	lastSequence := int64(0)
+	for index := range result {
+		message := &result[index]
+		if message.ID == "" {
+			message.ID = domainmessage.StableID(sessionID, index, *message)
+		}
+		if message.Sequence <= 0 {
+			if !message.CreatedAt.IsZero() {
+				message.Sequence = message.CreatedAt.UnixNano()
+			} else {
+				message.Sequence = int64(index + 1)
+			}
+		}
+		if message.Sequence <= lastSequence {
+			message.Sequence = lastSequence + 1
+		}
+		if message.CreatedAt.IsZero() {
+			message.CreatedAt = time.Unix(0, message.Sequence).UTC()
+		}
+		lastSequence = message.Sequence
+	}
+	return result
 }
 
 func defaultMessages(systemInstruction ...string) []domainmessage.Message {

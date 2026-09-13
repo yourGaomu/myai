@@ -3,11 +3,14 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	gomongo "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"myai/core/adapter/persistence/mongo/po"
+	mongotemplate "myai/core/adapter/persistence/mongo/template"
 
 	repository "myai/core/port/repository"
 )
@@ -59,27 +62,81 @@ func TestStoreDelegatesSessionListToTemplate(t *testing.T) {
 	}
 }
 
+func TestStoreListsMessagesAfterCursorInMongo(t *testing.T) {
+	createdAt := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
+	operations := &fakeMongoOperations{
+		message:  po.MessageDocument{ID: "message-1", SessionID: "session-1", Sequence: 41, CreatedAt: createdAt},
+		messages: []po.MessageDocument{{ID: "message-2", SessionID: "session-1", Sequence: 42, CreatedAt: createdAt.Add(time.Nanosecond)}},
+	}
+	store := NewWithTemplate(operations)
+
+	records, fullSync, err := store.ListMessagesAfter(context.Background(), "session-1", "message-1", 25)
+	if err != nil || fullSync || len(records) != 1 || records[0].ID != "message-2" {
+		t.Fatalf("unexpected incremental result: records=%#v fullSync=%v err=%v", records, fullSync, err)
+	}
+	filter, ok := operations.findAllFilter.(bson.M)
+	if !ok || filter["$and"] == nil {
+		t.Fatalf("expected tuple cursor filter, got %#v", operations.findAllFilter)
+	}
+	if operations.findOptions.Limit == nil || *operations.findOptions.Limit != 25 || operations.findOptions.Sort == nil {
+		t.Fatalf("expected database sort and limit, got %#v", operations.findOptions)
+	}
+}
+
+func TestStoreRequiresFullSyncWhenMessageCursorIsMissing(t *testing.T) {
+	operations := &fakeMongoOperations{findOneErr: mongotemplate.ErrNotFound}
+	store := NewWithTemplate(operations)
+
+	records, fullSync, err := store.ListMessagesAfter(context.Background(), "session-1", "missing", 25)
+	if err != nil || !fullSync || len(records) != 0 || operations.findAllCalls != 0 {
+		t.Fatalf("unexpected missing cursor result: records=%#v fullSync=%v err=%v operations=%#v", records, fullSync, err, operations)
+	}
+}
+
 type fakeMongoOperations struct {
-	collection string
-	document   any
-	session    po.SessionDocument
-	sessions   []po.SessionDocument
+	collection    string
+	document      any
+	session       po.SessionDocument
+	sessions      []po.SessionDocument
+	message       po.MessageDocument
+	messages      []po.MessageDocument
+	findOneErr    error
+	findAllFilter any
+	findAllCalls  int
+	findOptions   options.FindOptions
 }
 
 func (f *fakeMongoOperations) FindOne(_ context.Context, collection string, _ any, out any, _ ...options.Lister[options.FindOneOptions]) error {
 	f.collection = collection
+	if f.findOneErr != nil {
+		return f.findOneErr
+	}
 	switch target := out.(type) {
 	case *po.SessionDocument:
 		*target = f.session
+	case *po.MessageDocument:
+		*target = f.message
 	}
 	return nil
 }
 
-func (f *fakeMongoOperations) FindAll(_ context.Context, collection string, _ any, out any, _ ...options.Lister[options.FindOptions]) error {
+func (f *fakeMongoOperations) FindAll(_ context.Context, collection string, filter any, out any, opts ...options.Lister[options.FindOptions]) error {
 	f.collection = collection
+	f.findAllCalls++
+	f.findAllFilter = filter
+	f.findOptions = options.FindOptions{}
+	for _, option := range opts {
+		for _, apply := range option.List() {
+			if err := apply(&f.findOptions); err != nil {
+				return err
+			}
+		}
+	}
 	switch target := out.(type) {
 	case *[]po.SessionDocument:
 		*target = append([]po.SessionDocument(nil), f.sessions...)
+	case *[]po.MessageDocument:
+		*target = append([]po.MessageDocument(nil), f.messages...)
 	}
 	return nil
 }

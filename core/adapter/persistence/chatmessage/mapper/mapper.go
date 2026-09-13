@@ -1,6 +1,7 @@
 package mapper
 
 import (
+	"fmt"
 	"time"
 
 	uuidadapter "myai/core/adapter/id/uuid"
@@ -23,8 +24,12 @@ type Mapper struct {
 }
 
 func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, createdAt time.Time) repository.MessageRecord {
+	id := m.newID()
+	if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, command.Input, command.SyntheticReason); ok {
+		id = messageRecordID(message, 0, 1)
+	}
 	return repository.MessageRecord{
-		ID:              m.newID(),
+		ID:              id,
 		SessionID:       command.SessionID,
 		Role:            repository.RoleUser,
 		Content:         command.Input,
@@ -35,16 +40,27 @@ func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, create
 }
 
 func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt time.Time) []repository.MessageRecord {
+	if len(command.AppendedMessages) > 0 {
+		return m.recordsForMessages(command.SessionID, command.AppendedMessages, createdAt)
+	}
 	records := make([]repository.MessageRecord, 0, 3)
 	if ragMessage := domainmessage.RAGContext(command.RAGContext); ragMessage.IsSynthetic() {
+		id := m.newID()
+		if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, ragMessage.Text(), ragMessage.SyntheticReason); ok {
+			id = messageRecordID(message, 0, 1)
+		}
 		records = append(records, repository.MessageRecord{
-			ID: m.newID(), SessionID: command.SessionID, Role: repository.RoleSystem,
+			ID: id, SessionID: command.SessionID, Role: repository.RoleUser,
 			Content: ragMessage.Text(), SyntheticReason: string(ragMessage.SyntheticReason), CreatedAt: createdAt,
 		})
 	}
 	if runtimeMessage := domainmessage.RuntimeInstruction(command.RuntimeInstruction); runtimeMessage.IsSynthetic() {
+		id := m.newID()
+		if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleSystem, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
+			id = messageRecordID(message, 0, 1)
+		}
 		records = append(records, repository.MessageRecord{
-			ID:              m.newID(),
+			ID:              id,
 			SessionID:       command.SessionID,
 			Role:            repository.RoleSystem,
 			Content:         runtimeMessage.Text(),
@@ -76,6 +92,24 @@ func (m Mapper) AssistantMessage(sessionID string, result modelport.ChatResult, 
 		Sequence:           messageSequence(createdAt),
 		CreatedAt:          createdAt,
 	}
+}
+
+func (m Mapper) AssistantMessageFromSession(current *session.Session, result modelport.ChatResult, createdAt time.Time) repository.MessageRecord {
+	sessionID := ""
+	if current != nil {
+		sessionID = current.ID
+	}
+	record := m.AssistantMessage(sessionID, result, createdAt)
+	if message, ok := latestSnapshotMessage(current, domainmessage.RoleAssistant, result.Content, ""); ok {
+		record.ID = messageRecordID(message, 0, 1)
+		if message.Sequence > 0 {
+			record.Sequence = message.Sequence
+		}
+		if !message.CreatedAt.IsZero() {
+			record.CreatedAt = message.CreatedAt
+		}
+	}
+	return record
 }
 
 func (m Mapper) Session(current *session.Session, title string) repository.SessionRecord {
@@ -122,17 +156,100 @@ func (m Mapper) MemoryMessages(current *session.Session) []repository.MessageRec
 		return nil
 	}
 
-	records := make([]repository.MessageRecord, 0, len(current.Messages))
+	count := 0
 	for _, message := range current.Messages {
-		records = append(records, m.messageRecords(current.ID, message)...)
+		count += messageRecordCount(message)
 	}
-	createdAt := m.now().Add(-time.Duration(len(records)) * time.Nanosecond)
-	for index := range records {
-		messageCreatedAt := createdAt.Add(time.Duration(index) * time.Nanosecond)
-		records[index].CreatedAt = messageCreatedAt
-		records[index].Sequence = messageSequence(messageCreatedAt)
+	createdAt := m.now().Add(-time.Duration(count) * time.Nanosecond)
+	return m.recordsForMessages(current.ID, current.Messages, createdAt)
+}
+
+func messageRecordCount(message domainmessage.Message) int {
+	switch message.Role {
+	case domainmessage.RoleSystem:
+		if !message.IsSynthetic() {
+			return 0
+		}
+		return 1
+	case domainmessage.RoleUser:
+		return 1
+	case domainmessage.RoleAssistant:
+		count := 0
+		if message.Text() != "" {
+			count++
+		}
+		for _, part := range message.Parts {
+			if part.Type == domainmessage.PartToolCall && part.ToolCall != nil {
+				count++
+			}
+		}
+		if count == 0 {
+			return 1
+		}
+		return count
+	case domainmessage.RoleTool:
+		count := 0
+		for _, part := range message.Parts {
+			if part.Type == domainmessage.PartToolResult && part.ToolResult != nil {
+				count++
+			}
+		}
+		if count == 0 {
+			return 1
+		}
+		return count
+	default:
+		return 0
+	}
+}
+
+func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Message, fallbackCreatedAt time.Time) []repository.MessageRecord {
+	records := make([]repository.MessageRecord, 0, len(messages))
+	for _, message := range messages {
+		mapped := m.messageRecords(sessionID, message)
+		for partIndex := range mapped {
+			if id := messageRecordID(message, partIndex, len(mapped)); id != "" {
+				mapped[partIndex].ID = id
+			}
+			createdAt := fallbackCreatedAt.Add(time.Duration(len(records)) * time.Nanosecond)
+			if !message.CreatedAt.IsZero() {
+				createdAt = message.CreatedAt
+			}
+			mapped[partIndex].CreatedAt = createdAt
+			mapped[partIndex].Sequence = message.Sequence
+			if mapped[partIndex].Sequence <= 0 {
+				mapped[partIndex].Sequence = messageSequence(createdAt)
+			}
+			records = append(records, mapped[partIndex])
+		}
 	}
 	return records
+}
+
+func latestSnapshotMessage(snapshot *session.Session, role domainmessage.Role, content string, reason domainmessage.SyntheticReason) (domainmessage.Message, bool) {
+	if snapshot == nil {
+		return domainmessage.Message{}, false
+	}
+	for index := len(snapshot.Messages) - 1; index >= 0; index-- {
+		message := snapshot.Messages[index]
+		if message.Role == role && message.Text() == content && (reason == "" || message.SyntheticReason == reason) {
+			return message, true
+		}
+	}
+	return domainmessage.Message{}, false
+}
+
+func messageRecordID(message domainmessage.Message, partIndex, partCount int) string {
+	if partIndex < len(message.RecordIDs) && message.RecordIDs[partIndex] != "" {
+		return message.RecordIDs[partIndex]
+	}
+	if message.ID == "" {
+		return ""
+	}
+	if partCount <= 1 {
+		return message.ID
+	}
+	return fmt.Sprintf("%s:%06d", message.ID, partIndex)
 }
 
 func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) []repository.MessageRecord {

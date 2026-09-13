@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
@@ -87,6 +88,7 @@ func TestLoadServiceReturnsExistingMemorySession(t *testing.T) {
 
 func TestLoadServiceHydratesFromRepository(t *testing.T) {
 	memory := &fakeMemoryStore{sessions: map[string]*session.Session{}}
+	createdAt := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
 
 	current, err := (LoadService{
 		Memory: memory,
@@ -99,10 +101,10 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 			Usage:          &repository.TokenUsageRecord{TotalTokens: 12, Available: true},
 		}},
 		Messages: fakeMessageLister{records: []repository.MessageRecord{
-			{Role: repository.RoleSystem, Content: domainmessage.RuntimeInstructionPrefix + "\nplan rules", SyntheticReason: "runtime_instruction"},
-			{Role: repository.RoleUser, Content: "hello"},
-			{Role: repository.RoleUser, Content: "subagent report", SyntheticReason: "subagent_result"},
-			{Role: repository.RoleTool, ToolCallID: "call-1", ToolName: "shell", Content: "exit code 1", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero", ToolError: "exit code 1", ToolTruncated: true},
+			{ID: "runtime-1", Sequence: 40, CreatedAt: createdAt, Role: repository.RoleSystem, Content: domainmessage.RuntimeInstructionPrefix + "\nplan rules", SyntheticReason: "runtime_instruction"},
+			{ID: "user-1", Sequence: 41, CreatedAt: createdAt.Add(time.Nanosecond), Role: repository.RoleUser, Content: "hello"},
+			{ID: "subagent-1", Sequence: 42, CreatedAt: createdAt.Add(2 * time.Nanosecond), Role: repository.RoleUser, Content: "subagent report", SyntheticReason: "subagent_result"},
+			{ID: "tool-1", Sequence: 43, CreatedAt: createdAt.Add(3 * time.Nanosecond), Role: repository.RoleTool, ToolCallID: "call-1", ToolName: "shell", Content: "exit code 1", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero", ToolError: "exit code 1", ToolTruncated: true},
 		}},
 	}).EnsureInMemory(context.Background(), EnsureInMemoryCommand{
 		SessionID:  "session-1",
@@ -119,6 +121,9 @@ func TestLoadServiceHydratesFromRepository(t *testing.T) {
 	}
 	if len(current.Messages) != 5 || !current.Messages[1].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || current.Messages[2].Text() != "hello" || !current.Messages[3].IsSyntheticReason(domainmessage.SyntheticReasonSubagentResult) {
 		t.Fatalf("unexpected messages: %#v", current.Messages)
+	}
+	if current.Messages[2].ID != "user-1" || current.Messages[2].Sequence != 41 || !current.Messages[2].CreatedAt.Equal(createdAt.Add(time.Nanosecond)) {
+		t.Fatalf("durable message identity was not restored: %#v", current.Messages[2])
 	}
 	toolResult, ok := current.Messages[4].FirstToolResult()
 	if !ok || toolResult.Status != domaintool.ResultStatusFailed || toolResult.ErrorCode != "command_exit_nonzero" || !toolResult.Truncated {

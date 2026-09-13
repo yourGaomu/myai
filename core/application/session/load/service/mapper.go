@@ -32,27 +32,32 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 		case repository.RoleSystem:
 			reason := domainmessage.SyntheticReason(record.SyntheticReason)
 			if reason != "" {
-				messages = append(messages, domainmessage.SyntheticText(reason, record.Content))
+				messages = append(messages, messageWithRecord(domainmessage.SyntheticText(reason, record.Content), record))
 			}
 		case repository.RoleUser:
 			message := domainmessage.Text(domainmessage.RoleUser, record.Content)
 			if reason := domainmessage.SyntheticReason(record.SyntheticReason); reason != "" {
 				message = domainmessage.SyntheticUserText(reason, record.Content)
 			}
-			messages = append(messages, message)
+			messages = append(messages, messageWithRecord(message, record))
 		case repository.RoleAssistant:
-			messages = append(messages, domainmessage.Text(domainmessage.RoleAssistant, record.Content))
+			messages = append(messages, messageWithRecord(domainmessage.Text(domainmessage.RoleAssistant, record.Content), record))
 		case repository.RoleToolCall:
 			calls := make([]domainmessage.ToolCall, 0, 1)
+			recordIDs := make([]string, 0, 1)
+			firstRecord := record
 			for index < len(records) && records[index].Role == repository.RoleToolCall {
 				callRecord := records[index]
+				recordIDs = append(recordIDs, callRecord.ID)
 				calls = append(calls, domainmessage.ToolCall{
 					ID: callRecord.ToolCallID, Type: "function", Name: callRecord.ToolName, Arguments: callRecord.ToolArguments,
 				})
 				index++
 			}
 			index--
-			messages = append(messages, domainmessage.ToolCallMessage(calls))
+			message := messageWithRecord(domainmessage.ToolCallMessage(calls), firstRecord)
+			message.RecordIDs = recordIDs
+			messages = append(messages, message)
 		case repository.RoleTool:
 			content := record.Content
 			errorMessage := record.ToolError
@@ -60,14 +65,23 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 				content = record.ToolPromptContent
 				errorMessage = record.ToolPromptError
 			}
-			messages = append(messages, domainmessage.ToolResultMessage(domainmessage.ToolResult{
+			message := domainmessage.ToolResultMessage(domainmessage.ToolResult{
 				ToolCallID: record.ToolCallID, Name: record.ToolName, Content: content,
 				Status: domaintool.ResultStatus(record.ToolStatus), ErrorCode: record.ToolErrorCode,
 				ErrorMessage: errorMessage, Truncated: record.ToolTruncated,
 				FullContent: record.Content, FullErrorMessage: record.ToolError,
 				PromptTruncated: record.ToolPromptTruncated,
-			}))
+			})
+			messages = append(messages, messageWithRecord(message, record))
 		}
 	}
 	return messages
+}
+
+func messageWithRecord(message domainmessage.Message, record repository.MessageRecord) domainmessage.Message {
+	message.ID = record.ID
+	message.RecordIDs = []string{record.ID}
+	message.Sequence = record.Sequence
+	message.CreatedAt = record.CreatedAt
+	return message
 }

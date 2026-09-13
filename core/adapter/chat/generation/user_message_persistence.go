@@ -7,6 +7,7 @@ import (
 
 	generationcommand "myai/core/application/chat/generation/command"
 	runtimeservice "myai/core/application/runtime/service"
+	domainmessage "myai/core/domain/message"
 	"myai/core/session"
 )
 
@@ -21,6 +22,7 @@ type UserMessagePersistence struct {
 
 func (p UserMessagePersistence) PersistUserMessage(command generationcommand.PersistUserMessage) {
 	command.SessionSnapshot = session.Clone(command.SessionSnapshot)
+	command.AppendedMessages = domainmessage.CloneAll(command.AppendedMessages)
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = p.now()
 	}

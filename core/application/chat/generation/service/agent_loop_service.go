@@ -78,9 +78,9 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			calls = result.ToolCalls
 		}
 		if len(calls) > 0 {
-			command.Session.Messages = append(command.Session.Messages, domainmessage.ToolCallMessage(calls))
+			command.Session.AppendMessage(domainmessage.ToolCallMessage(calls))
 		}
-		command.Session.Messages = append(command.Session.Messages, toolResult.Messages...)
+		command.Session.AppendMessages(toolResult.Messages...)
 		if err != nil {
 			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
 			return modelport.ChatResult{}, err

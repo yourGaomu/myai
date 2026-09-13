@@ -40,6 +40,7 @@ var agentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		//记录修改历史记录和git diff类似的功能
 		changeService, err := changes.NewWithStoreFactory(agentWorkspace, "", sqlitehistory.Factory{})
 		if err != nil {
 			return err

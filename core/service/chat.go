@@ -175,6 +175,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 			Input:              input,
 			RuntimeInstruction: prepared.RuntimeInstruction,
 			RAGContext:         prepared.RAGContext,
+			AppendedMessages:   domainmessage.CloneAll(prepared.AppendedMessages),
 			SessionSnapshot:    session.Clone(current),
 		})
 	}
@@ -403,7 +404,7 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 			SessionID: current.ID, Model: current.Model, Input: input,
 			RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
-			SyntheticReason: syntheticReason, SessionSnapshot: session.Clone(current),
+			SyntheticReason: syntheticReason, AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(current),
 		})
 	}
 
