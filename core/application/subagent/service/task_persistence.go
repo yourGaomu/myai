@@ -11,6 +11,7 @@ import (
 )
 
 const interruptedTaskMessage = "subagent execution was interrupted by process restart"
+const interruptedTaskContinuation = "Continue the interrupted task from the existing child session. Review the current state and finish the assigned work."
 
 func (service *Service) saveTaskAndRun(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
 	if service == nil {
@@ -86,10 +87,20 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 	}
 	var recoveryErrors []error
 	for _, task := range tasks {
+		if service.taskIsActive(task.ID) {
+			continue
+		}
 		run, runErr := service.recoveryRun(ctx, &task)
 		if runErr != nil {
 			recoveryErrors = append(recoveryErrors, fmt.Errorf("load interrupted subagent task %s run: %w", task.ID, runErr))
 			continue
+		}
+		if service.canRequeueAfterRestart(task) {
+			if err := service.requeueInterruptedTask(ctx, task, run); err == nil {
+				continue
+			} else {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("requeue interrupted subagent task %s: %w", task.ID, err))
+			}
 		}
 		now := service.now()
 		if err := task.MarkFailed(interruptedTaskMessage, now); err != nil {
@@ -107,6 +118,62 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 		service.publish(ctx, task)
 	}
 	return errors.Join(recoveryErrors...)
+}
+
+func (service *Service) canRequeueAfterRestart(task domainsubagent.Task) bool {
+	if service == nil || service.Scheduler == nil {
+		return false
+	}
+	switch task.Status {
+	case domainsubagent.TaskStatusQueued, domainsubagent.TaskStatusRunning,
+		domainsubagent.TaskStatusWaitingSubagents, domainsubagent.TaskStatusWaitingPermission:
+		return true
+	default:
+		return false
+	}
+}
+
+// requeueInterruptedTask preserves queued/running work across a process
+// restart. The previous scheduler context is gone, so the task is reset to a
+// clean queued transition and admitted to the new scheduler. If admission
+// fails, the caller falls back to the existing terminal failure path.
+func (service *Service) requeueInterruptedTask(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
+	if !service.registerActiveRun(task.ID, run.ID) {
+		return nil
+	}
+	registered := true
+	defer func() {
+		if registered {
+			service.completeActiveRun(task.ID, run.ID)
+		}
+	}()
+	now := service.now()
+	wasInterrupted := task.Status != domainsubagent.TaskStatusQueued ||
+		run.Status != domainsubagent.RunStatusQueued
+	task.RecoverMailboxDeliveries(now)
+	task.Status = domainsubagent.TaskStatusQueued
+	task.ErrorMessage = ""
+	task.StartedAt = nil
+	task.CompletedAt = nil
+	task.UpdatedAt = now
+	run.Status = domainsubagent.RunStatusQueued
+	if wasInterrupted {
+		run.Instruction = interruptedTaskContinuation
+	}
+	run.ErrorMessage = ""
+	run.StartedAt = nil
+	run.CompletedAt = nil
+	if err := service.saveTaskAndRun(ctx, task, run); err != nil {
+		return err
+	}
+	service.publish(ctx, task)
+	if err := service.Scheduler.Submit(run.ID, func(runContext context.Context) {
+		service.execute(runContext, task.ID, run.ID, task.Definition.ModelID)
+	}); err != nil {
+		return err
+	}
+	registered = false
+	return nil
 }
 
 func (service *Service) recoveryRun(ctx context.Context, task *domainsubagent.Task) (domainsubagent.Run, error) {

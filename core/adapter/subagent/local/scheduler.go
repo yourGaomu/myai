@@ -51,7 +51,7 @@ func (scheduler *Scheduler) Submit(taskID string, task subagentport.ScheduledTas
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	if scheduler.closed {
-		return errors.New("subagent scheduler is closed")
+		return subagentport.ErrSchedulerClosed
 	}
 	if _, exists := scheduler.active[taskID]; exists {
 		return errors.New("subagent task is already scheduled")
@@ -64,7 +64,7 @@ func (scheduler *Scheduler) Submit(taskID string, task subagentport.ScheduledTas
 		return nil
 	default:
 		cancel()
-		return errors.New("subagent task queue is full")
+		return subagentport.ErrSchedulerQueueFull
 	}
 }
 

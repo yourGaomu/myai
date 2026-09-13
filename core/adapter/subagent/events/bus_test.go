@@ -64,6 +64,19 @@ func TestBusClosesSlowEventSubscriberInsteadOfDroppingSequence(t *testing.T) {
 	}
 }
 
+func TestBusClosesSubscriberWhenReplayCursorFallsOutsideWindow(t *testing.T) {
+	bus := NewBus()
+	bus.historyLimit = 2
+	for index := 0; index < 4; index++ {
+		bus.TaskUpdated(context.Background(), domainsubagent.Task{ID: "task-1", Status: domainsubagent.TaskStatusRunning})
+	}
+	events, cancel := bus.SubscribeTaskEvents("", 1, 1)
+	defer cancel()
+	if _, ok := <-events; ok {
+		t.Fatal("expected stale replay cursor to close the stream")
+	}
+}
+
 func TestBusRestoresPersistedSequenceAndHistory(t *testing.T) {
 	repository := memory.NewRepository()
 	first := NewBus(repository)

@@ -19,7 +19,10 @@ import (
 const (
 	defaultTaskListLimit = 50
 	cancelWaitTimeout    = 5 * time.Second
+	maxMailboxFollowUps  = domainsubagent.MaxMailboxMessages
 )
+
+var errMailboxPending = errors.New("subagent mailbox received a message before completion")
 
 func (service *Service) Start(ctx context.Context, command subagentcommand.StartTask) (subagentresult.Task, error) {
 	if service == nil || service.Registry == nil || service.Tasks == nil || service.Runs == nil || service.Scheduler == nil || service.Sessions == nil || service.Runner == nil || service.IDs == nil {
@@ -85,39 +88,17 @@ func (service *Service) Start(ctx context.Context, command subagentcommand.Start
 		Status: domainsubagent.RunStatusQueued, CreatedAt: now,
 	}
 	task.CurrentRunID = run.ID
+	service.mu.Lock()
 	if err := service.saveTaskAndRun(ctx, task, run); err != nil {
+		service.mu.Unlock()
 		service.admissionMu.Unlock()
 		return subagentresult.Task{}, err
 	}
-	service.admissionMu.Unlock()
-	service.mu.Lock()
-	if service.activeRuns == nil {
-		service.activeRuns = make(map[string]chan struct{})
-	}
-	service.activeRuns[task.ID] = make(chan struct{})
-	service.mu.Unlock()
-	if err := service.Scheduler.Submit(task.ID, func(runContext context.Context) {
-		service.execute(runContext, task.ID, run.ID, command.FallbackModelID)
-	}); err != nil {
-		now := service.now()
-		message := "schedule subagent task: " + err.Error()
-		if transitionErr := task.MarkFailed(message, now); transitionErr != nil {
-			service.completeActiveRun(task.ID)
-			return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, errors.Join(err, transitionErr)
-		}
-		run.Status = domainsubagent.RunStatusFailed
-		run.ErrorMessage = message
-		run.CompletedAt = timePtr(now)
-		if saveErr := service.saveTaskAndRun(context.Background(), task, run); saveErr != nil {
-			service.completeActiveRun(task.ID)
-			return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, errors.Join(err, saveErr)
-		}
-		service.publish(ctx, task)
-		service.completeActiveRun(task.ID)
-		return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, err
-	}
+	service.registerActiveRunLocked(task.ID, run.ID)
 	service.publish(ctx, task)
-	return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, nil
+	service.mu.Unlock()
+	service.admissionMu.Unlock()
+	return service.scheduleRun(task, run, command.FallbackModelID)
 }
 
 func (service *Service) Check(ctx context.Context, command subagentcommand.CheckTask) (subagentresult.Task, error) {
@@ -135,6 +116,48 @@ func (service *Service) Check(ctx context.Context, command subagentcommand.Check
 		return subagentresult.Task{}, errors.New("a subagent task cannot be polled from the request that created it")
 	}
 	return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, nil
+}
+
+// SendMessage appends parent input to a queued or running child mailbox. Each
+// message remains durable until its model turn succeeds and is acknowledged.
+func (service *Service) SendMessage(ctx context.Context, command subagentcommand.SendMessage) (subagentresult.Task, error) {
+	if service == nil || service.Tasks == nil || service.IDs == nil {
+		return subagentresult.Task{}, errors.New("subagent mailbox is not configured")
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	task, err := service.Tasks.GetTask(ctx, strings.TrimSpace(command.TaskID))
+	if err != nil {
+		return subagentresult.Task{}, err
+	}
+	if parentID := strings.TrimSpace(command.ParentSessionID); parentID != "" && task.ParentSessionID != parentID {
+		return subagentresult.Task{}, subagentport.ErrNotFound
+	}
+	if err := task.EnqueueMessage(domainsubagent.Message{ID: service.IDs.NewID(), Content: command.Content, CreatedAt: service.now()}); err != nil {
+		return subagentresult.Task{}, err
+	}
+	if err := service.Tasks.SaveTask(ctx, task); err != nil {
+		return subagentresult.Task{}, err
+	}
+	if task.Status == domainsubagent.TaskStatusWaitingSubagents {
+		service.signalWaitingTask(task.ID)
+	}
+	service.publish(ctx, task)
+	return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, nil
+}
+
+// signalWaitingTask wakes a child that is blocked inside wait_agent. The
+// channel is closed so all concurrent waiters observe the same mailbox write.
+func (service *Service) signalWaitingTask(taskID string) {
+	if service == nil || taskID == "" {
+		return
+	}
+	for waiter := range service.waitingWakeups[taskID] {
+		if !waiter.signaled {
+			close(waiter.wakeup)
+			waiter.signaled = true
+		}
+	}
 }
 
 func (service *Service) List(ctx context.Context, command subagentcommand.ListTasks) (subagentresult.Tasks, error) {
@@ -204,7 +227,7 @@ func (service *Service) Cancel(ctx context.Context, command subagentcommand.Canc
 		service.mu.Unlock()
 		return subagentresult.Task{}, err
 	}
-	service.Scheduler.Cancel(task.ID)
+	service.Scheduler.Cancel(task.CurrentRunID)
 	reason := strings.TrimSpace(command.Reason)
 	if reason == "" {
 		reason = "canceled by user or parent agent"
@@ -222,7 +245,10 @@ func (service *Service) Cancel(ctx context.Context, command subagentcommand.Canc
 		return subagentresult.Task{}, err
 	}
 	service.publish(ctx, task)
-	done := service.activeRuns[task.ID]
+	var done <-chan struct{}
+	if active := service.activeRuns[task.ID]; active != nil {
+		done = active.done
+	}
 	result := domainsubagent.CloneTask(task)
 	service.mu.Unlock()
 
@@ -276,10 +302,10 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 		Task: claimed, Stream: command.Stream,
 	})
 	if continueErr != nil {
+		restored, restoreErr := service.restoreUnreadResult(claimed.ID)
 		service.mu.Lock()
 		delete(service.resumeClaims, claimed.ID)
 		service.mu.Unlock()
-		restored, restoreErr := service.restoreUnreadResult(claimed.ID)
 		return subagentresult.Resume{Task: restored}, errors.Join(continueErr, restoreErr)
 	}
 
@@ -396,7 +422,7 @@ func (service *Service) DiscardChanges(ctx context.Context, command subagentcomm
 }
 
 func (service *Service) execute(ctx context.Context, taskID string, runID string, fallbackModelID string) {
-	defer service.completeActiveRun(taskID)
+	defer service.completeActiveRun(taskID, runID)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panicErr := fmt.Errorf("subagent execution panicked: %v", recovered)
@@ -431,21 +457,30 @@ func (service *Service) execute(ctx context.Context, taskID string, runID string
 		metadata := agentrunruntime.Metadata{ParentRunID: task.ParentRunID, TaskID: task.ID, PlanID: task.PlanID, StepID: task.StepID}
 		runContext = agentrunruntime.WithMetadata(runContext, metadata)
 		response, err = service.Runner.Run(runContext, subagentport.AgentRunRequest{
-			SessionID: task.ChildSessionID, Instruction: task.Instruction, Title: task.Title,
+			SessionID: task.ChildSessionID, Instruction: run.Instruction, Title: task.Title,
 			Stream: service.taskStream(runContext, task.ID, run.ID),
 		})
-		if err == nil && strings.TrimSpace(response.Content) == "" {
-			err = errors.New("subagent returned an empty result")
-		}
-		if err == nil {
+		for err == nil {
+			response, err = service.runMailboxFollowUps(runContext, task, run, response)
+			if err == nil && strings.TrimSpace(response.Content) == "" {
+				err = errors.New("subagent returned an empty result")
+			}
+			if err != nil {
+				break
+			}
 			var changes domainworkspace.ChangeSet
 			changes, err = service.collectWorkspaceChanges(runContext, task)
-			if err == nil {
-				if finishErr := service.finishSuccess(task, run, response, changes); finishErr != nil {
-					service.reportError(fmt.Errorf("finish subagent task %s successfully: %w", task.ID, finishErr))
-				}
-				return
+			if err != nil {
+				break
 			}
+			finishErr := service.finishSuccess(task, run, response, changes)
+			if errors.Is(finishErr, errMailboxPending) {
+				continue
+			}
+			if finishErr != nil {
+				service.reportError(fmt.Errorf("finish subagent task %s successfully: %w", task.ID, finishErr))
+			}
+			return
 		}
 	}
 	service.discardFailedWorkspace(task)
@@ -454,16 +489,164 @@ func (service *Service) execute(ctx context.Context, taskID string, runID string
 	}
 }
 
-func (service *Service) completeActiveRun(taskID string) {
+func (service *Service) runMailboxFollowUps(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run, response subagentport.AgentRunResult) (subagentport.AgentRunResult, error) {
+	for turn := 0; turn < maxMailboxFollowUps; turn++ {
+		message, ok, err := service.claimMailboxMessage(task.ID)
+		if err != nil || !ok {
+			return response, err
+		}
+		followUp, runErr := service.deliverMailboxMessage(ctx, task, run, message)
+		if runErr != nil {
+			return response, runErr
+		}
+		response.Content = strings.TrimSpace(response.Content + "\n\n" + followUp.Content)
+		response.Reasoning = strings.TrimSpace(response.Reasoning + "\n\n" + followUp.Reasoning)
+		response.Usage = response.Usage.Add(followUp.Usage)
+	}
+	remaining, err := service.mailboxHasMessages(task.ID)
+	if err != nil || !remaining {
+		return response, err
+	}
+	return response, errors.New("subagent mailbox follow-up limit reached")
+}
+
+func (service *Service) deliverMailboxMessage(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run, message domainsubagent.Message) (response subagentport.AgentRunResult, err error) {
+	acknowledged := false
+	defer func() {
+		if acknowledged {
+			return
+		}
+		if releaseErr := service.releaseMailboxMessage(task.ID, message.ID, err); releaseErr != nil {
+			service.reportError(fmt.Errorf("release subagent mailbox message %s: %w", message.ID, releaseErr))
+			if err != nil {
+				err = errors.Join(err, releaseErr)
+			}
+		}
+	}()
+	response, err = service.Runner.Run(ctx, subagentport.AgentRunRequest{
+		SessionID: task.ChildSessionID, Instruction: message.Content, Title: task.Title,
+		Stream: service.taskStream(ctx, task.ID, run.ID),
+	})
+	if err != nil {
+		return subagentport.AgentRunResult{}, err
+	}
+	if strings.TrimSpace(response.Content) == "" {
+		err = errors.New("subagent follow-up returned an empty result")
+		return subagentport.AgentRunResult{}, err
+	}
+	if err = service.acknowledgeMailboxMessage(task.ID, message.ID); err != nil {
+		return subagentport.AgentRunResult{}, err
+	}
+	acknowledged = true
+	return response, nil
+}
+
+func (service *Service) claimMailboxMessage(taskID string) (domainsubagent.Message, bool, error) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	task, err := service.Tasks.GetTask(context.Background(), taskID)
+	if err != nil {
+		return domainsubagent.Message{}, false, err
+	}
+	message, ok := task.ClaimMailboxMessage(service.now())
+	if !ok {
+		return domainsubagent.Message{}, false, nil
+	}
+	if err := service.Tasks.SaveTask(context.Background(), task); err != nil {
+		return domainsubagent.Message{}, false, err
+	}
+	service.publish(context.Background(), task)
+	return message, true, nil
+}
+
+func (service *Service) acknowledgeMailboxMessage(taskID string, messageID string) error {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	task, err := service.Tasks.GetTask(context.Background(), taskID)
+	if err != nil {
+		return err
+	}
+	if !task.AcknowledgeMailboxMessage(messageID, service.now()) {
+		return fmt.Errorf("claimed subagent mailbox message not found: %s", messageID)
+	}
+	if err := service.Tasks.SaveTask(context.Background(), task); err != nil {
+		return err
+	}
+	service.publish(context.Background(), task)
+	return nil
+}
+
+func (service *Service) releaseMailboxMessage(taskID string, messageID string, deliveryErr error) error {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	task, err := service.Tasks.GetTask(context.Background(), taskID)
+	if err != nil {
+		return err
+	}
+	if !task.ReleaseMailboxMessage(messageID, deliveryErr, service.now()) {
+		return nil
+	}
+	if err := service.Tasks.SaveTask(context.Background(), task); err != nil {
+		return err
+	}
+	service.publish(context.Background(), task)
+	return nil
+}
+
+func (service *Service) mailboxHasMessages(taskID string) (bool, error) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	task, err := service.Tasks.GetTask(context.Background(), taskID)
+	if err != nil {
+		return false, err
+	}
+	return task.HasMailboxMessages(), nil
+}
+
+func (service *Service) completeActiveRun(taskID, runID string) {
 	if service == nil || taskID == "" {
 		return
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	if done, ok := service.activeRuns[taskID]; ok {
+	service.completeActiveRunLocked(taskID, runID)
+}
+
+func (service *Service) completeActiveRunLocked(taskID, runID string) {
+	if active := service.activeRuns[taskID]; active != nil && active.runID == runID {
 		delete(service.activeRuns, taskID)
-		close(done)
+		close(active.done)
 	}
+}
+
+func (service *Service) registerActiveRun(taskID, runID string) bool {
+	if service == nil || taskID == "" {
+		return false
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	return service.registerActiveRunLocked(taskID, runID)
+}
+
+func (service *Service) registerActiveRunLocked(taskID, runID string) bool {
+	if service.activeRuns == nil {
+		service.activeRuns = make(map[string]*activeExecution)
+	}
+	if _, exists := service.activeRuns[taskID]; exists {
+		return false
+	}
+	service.activeRuns[taskID] = &activeExecution{runID: runID, done: make(chan struct{})}
+	return true
+}
+
+func (service *Service) taskIsActive(taskID string) bool {
+	if service == nil || taskID == "" {
+		return false
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	_, active := service.activeRuns[taskID]
+	return active
 }
 
 func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagent.Task) (domainsubagent.Task, error) {
@@ -473,6 +656,11 @@ func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagen
 	if service.Workspaces == nil {
 		return task, errors.New("isolated workspace manager is not configured")
 	}
+	// Existing OpenSandbox sessions reconnect lazily through the manager.
+	// Re-preparing would allocate another sandbox and orphan the session's ID.
+	if task.Workspace.Mode == domainworkspace.IsolationModeOpenSandbox && task.Workspace.SandboxID != "" {
+		return task, nil
+	}
 	prepared, err := service.Workspaces.Prepare(ctx, workspaceport.PrepareRequest{
 		WorkspaceID: task.Workspace.ID, Mode: task.Workspace.Mode, SourceRoot: task.Workspace.Root,
 		TaskID: task.ID, SessionID: task.ParentSessionID,
@@ -480,13 +668,21 @@ func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagen
 	if err != nil {
 		return task, err
 	}
-	original := task
-	task.Workspace = prepared.Reference
-	if err := service.Tasks.SaveTask(context.Background(), task); err != nil {
-		_, _ = service.Workspaces.Discard(context.Background(), workspaceport.DiscardRequest{Reference: prepared.Reference, DiscardedAt: service.now()})
-		return original, err
+	service.mu.Lock()
+	current, err := service.Tasks.GetTask(context.Background(), task.ID)
+	if err == nil && (current.CurrentRunID != task.CurrentRunID || current.Terminal()) {
+		err = context.Canceled
 	}
-	return task, nil
+	if err == nil {
+		current.Workspace = prepared.Reference
+		err = service.Tasks.SaveTask(context.Background(), current)
+	}
+	service.mu.Unlock()
+	if err != nil {
+		_, _ = service.Workspaces.Discard(context.Background(), workspaceport.DiscardRequest{Reference: prepared.Reference, DiscardedAt: service.now()})
+		return task, err
+	}
+	return current, nil
 }
 
 func (service *Service) collectWorkspaceChanges(ctx context.Context, task domainsubagent.Task) (domainworkspace.ChangeSet, error) {
@@ -516,7 +712,7 @@ func (service *Service) beginExecution(ctx context.Context, taskID string, runID
 	if err != nil {
 		return domainsubagent.Task{}, domainsubagent.Run{}, false, err
 	}
-	if task.Terminal() {
+	if task.Terminal() || task.CurrentRunID != runID {
 		return domainsubagent.Task{}, domainsubagent.Run{}, false, nil
 	}
 	runs, err := service.Runs.ListRuns(context.Background(), taskID)
@@ -554,11 +750,17 @@ func (service *Service) finishSuccess(task domainsubagent.Task, run domainsubage
 	if err != nil {
 		return err
 	}
+	if current.CurrentRunID != run.ID {
+		return nil
+	}
 	if current.Terminal() {
 		if current.Status == domainsubagent.TaskStatusCanceled || current.Status == domainsubagent.TaskStatusFailed {
 			service.discardFailedWorkspace(task)
 		}
 		return nil
+	}
+	if current.HasMailboxMessages() {
+		return errMailboxPending
 	}
 	now := service.now()
 	if err := current.MarkSucceeded(response.Content, response.Reasoning, now); err != nil {
@@ -582,6 +784,9 @@ func (service *Service) finishError(task domainsubagent.Task, run domainsubagent
 	current, err := service.Tasks.GetTask(context.Background(), task.ID)
 	if err != nil {
 		return err
+	}
+	if current.CurrentRunID != run.ID {
+		return nil
 	}
 	if current.Terminal() {
 		if current.Status == domainsubagent.TaskStatusCanceled || current.Status == domainsubagent.TaskStatusFailed {

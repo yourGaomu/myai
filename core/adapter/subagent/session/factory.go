@@ -18,9 +18,14 @@ type memoryStore interface {
 	RemoveSession(sessionID string) error
 }
 
+type sessionLoader interface {
+	Load(ctx context.Context, sessionID string) (*domainsession.Session, error)
+}
+
 type Factory struct {
 	Memory      memoryStore
 	Persistence persistenceapi.Service
+	Loader      sessionLoader
 }
 
 var _ subagentport.ChildSessionFactory = Factory{}
@@ -28,6 +33,18 @@ var _ subagentport.ChildSessionFactory = Factory{}
 func (factory Factory) Create(ctx context.Context, request subagentport.ChildSessionRequest) (*domainsession.Session, error) {
 	if factory.Memory == nil {
 		return nil, errors.New("subagent session memory is nil")
+	}
+	if current, err := factory.Memory.GetSession(request.SessionID); err == nil {
+		return current, nil
+	}
+	if factory.Loader != nil {
+		current, err := factory.Loader.Load(ctx, request.SessionID)
+		if err == nil {
+			return current, nil
+		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
 	}
 	modelID := strings.TrimSpace(request.Definition.ModelID)
 	if modelID == "" {

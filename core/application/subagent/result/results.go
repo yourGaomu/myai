@@ -29,7 +29,8 @@ type Resume struct {
 }
 
 type Wait struct {
-	Task     domainsubagent.Task
-	TimedOut bool
-	Sequence uint64
+	Task           domainsubagent.Task
+	TimedOut       bool
+	WokenByMailbox bool
+	Sequence       uint64
 }

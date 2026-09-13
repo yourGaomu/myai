@@ -25,10 +25,22 @@ type Service struct {
 	Now                  func() time.Time
 	OnError              func(error)
 
-	mu           sync.Mutex
-	admissionMu  sync.Mutex
-	resumeClaims map[string]struct{}
-	activeRuns   map[string]chan struct{}
+	mu             sync.Mutex
+	admissionMu    sync.Mutex
+	resumeClaims   map[string]struct{}
+	activeRuns     map[string]*activeExecution
+	waitingWakeups map[string]map[*childWait]struct{}
+}
+
+type activeExecution struct {
+	runID string
+	done  chan struct{}
+}
+
+type childWait struct {
+	runID    string
+	wakeup   chan struct{}
+	signaled bool
 }
 
 func (service *Service) reportError(err error) {

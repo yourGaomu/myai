@@ -72,6 +72,7 @@ import (
 	memoryretrievalservice "myai/core/application/memory/retrieval/service"
 	modelcommand "myai/core/application/model/command"
 	modelservice "myai/core/application/model/service"
+	sessionloadservice "myai/core/application/session/load/service"
 	sessionpersistenceservice "myai/core/application/session/persistence/service"
 	subagentapi "myai/core/application/subagent/api"
 	subagentcommand "myai/core/application/subagent/command"
@@ -800,6 +801,7 @@ func (app *Application) InitSubagents() {
 		Scheduler:   scheduler,
 		Sessions: subagentsession.Factory{
 			Memory: app.sessionMemory, Persistence: sessionPersistence,
+			Loader: sessionloadservice.LoadService{Memory: app.sessionMemory, Sessions: app.store, Messages: app.store},
 		},
 		Runner:               subagentchat.Runner{Chat: app.chatService},
 		ParentContinuation:   subagentchat.Continuation{Chat: app.chatService},

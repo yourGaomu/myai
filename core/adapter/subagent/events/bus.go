@@ -160,6 +160,15 @@ func (bus *Bus) SubscribeTaskEvents(parentSessionID string, afterSequence uint64
 	bus.mu.Lock()
 	bus.nextID++
 	id := bus.nextID
+	if afterSequence > 0 && len(bus.history) > 0 && afterSequence+1 < bus.history[0].Sequence {
+		// The requested cursor is older than the in-memory replay window. A
+		// partial replay is unsafe because callers cannot distinguish it from a
+		// complete stream, so force an explicit reconnect/full resync.
+		channel := make(chan subagentport.TaskEvent)
+		close(channel)
+		bus.mu.Unlock()
+		return channel, func() {}
+	}
 	replay := make([]subagentport.TaskEvent, 0)
 	for _, event := range bus.history {
 		if event.Sequence <= afterSequence {

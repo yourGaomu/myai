@@ -57,6 +57,13 @@ func DefinitionDomainFromDocument(document po.DefinitionDocument) domainsubagent
 }
 
 func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
+	mailbox := make([]po.MailboxMessageDocument, 0, len(task.Mailbox))
+	for _, message := range task.Mailbox {
+		mailbox = append(mailbox, po.MailboxMessageDocument{
+			ID: message.ID, Content: message.Content, Status: string(message.Status), DeliveryAttempts: message.DeliveryAttempts,
+			LastError: message.LastError, CreatedAt: message.CreatedAt, ClaimedAt: cloneTime(message.ClaimedAt),
+		})
+	}
 	return po.TaskDocument{
 		ID: task.ID, ParentSessionID: task.ParentSessionID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID,
 		ChildSessionID: task.ChildSessionID, AgentPath: task.AgentPath, AgentNickname: task.AgentNickname,
@@ -65,7 +72,7 @@ func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
 		Instruction: task.Instruction, Title: task.Title, Status: string(task.Status), CurrentRunID: task.CurrentRunID,
 		Workspace: workspaceDocument(task.Workspace), Result: task.Result, Reasoning: task.Reasoning,
 		ChangeSet:    changeSetDocument(task.ChangeSet),
-		ErrorMessage: task.ErrorMessage, Unread: task.Unread, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+		ErrorMessage: task.ErrorMessage, Unread: task.Unread, Mailbox: mailbox, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 		StartedAt: cloneTime(task.StartedAt), CompletedAt: cloneTime(task.CompletedAt),
 	}
 }
@@ -74,6 +81,17 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 	unread := document.Unread
 	if domainsubagent.TaskStatus(document.Status) == domainsubagent.TaskStatusCanceled {
 		unread = false
+	}
+	mailbox := make([]domainsubagent.Message, 0, len(document.Mailbox))
+	for _, message := range document.Mailbox {
+		status := domainsubagent.MessageStatus(message.Status)
+		if status == "" {
+			status = domainsubagent.MessageStatusPending
+		}
+		mailbox = append(mailbox, domainsubagent.Message{
+			ID: message.ID, Content: message.Content, Status: status, DeliveryAttempts: message.DeliveryAttempts,
+			LastError: message.LastError, CreatedAt: message.CreatedAt, ClaimedAt: cloneTime(message.ClaimedAt),
+		})
 	}
 	return domainsubagent.Task{
 		ID: document.ID, ParentSessionID: document.ParentSessionID, ParentTaskID: document.ParentTaskID, ParentRunID: document.ParentRunID, PlanID: document.PlanID, StepID: document.StepID,
@@ -84,23 +102,25 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 		CurrentRunID: document.CurrentRunID, Workspace: workspaceDomain(document.Workspace),
 		ChangeSet: changeSetDomain(document.ChangeSet),
 		Result:    document.Result, Reasoning: document.Reasoning, ErrorMessage: document.ErrorMessage,
-		Unread: unread, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt,
+		Unread: unread, Mailbox: mailbox, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt,
 		StartedAt: cloneTime(document.StartedAt), CompletedAt: cloneTime(document.CompletedAt),
 	}
 }
 
 func RunDocumentFromDomain(run domainsubagent.Run) po.RunDocument {
 	return po.RunDocument{
-		ID: run.ID, TaskID: run.TaskID, Sequence: run.Sequence, Instruction: run.Instruction,
-		Status: string(run.Status), Result: run.Result, ErrorMessage: run.ErrorMessage,
+		ID: run.ID, TaskID: run.TaskID, Sequence: run.Sequence, RequestID: run.RequestID, Instruction: run.Instruction,
+		RequestContentHash: run.RequestContentHash,
+		Status:             string(run.Status), Result: run.Result, ErrorMessage: run.ErrorMessage,
 		CreatedAt: run.CreatedAt, StartedAt: cloneTime(run.StartedAt), CompletedAt: cloneTime(run.CompletedAt),
 	}
 }
 
 func RunDomainFromDocument(document po.RunDocument) domainsubagent.Run {
 	return domainsubagent.Run{
-		ID: document.ID, TaskID: document.TaskID, Sequence: document.Sequence, Instruction: document.Instruction,
-		Status: domainsubagent.RunStatus(document.Status), Result: document.Result, ErrorMessage: document.ErrorMessage,
+		ID: document.ID, TaskID: document.TaskID, Sequence: document.Sequence, RequestID: document.RequestID, Instruction: document.Instruction,
+		RequestContentHash: document.RequestContentHash,
+		Status:             domainsubagent.RunStatus(document.Status), Result: document.Result, ErrorMessage: document.ErrorMessage,
 		CreatedAt: document.CreatedAt, StartedAt: cloneTime(document.StartedAt), CompletedAt: cloneTime(document.CompletedAt),
 	}
 }

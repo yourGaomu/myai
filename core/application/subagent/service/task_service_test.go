@@ -61,6 +61,207 @@ func TestTaskUsesPreparedSnapshotAndCollectsChanges(t *testing.T) {
 	}
 }
 
+func TestSendMessageDeliversMailboxBetweenChildTurns(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	runner := &recordingRunner{}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: scheduler, Sessions: &fakeChildSessions{}, Runner: runner, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	started, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "parent-1", DefinitionID: definition.ID, Instruction: "inspect", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
+		TaskID: started.Value.ID, ParentSessionID: "parent-1", Content: "also check the tests",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.task(context.Background())
+	if len(runner.instructions) != 2 || runner.instructions[1] != "also check the tests" {
+		t.Fatalf("expected initial and mailbox turns, got %#v", runner.instructions)
+	}
+	task, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(task.Mailbox) != 0 || !strings.Contains(task.Result, "follow-up result") {
+		t.Fatalf("mailbox was not drained into result: %#v", task)
+	}
+}
+
+func TestFollowupStartsNewRunAndReusesChildSession(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	sessions := &fakeChildSessions{}
+	runner := &recordingRunner{}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: scheduler, Sessions: sessions, Runner: runner, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	started, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "parent-1", DefinitionID: definition.ID, Instruction: "inspect", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstRunID := started.Value.CurrentRunID
+	scheduler.task(context.Background())
+	completed, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != domainsubagent.TaskStatusSucceeded || !completed.Unread {
+		t.Fatalf("initial child run did not complete: %#v", completed)
+	}
+	followup, err := service.Followup(context.Background(), subagentcommand.FollowupTask{
+		TaskID: started.Value.ID, ParentSessionID: "parent-1", Content: "now inspect the tests too",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if followup.Value.Status != domainsubagent.TaskStatusQueued || followup.Value.CurrentRunID == firstRunID || followup.Value.Unread {
+		t.Fatalf("follow-up did not queue a fresh run: %#v", followup.Value)
+	}
+	runs, err := repository.ListRuns(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[1].Sequence != 2 || runs[1].Instruction != "now inspect the tests too" {
+		t.Fatalf("expected preserved first run and second follow-up run: %#v", runs)
+	}
+	scheduler.task(context.Background())
+	final, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != domainsubagent.TaskStatusSucceeded || len(runner.instructions) != 2 || runner.instructions[1] != "now inspect the tests too" {
+		t.Fatalf("follow-up execution did not reuse child session: task=%#v instructions=%#v sessions=%d", final, runner.instructions, sessions.creates)
+	}
+	if sessions.creates != 2 {
+		t.Fatalf("expected child session factory to be called for each run, got %d", sessions.creates)
+	}
+}
+
+func TestFollowupRejectsResultBeingConsumed(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{
+		ID: "completed", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusSucceeded,
+		CurrentRunID: "run-1", CreatedAt: time.Now().UTC(), Unread: true,
+	}
+	run := domainsubagent.Run{ID: "run-1", TaskID: task.ID, Sequence: 1, Status: domainsubagent.RunStatusSucceeded, CreatedAt: task.CreatedAt}
+	if err := repository.SaveTaskAndRun(context.Background(), task, run); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{
+		Tasks: repository, Runs: repository, TaskRuns: repository, Scheduler: &fakeScheduler{}, IDs: &sequenceIDs{},
+		resumeClaims: map[string]struct{}{task.ID: {}},
+	}
+	if _, err := service.Followup(context.Background(), subagentcommand.FollowupTask{
+		TaskID: task.ID, ParentSessionID: task.ParentSessionID, Content: "continue",
+	}); err == nil || !strings.Contains(err.Error(), "being consumed") {
+		t.Fatalf("expected resume claim to block follow-up, got %v", err)
+	}
+}
+
+func TestMailboxFailureKeepsFailedAndLaterMessagesPending(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	runner := &failingFollowUpRunner{}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: scheduler, Sessions: &fakeChildSessions{}, Runner: runner, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	started, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "parent-1", DefinitionID: definition.ID, Instruction: "inspect", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{"first follow-up", "second follow-up"} {
+		if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
+			TaskID: started.Value.ID, ParentSessionID: "parent-1", Content: content,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scheduler.task(context.Background())
+
+	task, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != domainsubagent.TaskStatusFailed || len(task.Mailbox) != 2 {
+		t.Fatalf("failed delivery lost mailbox data: %#v", task)
+	}
+	if task.Mailbox[0].Status != domainsubagent.MessageStatusPending || task.Mailbox[0].DeliveryAttempts != 1 || task.Mailbox[0].LastError == "" {
+		t.Fatalf("failed message was not released for retry: %#v", task.Mailbox[0])
+	}
+	if task.Mailbox[1].Status != domainsubagent.MessageStatusPending || task.Mailbox[1].DeliveryAttempts != 0 {
+		t.Fatalf("later message was claimed or lost: %#v", task.Mailbox[1])
+	}
+}
+
+func TestMailboxPanicReleasesClaimedMessage(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	runner := &panicFollowUpRunner{}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: scheduler, Sessions: &fakeChildSessions{}, Runner: runner, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	started, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "parent-1", DefinitionID: definition.ID, Instruction: "inspect", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
+		TaskID: started.Value.ID, ParentSessionID: "parent-1", Content: "follow up",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.task(context.Background())
+
+	task, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != domainsubagent.TaskStatusFailed || len(task.Mailbox) != 1 {
+		t.Fatalf("panic lost mailbox state: %#v", task)
+	}
+	if task.Mailbox[0].Status != domainsubagent.MessageStatusPending || task.Mailbox[0].DeliveryAttempts != 1 || task.Mailbox[0].ClaimedAt != nil {
+		t.Fatalf("panicked delivery was not released: %#v", task.Mailbox[0])
+	}
+}
+
 func TestListIncludesNestedTaskTree(t *testing.T) {
 	repository := memory.NewRepository()
 	root := domainsubagent.Task{ID: "root", ParentSessionID: "session-1", ChildSessionID: "child-session", Title: "root", Status: domainsubagent.TaskStatusRunning}
@@ -230,6 +431,78 @@ func TestWaitMarksNestedParentAsWaitingAndRestoresIt(t *testing.T) {
 	}
 }
 
+func TestWaitingChildIsWokenByMailboxMessage(t *testing.T) {
+	repository := memory.NewRepository()
+	bus := subagentevents.NewBus()
+	waitingChild := domainsubagent.Task{
+		ID: "waiting-child", ParentSessionID: "root-session", ChildSessionID: "child-session",
+		Status: domainsubagent.TaskStatusRunning,
+	}
+	grandchild := domainsubagent.Task{
+		ID: "grandchild", ParentSessionID: "child-session", ParentTaskID: waitingChild.ID,
+		Status: domainsubagent.TaskStatusRunning,
+	}
+	for _, task := range []domainsubagent.Task{waitingChild, grandchild} {
+		if err := repository.SaveTask(context.Background(), task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &Service{Tasks: repository, Events: bus, IDs: &sequenceIDs{}}
+	resultCh := make(chan struct {
+		result subagentresult.Wait
+		err    error
+	}, 1)
+	go func() {
+		result, err := service.Wait(context.Background(), subagentcommand.WaitTask{
+			TaskID: grandchild.ID, ParentSessionID: waitingChild.ChildSessionID,
+			ParentTaskID: waitingChild.ID, Timeout: time.Second,
+		})
+		resultCh <- struct {
+			result subagentresult.Wait
+			err    error
+		}{result: result, err: err}
+	}()
+	deadline := time.After(time.Second)
+	for {
+		current, err := repository.GetTask(context.Background(), waitingChild.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == domainsubagent.TaskStatusWaitingSubagents {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("waiting child did not enter waiting_subagents")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
+		TaskID: waitingChild.ID, ParentSessionID: waitingChild.ParentSessionID, Content: "handle this new requirement",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case outcome := <-resultCh:
+		if outcome.err != nil {
+			t.Fatal(outcome.err)
+		}
+		if !outcome.result.WokenByMailbox || outcome.result.Task.ID != grandchild.ID {
+			t.Fatalf("unexpected mailbox wake result: %#v", outcome.result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mailbox message did not wake waiting child")
+	}
+	current, err := repository.GetTask(context.Background(), waitingChild.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != domainsubagent.TaskStatusRunning || len(current.Mailbox) != 1 {
+		t.Fatalf("expected waiting child to resume with a pending mailbox message: %#v", current)
+	}
+}
+
 func TestTaskFailsWhenSubagentReturnsEmptyResult(t *testing.T) {
 	repository := memory.NewRepository()
 	registry := memory.NewRegistry()
@@ -391,6 +664,127 @@ func TestRecoverInterruptedTasksMarksTaskAndRunFailed(t *testing.T) {
 	}
 }
 
+func TestRecoverInterruptedTasksRequeuesRunningTaskWhenSchedulerIsAvailable(t *testing.T) {
+	repository := memory.NewRepository()
+	createdAt := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
+	claimedAt := createdAt.Add(time.Second)
+	task := domainsubagent.Task{
+		ID: "task-requeue", ParentSessionID: "parent-1", DefinitionID: "coder", Instruction: "Continue work",
+		Definition: domainsubagent.DefinitionSnapshot{ModelID: "model-1"},
+		Status:     domainsubagent.TaskStatusRunning, CurrentRunID: "run-requeue", CreatedAt: createdAt, UpdatedAt: createdAt,
+		Mailbox: []domainsubagent.Message{{
+			ID: "message-1", Content: "retry after restart", Status: domainsubagent.MessageStatusDelivering,
+			DeliveryAttempts: 1, CreatedAt: createdAt, ClaimedAt: &claimedAt,
+		}},
+	}
+	run := domainsubagent.Run{
+		ID: "run-requeue", TaskID: task.ID, Sequence: 1, Instruction: task.Instruction,
+		Status: domainsubagent.RunStatusRunning, CreatedAt: createdAt,
+	}
+	if err := repository.SaveTaskAndRun(context.Background(), task, run); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	service := &Service{
+		Tasks: repository, Runs: repository, TaskRuns: repository, Scheduler: scheduler,
+		Now: func() time.Time { return createdAt.Add(time.Minute) },
+	}
+	if err := service.RecoverInterruptedTasks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RecoverInterruptedTasks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := repository.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != domainsubagent.TaskStatusQueued || recovered.ErrorMessage != "" {
+		t.Fatalf("expected recovered task to be queued, got %#v", recovered)
+	}
+	if len(recovered.Mailbox) != 1 || recovered.Mailbox[0].Status != domainsubagent.MessageStatusPending || recovered.Mailbox[0].ClaimedAt != nil {
+		t.Fatalf("expected interrupted mailbox delivery to become pending: %#v", recovered.Mailbox)
+	}
+	runs, err := repository.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Status != domainsubagent.RunStatusQueued || runs[0].Instruction != interruptedTaskContinuation {
+		t.Fatalf("expected recovered run to be queued, got %#v", runs)
+	}
+	if scheduler.task == nil || scheduler.submissions != 1 {
+		t.Fatalf("expected interrupted task to be submitted once, submissions=%d", scheduler.submissions)
+	}
+}
+
+func TestRecoverInterruptedTasksRequeuesWaitingStates(t *testing.T) {
+	for _, status := range []domainsubagent.TaskStatus{
+		domainsubagent.TaskStatusWaitingSubagents,
+		domainsubagent.TaskStatusWaitingPermission,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			repository := memory.NewRepository()
+			createdAt := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
+			task := domainsubagent.Task{
+				ID: "task-" + string(status), ParentSessionID: "parent-1", Instruction: "original instruction",
+				Definition: domainsubagent.DefinitionSnapshot{ModelID: "model-1"}, Status: status,
+				CurrentRunID: "run-1", CreatedAt: createdAt, UpdatedAt: createdAt,
+			}
+			run := domainsubagent.Run{
+				ID: "run-1", TaskID: task.ID, Sequence: 1, Instruction: task.Instruction,
+				Status: domainsubagent.RunStatusRunning, CreatedAt: createdAt,
+			}
+			if err := repository.SaveTaskAndRun(context.Background(), task, run); err != nil {
+				t.Fatal(err)
+			}
+			scheduler := &fakeScheduler{}
+			service := &Service{Tasks: repository, Runs: repository, TaskRuns: repository, Scheduler: scheduler}
+			if err := service.RecoverInterruptedTasks(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := repository.GetTask(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runs, err := repository.ListRuns(context.Background(), task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recovered.Status != domainsubagent.TaskStatusQueued || len(runs) != 1 || runs[0].Instruction != interruptedTaskContinuation || scheduler.submissions != 1 {
+				t.Fatalf("waiting task was not recovered: task=%#v runs=%#v submissions=%d", recovered, runs, scheduler.submissions)
+			}
+		})
+	}
+}
+
+func TestRecoverInterruptedQueuedTaskKeepsOriginalInstruction(t *testing.T) {
+	repository := memory.NewRepository()
+	createdAt := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
+	task := domainsubagent.Task{
+		ID: "task-queued", ParentSessionID: "parent-1", Instruction: "original instruction",
+		Definition: domainsubagent.DefinitionSnapshot{ModelID: "model-1"}, Status: domainsubagent.TaskStatusQueued,
+		CurrentRunID: "run-1", CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+	run := domainsubagent.Run{
+		ID: "run-1", TaskID: task.ID, Sequence: 1, Instruction: task.Instruction,
+		Status: domainsubagent.RunStatusQueued, CreatedAt: createdAt,
+	}
+	if err := repository.SaveTaskAndRun(context.Background(), task, run); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, Runs: repository, TaskRuns: repository, Scheduler: &fakeScheduler{}}
+	if err := service.RecoverInterruptedTasks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := repository.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Instruction != task.Instruction {
+		t.Fatalf("queued task instruction changed during recovery: %#v", runs)
+	}
+}
+
 func TestResumeClaimsUnreadTaskAndContinuesParent(t *testing.T) {
 	repository := memory.NewRepository()
 	task := resumableTask()
@@ -496,10 +890,14 @@ func (ids *sequenceIDs) NewID() string {
 	return "id-" + string(rune('0'+ids.next))
 }
 
-type fakeScheduler struct{ task subagentport.ScheduledTask }
+type fakeScheduler struct {
+	task        subagentport.ScheduledTask
+	submissions int
+}
 
 func (scheduler *fakeScheduler) Submit(_ string, task subagentport.ScheduledTask) error {
 	scheduler.task = task
+	scheduler.submissions++
 	return nil
 }
 func (*fakeScheduler) Cancel(string) bool { return true }
@@ -513,10 +911,12 @@ func (failingScheduler) Cancel(string) bool { return false }
 
 type fakeChildSessions struct {
 	request subagentport.ChildSessionRequest
+	creates int
 }
 
 func (sessions *fakeChildSessions) Create(_ context.Context, request subagentport.ChildSessionRequest) (*session.Session, error) {
 	sessions.request = request
+	sessions.creates++
 	return session.NewFromState(session.InitialState{ID: request.SessionID, Model: request.FallbackModelID}), nil
 }
 
@@ -524,6 +924,36 @@ type fakeRunner struct{}
 
 func (fakeRunner) Run(context.Context, subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
 	return subagentport.AgentRunResult{Content: "done"}, nil
+}
+
+type recordingRunner struct{ instructions []string }
+
+func (runner *recordingRunner) Run(_ context.Context, request subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
+	runner.instructions = append(runner.instructions, request.Instruction)
+	if len(runner.instructions) == 1 {
+		return subagentport.AgentRunResult{Content: "initial result"}, nil
+	}
+	return subagentport.AgentRunResult{Content: "follow-up result"}, nil
+}
+
+type failingFollowUpRunner struct{ calls int }
+
+func (runner *failingFollowUpRunner) Run(_ context.Context, _ subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
+	runner.calls++
+	if runner.calls == 1 {
+		return subagentport.AgentRunResult{Content: "initial result"}, nil
+	}
+	return subagentport.AgentRunResult{}, errors.New("follow-up model unavailable")
+}
+
+type panicFollowUpRunner struct{ calls int }
+
+func (runner *panicFollowUpRunner) Run(_ context.Context, _ subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
+	runner.calls++
+	if runner.calls == 1 {
+		return subagentport.AgentRunResult{Content: "initial result"}, nil
+	}
+	panic("follow-up panic")
 }
 
 type emptyRunner struct{}

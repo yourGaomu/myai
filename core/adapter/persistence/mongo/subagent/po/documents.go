@@ -86,23 +86,36 @@ type TaskDocument struct {
 	Reasoning         string                     `bson:"reasoning,omitempty"`
 	ErrorMessage      string                     `bson:"error_message,omitempty"`
 	Unread            bool                       `bson:"unread"`
+	Mailbox           []MailboxMessageDocument   `bson:"mailbox,omitempty"`
 	CreatedAt         time.Time                  `bson:"created_at"`
 	UpdatedAt         time.Time                  `bson:"updated_at"`
 	StartedAt         *time.Time                 `bson:"started_at,omitempty"`
 	CompletedAt       *time.Time                 `bson:"completed_at,omitempty"`
 }
 
+type MailboxMessageDocument struct {
+	ID               string     `bson:"id"`
+	Content          string     `bson:"content"`
+	Status           string     `bson:"status,omitempty"`
+	DeliveryAttempts int        `bson:"delivery_attempts,omitempty"`
+	LastError        string     `bson:"last_error,omitempty"`
+	CreatedAt        time.Time  `bson:"created_at"`
+	ClaimedAt        *time.Time `bson:"claimed_at,omitempty"`
+}
+
 type RunDocument struct {
-	ID           string     `bson:"_id"`
-	TaskID       string     `bson:"task_id"`
-	Sequence     int        `bson:"sequence"`
-	Instruction  string     `bson:"instruction"`
-	Status       string     `bson:"status"`
-	Result       string     `bson:"result,omitempty"`
-	ErrorMessage string     `bson:"error_message,omitempty"`
-	CreatedAt    time.Time  `bson:"created_at"`
-	StartedAt    *time.Time `bson:"started_at,omitempty"`
-	CompletedAt  *time.Time `bson:"completed_at,omitempty"`
+	ID                 string     `bson:"_id"`
+	TaskID             string     `bson:"task_id"`
+	Sequence           int        `bson:"sequence"`
+	RequestID          string     `bson:"request_id,omitempty"`
+	RequestContentHash string     `bson:"request_content_hash,omitempty"`
+	Instruction        string     `bson:"instruction"`
+	Status             string     `bson:"status"`
+	Result             string     `bson:"result,omitempty"`
+	ErrorMessage       string     `bson:"error_message,omitempty"`
+	CreatedAt          time.Time  `bson:"created_at"`
+	StartedAt          *time.Time `bson:"started_at,omitempty"`
+	CompletedAt        *time.Time `bson:"completed_at,omitempty"`
 }
 
 // TaskEventDocument is an append-only replay record. The task snapshot keeps

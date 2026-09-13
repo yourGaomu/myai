@@ -100,7 +100,7 @@ func (repository *Repository) SaveTask(ctx context.Context, task domainsubagent.
 	document := mapper.TaskDocumentFromDomain(task)
 	update, err := replacementUpdate(
 		document,
-		"created_request_id", "change_set", "result", "reasoning", "error_message", "started_at", "completed_at",
+		"created_request_id", "change_set", "result", "reasoning", "error_message", "mailbox", "started_at", "completed_at",
 	)
 	if err != nil {
 		return err

@@ -52,12 +52,14 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 	} else if task.Terminal() {
 		return subagentresult.Wait{Task: domainsubagent.CloneTask(task)}, nil
 	}
-	restoreWaiting, err := service.markWaitingForChildren(command)
+	waiter, err := service.markWaitingForChildren(command)
 	if err != nil {
 		return subagentresult.Wait{}, err
 	}
-	if restoreWaiting {
-		defer service.restoreRunningAfterChildren(command.ParentTaskID)
+	var wakeup <-chan struct{}
+	if waiter != nil {
+		defer service.restoreRunningAfterChildren(command.ParentTaskID, waiter)
+		wakeup = waiter.wakeup
 	}
 	source, ok := service.Events.(subagentport.TaskEventSource)
 	if !ok {
@@ -81,6 +83,12 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 				return subagentresult.Wait{}, err
 			}
 			return subagentresult.Wait{Task: task, TimedOut: !task.Terminal()}, nil
+		case <-wakeup:
+			task, err := service.Tasks.GetTask(context.Background(), taskID)
+			if err != nil {
+				return subagentresult.Wait{}, err
+			}
+			return subagentresult.Wait{Task: task, WokenByMailbox: true}, nil
 		case event, open := <-events:
 			if !open {
 				return subagentresult.Wait{}, errors.New("subagent task event stream closed; reconnect and retry")
@@ -102,40 +110,74 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 	}
 }
 
-func (service *Service) markWaitingForChildren(command subagentcommand.WaitTask) (bool, error) {
+func (service *Service) markWaitingForChildren(command subagentcommand.WaitTask) (*childWait, error) {
 	parentTaskID := strings.TrimSpace(command.ParentTaskID)
 	if parentTaskID == "" {
-		return false, nil
+		return nil, nil
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	parent, err := service.Tasks.GetTask(context.Background(), parentTaskID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if parent.ChildSessionID != strings.TrimSpace(command.ParentSessionID) {
-		return false, subagentport.ErrNotFound
+		return nil, subagentport.ErrNotFound
 	}
-	if parent.Status != domainsubagent.TaskStatusRunning {
-		return false, nil
+	if parent.Status != domainsubagent.TaskStatusRunning && parent.Status != domainsubagent.TaskStatusWaitingSubagents {
+		return nil, nil
 	}
-	parent.Status = domainsubagent.TaskStatusWaitingSubagents
-	parent.UpdatedAt = service.now()
-	if err := service.Tasks.SaveTask(context.Background(), parent); err != nil {
-		return false, err
+	changed := parent.Status == domainsubagent.TaskStatusRunning
+	if changed {
+		parent.Status = domainsubagent.TaskStatusWaitingSubagents
+		parent.UpdatedAt = service.now()
+		if err := service.Tasks.SaveTask(context.Background(), parent); err != nil {
+			return nil, err
+		}
+		service.publish(context.Background(), parent)
 	}
-	service.publish(context.Background(), parent)
-	return true, nil
+	if service.waitingWakeups == nil {
+		service.waitingWakeups = make(map[string]map[*childWait]struct{})
+	}
+	if service.waitingWakeups[parent.ID] == nil {
+		service.waitingWakeups[parent.ID] = make(map[*childWait]struct{})
+	}
+	waiter := &childWait{runID: parent.CurrentRunID, wakeup: make(chan struct{})}
+	service.waitingWakeups[parent.ID][waiter] = struct{}{}
+	// A message may have arrived before registration. Delivering messages
+	// already belong to the current model turn and must not wake its own wait.
+	for _, message := range parent.Mailbox {
+		if message.Status == "" || message.Status == domainsubagent.MessageStatusPending {
+			close(waiter.wakeup)
+			waiter.signaled = true
+			break
+		}
+	}
+	return waiter, nil
 }
 
-func (service *Service) restoreRunningAfterChildren(parentTaskID string) {
+func (service *Service) restoreRunningAfterChildren(parentTaskID string, waiter *childWait) {
 	if strings.TrimSpace(parentTaskID) == "" {
 		return
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	parent, err := service.Tasks.GetTask(context.Background(), strings.TrimSpace(parentTaskID))
-	if err != nil || parent.Status != domainsubagent.TaskStatusWaitingSubagents {
+	parentTaskID = strings.TrimSpace(parentTaskID)
+	waiters := service.waitingWakeups[parentTaskID]
+	if _, registered := waiters[waiter]; !registered {
+		return
+	}
+	delete(waiters, waiter)
+	if len(waiters) == 0 {
+		delete(service.waitingWakeups, parentTaskID)
+	}
+	for other := range waiters {
+		if other.runID == waiter.runID {
+			return
+		}
+	}
+	parent, err := service.Tasks.GetTask(context.Background(), parentTaskID)
+	if err != nil || parent.CurrentRunID != waiter.runID || parent.Status != domainsubagent.TaskStatusWaitingSubagents {
 		return
 	}
 	parent.Status = domainsubagent.TaskStatusRunning

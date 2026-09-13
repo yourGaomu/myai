@@ -45,6 +45,20 @@ type CheckTask struct {
 	RequestID       string
 }
 
+type SendMessage struct {
+	TaskID          string
+	ParentSessionID string
+	Content         string
+}
+
+type FollowupTask struct {
+	TaskID          string
+	ParentSessionID string
+	RequestID       string
+	Content         string
+	FallbackModelID string
+}
+
 type ListTasks struct {
 	ParentSessionID string
 	Limit           int

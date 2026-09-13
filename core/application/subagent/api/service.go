@@ -15,6 +15,8 @@ type Service interface {
 	ListDefinitions(ctx context.Context) (subagentresult.Definitions, error)
 	Start(ctx context.Context, command subagentcommand.StartTask) (subagentresult.Task, error)
 	Check(ctx context.Context, command subagentcommand.CheckTask) (subagentresult.Task, error)
+	SendMessage(ctx context.Context, command subagentcommand.SendMessage) (subagentresult.Task, error)
+	Followup(ctx context.Context, command subagentcommand.FollowupTask) (subagentresult.Task, error)
 	List(ctx context.Context, command subagentcommand.ListTasks) (subagentresult.Tasks, error)
 	Cancel(ctx context.Context, command subagentcommand.CancelTask) (subagentresult.Task, error)
 	Wait(ctx context.Context, command subagentcommand.WaitTask) (subagentresult.Wait, error)

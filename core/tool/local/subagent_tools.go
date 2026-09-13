@@ -19,6 +19,8 @@ import (
 type ListSubagentDefinitionsTool struct{ service subagentapi.Service }
 type StartAsyncTaskTool struct{ service subagentapi.Service }
 type SpawnAgentTool struct{ service subagentapi.Service }
+type SendMessageTool struct{ service subagentapi.Service }
+type FollowupTaskTool struct{ service subagentapi.Service }
 type CheckAsyncTaskTool struct{ service subagentapi.Service }
 type ListAsyncTasksTool struct{ service subagentapi.Service }
 type ListAgentsTool struct{ service subagentapi.Service }
@@ -33,6 +35,8 @@ func NewSubagentTools(service subagentapi.Service) []tooldef.Tool {
 		&ListSubagentDefinitionsTool{service: service},
 		&StartAsyncTaskTool{service: service},
 		&SpawnAgentTool{service: service},
+		&SendMessageTool{service: service},
+		&FollowupTaskTool{service: service},
 		&CheckAsyncTaskTool{service: service},
 		&ListAsyncTasksTool{service: service},
 		&ListAgentsTool{service: service},
@@ -189,6 +193,91 @@ func (tool *SpawnAgentTool) Call(ctx context.Context, args json.RawMessage) (too
 	return jsonToolOutput(taskView(result.Value, false))
 }
 
+// SendMessageTool is the Codex-compatible follow-up channel for a child that
+// is still running. The message is durable and consumed between child turns.
+func (tool *SendMessageTool) Name() string { return "send_message" }
+func (tool *SendMessageTool) Description() string {
+	return "Queue input for a queued, running, or waiting child agent. A waiting child is woken; delivery begins after its current execution turn completes."
+}
+func (tool *SendMessageTool) Schema() any {
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"task_id": map[string]any{"type": "string"},
+		"message": map[string]any{"type": "string"},
+	}, "required": []string{"task_id", "message"}}
+}
+func (tool *SendMessageTool) Permission() tooldef.Permission { return tooldef.PermissionExecute }
+func (tool *SendMessageTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
+	if tool == nil || tool.service == nil {
+		return tooldef.ToolOutput{}, errors.New("subagent service is not configured")
+	}
+	var input struct {
+		TaskID  string `json:"task_id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(args, &input); err != nil {
+		return tooldef.ToolOutput{}, err
+	}
+	input.TaskID = strings.TrimSpace(input.TaskID)
+	input.Message = strings.TrimSpace(input.Message)
+	if input.TaskID == "" || input.Message == "" {
+		return tooldef.ToolOutput{}, errors.New("send_message requires task_id and message")
+	}
+	execution, _ := toolruntime.CurrentExecution(ctx)
+	if strings.TrimSpace(execution.SessionID) == "" {
+		return tooldef.ToolOutput{}, errors.New("send_message parent execution context is unavailable")
+	}
+	result, err := tool.service.SendMessage(ctx, subagentcommand.SendMessage{
+		TaskID: input.TaskID, ParentSessionID: execution.SessionID, Content: input.Message,
+	})
+	if err != nil {
+		return tooldef.ToolOutput{}, err
+	}
+	return jsonToolOutput(taskView(result.Value, false))
+}
+
+// FollowupTaskTool starts a fresh Run for a completed child while reusing its
+// existing child session and preserving the earlier run history.
+func (tool *FollowupTaskTool) Name() string { return "followup_task" }
+func (tool *FollowupTaskTool) Description() string {
+	return "Continue a completed child in the same session. Direct tasks may succeed or fail; isolated tasks must have succeeded with pending or conflicting changes. Applied, discarded, or failed isolated workspaces require a new task."
+}
+func (tool *FollowupTaskTool) Schema() any {
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"task_id": map[string]any{"type": "string"},
+		"message": map[string]any{"type": "string"},
+	}, "required": []string{"task_id", "message"}}
+}
+func (tool *FollowupTaskTool) Permission() tooldef.Permission { return tooldef.PermissionExecute }
+func (tool *FollowupTaskTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
+	if tool == nil || tool.service == nil {
+		return tooldef.ToolOutput{}, errors.New("subagent service is not configured")
+	}
+	var input struct {
+		TaskID  string `json:"task_id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(args, &input); err != nil {
+		return tooldef.ToolOutput{}, err
+	}
+	input.TaskID = strings.TrimSpace(input.TaskID)
+	input.Message = strings.TrimSpace(input.Message)
+	if input.TaskID == "" || input.Message == "" {
+		return tooldef.ToolOutput{}, errors.New("followup_task requires task_id and message")
+	}
+	execution, ok := toolruntime.CurrentExecution(ctx)
+	if !ok || strings.TrimSpace(execution.SessionID) == "" {
+		return tooldef.ToolOutput{}, errors.New("followup_task parent execution context is unavailable")
+	}
+	result, err := tool.service.Followup(ctx, subagentcommand.FollowupTask{
+		TaskID: input.TaskID, ParentSessionID: execution.SessionID,
+		RequestID: execution.RequestID, Content: input.Message, FallbackModelID: execution.ModelID,
+	})
+	if err != nil {
+		return tooldef.ToolOutput{}, err
+	}
+	return jsonToolOutput(taskView(result.Value, false))
+}
+
 func (tool *CheckAsyncTaskTool) Name() string { return "check_async_task" }
 func (tool *CheckAsyncTaskTool) Description() string {
 	return "Get the state and final result of a background subagent task. Never call this in the request that started the task."
@@ -287,7 +376,7 @@ func (tool *ListAgentsTool) Call(ctx context.Context, args json.RawMessage) (too
 
 func (tool *WaitAgentTool) Name() string { return "wait_agent" }
 func (tool *WaitAgentTool) Description() string {
-	return "Wait asynchronously for a child agent to reach a terminal state or until the timeout expires."
+	return "Wait asynchronously for a child agent to reach a terminal state or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it and the result includes woken_by_mailbox=true."
 }
 func (tool *WaitAgentTool) Schema() any {
 	return map[string]any{"type": "object", "properties": map[string]any{
@@ -325,7 +414,7 @@ func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tool
 		return tooldef.ToolOutput{}, err
 	}
 	return jsonToolOutput(map[string]any{
-		"task": taskView(result.Task, true), "timed_out": result.TimedOut, "sequence": result.Sequence,
+		"task": taskView(result.Task, true), "timed_out": result.TimedOut, "woken_by_mailbox": result.WokenByMailbox, "sequence": result.Sequence,
 	})
 }
 
@@ -458,6 +547,7 @@ type taskToolView struct {
 	DefinitionID   string     `json:"definition_id"`
 	ChildSessionID string     `json:"child_session_id,omitempty"`
 	Status         string     `json:"status"`
+	CanFollowup    bool       `json:"can_followup"`
 	Result         string     `json:"result,omitempty"`
 	Error          string     `json:"error,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -478,7 +568,8 @@ func taskView(task domainsubagent.Task, includeResult bool) taskToolView {
 		TaskID: task.ID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID, AgentPath: task.AgentPath, AgentNickname: task.AgentNickname,
 		Title: task.Title, DefinitionID: task.DefinitionID,
 		ChildSessionID: task.ChildSessionID, Status: string(task.Status), Error: task.ErrorMessage,
-		CreatedAt: task.CreatedAt, StartedAt: task.StartedAt, CompletedAt: task.CompletedAt,
+		CanFollowup: task.CanFollowup(),
+		CreatedAt:   task.CreatedAt, StartedAt: task.StartedAt, CompletedAt: task.CompletedAt,
 	}
 	if includeResult || task.Terminal() {
 		view.Result = task.Result
