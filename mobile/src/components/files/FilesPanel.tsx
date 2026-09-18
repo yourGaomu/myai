@@ -122,12 +122,17 @@ export function FilesPanel({
           {fileEntries.length === 0 ? (
             <Text style={styles.emptyText}>{clientToken ? "还没有加载文件" : "请先完成配对"}</Text>
           ) : (
-            fileEntries.map((entry) => (
+            fileEntries.map((entry, index) => (
               <Pressable
                 key={entry.path}
                 disabled={pendingFiles}
                 onPress={() => onOpenFileEntry(entry)}
-                style={({ pressed }) => buttonFeedback([styles.fileRow, pendingFiles && styles.disabledButton], pressed)}
+                style={({ pressed }) =>
+                  buttonFeedback(
+                    [styles.fileRow, index === fileEntries.length - 1 && styles.fileRowLast, pendingFiles && styles.disabledButton],
+                    pressed,
+                  )
+                }
               >
                 <Text style={styles.fileEmoji}>{entry.type === "dir" ? "📁" : "📄"}</Text>
                 <View style={styles.flex}>
@@ -166,11 +171,13 @@ export function FilesPanel({
             <Text style={styles.emptyText}>二进制文件暂不支持预览。</Text>
           ) : (
             <View style={styles.darkCodeContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <Text selectable style={styles.darkCodeText}>
-                  {filePreview.content || ""}
-                  {filePreview.truncated ? "\n\n[truncated]" : ""}
-                </Text>
+              <ScrollView nestedScrollEnabled style={styles.darkCodeScroll}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                  <Text selectable style={styles.darkCodeText}>
+                    {filePreview.content || ""}
+                    {filePreview.truncated ? "\n\n[truncated]" : ""}
+                  </Text>
+                </ScrollView>
               </ScrollView>
             </View>
           )}
@@ -313,9 +320,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 8,
-    minHeight: 38,
+    minHeight: 40,
     paddingHorizontal: 4,
-    paddingVertical: 6,
+    paddingVertical: 7,
+  },
+  fileRowLast: {
+    borderBottomWidth: 0,
   },
   fileEmoji: {
     fontSize: 15,
@@ -336,16 +346,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   fileList: {
-    maxHeight: 280,
+    gap: 0,
   },
   darkCodeContainer: {
     backgroundColor: "#1e1e1e",
     borderColor: "#25231f",
     borderRadius: 10,
     borderWidth: 1.5,
-    maxHeight: 220,
     overflow: "hidden",
     padding: 10,
+  },
+  darkCodeScroll: {
+    maxHeight: 280,
   },
   darkCodeText: {
     color: "#f7f5f0",
