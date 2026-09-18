@@ -793,6 +793,11 @@ export function MobileAppScreen() {
 
       if (returningToForeground && reconnectOnForegroundRef.current && clientToken) {
         reconnectOnForegroundRef.current = false;
+        // 如果当前已有正在连接或已经处于 OPEN 状态的 Socket，无需重复发起重连
+        const currentSocket = socketRef.current;
+        if (currentSocket && (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)) {
+          return;
+        }
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current);
         }

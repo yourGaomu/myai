@@ -226,6 +226,17 @@ export function useRelayConnection({
     }
 
     const previousSocket = socketRef.current;
+    if (previousSocket) {
+      if (previousSocket.readyState === WebSocket.OPEN) {
+        // Socket 已经处于连接就绪状态，切勿粗暴断开重建
+        return;
+      }
+      if (previousSocket.readyState === WebSocket.CONNECTING) {
+        // 正在连接建立中，等待握手完成即可
+        return;
+      }
+    }
+
     if (heartbeatTimerRef.current) {
       clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = null;
