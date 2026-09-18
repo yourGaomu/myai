@@ -1,0 +1,71 @@
+/**
+ * MyAI Mobile UI Prototype - Design Tokens
+ * 复刻当前移动端的 Neo-Brutalism 漫画粗线风设计系统
+ */
+
+:root {
+  /* 基础墨色与边框色 */
+  --ink: #12100e;
+  --line: #25231f;
+  --line-light: #d7cfc2;
+  --line-subtle: #e8e2d7;
+
+  /* 背景基调 */
+  --bg-app: #f4f5f7;
+  --bg-screen: #f4f5f7;
+  --paper: #f3ead9;
+  --surface: #fffdf7;
+  --surface-alt: #f8f1e5;
+  --surface-subtle: #f0eae1;
+
+  /* 核心强调色 */
+  --yellow: #ffd84f;
+  --yellow-hover: #f2cb38;
+  --cyan: #4fd7ee;
+  --cyan-hover: #3bc5dc;
+  --green: #b9e9b0;
+  --green-dark: #2e8b38;
+  --coral: #ff7f68;
+  --coral-dark: #d94b34;
+  --purple: #6741c8;
+  --blue-accent: #3182ce;
+
+  /* 文字与次级文字 */
+  --text-primary: #12100e;
+  --text-secondary: #6c665f;
+  --text-muted: #8c857b;
+  --text-on-dark: #ffffff;
+
+  /* 字体家族 */
+  --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, Menlo, Monaco, "Courier New", monospace;
+  --font-comic: "Arial Black", "Impact", "PingFang SC", "Noto Sans SC", sans-serif;
+
+  /* 边框标准 */
+  --border-width: 2px;
+  --border-thick: 4px;
+  --border-main: var(--border-width) solid var(--line);
+  --border-dark: var(--border-width) solid var(--ink);
+  --border-heavy: var(--border-thick) solid var(--ink);
+  --border-light: 1px solid var(--line-light);
+
+  /* 圆角规范 */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* 阴影规范 (Flat Offset Shadow) */
+  --shadow-press: 0 1px 0 var(--ink);
+  --shadow-sm: 0 2px 0 var(--ink);
+  --shadow-md: 0 4px 0 var(--ink);
+  --shadow-lg: 0 6px 0 var(--ink);
+  --shadow-xl: 0 8px 0 rgba(18, 16, 14, 0.16);
+  --shadow-float: 0 16px 36px rgba(18, 16, 14, 0.18);
+
+  /* 过渡动画 */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+}

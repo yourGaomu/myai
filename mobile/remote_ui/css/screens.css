@@ -1,0 +1,652 @@
+/**
+ * MyAI Mobile UI Prototype - Screens Styles
+ * 8大核心业务屏幕专有样式（对话、文件、变更、Diff、知识库与记忆、规划、会话、设置与子智能体）
+ */
+
+/* ==================== 1. 对话主屏幕 (Chat Screen) ==================== */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 6px;
+}
+
+/* Agent 任务时间线 (Agent Run Timeline) */
+.agent-run-timeline {
+  background: #fff8db;
+  border: 1px solid #d4cbb8;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.timeline-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.timeline-steps {
+  display: flex;
+  gap: 4px;
+}
+
+.step-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ccc4b6;
+}
+
+.step-indicator.done { background: var(--green-dark); }
+.step-indicator.active { background: var(--yellow); animation: pulse-dot 1s infinite alternate; }
+
+/* 聊天消息流列表 */
+.chat-messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 2px 2px;
+}
+
+/* 用户气泡 */
+.message-bubble-user {
+  align-self: flex-end;
+  max-width: 82%;
+  background-color: var(--yellow);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px 14px 4px 14px;
+  padding: 7px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  box-shadow: 0 1.5px 0 var(--ink);
+  line-height: 1.4;
+}
+
+/* Assistant 回复气泡 */
+.message-bubble-assistant {
+  align-self: flex-start;
+  width: 100%;
+  background-color: var(--surface);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px 14px 14px 4px;
+  padding: 8px 11px;
+  box-shadow: 0 1.5px 0 var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Thinking 深度思考折叠块 (默认折叠以节省空间) */
+.thinking-box {
+  background: #fbf9f4;
+  border: 1px dashed #d9d1c3;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 800;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.thinking-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.thinking-content {
+  display: none; /* 默认折叠 */
+  padding: 6px 8px;
+  color: #555047;
+  font-size: 11px;
+  line-height: 1.45;
+  border-top: 1px dashed #d9d1c3;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+/* Markdown 文本解析渲染 */
+.markdown-body {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.markdown-body p { margin-bottom: 4px; }
+.markdown-body p:last-child { margin-bottom: 0; }
+.markdown-body ul, .markdown-body ol { padding-left: 14px; margin-bottom: 4px; }
+.markdown-body li { margin-bottom: 2px; font-weight: 500; }
+.markdown-body code {
+  background: #eee8dc;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid #ddd3c3;
+}
+.markdown-body pre {
+  background: #25231f;
+  color: #f7f5f0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+
+/* 工具调用组卡片 (Tool Activity Group) */
+.tool-group-card {
+  background: #f7f3ec;
+  border: 1px solid var(--line-light);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  background: #efe7d9;
+  font-size: 11px;
+}
+
+.tool-badge-call {
+  background: var(--cyan);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.tool-badge-done {
+  background: var(--green);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.tool-name {
+  font-size: 11px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+
+.tool-card-body {
+  display: none; /* 默认折叠，节省垂向空间 */
+  padding: 6px 8px;
+  border-top: 1px solid var(--line-light);
+  background: var(--surface);
+}
+
+.tool-code-preview {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #333;
+  background: #f8f6f0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #e5dfd2;
+  white-space: pre-wrap;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+/* ==================== 2. 文件工作区 (Files Screen) ==================== */
+.files-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.asset-box {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.asset-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-sm);
+  gap: 8px;
+}
+
+.asset-title {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.asset-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* 工作区文件树 */
+.file-browser-box {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-breadcrumb {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-alt);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-light);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--line-subtle);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.file-row:hover {
+  background: var(--surface-alt);
+}
+
+.file-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-icon {
+  font-size: 14px;
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ==================== 3. 变更与历史 (Changes Screen) ==================== */
+.changes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.change-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.change-item:active {
+  transform: translateY(2px);
+}
+
+.change-badge {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.change-badge.mod { background: var(--yellow); }
+.change-badge.add { background: var(--green); }
+.change-badge.del { background: var(--coral); }
+
+.change-path {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+/* 历史检查点卡片 */
+.checkpoint-item {
+  background: var(--surface-alt);
+  border: var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkpoint-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/* ==================== 4. Diff 差异对比器 (Change Detail Screen) ==================== */
+.diff-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+.diff-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.diff-view-box {
+  flex: 1;
+  background: #1e1e1e;
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  padding: 8px 0;
+}
+
+.diff-line {
+  display: flex;
+  padding: 1px 8px;
+  white-space: pre;
+}
+
+.diff-line.add {
+  background: rgba(46, 160, 67, 0.25);
+  color: #7ee787;
+}
+
+.diff-line.del {
+  background: rgba(248, 81, 73, 0.25);
+  color: #ffa198;
+}
+
+.diff-line-num {
+  width: 32px;
+  color: #6e7681;
+  user-select: none;
+  text-align: right;
+  padding-right: 8px;
+}
+
+/* ==================== 5. 知识库与 AI 记忆 (Knowledge Screen) ==================== */
+.knowledge-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.knowledge-subtabs {
+  display: flex;
+  background: #e6dfd3;
+  border: var(--border-main);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 3px;
+}
+
+.knowledge-tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+}
+
+.knowledge-tab-btn.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.kb-card {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-card {
+  background: var(--surface);
+  border-left: 5px solid var(--yellow);
+  border-top: var(--border-main);
+  border-right: var(--border-main);
+  border-bottom: var(--border-main);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ==================== 6. 规划执行面板 (Plan Screen) ==================== */
+.plan-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-goal-box {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-progress-track {
+  width: 100%;
+  height: 10px;
+  background: #e2dcd2;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.plan-progress-fill {
+  height: 100%;
+  background: var(--yellow);
+  transition: width var(--transition-normal);
+}
+
+.plan-step-card {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.step-num-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--cyan);
+  border: 1px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+/* ==================== 7. 会话中心 (Sessions Screen) ==================== */
+.sessions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.session-card.active {
+  border-color: var(--ink);
+  background: var(--surface-alt);
+  box-shadow: var(--shadow-md);
+}
+
+/* ==================== 8. 设置与控制台 (Settings Screen) ==================== */
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-pill-nav {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.settings-nav-pill {
+  padding: 5px 12px;
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-nav-pill.active {
+  background: var(--yellow);
+  box-shadow: var(--shadow-press);
+  transform: translateY(1px);
+}
+
+.settings-section-card {
+  background: var(--surface);
+  border: var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.input-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.input-field-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.ui-text-input {
+  background: var(--surface-alt);
+  border: var(--border-main);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}

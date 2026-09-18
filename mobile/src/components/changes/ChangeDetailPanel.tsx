@@ -38,41 +38,58 @@ export function ChangeDetailPanel({
     <View style={[styles.panel, styles.diffDetailPanel]}>
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={({ pressed }) => buttonFeedback(styles.detailBackButton, pressed)}>
-          <Text style={styles.detailBackText}>返回</Text>
+          <Text style={styles.detailBackText}>❮ 返回变更</Text>
         </Pressable>
-        <View style={styles.flex}>
-          <Text style={styles.panelTitle}>{changeDiff ? "文件变更" : "历史差异"}</Text>
-          <Text numberOfLines={2} style={styles.pathText}>
+        <View style={styles.detailHeaderCenter}>
+          <Text numberOfLines={1} style={styles.detailHeaderTitle}>
             {changeDiff
-              ? `${changeDiff.path}${changeDiff.truncated ? " / 已截断" : ""}`
+              ? changeDiff.path.split("/").pop() || changeDiff.path
               : historyDiff
-                ? `检查点 ${shortID(historyDiff.checkpoint_id)} / ${(historyDiff.files || []).length} 个文件`
-                : "未选择差异"}
+                ? `检查点 ${shortID(historyDiff.checkpoint_id)}`
+                : "差异详情"}
           </Text>
+        </View>
+        <View style={styles.rowCompact}>
+          {changeDiff ? (
+            <>
+              <Pressable
+                disabled={!canOpenSelectedChangeFile || pendingFiles}
+                onPress={onOpenSelectedChangeFile}
+                style={({ pressed }) =>
+                  buttonFeedback([styles.previewButton, (!canOpenSelectedChangeFile || pendingFiles) && styles.disabledButton], pressed)
+                }
+              >
+                <ButtonContent loading={pendingFiles} text={pendingFiles ? "打开中" : "打开"} />
+              </Pressable>
+              <Pressable
+                disabled={!canRevertSelectedChange || pendingRevert}
+                onPress={onRevertSelectedChange}
+                style={({ pressed }) =>
+                  buttonFeedback([styles.revertButton, (!canRevertSelectedChange || pendingRevert) && styles.disabledButton], pressed)
+                }
+              >
+                <ButtonContent loading={pendingRevert} text={pendingRevert ? "还原中" : "还原文件"} />
+              </Pressable>
+            </>
+          ) : historyDiff ? (
+            <Pressable
+              disabled={pendingRevert}
+              onPress={() => onRevertHistory(historyDiff.checkpoint_id)}
+              style={({ pressed }) => buttonFeedback([styles.revertButton, pendingRevert && styles.disabledButton], pressed)}
+            >
+              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
       {changeDiff ? (
         <View style={styles.diffDetailContent}>
-          <View style={styles.detailActions}>
-            <Pressable
-              disabled={!canRevertSelectedChange || pendingRevert}
-              onPress={onRevertSelectedChange}
-              style={({ pressed }) =>
-                buttonFeedback([styles.previewButton, (!canRevertSelectedChange || pendingRevert) && styles.disabledButton], pressed)
-              }
-            >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复"} />
-            </Pressable>
-            <Pressable
-              disabled={!canOpenSelectedChangeFile || pendingFiles}
-              onPress={onOpenSelectedChangeFile}
-              style={({ pressed }) =>
-                buttonFeedback([styles.previewButton, (!canOpenSelectedChangeFile || pendingFiles) && styles.disabledButton], pressed)
-              }
-            >
-              <ButtonContent loading={pendingFiles} text={pendingFiles ? "打开中" : "打开文件"} />
-            </Pressable>
+          <View style={styles.diffStatsBar}>
+            <Text numberOfLines={1} style={styles.diffStatsPath}>
+              {changeDiff.path}
+              {changeDiff.truncated ? " / 已截断" : ""}
+            </Text>
           </View>
           {changeDiff.binary ? (
             <Text style={styles.emptyText}>{changeDiff.message || "二进制文件暂不支持差异查看。"}</Text>
@@ -84,14 +101,10 @@ export function ChangeDetailPanel({
 
       {historyDiff ? (
         <View style={styles.diffDetailContent}>
-          <View style={styles.detailActions}>
-            <Pressable
-              disabled={pendingRevert}
-              onPress={() => onRevertHistory(historyDiff.checkpoint_id)}
-              style={({ pressed }) => buttonFeedback([styles.previewButton, pendingRevert && styles.disabledButton], pressed)}
-            >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
-            </Pressable>
+          <View style={styles.diffStatsBar}>
+            <Text style={styles.diffStatsPath}>
+              快照 ID: {historyDiff.checkpoint_id} ({(historyDiff.files || []).length} 个文件变动)
+            </Text>
           </View>
           {historyDiff.message && (historyDiff.files || []).length > 0 ? <Text style={styles.emptyText}>{historyDiff.message}</Text> : null}
           {(historyDiff.files || []).length === 0 ? (

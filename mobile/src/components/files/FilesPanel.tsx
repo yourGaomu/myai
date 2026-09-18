@@ -41,17 +41,18 @@ export function FilesPanel({
   pendingFiles,
 }: Props) {
   return (
-    <View style={[styles.panel, styles.filesPanel]}>
-      <View style={styles.assetSection}>
+    <View style={styles.container}>
+      {/* 1. 会话资源卡片 */}
+      <View style={styles.panel}>
         <View style={styles.panelHeader}>
           <View style={styles.flex}>
             <Text style={styles.panelTitle}>会话资源</Text>
-            <Text style={styles.pathText}>{assets.length === 0 ? "当前对话中的共享文件" : `${assets.length} 个共享文件`}</Text>
+            <Text style={styles.pathText}>{assets.length === 0 ? "当前对话中的共享文件" : `${assets.length} 个共享资产`}</Text>
           </View>
           <Pressable
             disabled={pendingAssets}
             onPress={onRefreshAssets}
-            style={({ pressed }) => buttonFeedback([styles.smallButton, pendingAssets && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.primaryButton, pendingAssets && styles.disabledButton], pressed)}
           >
             <ButtonContent loading={pendingAssets} text={pendingAssets ? "加载中" : "刷新"} />
           </Pressable>
@@ -63,29 +64,22 @@ export function FilesPanel({
           <View style={styles.assetList}>
             {assets.map((asset) => (
               <View key={asset.id || asset.short_url} style={styles.assetRow}>
-                <View style={styles.assetBadge}>
-                  <Text style={styles.assetBadgeText}>{assetKind(asset)}</Text>
-                </View>
+                <Text style={styles.assetEmoji}>📦</Text>
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.fileName}>
                     {asset.file_name || asset.path || "Shared file"}
                   </Text>
-                  {asset.path ? (
-                    <Text numberOfLines={1} style={styles.fileMeta}>
-                      {asset.path}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.fileMeta}>
-                    {[asset.size !== undefined ? formatBytes(asset.size) : "", asset.content_type || "", asset.expires_at ? `expires ${formatDateTime(asset.expires_at)}` : ""]
+                  <Text numberOfLines={1} style={styles.fileMeta}>
+                    {[asset.path || "", asset.size !== undefined ? formatBytes(asset.size) : ""]
                       .filter(Boolean)
-                      .join(" / ")}
+                      .join(" · ")}
                   </Text>
                 </View>
                 <Pressable
                   onPress={() => void Linking.openURL(asset.short_url)}
-                  style={({ pressed }) => buttonFeedback(styles.assetOpenButton, pressed)}
+                  style={({ pressed }) => buttonFeedback(styles.actionButton, pressed)}
                 >
-                  <Text style={styles.assetOpenButtonText}>打开</Text>
+                  <Text style={styles.actionButtonText}>打开</Text>
                 </Pressable>
               </View>
             ))}
@@ -93,75 +87,92 @@ export function FilesPanel({
         )}
       </View>
 
-      <View style={styles.panelHeader}>
-        <View style={styles.flex}>
-          <Text style={styles.panelTitle}>文件</Text>
-          <Text style={styles.pathText}>{filePath}</Text>
-        </View>
-        <View style={styles.rowCompact}>
-          <Pressable
-            disabled={!fileParent || pendingFiles}
-            onPress={onGoToParent}
-            style={({ pressed }) => buttonFeedback([styles.smallButton, (!fileParent || pendingFiles) && styles.disabledButton], pressed)}
-          >
-            <Text style={styles.smallButtonText}>上级</Text>
-          </Pressable>
+      {/* 2. 工作区文件卡片 */}
+      <View style={styles.panel}>
+        <View style={styles.panelHeader}>
+          <View style={styles.flex}>
+            <Text style={styles.panelTitle}>工作区文件</Text>
+            <Text style={styles.pathText}>PC Agent Workspace</Text>
+          </View>
           <Pressable
             disabled={pendingFiles}
             onPress={onRefresh}
-            style={({ pressed }) => buttonFeedback([styles.smallButton, pendingFiles && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.actionButton, pendingFiles && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingFiles} text={pendingFiles ? "加载中" : "刷新"} />
+            <ButtonContent loading={pendingFiles} text={pendingFiles ? "加载中" : "刷新目录"} />
           </Pressable>
+        </View>
+
+        {/* 路径面包屑导航栏 */}
+        <View style={styles.breadcrumbBar}>
+          <Text numberOfLines={1} style={[styles.breadcrumbText, styles.flex]}>
+            📁 {filePath || "工作区根目录"}
+          </Text>
+          <Pressable
+            disabled={!fileParent || pendingFiles}
+            onPress={onGoToParent}
+            style={({ pressed }) => buttonFeedback([styles.smallParentButton, (!fileParent || pendingFiles) && styles.disabledButton], pressed)}
+          >
+            <Text style={styles.smallParentButtonText}>上一级</Text>
+          </Pressable>
+        </View>
+
+        {/* 文件列表 */}
+        <View style={styles.fileList}>
+          {fileEntries.length === 0 ? (
+            <Text style={styles.emptyText}>{clientToken ? "还没有加载文件" : "请先完成配对"}</Text>
+          ) : (
+            fileEntries.map((entry) => (
+              <Pressable
+                key={entry.path}
+                disabled={pendingFiles}
+                onPress={() => onOpenFileEntry(entry)}
+                style={({ pressed }) => buttonFeedback([styles.fileRow, pendingFiles && styles.disabledButton], pressed)}
+              >
+                <Text style={styles.fileEmoji}>{entry.type === "dir" ? "📁" : "📄"}</Text>
+                <View style={styles.flex}>
+                  <Text numberOfLines={1} style={styles.fileName}>{entry.name}</Text>
+                </View>
+                <Text style={styles.fileSizeText}>{entry.type === "dir" ? "目录" : formatBytes(entry.size || 0)}</Text>
+              </Pressable>
+            ))
+          )}
         </View>
       </View>
 
-      <View style={styles.fileList}>
-        {fileEntries.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "还没有加载文件" : "请先完成配对"}</Text>
-        ) : (
-          fileEntries.map((entry) => (
-            <Pressable
-              key={entry.path}
-              disabled={pendingFiles}
-              onPress={() => onOpenFileEntry(entry)}
-              style={({ pressed }) => buttonFeedback([styles.fileRow, pendingFiles && styles.disabledButton], pressed)}
-            >
-              <Text style={styles.fileIcon}>{entry.type === "dir" ? "目录" : "文本"}</Text>
-              <View style={styles.flex}>
-                <Text style={styles.fileName}>{entry.name}</Text>
-                <Text style={styles.fileMeta}>{entry.type === "dir" ? entry.path : `${formatBytes(entry.size || 0)} / ${entry.path}`}</Text>
-              </View>
-            </Pressable>
-          ))
-        )}
-      </View>
-
+      {/* 3. 代码详情预览卡片 */}
       {filePreview ? (
-        <View style={styles.previewBox}>
-          <View style={styles.previewHeader}>
-            <Text style={[styles.previewTitle, styles.flex]}>
-              {filePreview.name} / {filePreview.language} / {formatBytes(filePreview.size)}
-            </Text>
+        <View style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <View style={styles.flex}>
+              <Text numberOfLines={1} style={styles.panelTitle}>
+                📄 {filePreview.name}
+              </Text>
+              <Text numberOfLines={1} style={styles.pathText}>
+                {filePreview.path}
+              </Text>
+            </View>
             <Pressable
               disabled={filePreview.binary || filePreviewAttached}
               onPress={onAttachFilePreview}
               style={({ pressed }) =>
-                buttonFeedback([styles.previewButton, (filePreview.binary || filePreviewAttached) && styles.disabledButton], pressed)
+                buttonFeedback([styles.primaryButton, (filePreview.binary || filePreviewAttached) && styles.disabledButton], pressed)
               }
             >
-              <Text style={styles.previewButtonText}>{filePreviewAttached ? "已附加" : "附加"}</Text>
+              <Text style={styles.primaryButtonText}>{filePreviewAttached ? "已附加" : "附加到对话"}</Text>
             </Pressable>
           </View>
           {filePreview.binary ? (
             <Text style={styles.emptyText}>二进制文件暂不支持预览。</Text>
           ) : (
-            <ScrollView horizontal>
-              <Text style={styles.codeText}>
-                {filePreview.content || ""}
-                {filePreview.truncated ? "\n\n[truncated]" : ""}
-              </Text>
-            </ScrollView>
+            <View style={styles.darkCodeContainer}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                <Text selectable style={styles.darkCodeText}>
+                  {filePreview.content || ""}
+                  {filePreview.truncated ? "\n\n[truncated]" : ""}
+                </Text>
+              </ScrollView>
+            </View>
           )}
         </View>
       ) : null}
@@ -170,32 +181,25 @@ export function FilesPanel({
 }
 
 const styles = StyleSheet.create({
+  container: {
+    gap: 12,
+  },
   panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
+    backgroundColor: "#fffdf7",
+    borderColor: "#25231f",
+    borderRadius: 16,
+    borderWidth: 2,
+    elevation: 3,
     gap: 10,
     padding: 12,
     shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
-  },
-  filesPanel: {
-    minHeight: 280,
-  },
-  assetSection: {
-    borderBottomColor: "#12100e",
-    borderBottomWidth: 3,
-    gap: 10,
-    paddingBottom: 12,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   panelHeader: {
     alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 10,
     justifyContent: "space-between",
   },
@@ -206,28 +210,50 @@ const styles = StyleSheet.create({
   },
   pathText: {
     color: "#6c665f",
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "700",
-    marginTop: 3,
-  },
-  rowCompact: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    marginTop: 2,
   },
   flex: {
     flex: 1,
     minWidth: 0,
   },
-  smallButton: {
-    backgroundColor: "#f5eefc",
+  primaryButton: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
     borderColor: "#12100e",
     borderRadius: 8,
-    borderWidth: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 1,
   },
-  smallButtonText: {
+  primaryButtonText: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  actionButton: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  },
+  actionButtonText: {
     color: "#12100e",
     fontSize: 12,
     fontWeight: "900",
@@ -235,116 +261,103 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.45,
   },
-  fileList: {
+  breadcrumbBar: {
+    alignItems: "center",
+    backgroundColor: "#f8f1e5",
+    borderColor: "#d7cfc2",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
     gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  breadcrumbText: {
+    color: "#4a453e",
+    fontFamily: "monospace",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  smallParentButton: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  smallParentButtonText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
   },
   assetList: {
     gap: 8,
   },
   assetRow: {
     alignItems: "center",
-    backgroundColor: "#e8f6ff",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: "#f8f1e5",
+    borderColor: "#d7cfc2",
+    borderRadius: 10,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 10,
-    padding: 10,
+    padding: 9,
   },
-  assetBadge: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    height: 36,
-    justifyContent: "center",
-    width: 44,
-  },
-  assetBadgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  assetOpenButton: {
-    backgroundColor: "#12100e",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  assetOpenButtonText: {
-    color: "#fffaf0",
-    fontSize: 12,
-    fontWeight: "900",
+  assetEmoji: {
+    fontSize: 16,
   },
   fileRow: {
     alignItems: "center",
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    borderBottomColor: "#eee8df",
+    borderBottomWidth: 1,
     flexDirection: "row",
-    gap: 10,
-    padding: 10,
+    gap: 8,
+    minHeight: 38,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
   },
-  fileIcon: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-    width: 28,
+  fileEmoji: {
+    fontSize: 15,
   },
   fileName: {
     color: "#12100e",
-    fontWeight: "900",
+    fontSize: 13,
+    fontWeight: "800",
   },
   fileMeta: {
     color: "#6c665f",
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
   },
-  previewBox: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 8,
-    maxHeight: 360,
-    padding: 12,
+  fileSizeText: {
+    color: "#777066",
+    fontSize: 11,
+    fontWeight: "700",
   },
-  previewHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+  fileList: {
+    maxHeight: 280,
   },
-  previewTitle: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+  darkCodeContainer: {
+    backgroundColor: "#1e1e1e",
+    borderColor: "#25231f",
+    borderRadius: 10,
+    borderWidth: 1.5,
+    maxHeight: 220,
+    overflow: "hidden",
+    padding: 10,
   },
-  previewButton: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  previewButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  codeText: {
-    color: "#12100e",
+  darkCodeText: {
+    color: "#f7f5f0",
     fontFamily: "monospace",
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11.5,
+    lineHeight: 17,
   },
   emptyText: {
     color: "#6c665f",
+    fontSize: 12,
+    paddingVertical: 8,
+    textAlign: "center",
   },
 });
 

@@ -1,0 +1,17 @@
+{
+  "name": "myai-mobile-remote-ui",
+  "version": "1.0.4",
+  "description": "High-fidelity interactive UI prototype system for MyAI Android client",
+  "scripts": {
+    "dev": "npx serve . -p 3000",
+    "preview": "npx serve . -p 3000"
+  },
+  "keywords": [
+    "ui-prototype",
+    "android",
+    "react-native",
+    "neo-brutalism"
+  ],
+  "author": "MyAI Team",
+  "license": "MIT"
+}

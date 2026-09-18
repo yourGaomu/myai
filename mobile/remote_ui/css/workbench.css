@@ -1,0 +1,221 @@
+/**
+ * MyAI Mobile UI Prototype - Workbench Showcase Layout
+ * 原型交互工作台：左侧导航树、中间真机视窗、右侧状态模拟触发台与设计规范
+ */
+
+.workbench-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background-color: #dfd8cc;
+}
+
+/* 顶部工作台标题栏 */
+.workbench-header {
+  height: 52px;
+  background-color: #25231f;
+  color: #fffaf0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 3px solid var(--ink);
+  z-index: 100;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.wb-logo-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-badge {
+  background: var(--yellow);
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ink);
+}
+
+.wb-title {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.wb-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-tool-btn {
+  background: #3a3630;
+  color: #f7f3ea;
+  border: 1px solid #4d4841;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.wb-tool-btn:hover {
+  background: #4a453e;
+}
+
+.wb-tool-btn.active {
+  background: var(--cyan);
+  color: var(--ink);
+  border-color: var(--ink);
+  font-weight: 900;
+}
+
+/* 主工作台分栏主体 */
+.workbench-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 左侧页面导航树 */
+.wb-sidebar-left {
+  width: 250px;
+  background: #eae3d6;
+  border-right: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 12px;
+  gap: 16px;
+}
+
+.wb-section-title {
+  font-size: 11px;
+  font-weight: 900;
+  color: #7a7368;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 4px;
+}
+
+.wb-screen-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 0 rgba(18, 16, 14, 0.08);
+  transition: all var(--transition-fast);
+}
+
+.wb-nav-item:hover {
+  background: #fdfaf3;
+  transform: translateX(2px);
+}
+
+.wb-nav-item.active {
+  background: var(--yellow);
+  box-shadow: 0 2px 0 var(--ink);
+  transform: translateY(1px);
+}
+
+.wb-nav-icon {
+  font-size: 15px;
+}
+
+/* 中间真机画布视窗 */
+.wb-viewport-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  position: relative;
+  background: radial-gradient(#cbc3b4 1.5px, transparent 1.5px);
+  background-size: 20px 20px;
+  background-color: #dcd4c6;
+  padding: 20px;
+}
+
+/* 右侧场景模拟与设计规范面板 */
+.wb-sidebar-right {
+  width: 320px;
+  background: #eae3d6;
+  border-left: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 14px;
+  gap: 18px;
+}
+
+.wb-trigger-card {
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 3px 0 var(--line);
+}
+
+.wb-trigger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: var(--surface-alt);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--line);
+  transition: all var(--transition-fast);
+}
+
+.wb-trigger-btn:hover {
+  background: #fff8eb;
+}
+
+.wb-trigger-btn:active {
+  transform: translateY(2px);
+  box-shadow: none;
+}
+
+/* 设计规范色块预览 */
+.wb-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.wb-palette-swatch {
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 900;
+}

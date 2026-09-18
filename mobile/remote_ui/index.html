@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MyAI Mobile - Android 产品 UI 原型系统</title>
+  
+  <!-- 样式模块体系 -->
+  <link rel="stylesheet" href="./css/tokens.css" />
+  <link rel="stylesheet" href="./css/reset.css" />
+  <link rel="stylesheet" href="./css/device.css" />
+  <link rel="stylesheet" href="./css/components.css" />
+  <link rel="stylesheet" href="./css/screens.css" />
+  <link rel="stylesheet" href="./css/workbench.css" />
+</head>
+<body>
+  <div class="workbench-layout">
+    <!-- 顶部工作台标题栏 -->
+    <header class="workbench-header">
+      <div class="wb-logo-group">
+        <span class="wb-badge">MYAI MOBILE</span>
+        <span class="wb-title">Android 高保真交互原型展示台</span>
+        <span style="font-size: 11px; opacity: 0.6; font-family: var(--font-mono);">v1.0.4 Prototype</span>
+      </div>
+      <div class="wb-header-tools">
+        <button id="btn-toggle-device-frame" class="wb-tool-btn">
+          切为平铺画布
+        </button>
+      </div>
+    </header>
+
+    <!-- 工作台三栏主视窗 -->
+    <div class="workbench-main">
+      <!-- 左侧：8大核心业务屏幕快捷导航 -->
+      <aside class="wb-sidebar-left custom-scrollbar">
+        <div class="wb-section-title">核心业务屏幕 (8 Screens)</div>
+        <div class="wb-screen-nav-list">
+          <div class="wb-nav-item active" data-view="chat">
+            <span class="wb-nav-icon">💬</span>
+            <span>对话主面板</span>
+          </div>
+          <div class="wb-nav-item" data-view="files">
+            <span class="wb-nav-icon">📂</span>
+            <span>工作区文件</span>
+          </div>
+          <div class="wb-nav-item" data-view="changes">
+            <span class="wb-nav-icon">📝</span>
+            <span>文件改动与快照</span>
+          </div>
+          <div class="wb-nav-item" data-view="changeDetail">
+            <span class="wb-nav-icon">🔀</span>
+            <span>Diff 差异对比器</span>
+          </div>
+          <div class="wb-nav-item" data-view="knowledge">
+            <span class="wb-nav-icon">📚</span>
+            <span>知识库与 AI 记忆</span>
+          </div>
+          <div class="wb-nav-item" data-view="plan">
+            <span class="wb-nav-icon">🎯</span>
+            <span>任务规划执行</span>
+          </div>
+          <div class="wb-nav-item" data-view="sessions">
+            <span class="wb-nav-icon">🗂️</span>
+            <span>多会话中心</span>
+          </div>
+          <div class="wb-nav-item" data-view="settings">
+            <span class="wb-nav-icon">⚙️</span>
+            <span>全局设置与子智能体</span>
+          </div>
+        </div>
+
+        <div class="wb-section-title" style="margin-top: 14px;">原型架构特征</div>
+        <div style="font-size: 11.5px; color: #665f54; line-height: 1.6; padding: 0 4px;">
+          • <strong>分层解耦</strong>：Tokens / Screens / Store / Data<br/>
+          • <strong>设计风格</strong>：Neo-Brutalism 漫画粗线风<br/>
+          • <strong>零环境依赖</strong>：纯原生现代 Web 标准构建<br/>
+          • <strong>双向联动</strong>：真机点击与工作台场景双向驱动
+        </div>
+      </aside>
+
+      <!-- 中间：Android 真机模拟器机身 -->
+      <main class="wb-viewport-center">
+        <div class="device-wrapper">
+          <div class="android-phone">
+            <div class="device-speaker"></div>
+            <!-- 手机内容挂载容器 -->
+            <div id="phone-viewport" style="display: flex; flex-direction: column; height: 100%; width: 100%;"></div>
+          </div>
+        </div>
+      </main>
+
+      <!-- 右侧：交互场景模拟器与设计规范 -->
+      <aside class="wb-sidebar-right custom-scrollbar">
+        <div class="wb-section-title">交互场景模拟器 (Live Simulation)</div>
+        <div class="wb-trigger-card">
+          <div style="font-size: 12px; color: var(--text-secondary); font-weight: 700;">
+            点击下方按钮可实时向真机注入不同业务事件，观察 UI 动画与状态反馈：
+          </div>
+
+          <button id="trig-stream-chat" class="wb-trigger-btn">
+            <span>⚡ 模拟思考与打字机输出</span>
+            <span style="color: var(--text-muted);">▶</span>
+          </button>
+
+          <button id="trig-tool-call" class="wb-trigger-btn">
+            <span>🛠️ 模拟系统工具调用过程</span>
+            <span style="color: var(--text-muted);">▶</span>
+          </button>
+
+          <button id="trig-permission-prompt" class="wb-trigger-btn" style="border-color: var(--coral);">
+            <span>⚠️ 触发危险操作权限弹窗</span>
+            <span style="color: var(--coral-dark);">▶</span>
+          </button>
+
+          <button id="trig-switch-mode" class="wb-trigger-btn">
+            <span>🔄 切换对话 / 规划模式</span>
+            <span style="color: var(--text-muted);">▶</span>
+          </button>
+
+          <button id="trig-toggle-online" class="wb-trigger-btn">
+            <span>📡 模拟在线 / 离线网络切换</span>
+            <span style="color: var(--text-muted);">▶</span>
+          </button>
+        </div>
+
+        <div class="wb-section-title">设计规范速查 (Design Palette)</div>
+        <div class="wb-trigger-card">
+          <div class="wb-palette-grid">
+            <div class="wb-palette-swatch" style="background: var(--yellow);">
+              #ffd84f
+            </div>
+            <div class="wb-palette-swatch" style="background: var(--cyan);">
+              #4fd7ee
+            </div>
+            <div class="wb-palette-swatch" style="background: var(--green);">
+              #b9e9b0
+            </div>
+            <div class="wb-palette-swatch" style="background: var(--coral);">
+              #ff7f68
+            </div>
+            <div class="wb-palette-swatch" style="background: var(--surface);">
+              #fffdf7
+            </div>
+            <div class="wb-palette-swatch" style="background: var(--ink); color: #fff;">
+              #12100e
+            </div>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-top: 4px;">
+            • 边框：<code>2px solid #12100e</code><br/>
+            • 投影：<code>0 4px 0 #12100e</code> (硬投影)<br/>
+            • 字体：主字重 800/900 粗体加粗
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 驱动主入口：支持 file:// 协议直接双击运行与 HTTP 服务器运行 -->
+  <script src="./js/bundle.js"></script>
+</body>
+</html>
