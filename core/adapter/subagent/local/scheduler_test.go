@@ -54,3 +54,49 @@ func TestSchedulerReportsQueueFullWithSentinelError(t *testing.T) {
 	}
 	close(release)
 }
+
+func TestSchedulerParkReleasesSlotForQueuedDescendant(t *testing.T) {
+	scheduler := NewScheduler(1, 2)
+	defer scheduler.Close()
+	parentParked := make(chan struct{})
+	childStarted := make(chan struct{})
+	childDone := make(chan struct{})
+	parentDone := make(chan struct{})
+	if err := scheduler.Submit("parent", func(context.Context) {
+		if err := scheduler.Park("parent"); err != nil {
+			t.Errorf("park parent: %v", err)
+			return
+		}
+		close(parentParked)
+		defer func() {
+			if err := scheduler.Unpark("parent"); err != nil {
+				t.Errorf("unpark parent: %v", err)
+			}
+			close(parentDone)
+		}()
+		<-childDone
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-parentParked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("parent did not park")
+	}
+	if err := scheduler.Submit("child", func(context.Context) {
+		close(childStarted)
+		close(childDone)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-childStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("parked parent kept the only worker; descendant never started")
+	}
+	select {
+	case <-parentDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("parent did not resume after descendant finished")
+	}
+}

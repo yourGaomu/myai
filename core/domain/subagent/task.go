@@ -254,17 +254,10 @@ func (task Task) Terminal() bool {
 	}
 }
 
-// CanFollowup describes persisted eligibility. Admission also checks that
-// the workspace still exists and the previous execution has released it.
+// CanFollowup describes persisted eligibility. Isolated workspaces that were
+// applied, discarded, or cleaned up after failure are reopened at admission.
 func (task Task) CanFollowup() bool {
-	if task.Status != TaskStatusSucceeded && task.Status != TaskStatusFailed {
-		return false
-	}
-	if task.Workspace.Mode == domainworkspace.IsolationModeDirect {
-		return true
-	}
-	return task.Status == TaskStatusSucceeded &&
-		(task.ChangeSet.Status == domainworkspace.ChangeSetStatusPending || task.ChangeSet.Status == domainworkspace.ChangeSetStatusConflict)
+	return task.Status == TaskStatusSucceeded || task.Status == TaskStatusFailed
 }
 
 func (task *Task) MarkRunning(now time.Time) error {

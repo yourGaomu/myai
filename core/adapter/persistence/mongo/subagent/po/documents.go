@@ -36,10 +36,11 @@ type DefinitionSnapshotDocument struct {
 }
 
 type WorkspaceReferenceDocument struct {
-	ID        string `bson:"id,omitempty"`
-	Mode      string `bson:"mode,omitempty"`
-	Root      string `bson:"root,omitempty"`
-	SandboxID string `bson:"sandbox_id,omitempty"`
+	ID         string `bson:"id,omitempty"`
+	Mode       string `bson:"mode,omitempty"`
+	Root       string `bson:"root,omitempty"`
+	SourceRoot string `bson:"source_root,omitempty"`
+	SandboxID  string `bson:"sandbox_id,omitempty"`
 }
 
 type FileChangeDocument struct {

@@ -12,9 +12,11 @@ import (
 
 	historyrepository "myai/core/adapter/persistence/sqlite/history/repository"
 	subagentevents "myai/core/adapter/subagent/events"
+	subagentlocal "myai/core/adapter/subagent/local"
 	"myai/core/adapter/subagent/memory"
 	"myai/core/adapter/workspace/snapshot"
 	subagentcommand "myai/core/application/subagent/command"
+	subagentresult "myai/core/application/subagent/result"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
 	subagentport "myai/core/port/subagent"
@@ -76,6 +78,90 @@ func TestWaitWakesForPreviouslyQueuedMailbox(t *testing.T) {
 	result, err := service.Wait(ctx, subagentcommand.WaitTask{TaskID: child.ID, ParentTaskID: parent.ID, ParentSessionID: "session", Timeout: time.Second})
 	if err != nil || !result.WokenByMailbox || result.TimedOut {
 		t.Fatalf("pre-existing input did not wake wait: %#v, %v", result, err)
+	}
+}
+
+func TestWaitReleasesWorkerSoQueuedChildCanRun(t *testing.T) {
+	scheduler := subagentlocal.NewScheduler(1, 4)
+	t.Cleanup(scheduler.Close)
+	repository := memory.NewRepository()
+	parent := domainsubagent.Task{
+		ID: "parent", ParentSessionID: "root", ChildSessionID: "parent-session",
+		CurrentRunID: "parent-run", Status: domainsubagent.TaskStatusQueued,
+		Definition: domainsubagent.DefinitionSnapshot{TimeoutSeconds: 8},
+		Workspace:  domainworkspace.Reference{Mode: domainworkspace.IsolationModeDirect},
+	}
+	child := domainsubagent.Task{
+		ID: "child", ParentSessionID: "parent-session", ChildSessionID: "child-session",
+		CurrentRunID: "child-run", Status: domainsubagent.TaskStatusQueued,
+		Definition: domainsubagent.DefinitionSnapshot{TimeoutSeconds: 8},
+		Workspace:  domainworkspace.Reference{Mode: domainworkspace.IsolationModeDirect},
+	}
+	now := time.Now().UTC()
+	for _, task := range []domainsubagent.Task{parent, child} {
+		run := domainsubagent.Run{ID: task.CurrentRunID, TaskID: task.ID, Sequence: 1, Instruction: "work", Status: domainsubagent.RunStatusQueued, CreatedAt: now}
+		if err := repository.SaveTaskAndRun(context.Background(), task, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var service *Service
+	service = &Service{
+		Tasks: repository, Runs: repository, Scheduler: scheduler,
+		Sessions: &fakeChildSessions{}, Events: subagentevents.NewBus(), IDs: &sequenceIDs{},
+		Runner: waitForChildRunner{wait: func(ctx context.Context) (subagentresult.Wait, error) {
+			return service.Wait(ctx, subagentcommand.WaitTask{
+				TaskID: child.ID, ParentSessionID: parent.ChildSessionID, ParentTaskID: parent.ID, Timeout: 3 * time.Second,
+			})
+		}, parentSessionID: parent.ChildSessionID},
+	}
+	service.registerActiveRun(parent.ID, parent.CurrentRunID)
+	if err := scheduler.Submit(parent.CurrentRunID, func(ctx context.Context) {
+		service.execute(ctx, parent.ID, parent.CurrentRunID, "model-1")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForTaskStatus(t, repository, parent.ID, domainsubagent.TaskStatusWaitingSubagents)
+	service.registerActiveRun(child.ID, child.CurrentRunID)
+	if err := scheduler.Submit(child.CurrentRunID, func(ctx context.Context) {
+		service.execute(ctx, child.ID, child.CurrentRunID, "model-1")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForTaskStatus(t, repository, child.ID, domainsubagent.TaskStatusSucceeded)
+	waitForTaskStatus(t, repository, parent.ID, domainsubagent.TaskStatusSucceeded)
+}
+
+type waitForChildRunner struct {
+	wait            func(context.Context) (subagentresult.Wait, error)
+	parentSessionID string
+}
+
+func (runner waitForChildRunner) Run(ctx context.Context, request subagentport.AgentRunRequest) (subagentport.AgentRunResult, error) {
+	if request.SessionID != runner.parentSessionID {
+		return subagentport.AgentRunResult{Content: "child done"}, nil
+	}
+	result, err := runner.wait(ctx)
+	if err != nil {
+		return subagentport.AgentRunResult{}, err
+	}
+	if result.TimedOut {
+		return subagentport.AgentRunResult{}, errors.New("wait timed out; worker slot was not released")
+	}
+	return subagentport.AgentRunResult{Content: "parent saw child"}, nil
+}
+
+func waitForTaskStatus(t *testing.T, repository subagentport.TaskRepository, taskID string, status domainsubagent.TaskStatus) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		current, err := repository.GetTask(context.Background(), taskID)
+		if err == nil && current.Status == status {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task %s status %s not reached: %#v, %v", taskID, status, current, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -270,6 +356,8 @@ func (scheduler *retainedScheduler) Cancel(id string) bool {
 	scheduler.canceled = id
 	return true
 }
+func (*retainedScheduler) Park(string) error   { return nil }
+func (*retainedScheduler) Unpark(string) error { return nil }
 
 func TestWorkspacePreparationPreservesConcurrentMailboxAndCancellation(t *testing.T) {
 	for _, cancelTask := range []bool{false, true} {
@@ -346,12 +434,9 @@ func TestFollowupChecksRealSnapshotLifecycle(t *testing.T) {
 				_, err = manager.Discard(context.Background(), workspaceport.DiscardRequest{Reference: prepared.Reference})
 			case "failed":
 				task.Status = domainsubagent.TaskStatusFailed
+				_, err = manager.Discard(context.Background(), workspaceport.DiscardRequest{Reference: prepared.Reference})
 			}
 			if err != nil {
-				t.Fatal(err)
-			}
-			// Keep a stale pending task record even when the manager has closed it.
-			if err := repository.SaveTask(context.Background(), task); err != nil {
 				t.Fatal(err)
 			}
 			service.Workspaces = manager
@@ -361,21 +446,19 @@ func TestFollowupChecksRealSnapshotLifecycle(t *testing.T) {
 			if err := repository.SaveTask(context.Background(), task); err != nil {
 				t.Fatal(err)
 			}
-			_, err = service.Followup(context.Background(), subagentcommand.FollowupTask{TaskID: task.ID, Content: "continue"})
-			if lifecycle != "pending" {
-				current, _ := repository.GetTask(context.Background(), task.ID)
-				if err == nil || current.CurrentRunID != task.CurrentRunID || !current.Unread {
-					t.Fatalf("closed workspace admitted follow-up: %#v, %v", current, err)
-				}
-				return
-			}
-			if err != nil {
+			if _, err := service.Followup(context.Background(), subagentcommand.FollowupTask{TaskID: task.ID, Content: "continue"}); err != nil {
 				t.Fatal(err)
 			}
 			service.Scheduler.(*fakeScheduler).task(context.Background())
 			current, _ := repository.GetTask(context.Background(), task.ID)
-			if current.Status != domainsubagent.TaskStatusSucceeded || current.Workspace != prepared.Reference || len(current.ChangeSet.Files) != 1 {
-				t.Fatalf("pending snapshot was not preserved: %#v", current)
+			if current.Status != domainsubagent.TaskStatusSucceeded || current.Workspace.ID != prepared.Reference.ID || current.Workspace.SourceRoot != prepared.Reference.SourceRoot {
+				t.Fatalf("follow-up did not reopen workspace: %#v", current)
+			}
+			if lifecycle == "pending" && len(current.ChangeSet.Files) != 1 {
+				t.Fatalf("pending snapshot changes were lost: %#v", current.ChangeSet)
+			}
+			if lifecycle == "applied" && len(current.ChangeSet.Files) != 0 {
+				t.Fatalf("applied snapshot was not rebased: %#v", current.ChangeSet)
 			}
 		})
 	}

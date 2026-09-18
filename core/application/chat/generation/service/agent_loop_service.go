@@ -85,6 +85,11 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
 			return modelport.ChatResult{}, err
 		}
+		if hook := generationcommand.AfterToolRoundFrom(ctx); hook != nil {
+			if hookErr := hook(ctx, command.Session); hookErr != nil {
+				return modelport.ChatResult{}, hookErr
+			}
+		}
 	}
 
 	snapshot := s.Contexts.Snapshot(command.Session)

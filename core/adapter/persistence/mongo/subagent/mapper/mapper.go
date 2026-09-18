@@ -145,11 +145,11 @@ func snapshotDomain(document po.DefinitionSnapshotDocument) domainsubagent.Defin
 }
 
 func workspaceDocument(reference domainworkspace.Reference) po.WorkspaceReferenceDocument {
-	return po.WorkspaceReferenceDocument{ID: reference.ID, Mode: string(reference.Mode), Root: reference.Root, SandboxID: reference.SandboxID}
+	return po.WorkspaceReferenceDocument{ID: reference.ID, Mode: string(reference.Mode), Root: reference.Root, SourceRoot: reference.SourceRoot, SandboxID: reference.SandboxID}
 }
 
 func workspaceDomain(document po.WorkspaceReferenceDocument) domainworkspace.Reference {
-	return domainworkspace.Reference{ID: document.ID, Mode: domainworkspace.IsolationMode(document.Mode), Root: document.Root, SandboxID: document.SandboxID}
+	return domainworkspace.Reference{ID: document.ID, Mode: domainworkspace.IsolationMode(document.Mode), Root: document.Root, SourceRoot: document.SourceRoot, SandboxID: document.SandboxID}
 }
 
 func changeSetDocument(changeSet domainworkspace.ChangeSet) po.ChangeSetDocument {

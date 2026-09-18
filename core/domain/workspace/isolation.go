@@ -36,8 +36,9 @@ func ValidateIsolationMode(mode IsolationMode) error {
 }
 
 type Reference struct {
-	ID        string
-	Mode      IsolationMode
-	Root      string
-	SandboxID string
+	ID         string
+	Mode       IsolationMode
+	Root       string
+	SourceRoot string
+	SandboxID  string
 }

@@ -132,6 +132,77 @@ func TestSnapshotWorkspaceDiscardRemovesIsolatedFiles(t *testing.T) {
 	}
 }
 
+func TestSnapshotWorkspaceFollowupAfterApplyRebasesBaseline(t *testing.T) {
+	source := t.TempDir()
+	writeTestFile(t, source, "main.go", "first\n")
+	manager, err := New(t.TempDir(), fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-rebase", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, prepared.Reference.Root, "main.go", "second\n")
+	if _, err := manager.Apply(context.Background(), workspaceport.ApplyRequest{Reference: prepared.Reference}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-rebase", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Reference.Root != prepared.Reference.Root || reopened.Reference.SourceRoot == "" {
+		t.Fatalf("expected same snapshot with source identity: %#v", reopened.Reference)
+	}
+	collected, err := manager.Collect(context.Background(), workspaceport.CollectRequest{Reference: reopened.Reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collected.ChangeSet.Status != domainworkspace.ChangeSetStatusPending || len(collected.ChangeSet.Files) != 0 {
+		t.Fatalf("applied snapshot was not rebased: %#v", collected.ChangeSet)
+	}
+	writeTestFile(t, reopened.Reference.Root, "next.go", "round two\n")
+	collected, err = manager.Collect(context.Background(), workspaceport.CollectRequest{Reference: reopened.Reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collected.ChangeSet.Files) != 1 || collected.ChangeSet.Files[0].Path != "next.go" {
+		t.Fatalf("follow-up changes should be relative to the new baseline: %#v", collected.ChangeSet)
+	}
+}
+
+func TestSnapshotWorkspacePrepareRecreatesAfterDiscard(t *testing.T) {
+	source := t.TempDir()
+	writeTestFile(t, source, "main.go", "source\n")
+	manager, err := New(t.TempDir(), fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-recreate", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Discard(context.Background(), workspaceport.DiscardRequest{Reference: prepared.Reference}); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-recreate", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(recreated.Reference.Root, "main.go"), "source\n")
+	if recreated.Reference.SourceRoot == "" {
+		t.Fatal("recreated snapshot lost source identity")
+	}
+}
+
 func TestSnapshotWorkspaceStoredInsideSourceDoesNotCopyRuntimeDirectory(t *testing.T) {
 	source := t.TempDir()
 	writeTestFile(t, source, "main.go", "package main\n")

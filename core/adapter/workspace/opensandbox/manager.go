@@ -91,9 +91,13 @@ func (manager *Manager) Prepare(ctx context.Context, request workspaceport.Prepa
 	manager.mu.Lock()
 	manager.states[remote.ID()] = state
 	manager.mu.Unlock()
+	sourceRoot := strings.TrimSpace(prepared.Reference.SourceRoot)
+	if sourceRoot == "" {
+		sourceRoot = strings.TrimSpace(request.SourceRoot)
+	}
 	return workspaceport.PreparedWorkspace{Reference: domainworkspace.Reference{
 		ID: request.WorkspaceID, Mode: domainworkspace.IsolationModeOpenSandbox,
-		Root: prepared.Reference.Root, SandboxID: remote.ID(),
+		Root: prepared.Reference.Root, SourceRoot: sourceRoot, SandboxID: remote.ID(),
 	}}, nil
 }
 

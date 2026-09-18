@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	sessioncommand "myai/core/application/session/command"
 	persistenceapi "myai/core/application/session/persistence/api"
 	domainsubagent "myai/core/domain/subagent"
 	repository "myai/core/port/repository"
@@ -35,12 +36,12 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 		return nil, errors.New("subagent session memory is nil")
 	}
 	if current, err := factory.Memory.GetSession(request.SessionID); err == nil {
-		return current, nil
+		return factory.syncWorkspace(ctx, current, request)
 	}
 	if factory.Loader != nil {
 		current, err := factory.Loader.Load(ctx, request.SessionID)
 		if err == nil {
-			return current, nil
+			return factory.syncWorkspace(ctx, current, request)
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, err
@@ -92,4 +93,25 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 		}
 	}
 	return factory.Memory.GetSession(state.ID)
+}
+
+func (factory Factory) syncWorkspace(ctx context.Context, current *domainsession.Session, request subagentport.ChildSessionRequest) (*domainsession.Session, error) {
+	if current == nil {
+		return nil, errors.New("subagent child session is nil")
+	}
+	root := strings.TrimSpace(request.WorkspaceRoot)
+	sandbox := strings.TrimSpace(request.WorkspaceSandboxID)
+	if (root == "" || root == current.WorkspaceRoot) && sandbox == current.WorkspaceSandboxID {
+		return current, nil
+	}
+	if root != "" {
+		current.WorkspaceRoot = root
+	}
+	current.WorkspaceSandboxID = sandbox
+	if factory.Persistence != nil {
+		if err := factory.Persistence.Save(ctx, sessioncommand.SaveSession{SessionID: current.ID, Model: current.Model}); err != nil {
+			return nil, err
+		}
+	}
+	return current, nil
 }

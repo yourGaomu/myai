@@ -62,9 +62,7 @@ func (manager *Manager) Prepare(ctx context.Context, request workspaceport.Prepa
 		return workspaceport.PreparedWorkspace{}, err
 	}
 	if stored, err := loadManifest(jobRoot); err == nil {
-		return workspaceport.PreparedWorkspace{Reference: domainworkspace.Reference{
-			ID: stored.WorkspaceID, Mode: domainworkspace.IsolationModeSnapshot, Root: stored.SnapshotRoot,
-		}}, nil
+		return manager.reopenExisting(ctx, jobRoot, stored)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return workspaceport.PreparedWorkspace{}, err
 	}
@@ -93,9 +91,37 @@ func (manager *Manager) Prepare(ctx context.Context, request workspaceport.Prepa
 		_ = manager.removeJobRoot(jobRoot)
 		return workspaceport.PreparedWorkspace{}, err
 	}
-	return workspaceport.PreparedWorkspace{Reference: domainworkspace.Reference{
-		ID: request.WorkspaceID, Mode: domainworkspace.IsolationModeSnapshot, Root: snapshotRoot,
-	}}, nil
+	return workspaceport.PreparedWorkspace{Reference: snapshotReference(value)}, nil
+}
+
+func (manager *Manager) reopenExisting(ctx context.Context, jobRoot string, stored manifest) (workspaceport.PreparedWorkspace, error) {
+	if stored.Status == domainworkspace.ChangeSetStatusApplied {
+		scanned, err := scanWorkspace(ctx, stored.SnapshotRoot)
+		if err != nil {
+			return workspaceport.PreparedWorkspace{}, err
+		}
+		baseline := make([]fileState, 0, len(scanned))
+		for _, file := range scanned {
+			baseline = append(baseline, file)
+		}
+		sort.Slice(baseline, func(left, right int) bool { return baseline[left].Path < baseline[right].Path })
+		stored.BaselineFiles = baseline
+		stored.Status = domainworkspace.ChangeSetStatusPending
+		stored.AppliedAt = nil
+		stored.CheckpointID = ""
+		stored.CreatedAt = manager.currentTime()
+		if err := manager.saveManifest(jobRoot, stored); err != nil {
+			return workspaceport.PreparedWorkspace{}, err
+		}
+	}
+	return workspaceport.PreparedWorkspace{Reference: snapshotReference(stored)}, nil
+}
+
+func snapshotReference(stored manifest) domainworkspace.Reference {
+	return domainworkspace.Reference{
+		ID: stored.WorkspaceID, Mode: domainworkspace.IsolationModeSnapshot,
+		Root: stored.SnapshotRoot, SourceRoot: stored.SourceRoot,
+	}
 }
 
 func (manager *Manager) Collect(ctx context.Context, request workspaceport.CollectRequest) (workspaceport.CollectedChanges, error) {

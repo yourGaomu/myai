@@ -143,19 +143,21 @@ func (service *Service) validateFollowupWorkspace(ctx context.Context, task doma
 	if task.Workspace.Mode == domainworkspace.IsolationModeDirect {
 		return nil
 	}
-	if !task.CanFollowup() {
-		return errors.New("subagent isolated workspace is no longer open for follow-up; start a new task")
-	}
 	if service.Workspaces == nil {
 		return errors.New("isolated workspace manager is not configured")
 	}
-	// Apply may have succeeded even when saving the task's changeset failed.
 	collected, err := service.Workspaces.Collect(ctx, workspaceport.CollectRequest{Reference: task.Workspace})
-	if err != nil {
-		return fmt.Errorf("subagent follow-up workspace is unavailable: %w", err)
+	if err == nil {
+		switch collected.ChangeSet.Status {
+		case domainworkspace.ChangeSetStatusPending, domainworkspace.ChangeSetStatusConflict, domainworkspace.ChangeSetStatusApplied:
+			return nil
+		}
 	}
-	if collected.ChangeSet.Status != domainworkspace.ChangeSetStatusPending && collected.ChangeSet.Status != domainworkspace.ChangeSetStatusConflict {
-		return errors.New("subagent isolated workspace is no longer open for follow-up; start a new task")
+	if workspaceSourceRoot(task) == "" {
+		if err != nil {
+			return fmt.Errorf("subagent follow-up workspace is unavailable: %w", err)
+		}
+		return errors.New("subagent isolated workspace source is unavailable for follow-up; start a new task")
 	}
 	return nil
 }

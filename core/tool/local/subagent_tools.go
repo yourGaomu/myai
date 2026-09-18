@@ -376,7 +376,7 @@ func (tool *ListAgentsTool) Call(ctx context.Context, args json.RawMessage) (too
 
 func (tool *WaitAgentTool) Name() string { return "wait_agent" }
 func (tool *WaitAgentTool) Description() string {
-	return "Wait asynchronously for a child agent to reach a terminal state or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it and the result includes woken_by_mailbox=true."
+	return "Wait asynchronously for a child agent to reach a terminal state or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it (woken_by_mailbox=true) and is injected before the next model turn."
 }
 func (tool *WaitAgentTool) Schema() any {
 	return map[string]any{"type": "object", "properties": map[string]any{

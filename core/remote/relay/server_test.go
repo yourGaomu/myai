@@ -447,9 +447,19 @@ func TestRelayForwardsSubagentTaskWaitResult(t *testing.T) {
 	if result := readTestMessage(t, clientConn, protocol.TypeSubagentTaskWaitResult); result.RequestID != "wait-route-1" {
 		t.Fatalf("expected wait result request id, got %s", result.RequestID)
 	}
-	if server.getClient("wait-route-1") != nil {
-		t.Fatal("wait result did not release its request route")
+	waitForReleasedRequest(t, server, "wait-route-1")
+}
+
+func waitForReleasedRequest(t *testing.T, server *Server, requestID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if server.getClient(requestID) == nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
+	t.Fatal("wait result did not release its request route")
 }
 
 func TestRelayForwardsSessionMessages(t *testing.T) {

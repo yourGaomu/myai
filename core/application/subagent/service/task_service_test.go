@@ -61,6 +61,35 @@ func TestTaskUsesPreparedSnapshotAndCollectsChanges(t *testing.T) {
 	}
 }
 
+func TestInjectMailboxBetweenToolRoundsClaimsAndAcks(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{
+		ID: "child", Status: domainsubagent.TaskStatusRunning,
+		Mailbox: []domainsubagent.Message{
+			{ID: "m1", Content: "first", Status: domainsubagent.MessageStatusPending},
+			{ID: "m2", Content: "second", Status: domainsubagent.MessageStatusPending},
+		},
+	}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, IDs: &sequenceIDs{}}
+	current := &session.Session{}
+	if err := service.injectMailboxBetweenToolRounds(context.Background(), task.ID, current); err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Messages) != 2 || current.Messages[0].Text() != "first" || current.Messages[1].Text() != "second" {
+		t.Fatalf("mailbox was not injected into the live session: %#v", current.Messages)
+	}
+	stored, err := repository.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mailbox) != 0 {
+		t.Fatalf("injected mailbox messages were not acknowledged: %#v", stored.Mailbox)
+	}
+}
+
 func TestSendMessageDeliversMailboxBetweenChildTurns(t *testing.T) {
 	repository := memory.NewRepository()
 	registry := memory.NewRegistry()
@@ -900,14 +929,18 @@ func (scheduler *fakeScheduler) Submit(_ string, task subagentport.ScheduledTask
 	scheduler.submissions++
 	return nil
 }
-func (*fakeScheduler) Cancel(string) bool { return true }
+func (*fakeScheduler) Cancel(string) bool  { return true }
+func (*fakeScheduler) Park(string) error   { return nil }
+func (*fakeScheduler) Unpark(string) error { return nil }
 
 type failingScheduler struct{}
 
 func (failingScheduler) Submit(string, subagentport.ScheduledTask) error {
 	return errors.New("queue unavailable")
 }
-func (failingScheduler) Cancel(string) bool { return false }
+func (failingScheduler) Cancel(string) bool  { return false }
+func (failingScheduler) Park(string) error   { return nil }
+func (failingScheduler) Unpark(string) error { return nil }
 
 type fakeChildSessions struct {
 	request subagentport.ChildSessionRequest
@@ -987,7 +1020,7 @@ type fakeWorkspaceManager struct{ conflict bool }
 
 func (*fakeWorkspaceManager) Prepare(_ context.Context, request workspaceport.PrepareRequest) (workspaceport.PreparedWorkspace, error) {
 	return workspaceport.PreparedWorkspace{Reference: domainworkspace.Reference{
-		ID: request.WorkspaceID, Mode: domainworkspace.IsolationModeSnapshot, Root: "C:/snapshots/task",
+		ID: request.WorkspaceID, Mode: domainworkspace.IsolationModeSnapshot, Root: "C:/snapshots/task", SourceRoot: request.SourceRoot,
 	}}, nil
 }
 func (*fakeWorkspaceManager) Collect(_ context.Context, request workspaceport.CollectRequest) (workspaceport.CollectedChanges, error) {

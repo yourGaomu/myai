@@ -60,6 +60,9 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 	if waiter != nil {
 		defer service.restoreRunningAfterChildren(command.ParentTaskID, waiter)
 		wakeup = waiter.wakeup
+		if service.parkScheduler(waiter.runID) {
+			defer service.unparkScheduler(waiter.runID)
+		}
 	}
 	source, ok := service.Events.(subagentport.TaskEventSource)
 	if !ok {
@@ -185,6 +188,20 @@ func (service *Service) restoreRunningAfterChildren(parentTaskID string, waiter 
 	if err := service.Tasks.SaveTask(context.Background(), parent); err == nil {
 		service.publish(context.Background(), parent)
 	}
+}
+
+func (service *Service) parkScheduler(runID string) bool {
+	if service == nil || service.Scheduler == nil || strings.TrimSpace(runID) == "" {
+		return false
+	}
+	return service.Scheduler.Park(runID) == nil
+}
+
+func (service *Service) unparkScheduler(runID string) {
+	if service == nil || service.Scheduler == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	_ = service.Scheduler.Unpark(runID)
 }
 
 func validateWaitParent(task domainsubagent.Task, parentID string) error {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	generationcommand "myai/core/application/chat/generation/command"
 	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
@@ -263,6 +264,46 @@ func TestAgentLoopServiceFinalGenerationOmitsToolsAfterMaxRounds(t *testing.T) {
 	}
 	if contexts.calls != 2 {
 		t.Fatalf("expected snapshots for both requests, got %d", contexts.calls)
+	}
+}
+
+func TestAgentLoopServiceInjectsAfterToolRoundBeforeNextGenerate(t *testing.T) {
+	current := testSession()
+	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{call}},
+		{Content: "used parent input"},
+	}}
+	executor := &recordingToolExecutor{result: ToolExecutionResult{Messages: []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "ok"}),
+	}}}
+	hookCalls := 0
+	ctx := generationcommand.WithAfterToolRound(context.Background(), func(_ context.Context, sessionState *session.Session) error {
+		hookCalls++
+		sessionState.AppendMessage(domainmessage.Text(domainmessage.RoleUser, "parent follow-up"))
+		return nil
+	})
+	result, err := AgentLoopService{
+		Contexts: &recordingContextProvider{}, Tools: &recordingToolCatalog{}, ToolExecutor: executor,
+	}.Run(ctx, RunCommand{Model: model, Session: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hookCalls != 1 || result.Content != "used parent input" {
+		t.Fatalf("hookCalls=%d result=%q", hookCalls, result.Content)
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("expected two model turns, got %d", len(model.requests))
+	}
+	found := false
+	for _, message := range model.requests[1].Messages {
+		if message.Role == domainmessage.RoleUser && message.Text() == "parent follow-up" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("second model turn missing injected mailbox input: %#v", model.requests[1].Messages)
 	}
 }
 

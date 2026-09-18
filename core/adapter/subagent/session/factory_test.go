@@ -73,6 +73,22 @@ func TestFactoryLoadsPersistedChildSessionWithoutReplacingIt(t *testing.T) {
 	}
 }
 
+func TestFactorySyncsWorkspaceIdentityOnReuse(t *testing.T) {
+	existing := &domainsession.Session{ID: "child-1", Model: "model-from-history", WorkspaceRoot: "old-root", WorkspaceSandboxID: "old-sandbox"}
+	memory := &factoryMemory{sessions: map[string]*domainsession.Session{"child-1": existing}}
+
+	request := childSessionRequest("child-1")
+	request.WorkspaceRoot = "new-root"
+	request.WorkspaceSandboxID = "new-sandbox"
+	current, err := (Factory{Memory: memory}).Create(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.WorkspaceRoot != "new-root" || current.WorkspaceSandboxID != "new-sandbox" || memory.puts != 0 {
+		t.Fatalf("child session workspace was not synced: %#v puts=%d", current, memory.puts)
+	}
+}
+
 func TestFactoryCreatesChildSessionWhenPersistenceDoesNotContainIt(t *testing.T) {
 	memory := &factoryMemory{sessions: map[string]*domainsession.Session{}}
 	loader := &factoryLoader{err: repository.ErrNotFound}

@@ -8,12 +8,15 @@ import (
 	"time"
 
 	agentrunruntime "myai/core/application/agentrun/runtime"
+	generationcommand "myai/core/application/chat/generation/command"
 	subagentcommand "myai/core/application/subagent/command"
 	subagentresult "myai/core/application/subagent/result"
+	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
 	subagentport "myai/core/port/subagent"
 	workspaceport "myai/core/port/workspace"
+	"myai/core/session"
 )
 
 const (
@@ -64,7 +67,7 @@ func (service *Service) Start(ctx context.Context, command subagentcommand.Start
 		DefinitionID: definition.ID, DefinitionVersion: definition.Version, Definition: definition.Snapshot(),
 		Instruction: strings.TrimSpace(command.Instruction), Title: strings.TrimSpace(command.Title),
 		Status: domainsubagent.TaskStatusQueued, Unread: false, CreatedAt: now, UpdatedAt: now,
-		Workspace: domainworkspace.Reference{ID: service.IDs.NewID(), Mode: definition.IsolationMode, Root: workspaceRoot},
+		Workspace: isolatedWorkspaceReference(service.IDs.NewID(), definition.IsolationMode, workspaceRoot),
 	}
 	if task.Title == "" {
 		task.Title = definition.Name
@@ -375,6 +378,9 @@ func (service *Service) ApplyChanges(ctx context.Context, command subagentcomman
 	})
 	if result.ChangeSet.WorkspaceID != "" {
 		task.ChangeSet = domainworkspace.CloneChangeSet(result.ChangeSet)
+		if applyErr == nil {
+			task.Workspace.SandboxID = ""
+		}
 		task.UpdatedAt = service.now()
 		if saveErr := service.Tasks.SaveTask(ctx, task); saveErr != nil {
 			return subagentresult.Task{}, errors.Join(applyErr, saveErr)
@@ -413,6 +419,7 @@ func (service *Service) DiscardChanges(ctx context.Context, command subagentcomm
 		return subagentresult.Task{}, err
 	}
 	task.ChangeSet = domainworkspace.CloneChangeSet(result.ChangeSet)
+	task.Workspace.SandboxID = ""
 	task.UpdatedAt = service.now()
 	if err := service.Tasks.SaveTask(ctx, task); err != nil {
 		return subagentresult.Task{}, err
@@ -456,6 +463,9 @@ func (service *Service) execute(ctx context.Context, taskID string, runID string
 		var response subagentport.AgentRunResult
 		metadata := agentrunruntime.Metadata{ParentRunID: task.ParentRunID, TaskID: task.ID, PlanID: task.PlanID, StepID: task.StepID}
 		runContext = agentrunruntime.WithMetadata(runContext, metadata)
+		runContext = generationcommand.WithAfterToolRound(runContext, func(hookCtx context.Context, current *session.Session) error {
+			return service.injectMailboxBetweenToolRounds(hookCtx, task.ID, current)
+		})
 		response, err = service.Runner.Run(runContext, subagentport.AgentRunRequest{
 			SessionID: task.ChildSessionID, Instruction: run.Instruction, Title: task.Title,
 			Stream: service.taskStream(runContext, task.ID, run.ID),
@@ -487,6 +497,26 @@ func (service *Service) execute(ctx context.Context, taskID string, runID string
 	if finishErr := service.finishError(task, run, runContext, err); finishErr != nil {
 		service.reportError(fmt.Errorf("finish subagent task %s with error: %w", task.ID, finishErr))
 	}
+}
+
+func (service *Service) injectMailboxBetweenToolRounds(_ context.Context, taskID string, current *session.Session) error {
+	if service == nil || current == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	for turn := 0; turn < maxMailboxFollowUps; turn++ {
+		message, ok, err := service.claimMailboxMessage(taskID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		current.AppendMessage(domainmessage.Text(domainmessage.RoleUser, message.Content))
+		if err := service.acknowledgeMailboxMessage(taskID, message.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (service *Service) runMailboxFollowUps(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run, response subagentport.AgentRunResult) (subagentport.AgentRunResult, error) {
@@ -649,6 +679,21 @@ func (service *Service) taskIsActive(taskID string) bool {
 	return active
 }
 
+func isolatedWorkspaceReference(id string, mode domainworkspace.IsolationMode, sourceRoot string) domainworkspace.Reference {
+	reference := domainworkspace.Reference{ID: id, Mode: mode, Root: sourceRoot}
+	if mode != domainworkspace.IsolationModeDirect {
+		reference.SourceRoot = sourceRoot
+	}
+	return reference
+}
+
+func workspaceSourceRoot(task domainsubagent.Task) string {
+	if source := strings.TrimSpace(task.Workspace.SourceRoot); source != "" {
+		return source
+	}
+	return strings.TrimSpace(task.Workspace.Root)
+}
+
 func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagent.Task) (domainsubagent.Task, error) {
 	if task.Workspace.Mode == domainworkspace.IsolationModeDirect {
 		return task, nil
@@ -656,17 +701,18 @@ func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagen
 	if service.Workspaces == nil {
 		return task, errors.New("isolated workspace manager is not configured")
 	}
-	// Existing OpenSandbox sessions reconnect lazily through the manager.
-	// Re-preparing would allocate another sandbox and orphan the session's ID.
-	if task.Workspace.Mode == domainworkspace.IsolationModeOpenSandbox && task.Workspace.SandboxID != "" {
-		return task, nil
+	if reused, ok, err := service.reuseOpenSandbox(ctx, task); err != nil || ok {
+		return reused, err
 	}
 	prepared, err := service.Workspaces.Prepare(ctx, workspaceport.PrepareRequest{
-		WorkspaceID: task.Workspace.ID, Mode: task.Workspace.Mode, SourceRoot: task.Workspace.Root,
+		WorkspaceID: task.Workspace.ID, Mode: task.Workspace.Mode, SourceRoot: workspaceSourceRoot(task),
 		TaskID: task.ID, SessionID: task.ParentSessionID,
 	})
 	if err != nil {
 		return task, err
+	}
+	if prepared.Reference.SourceRoot == "" {
+		prepared.Reference.SourceRoot = workspaceSourceRoot(task)
 	}
 	service.mu.Lock()
 	current, err := service.Tasks.GetTask(context.Background(), task.ID)
@@ -683,6 +729,22 @@ func (service *Service) prepareWorkspace(ctx context.Context, task domainsubagen
 		return task, err
 	}
 	return current, nil
+}
+
+func (service *Service) reuseOpenSandbox(ctx context.Context, task domainsubagent.Task) (domainsubagent.Task, bool, error) {
+	if task.Workspace.Mode != domainworkspace.IsolationModeOpenSandbox || strings.TrimSpace(task.Workspace.SandboxID) == "" {
+		return task, false, nil
+	}
+	collected, err := service.Workspaces.Collect(ctx, workspaceport.CollectRequest{Reference: task.Workspace})
+	if err != nil {
+		return task, false, nil
+	}
+	switch collected.ChangeSet.Status {
+	case domainworkspace.ChangeSetStatusPending, domainworkspace.ChangeSetStatusConflict, domainworkspace.ChangeSetStatusNone, "":
+		return task, true, nil
+	default:
+		return task, false, nil
+	}
 }
 
 func (service *Service) collectWorkspaceChanges(ctx context.Context, task domainsubagent.Task) (domainworkspace.ChangeSet, error) {

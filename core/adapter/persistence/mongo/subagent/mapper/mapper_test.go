@@ -6,7 +6,18 @@ import (
 
 	"myai/core/adapter/persistence/mongo/subagent/po"
 	domainsubagent "myai/core/domain/subagent"
+	domainworkspace "myai/core/domain/workspace"
 )
+
+func TestTaskWorkspaceSourceRootRoundTrips(t *testing.T) {
+	original := domainsubagent.Task{ID: "task-1", Workspace: domainworkspace.Reference{
+		ID: "workspace-1", Mode: domainworkspace.IsolationModeSnapshot, Root: "/tmp/snapshot", SourceRoot: "/src/project",
+	}}
+	roundTrip := TaskDomainFromDocument(TaskDocumentFromDomain(original))
+	if roundTrip.Workspace.SourceRoot != original.Workspace.SourceRoot || roundTrip.Workspace.Root != original.Workspace.Root {
+		t.Fatalf("workspace source identity did not round trip: %#v", roundTrip.Workspace)
+	}
+}
 
 func TestTaskMailboxRoundTrips(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
