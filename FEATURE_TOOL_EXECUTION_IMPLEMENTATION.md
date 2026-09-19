@@ -232,6 +232,8 @@ toolcommand.Execution{
 	SessionID:      command.Session.ID,
 	PermissionMode: NormalizePermissionMode(...),
 	RequestID:      command.RequestID,
+	WorkspaceRoot:  command.Session.WorkspaceRoot,
+	Isolated:       command.Session.WorkspaceSandboxID != "",
 	Calls:          command.Calls,
 	Callbacks:      callbacksFromStream(command.Stream),
 }
@@ -262,7 +264,12 @@ Registry.GetTool(name)
 -> 记录 ToolResult Entry
 ```
 
-多个 Calls 在一个 Execute 中按数组顺序串行处理。
+同一批 Calls 按 Codex 读写锁并行：
+
+- `read` 工具共享读锁，可以同时执行。
+- `write` / `execute` 拿独占锁，彼此互斥，也要等当前读工具结束。
+- 结果仍按原始 Calls 顺序写回 Session，模型看到的顺序不变。
+- 单个工具查找失败或 Hook 预检失败只记录该 call 的 tool error，不再中止整批。
 
 ## 15. PreToolUse Hook
 
@@ -283,7 +290,7 @@ Reason = tool execution
 - `continue`：继续 Session 权限策略。
 - 返回新的 `arguments`：覆盖模型原参数。
 
-Hook 运行错误会直接中止整个工具批次并返回生成错误。
+Hook 运行错误只让当前 call 变成 tool error，其它工具继续执行。
 
 ## 16. 权限决策矩阵
 
@@ -293,14 +300,21 @@ Hook 运行错误会直接中止整个工具批次并返回生成错误。
 Read tool   -> allow
 Readonly    -> deny write/execute
 Full        -> allow
-Ask         -> 调用 OnToolAsk
+Ask         -> OnRequest：安全操作自动过，危险操作才 OnToolAsk
 ```
+
+Ask 模式对齐 Codex `OnRequest`：
+
+- 工作区内 `write`（path 落在 workspace 内）自动允许。
+- 只读安全命令自动允许，例如 `Get-Date`、`date`、`git status`。
+- 隔离沙箱（`WorkspaceSandboxID` 非空）里的非危险命令自动允许。
+- 工作区外写入、`rm`/`curl|iex` 等危险命令仍询问手机。
 
 | Tool Permission | readonly | ask | full |
 |---|---|---|---|
 | read | allow | allow | allow |
-| write | deny | 手机审批 | allow |
-| execute | deny | 手机审批 | allow |
+| write | deny | 工作区内自动过，否则手机审批 | allow |
+| execute | deny | 安全查询/隔离沙箱自动过，否则手机审批 | allow |
 
 Hook 显式 allow 不可覆盖 Session 权限模式。Plan 生成阶段还会在该服务之前执行硬门禁：只有 read 工具可继续；执行已批准计划时 `ForceChatMode=true` 只解除 Plan 门禁，仍需通过 Session 权限。
 
@@ -494,7 +508,7 @@ Call:
   record after
 ```
 
-ask 模式会在 Call 前暂停等待手机批准。
+ask 模式下，工作区内的 `edit_file` 会自动执行；写到 workspace 外仍会暂停等待手机批准。
 
 ## 30. 本地工具示例：shell
 
@@ -505,6 +519,8 @@ Call -> Sandbox.Run
 ```
 
 Sandbox 限制工作目录、超时、输出大小，并阻止部分明显危险命令。Shell 前后可扫描 workspace，记录非 Git 检查点。
+
+ask 模式下 `Get-Date` / `date` / `git status` 等只读查询自动执行，不弹权限；删除、下载执行、安装类命令仍询问。隔离沙箱中的普通命令也可自动执行。
 
 ## 31. MCP Tool 执行
 

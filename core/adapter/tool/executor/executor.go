@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 
 	agentrunruntime "myai/core/application/agentrun/runtime"
 	generationcommand "myai/core/application/chat/generation/command"
@@ -52,6 +53,8 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		PermissionMode:       session.NormalizePermissionMode(command.Session.PermissionMode),
 		ForceChatMode:        command.ForceChatMode,
 		RequestID:            command.RequestID,
+		WorkspaceRoot:        command.Session.WorkspaceRoot,
+		Isolated:             strings.TrimSpace(command.Session.WorkspaceSandboxID) != "",
 		Calls:                command.Calls,
 		AllowedTools:         append([]string(nil), command.Session.AllowedTools...),
 		EnforceToolAllowlist: command.Session.EnforceToolAllowlist,

@@ -37,6 +37,9 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	case session.PermissionModeFull:
 		return toolresult.PermissionDecision{Allowed: true}
 	default:
+		if assessAskApproval(command) == askApprovalAuto {
+			return toolresult.PermissionDecision{Allowed: true}
+		}
 		return askForPermission(command, permission, mode, "")
 	}
 }

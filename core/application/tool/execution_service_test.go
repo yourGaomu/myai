@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -227,8 +228,8 @@ func TestExecutionServiceReturnsPartialResultAfterLaterLookupFailure(t *testing.
 			{ID: "call-2", Name: "missing_tool", Arguments: `{}`},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected missing tool error")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !executed || len(result.Calls) != 2 || len(result.Messages) != 2 || len(result.Entries) != 4 {
 		t.Fatalf("expected completed call and failed lookup to be preserved: %#v", result)
@@ -301,6 +302,111 @@ func TestExecutionServiceRejectsToolOutsideEnforcedAllowlist(t *testing.T) {
 	}
 }
 
+func TestExecutionServiceRunsReadToolsInParallel(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var result ExecutionResult
+	var executeErr error
+	go func() {
+		defer close(done)
+		result, executeErr = (ExecutionService{
+			Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+				"read_file": blockingTool{name: "read_file", permission: tooldef.PermissionRead, started: started, release: release, result: "ok"},
+			}},
+		}).Execute(context.Background(), ExecutionCommand{
+			SessionID:      "session-1",
+			PermissionMode: session.PermissionModeAsk,
+			Calls: []domainmessage.ToolCall{
+				{ID: "call-1", Name: "read_file", Arguments: `{"path":"a.go"}`},
+				{ID: "call-2", Name: "read_file", Arguments: `{"path":"b.go"}`},
+			},
+		})
+	}()
+	waitStarted(t, started, 2)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for parallel reads")
+	}
+	if executeErr != nil {
+		t.Fatal(executeErr)
+	}
+	if len(result.Calls) != 2 || result.Calls[0].ID != "call-1" || result.Calls[1].ID != "call-2" {
+		t.Fatalf("expected original call order, got %#v", result.Calls)
+	}
+}
+
+func TestExecutionServiceKeepsCallOrderWhenReadsFinishOutOfOrder(t *testing.T) {
+	slowRelease := make(chan struct{})
+	fastRelease := make(chan struct{})
+	close(fastRelease)
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		close(slowRelease)
+	}()
+	result, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"slow_read": blockingTool{name: "slow_read", permission: tooldef.PermissionRead, release: slowRelease, result: "slow"},
+			"fast_read": blockingTool{name: "fast_read", permission: tooldef.PermissionRead, release: fastRelease, result: "fast"},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:      "session-1",
+		PermissionMode: session.PermissionModeAsk,
+		Calls: []domainmessage.ToolCall{
+			{ID: "call-1", Name: "slow_read"},
+			{ID: "call-2", Name: "fast_read"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected two results, got %#v", result.Messages)
+	}
+	first, _ := result.Messages[0].FirstToolResult()
+	second, _ := result.Messages[1].FirstToolResult()
+	if first.Content != "slow" || second.Content != "fast" {
+		t.Fatalf("expected slow then fast in original order, got %#v %#v", first, second)
+	}
+}
+
+func TestExecutionServiceSerializesWriteBehindRead(t *testing.T) {
+	var concurrent atomic.Int32
+	var maxConcurrent atomic.Int32
+	track := func() {
+		current := concurrent.Add(1)
+		for {
+			observed := maxConcurrent.Load()
+			if current <= observed || maxConcurrent.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		time.Sleep(40 * time.Millisecond)
+		concurrent.Add(-1)
+	}
+	_, err := (ExecutionService{
+		Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+			"read_file":  countingTool{name: "read_file", permission: tooldef.PermissionRead, onCall: track, result: "ok"},
+			"write_file": countingTool{name: "write_file", permission: tooldef.PermissionWrite, onCall: track, result: "written"},
+		}},
+	}).Execute(context.Background(), ExecutionCommand{
+		SessionID:      "session-1",
+		PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{
+			{ID: "call-1", Name: "read_file", Arguments: `{"path":"a.go"}`},
+			{ID: "call-2", Name: "write_file", Arguments: `{"path":"b.go"}`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxConcurrent.Load() != 1 {
+		t.Fatalf("read and write must not overlap, max concurrent = %d", maxConcurrent.Load())
+	}
+}
+
 func TestExecutionServiceAllowsGlobalToolForOrdinarySession(t *testing.T) {
 	executed := false
 	result, err := (ExecutionService{
@@ -349,4 +455,63 @@ func (t recordingExecutableTool) Call(context.Context, json.RawMessage) (tooldef
 		t.onCall()
 	}
 	return tooldef.SuccessOutput("written"), nil
+}
+
+type blockingTool struct {
+	name       string
+	permission tooldef.Permission
+	started    chan struct{}
+	release    chan struct{}
+	result     string
+}
+
+func (t blockingTool) Name() string                   { return t.name }
+func (t blockingTool) Description() string            { return t.name }
+func (t blockingTool) Schema() any                    { return nil }
+func (t blockingTool) Permission() tooldef.Permission { return t.permission }
+func (t blockingTool) Call(ctx context.Context, _ json.RawMessage) (tooldef.ToolOutput, error) {
+	if t.started != nil {
+		select {
+		case t.started <- struct{}{}:
+		default:
+		}
+	}
+	if t.release != nil {
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return tooldef.ToolOutput{}, ctx.Err()
+		}
+	}
+	return tooldef.SuccessOutput(t.result), nil
+}
+
+func waitStarted(t *testing.T, started <-chan struct{}, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for i := 0; i < count; i++ {
+		select {
+		case <-started:
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d overlapping tool starts", count)
+		}
+	}
+}
+
+type countingTool struct {
+	name       string
+	permission tooldef.Permission
+	onCall     func()
+	result     string
+}
+
+func (t countingTool) Name() string                   { return t.name }
+func (t countingTool) Description() string            { return t.name }
+func (t countingTool) Schema() any                    { return nil }
+func (t countingTool) Permission() tooldef.Permission { return t.permission }
+func (t countingTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+	if t.onCall != nil {
+		t.onCall()
+	}
+	return tooldef.SuccessOutput(t.result), nil
 }

@@ -50,6 +50,41 @@ func TestPermissionServiceAsksInAskMode(t *testing.T) {
 	}
 }
 
+func TestPermissionServiceAutoApprovesWorkspaceWriteInAskMode(t *testing.T) {
+	asked := false
+	decision := PermissionService{}.Allow(PermissionCommand{
+		Name:          "write_file",
+		Arguments:     `{"path":"a.txt"}`,
+		Permission:    tooldef.PermissionWrite,
+		Mode:          session.PermissionModeAsk,
+		WorkspaceRoot: t.TempDir(),
+		Ask: func(PermissionRequest) bool {
+			asked = true
+			return false
+		},
+	})
+	if !decision.Allowed || asked {
+		t.Fatalf("expected workspace write to auto-approve without asking: %#v", decision)
+	}
+}
+
+func TestPermissionServiceAutoApprovesSafeShellInAskMode(t *testing.T) {
+	asked := false
+	decision := PermissionService{}.Allow(PermissionCommand{
+		Name:       "shell",
+		Arguments:  `{"command":"Get-Date"}`,
+		Permission: tooldef.PermissionExecute,
+		Mode:       session.PermissionModeAsk,
+		Ask: func(PermissionRequest) bool {
+			asked = true
+			return false
+		},
+	})
+	if !decision.Allowed || asked {
+		t.Fatalf("expected safe shell to auto-approve without asking: %#v", decision)
+	}
+}
+
 func TestPermissionServiceKeepsReadonlyAsHardBoundary(t *testing.T) {
 	decision := PermissionService{}.Allow(PermissionCommand{
 		Name:       "shell",

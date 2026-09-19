@@ -30,6 +30,8 @@ type Execution struct {
 	PermissionMode       session.PermissionMode
 	ForceChatMode        bool
 	RequestID            string
+	WorkspaceRoot        string
+	Isolated             bool
 	Calls                []domainmessage.ToolCall
 	AllowedTools         []string
 	EnforceToolAllowlist bool
@@ -41,6 +43,8 @@ type Permission struct {
 	Arguments           string
 	Permission          tooldef.Permission
 	Mode                session.PermissionMode
+	WorkspaceRoot       string
+	Isolated            bool
 	RequireConfirmation bool
 	Ask                 PermissionAskFunc
 }
