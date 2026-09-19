@@ -6,7 +6,16 @@ import type {
   SessionHistoryMetaPayload,
 } from "../protocol";
 
-type SQLiteModule = typeof import("expo-sqlite");
+type SQLiteModule = {
+  openDatabaseAsync: (name: string) => Promise<{
+    execAsync: (sql: string) => Promise<void>;
+    runAsync: (sql: string, ...params: any[]) => Promise<any>;
+    getAllAsync: <T>(sql: string, ...params: any[]) => Promise<T[]>;
+    getFirstAsync: <T>(sql: string, ...params: any[]) => Promise<T | null>;
+    withTransactionAsync: <T>(action: () => Promise<T>) => Promise<T>;
+    withExclusiveTransactionAsync: <T>(action: (txn: any) => Promise<T>) => Promise<T>;
+  }>;
+};
 type SQLiteDatabase = Awaited<ReturnType<SQLiteModule["openDatabaseAsync"]>>;
 
 type MessageRow = {
@@ -207,9 +216,17 @@ async function ensureHistoryColumns(db: SQLiteDatabase) {
   }
 }
 
-function loadSQLite() {
+function loadSQLite(): Promise<SQLiteModule> {
+  if (Platform.OS === "web") {
+    return Promise.reject(new Error("SQLite is disabled on web"));
+  }
   if (!sqlitePromise) {
-    sqlitePromise = import("expo-sqlite");
+    try {
+      const getModule = new Function('return require("expo-sqlite")');
+      sqlitePromise = Promise.resolve(getModule());
+    } catch (err) {
+      sqlitePromise = Promise.reject(err);
+    }
   }
   return sqlitePromise;
 }

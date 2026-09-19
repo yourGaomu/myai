@@ -14,6 +14,7 @@ import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
 import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
 import { modelDisplayName } from "../../utils/session";
+import { formatTokenCount } from "../../utils/tokenUsage";
 
 type Props = {
   activeModel?: ModelSummary;
@@ -100,7 +101,7 @@ type Props = {
 
 const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta: string }> = [
   { label: "只读", mode: "readonly", meta: "不可写入或运行" },
-  { label: "询问", mode: "ask", meta: "工具调用需确认" },
+  { label: "询问", mode: "ask", meta: "危险操作需确认" },
   { label: "完全开放", mode: "full", meta: "自动允许工具调用" },
 ];
 const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }> = [
@@ -120,16 +121,16 @@ const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtoc
 ];
 
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
-  { icon: "AG", key: "subagent", label: "子智能体", meta: "配置与后台任务" },
-  { icon: "G", key: "general", label: "常规", meta: "状态总览" },
-  { icon: "WS", key: "connection", label: "连接", meta: "中继服务与配对" },
-  { icon: "AI", key: "model", label: "模型", meta: "选择当前模型" },
-  { icon: "T", key: "generation", label: "生成", meta: "采样与回复风格" },
-  { icon: "SK", key: "skill", label: "技能", meta: "本地技能中心" },
-  { icon: "PL", key: "plugin", label: "插件", meta: "本地工具插件" },
-  { icon: "S", key: "session", label: "会话", meta: "新建与切换" },
-  { icon: "P", key: "permission", label: "权限", meta: "工具调用策略" },
-  { icon: "K", key: "context", label: "上下文", meta: "窗口与压缩" },
+  { icon: "💬", key: "session", label: "会话", meta: "新建与切换" },
+  { icon: "🧠", key: "model", label: "模型", meta: "选择当前模型" },
+  { icon: "⚡", key: "connection", label: "连接", meta: "中继服务与配对" },
+  { icon: "⚙️", key: "general", label: "常规", meta: "状态总览" },
+  { icon: "🛡️", key: "permission", label: "权限", meta: "工具调用策略" },
+  { icon: "🤖", key: "subagent", label: "智能体", meta: "配置与后台任务" },
+  { icon: "🛠️", key: "skill", label: "技能", meta: "本地技能中心" },
+  { icon: "🔌", key: "plugin", label: "插件", meta: "本地工具插件" },
+  { icon: "🎨", key: "generation", label: "生成", meta: "采样与回复风格" },
+  { icon: "📦", key: "context", label: "上下文", meta: "窗口与压缩" },
 ];
 
 export function SettingsPanel({
@@ -242,7 +243,7 @@ export function SettingsPanel({
     defaultTopP: "",
     defaultMaxTokens: "",
   });
-  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("session");
   const requestContextInfoRef = useRef(onRequestContextInfo);
   const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
 
@@ -914,73 +915,91 @@ export function SettingsPanel({
 
   const sessionSection = (
     <View style={styles.sectionStack}>
-      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
-        <IconBox label="S" />
-        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
-          <Text style={styles.settingTitle}>会话</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>
-            {activeSession?.title || (sessionID ? shortID(sessionID) : "还没有选择会话")}
-          </Text>
+      {/* 顶部标题与快捷操作 */}
+      <View style={styles.sectionHeaderRow}>
+        <View style={styles.flex}>
+          <Text style={styles.sectionHeading}>会话管理</Text>
+          <Text style={styles.sectionSubheading}>{sessions.length} 个活跃记录</Text>
         </View>
         <View style={styles.rowCompact}>
           <Pressable
             disabled={pendingActions.sessions}
             onPress={onNewSession}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.sessions && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.primaryActionButton, pendingActions.sessions && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingActions.sessions} text={pendingActions.sessions ? "处理中" : "新建"} />
+            <ButtonContent loading={pendingActions.sessions} text={pendingActions.sessions ? "处理中" : "+ 新建会话"} />
           </Pressable>
           <Pressable
             disabled={pendingActions.sessions}
             onPress={onRefreshSessions}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.sessions && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.secondaryActionButton, pendingActions.sessions && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingActions.sessions} text={pendingActions.sessions ? "加载中" : "刷新"} />
+            <ButtonContent loading={pendingActions.sessions} text={pendingActions.sessions ? "刷新中" : "刷新"} />
           </Pressable>
         </View>
       </View>
 
+      {/* 当前激活会话 Hero 卡片 */}
       {sessionID ? (
-        <View style={styles.currentSessionBox}>
-          <View style={styles.currentSessionHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.currentSessionText}>{shortID(sessionID)}</Text>
-              <Text style={styles.currentSessionMeta}>
-                {activeSession?.model || "model"} / {activeAgentMode} / {activePermission} / {activeSession?.context_window_k || currentWindowK}K
-                {activeSession?.usage?.total_tokens !== undefined ? ` / ${activeSession.usage.total_tokens} 个令牌` : ""}
-              </Text>
+        <View style={styles.activeHeroCard}>
+          <View style={styles.activeHeroTopRow}>
+            <View style={styles.activeTagRow}>
+              <View style={styles.activePill}>
+                <Text style={styles.activePillText}>当前会话</Text>
+              </View>
+              <Text style={styles.activeSessionId}>#{shortID(sessionID)}</Text>
             </View>
             <Pressable
               disabled={pendingActions.sessions}
               onPress={() => onDeleteSession(sessionID)}
-              style={({ pressed }) => buttonFeedback([styles.deleteButton, pendingActions.sessions && styles.disabledButton], pressed)}
+              style={({ pressed }) => buttonFeedback([styles.heroDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)}
             >
-              <Text style={styles.deleteButtonText}>删除</Text>
+              <Text style={styles.heroDeleteBtnText}>删除</Text>
             </Pressable>
           </View>
-          <View style={styles.modeRow}>
+
+          <Text numberOfLines={2} style={styles.activeHeroTitle}>
+            {activeSession?.title || "未命名会话"}
+          </Text>
+
+          <Text style={styles.activeHeroMeta}>
+            {activeModel ? modelDisplayName(activeModel) : activeSession?.model || "默认模型"} · {activePermission === "ask" ? "询问授权" : activePermission === "readonly" ? "只读保护" : "完全开放"} · {activeSession?.context_window_k || currentWindowK}K 窗口
+            {activeSession?.usage?.total_tokens !== undefined ? ` · ${formatTokenCount(activeSession.usage.total_tokens)} 令牌` : ""}
+          </Text>
+
+          {/* 会话执行模式分段选择器 */}
+          <View style={styles.heroModeRow}>
             {agentModes.map((item) => {
               const selected = activeAgentMode === item.mode;
               return (
                 <Pressable
-                  disabled={!canUseSessionSettings || settingsBusy || selected}
                   key={item.mode}
+                  disabled={!canUseSessionSettings || settingsBusy || selected}
                   onPress={() => onSetAgentMode(item.mode)}
                   style={({ pressed }) =>
-                    buttonFeedback([styles.modeChip, selected && styles.modeChipActive, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)
+                    buttonFeedback([
+                      styles.heroModeBtn,
+                      selected && styles.heroModeBtnActive,
+                      (!canUseSessionSettings || settingsBusy) && styles.disabledButton,
+                    ], pressed)
                   }
                 >
-                  <Text style={styles.modeChipTitle}>{item.label}</Text>
-                  <Text style={styles.modeChipMeta}>{item.meta}</Text>
+                  <Text style={[styles.heroModeBtnText, selected && styles.heroModeBtnTextActive]}>
+                    {item.mode === "chat" ? "💬 " : "📋 "}
+                    {item.label}模式{selected ? " (激活)" : ""}
+                  </Text>
                 </Pressable>
               );
             })}
           </View>
+
           {settingsBusy ? (
             <View style={styles.sessionBusyRow}>
               <ButtonContent loading text="正在切换会话模式" />
             </View>
           ) : null}
+
+          {/* 计划概览（若有活动计划） */}
           {activePlan ? (
             <View style={styles.planSummaryBox}>
               <View style={styles.planSummaryHeader}>
@@ -1019,34 +1038,57 @@ export function SettingsPanel({
         </View>
       ) : null}
 
-      <View style={styles.sessionGrid}>
+      {/* 单列流式历史会话卡片 */}
+      <View style={styles.sessionStreamList}>
         {sessions.length === 0 ? (
-          <EmptyBox text={clientToken ? "还没有会话，点击新建开始" : "先配对后同步会话"} />
+          <EmptyBox text={clientToken ? "还没有会话，点击右上角新建开始" : "先配对后同步会话"} />
         ) : (
-          sessions.map((session) => (
-            <View
-              key={session.id}
-              style={[styles.sessionChip, session.id === sessionID && styles.sessionChipActive]}
-            >
+          sessions.map((session) => {
+            const selected = session.id === sessionID;
+            return (
               <Pressable
+                key={session.id}
                 disabled={pendingActions.sessions}
                 onPress={() => onLoadSession(session.id)}
-                style={({ pressed }) => buttonFeedback([styles.sessionChipMain, pendingActions.sessions && styles.disabledButton], pressed)}
+                style={({ pressed }) =>
+                  buttonFeedback([
+                    styles.sessionStreamCard,
+                    selected && styles.sessionStreamCardActive,
+                    pendingActions.sessions && styles.disabledButton,
+                  ], pressed)
+                }
               >
-                <Text numberOfLines={1} style={styles.sessionTitle}>{session.title || "新对话"}</Text>
-                <Text numberOfLines={1} style={styles.sessionMeta}>
-                  {shortID(session.id)} / {session.agent_mode || "chat"} / {session.permission_mode || "ask"} / {session.context_window_k || 16}K
-                </Text>
+                <View style={styles.sessionStreamLeft}>
+                  <View style={[styles.sessionAvatarBox, selected && styles.sessionAvatarBoxActive]}>
+                    <Text style={styles.sessionAvatarIcon}>💬</Text>
+                  </View>
+                  <View style={styles.sessionInfoBox}>
+                    <Text numberOfLines={1} style={styles.sessionStreamTitle}>
+                      {session.title || "新对话"}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.sessionStreamMeta}>
+                      {session.model || "默认模型"} · {session.agent_mode === "plan" ? "规划" : "对话"} · {session.context_window_k || 16}K
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.sessionStreamRight}>
+                  <Text style={styles.sessionTimeText}>
+                    {formatRelativeTime(session.updated_at)}
+                  </Text>
+                  <Pressable
+                    disabled={pendingActions.sessions}
+                    onPress={() => onDeleteSession(session.id)}
+                    style={({ pressed }) =>
+                      buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
+                    }
+                  >
+                    <Text style={styles.streamDeleteBtnText}>删除</Text>
+                  </Pressable>
+                </View>
               </Pressable>
-              <Pressable
-                disabled={pendingActions.sessions}
-                onPress={() => onDeleteSession(session.id)}
-                style={({ pressed }) => buttonFeedback([styles.sessionDeleteButton, pendingActions.sessions && styles.disabledButton], pressed)}
-              >
-                <Text style={styles.deleteButtonText}>删除</Text>
-              </Pressable>
-            </View>
-          ))
+            );
+          })
         )}
       </View>
     </View>
@@ -1054,34 +1096,60 @@ export function SettingsPanel({
 
   const permissionSection = (
     <View style={styles.sectionStack}>
-      <View style={styles.controlBlock}>
-        <View style={styles.controlHeader}>
-          <View style={styles.flex}>
-            <Text style={styles.controlTitle}>权限模式</Text>
-            <Text style={styles.settingMeta}>{permissionHelp(activePermission)}</Text>
-          </View>
-          {settingsBusy ? <ButtonContent loading text="保存中" /> : null}
+      <View style={styles.sectionHeaderRow}>
+        <View style={styles.flex}>
+          <Text style={styles.sectionHeading}>会话工具调用权限策略</Text>
+          <Text style={styles.sectionSubheading}>不同模式决定 Agent 调用系统工具时的确认级别</Text>
         </View>
-        <View style={styles.segmentRow}>
-          {permissionModes.map((item) => {
-            const selected = activePermission === item.mode;
-            return (
-              <Pressable
-                disabled={!canUseSessionSettings || settingsBusy || selected}
-                key={item.mode}
-                onPress={() => onSetPermissionMode(item.mode)}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.segment, selected && styles.segmentActive, (!canUseSessionSettings || settingsBusy) && styles.disabledButton], pressed)
-                }
-              >
-                <Text style={styles.segmentTitle}>{item.label}</Text>
-                <Text style={styles.segmentMeta}>{item.meta}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {settingsBusy ? <ButtonContent loading text="保存中" /> : null}
       </View>
-      <EmptyBox text="权限是会话级别配置。切换会话后，会使用对应会话自己的工具调用策略。" />
+
+      <View style={styles.permissionStack}>
+        {permissionModes.map((item) => {
+          const selected = activePermission === item.mode;
+          return (
+            <Pressable
+              key={item.mode}
+              disabled={!canUseSessionSettings || settingsBusy || selected}
+              onPress={() => onSetPermissionMode(item.mode)}
+              style={({ pressed }) =>
+                buttonFeedback([
+                  styles.permissionCard,
+                  selected && styles.permissionCardActive,
+                  (!canUseSessionSettings || settingsBusy) && styles.disabledButton,
+                ], pressed)
+              }
+            >
+              <View style={styles.flex}>
+                <View style={styles.row}>
+                  <Text style={styles.permissionCardTitle}>
+                    {item.mode === "readonly" ? "🔒 " : item.mode === "ask" ? "🛡️ " : "⚡ "}
+                    {item.label}模式
+                  </Text>
+                  {item.mode === "ask" ? (
+                    <View style={styles.recommendBadge}>
+                      <Text style={styles.recommendBadgeText}>当前推荐</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.permissionCardMeta}>{permissionHelp(item.mode)}</Text>
+              </View>
+
+              {selected ? (
+                <View style={styles.permissionActiveBadge}>
+                  <Text style={styles.permissionActiveBadgeText}>已生效</Text>
+                </View>
+              ) : (
+                <View style={styles.permissionSelectBtn}>
+                  <Text style={styles.permissionSelectBtnText}>选择</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <EmptyBox text="权限是会话级别配置。切换会话后，会自动使用对应会话自己的工具调用策略。" />
     </View>
   );
 
@@ -1281,11 +1349,11 @@ export function SettingsPanel({
     <View style={[styles.panel, wideLayout && styles.panelWide]}>
       <View style={styles.panelHeader}>
         <View style={styles.flex}>
-          <Text style={styles.settingsTitle}>设置</Text>
+          <Text style={styles.settingsTitle}>设置中心</Text>
           <Text style={styles.pathText}>连接、模型、会话和工具权限集中管理</Text>
         </View>
-        <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.smallButton, pressed)}>
-          <Text style={styles.smallButtonText}>完成</Text>
+        <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
+          <Text style={styles.closeButtonText}>✕ 关闭</Text>
         </Pressable>
       </View>
 
@@ -1307,7 +1375,7 @@ export function SettingsPanel({
                       buttonFeedback([styles.navItem, wideLayout && styles.navItemWide, selected && styles.navItemActive], pressed)
                     }
                   >
-                    <Text style={[styles.navIcon, selected && styles.navTextActive]}>{section.icon}</Text>
+                    <Text style={styles.navIcon}>{section.icon}</Text>
                     <View style={styles.navTextBlock}>
                       <Text style={[styles.navLabel, selected && styles.navTextActive]}>{section.label}</Text>
                       {wideLayout ? <Text style={styles.navMeta}>{section.meta}</Text> : null}
@@ -1320,21 +1388,23 @@ export function SettingsPanel({
         </View>
 
         <View style={[styles.contentPane, !wideLayout && styles.contentPaneCompact]}>
-          <View style={styles.contentHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.contentTitle}>{activeSectionMeta?.label || "设置"}</Text>
-              <Text style={styles.settingMeta}>{activeSectionMeta?.meta || "配置中心"}</Text>
-            </View>
-          </View>
           {wideLayout ? (
-            <ScrollView
-              contentContainerStyle={styles.contentScroll}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-            >
-              {sectionContent[activeSection]}
-            </ScrollView>
+            <>
+              <View style={styles.contentHeader}>
+                <View style={styles.flex}>
+                  <Text style={styles.contentTitle}>{activeSectionMeta?.label || "设置"}</Text>
+                  <Text style={styles.settingMeta}>{activeSectionMeta?.meta || "配置中心"}</Text>
+                </View>
+              </View>
+              <ScrollView
+                contentContainerStyle={styles.contentScroll}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {sectionContent[activeSection]}
+              </ScrollView>
+            </>
           ) : (
             <View style={styles.contentScroll}>{sectionContent[activeSection]}</View>
           )}
@@ -1562,7 +1632,7 @@ function permissionHelp(mode: SessionPermissionMode) {
   if (mode === "full") {
     return "允许的工具可以不再逐次确认。";
   }
-  return "写文件、Shell、敏感工具调用前需要确认。";
+  return "工作区内读写和安全查询可自动执行，危险命令仍需确认。";
 }
 
 function shortHash(value?: string) {
@@ -1590,6 +1660,18 @@ function formatDate(value?: string) {
   if (Number.isNaN(date.getTime())) {
     return "-";
   }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatRelativeTime(value?: string | number) {
+  if (!value) return "刚刚";
+  const time = typeof value === "number" ? value : new Date(value).getTime();
+  if (Number.isNaN(time)) return "-";
+  const diff = Date.now() - time;
+  if (diff < 60 * 1000) return "刚刚";
+  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}分钟前`;
+  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)}小时前`;
+  const date = new Date(time);
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
@@ -1648,34 +1730,56 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     justifyContent: "space-between",
+    paddingBottom: 2,
   },
   settingsTitle: {
     color: "#12100e",
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: "900",
-    lineHeight: 32,
+    lineHeight: 26,
+  },
+  closeButton: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  closeButtonText: {
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "900",
   },
   settingsBox: {
-    gap: 12,
+    gap: 10,
   },
   settingsBoxWide: {
     alignItems: "stretch",
     flexDirection: "row",
   },
   sideRail: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#ded4c6",
-    borderRadius: 12,
-    borderWidth: 1,
+    backgroundColor: "transparent",
   },
   sideRailWide: {
+    backgroundColor: "#f5f1e9",
+    borderColor: "#12100e",
+    borderRadius: 12,
+    borderWidth: 2,
     flexShrink: 0,
     minHeight: 520,
     padding: 8,
     width: 222,
   },
   sideRailCompact: {
-    padding: 6,
+    paddingVertical: 2,
   },
   navList: {
     gap: 6,
@@ -1685,40 +1789,46 @@ const styles = StyleSheet.create({
   },
   navListCompact: {
     flexDirection: "row",
+    gap: 6,
+    paddingVertical: 2,
   },
   navItem: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "transparent",
-    borderRadius: 10,
-    borderWidth: 1,
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 20,
+    borderWidth: 2,
     flexDirection: "row",
-    gap: 8,
-    minHeight: 48,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: 6,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   navItemWide: {
+    borderRadius: 10,
+    minHeight: 48,
     width: "100%",
   },
   navItemActive: {
     backgroundColor: "#ffd84f",
-    borderColor: "#d8a900",
+    borderColor: "#12100e",
+    elevation: 2,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   navIcon: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
-    minWidth: 22,
+    fontSize: 14,
     textAlign: "center",
   },
   navTextBlock: {
     minWidth: 0,
   },
   navLabel: {
-    color: "#3b3834",
-    fontSize: 14,
-    fontWeight: "900",
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "800",
   },
   navMeta: {
     color: "#7f766c",
@@ -1728,6 +1838,7 @@ const styles = StyleSheet.create({
   },
   navTextActive: {
     color: "#12100e",
+    fontWeight: "900",
   },
   contentPane: {
     backgroundColor: "#fffaf0",
@@ -2376,20 +2487,147 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 2,
   },
-  currentSessionBox: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  currentSessionHeader: {
+  sectionHeaderRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 8,
     justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  sectionHeading: {
+    color: "#12100e",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  sectionSubheading: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  primaryActionButton: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  secondaryActionButton: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  activeHeroCard: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderLeftColor: "#ffd84f",
+    borderLeftWidth: 6,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 8,
+    padding: 12,
+    elevation: 2,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  activeHeroTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  activeTagRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  activePill: {
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 4,
+    borderWidth: 1.5,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  activePillText: {
+    color: "#12100e",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  activeSessionId: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  heroDeleteBtn: {
+    backgroundColor: "#ff7f68",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  heroDeleteBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  activeHeroTitle: {
+    color: "#12100e",
+    fontSize: 15,
+    fontWeight: "900",
+    lineHeight: 20,
+  },
+  activeHeroMeta: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  heroModeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  heroModeBtn: {
+    alignItems: "center",
+    backgroundColor: "#f5f1e9",
+    borderColor: "#d8d1c5",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: "center",
+    paddingVertical: 7,
+  },
+  heroModeBtnActive: {
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  heroModeBtnText: {
+    color: "#6c665f",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  heroModeBtnTextActive: {
+    color: "#12100e",
+    fontWeight: "900",
   },
   modeRow: {
     flexDirection: "row",
@@ -2475,64 +2713,167 @@ const styles = StyleSheet.create({
   sessionBusyRow: {
     marginTop: 8,
   },
-  currentSessionText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  currentSessionMeta: {
-    color: "#6c665f",
-    fontSize: 12,
-  },
-  sessionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  sessionStreamList: {
     gap: 8,
-    paddingVertical: 2,
+    marginTop: 4,
   },
-  sessionChip: {
-    backgroundColor: "#f5f1e9",
+  sessionStreamCard: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
     borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    flexGrow: 1,
-    minWidth: 146,
+    borderRadius: 12,
+    borderWidth: 2,
+    flexDirection: "row",
+    justifyContent: "space-between",
     padding: 10,
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
-  sessionChipMain: {
+  sessionStreamCardActive: {
+    borderColor: "#12100e",
+    borderLeftColor: "#ffd84f",
+    borderLeftWidth: 5,
+  },
+  sessionStreamLeft: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 10,
     minWidth: 0,
   },
-  sessionChipActive: {
+  sessionAvatarBox: {
+    alignItems: "center",
+    backgroundColor: "#4fd7ee",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  sessionAvatarBoxActive: {
     backgroundColor: "#ffd84f",
   },
-  sessionTitle: {
+  sessionAvatarIcon: {
+    fontSize: 15,
+  },
+  sessionInfoBox: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sessionStreamTitle: {
     color: "#12100e",
+    fontSize: 13.5,
     fontWeight: "900",
   },
-  sessionMeta: {
+  sessionStreamMeta: {
     color: "#6c665f",
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  sessionStreamRight: {
+    alignItems: "flex-end",
+    flexShrink: 0,
+    gap: 4,
+    marginLeft: 8,
+  },
+  sessionTimeText: {
+    color: "#7f766c",
+    fontSize: 10.5,
+    fontWeight: "800",
+  },
+  streamDeleteBtn: {
+    backgroundColor: "#ff7f68",
+    borderColor: "#12100e",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  streamDeleteBtnText: {
+    color: "#12100e",
+    fontSize: 10.5,
+    fontWeight: "900",
+  },
+  permissionStack: {
+    gap: 8,
+    marginTop: 4,
+  },
+  permissionCard: {
+    alignItems: "center",
+    backgroundColor: "#f5f1e9",
+    borderColor: "#12100e",
+    borderRadius: 10,
+    borderWidth: 2,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: 12,
+  },
+  permissionCardActive: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderLeftColor: "#ffd84f",
+    borderLeftWidth: 6,
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  permissionCardTitle: {
+    color: "#12100e",
+    fontSize: 13.5,
+    fontWeight: "900",
+  },
+  permissionCardMeta: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "700",
     marginTop: 3,
   },
-  deleteButton: {
-    alignItems: "center",
-    backgroundColor: "#fffaf0",
+  recommendBadge: {
+    backgroundColor: "#ffd84f",
     borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: 10,
+    borderRadius: 4,
+    borderWidth: 1,
+    marginLeft: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
   },
-  sessionDeleteButton: {
-    alignSelf: "flex-start",
-    backgroundColor: "#fffaf0",
+  recommendBadgeText: {
+    color: "#12100e",
+    fontSize: 9.5,
+    fontWeight: "900",
+  },
+  permissionActiveBadge: {
+    backgroundColor: "#ffd84f",
     borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    marginTop: 8,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  permissionActiveBadgeText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  permissionSelectBtn: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 4,
+  },
+  permissionSelectBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
   },
   deleteButtonText: {
     color: "#a3342f",

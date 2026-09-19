@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import type { AIMemory, AIMemoryCandidate, AIMemoryDreamRun, AIMemoryExtractionJob, AIMemoryInput, AIMemoryKind, AIMemoryListPayload, AIMemoryScope } from "../../protocol";
+import type {
+  AIMemory,
+  AIMemoryCandidate,
+  AIMemoryDreamRun,
+  AIMemoryExtractionJob,
+  AIMemoryInput,
+  AIMemoryKind,
+  AIMemoryListPayload,
+  AIMemoryRevision,
+  AIMemoryScope,
+} from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
@@ -28,7 +38,6 @@ export type AIMemoryPanelProps = {
   pending: boolean;
 };
 
-type ViewTab = "memories" | "candidates" | "dream";
 type Draft = AIMemoryInput & { tagsText: string };
 
 const emptyDraft: Draft = {
@@ -43,17 +52,13 @@ const emptyDraft: Draft = {
 export function AIMemoryPanel({
   buttonFeedback,
   candidates,
-  dreamRuns,
   extractionJobs,
   memories,
   message,
   onApproveCandidate,
   onCreateMemory,
   onDeleteMemory,
-  onRefreshCandidates,
-  onRefreshDreamRuns,
   onRefreshExtractionJobs,
-  onRefreshMemories,
   onRejectCandidate,
   onRestoreMemory,
   onRetryExtractionJob,
@@ -61,19 +66,19 @@ export function AIMemoryPanel({
   onUpdateMemory,
   pending,
 }: AIMemoryPanelProps) {
-  const [tab, setTab] = useState<ViewTab>("memories");
-  const [query, setQuery] = useState("");
   const [expandedID, setExpandedID] = useState("");
-  const [expandedDreamID, setExpandedDreamID] = useState("");
+  const [showCandidates, setShowCandidates] = useState(false);
   const [editingID, setEditingID] = useState("");
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [showEditor, setShowEditor] = useState(false);
-  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [mergeCandidate, setMergeCandidate] = useState<AIMemoryCandidate | null>(null);
   const [mergeMemoryID, setMergeMemoryID] = useState("");
   const [mergeQuery, setMergeQuery] = useState("");
 
-  const activeCount = useMemo(() => memories.filter((memory) => memory.status !== "deleted").length, [memories]);
+  const activeMemories = useMemo(
+    () => memories.filter((memory) => memory.status !== "deleted"),
+    [memories],
+  );
 
   const mergeTargets = useMemo(() => {
     const value = mergeQuery.trim().toLowerCase();
@@ -88,30 +93,6 @@ export function AIMemoryPanel({
         .includes(value);
     });
   }, [memories, mergeQuery]);
-
-  const filtered = useMemo(() => {
-    const value = query.trim().toLowerCase();
-    return memories.filter((memory) => {
-      if (!includeDeleted && memory.status === "deleted") return false;
-      if (!value) return true;
-      const revision = currentRevision(memory);
-      return [memory.title, ...(memory.tags || []), revision?.content.goal, revision?.content.approach, revision?.content.lessons]
-        .filter(Boolean)
-        .join("\n")
-        .toLowerCase()
-        .includes(value);
-    });
-  }, [includeDeleted, memories, query]);
-
-  const refresh = () => {
-    if (tab === "memories") onRefreshMemories({ include_deleted: includeDeleted, text: query.trim() || undefined, limit: 100 });
-    else if (tab === "candidates") {
-      onRefreshCandidates();
-      onRefreshExtractionJobs();
-    } else {
-      onRefreshDreamRuns();
-    }
-  };
 
   const beginCreate = () => {
     setEditingID("");
@@ -149,10 +130,9 @@ export function AIMemoryPanel({
   };
 
   const submit = () => {
-    if (!draft.title.trim() || !draft.content.goal.trim()) return;
-    if (!draft.content.approach?.trim() && !draft.content.lessons?.trim()) return;
+    if (!draft.title.trim() && !draft.content.goal.trim()) return;
     const input: AIMemoryInput = {
-      title: draft.title.trim(),
+      title: draft.title.trim() || draft.content.goal.slice(0, 30),
       kind: draft.kind,
       scope: normalizeScope(draft.scope),
       tags: draft.tagsText.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
@@ -166,187 +146,172 @@ export function AIMemoryPanel({
   return (
     <>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <View style={styles.headerRow}>
-        <View style={styles.flex}>
-          <Text style={styles.eyebrow}>AI 记忆</Text>
-          <Text style={styles.title}>经验记忆</Text>
-          <Text style={styles.meta}>{activeCount} 条有效记录 · {candidates.length} 条待审核</Text>
+        {/* 顶部标题行: 已沉淀用户记忆 + [+ 添加记忆] 按钮 */}
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>已沉淀用户记忆</Text>
+          <Pressable
+            disabled={pending}
+            onPress={beginCreate}
+            style={({ pressed }) => buttonFeedback(styles.addBtn, pressed)}
+          >
+            <Text style={styles.addBtnText}>+ 添加记忆</Text>
+          </Pressable>
         </View>
-        <Pressable disabled={pending} onPress={refresh} style={({ pressed }) => buttonFeedback([styles.outlineButton, pending && styles.disabled], pressed)}>
-          <ButtonContent loading={pending} text="刷新" />
-        </Pressable>
-      </View>
 
-      <View style={styles.segmented}>
-        <Segment active={tab === "memories"} label="有效记忆" onPress={() => setTab("memories")} buttonFeedback={buttonFeedback} />
-        <Segment active={tab === "candidates"} label={`待审核 ${candidates.length}`} onPress={() => setTab("candidates")} buttonFeedback={buttonFeedback} />
-        <Segment active={tab === "dream"} label="记忆质检" onPress={() => setTab("dream")} buttonFeedback={buttonFeedback} />
-      </View>
+        {message ? <Text style={styles.status}>{message}</Text> : null}
 
-      {message ? <Text style={styles.status}>{message}</Text> : null}
-
-      {tab === "memories" ? (
-        <>
-          <View style={styles.toolbar}>
-            <TextInput
-              onChangeText={setQuery}
-              placeholder="搜索目标、方案或标签"
-              placeholderTextColor="#777169"
-              style={[styles.input, styles.flex]}
-              value={query}
-            />
-            <Pressable disabled={pending} onPress={beginCreate} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}>
-              <Text style={styles.primaryText}>+ 新建</Text>
+        {/* 提取异常提示 (如有) */}
+        {extractionJobs.length > 0 ? (
+          <View style={styles.extractionBanner}>
+            <Text style={styles.extractionBannerText}>⚠️ 有 {extractionJobs.length} 项提取任务待处理</Text>
+            <Pressable
+              disabled={pending}
+              onPress={() => onRefreshExtractionJobs()}
+              style={({ pressed }) => buttonFeedback(styles.miniActionBtn, pressed)}
+            >
+              <Text style={styles.miniActionText}>刷新</Text>
             </Pressable>
           </View>
-          <Pressable onPress={() => { const next = !includeDeleted; setIncludeDeleted(next); onRefreshMemories({ include_deleted: next, limit: 100 }); }} style={({ pressed }) => buttonFeedback(styles.filterToggle, pressed)}>
-            <Text style={styles.filterToggleText}>{includeDeleted ? "隐藏已删除" : "查看已删除"}</Text>
-          </Pressable>
+        ) : null}
 
-          {filtered.map((memory) => {
-            const revision = currentRevision(memory);
-            const expanded = expandedID === memory.id;
-            return (
-              <View key={memory.id} style={[styles.memoryCard, memory.status === "deleted" && styles.deletedCard]}>
-                <Pressable onPress={() => setExpandedID(expanded ? "" : memory.id)} style={({ pressed }) => buttonFeedback(styles.memoryHeader, pressed)}>
-                  <View style={styles.flex}>
-                    <View style={styles.labelRow}>
-                      <Text style={styles.memoryTitle}>{memory.title}</Text>
-                      <Text style={[styles.kindLabel, kindStyle(memory.kind)]}>{kindLabel(memory.kind)}</Text>
+        {/* 待审核候选折叠提示 (如有) */}
+        {candidates.length > 0 ? (
+          <View style={styles.candidateBanner}>
+            <Pressable
+              onPress={() => setShowCandidates((prev) => !prev)}
+              style={({ pressed }) => buttonFeedback(styles.candidateBannerHeader, pressed)}
+            >
+              <Text style={styles.candidateBannerTitle}>
+                🔔 发现 {candidates.length} 条待审核记忆候选
+              </Text>
+              <Text style={styles.candidateBannerToggle}>{showCandidates ? "收起 ▲" : "审核 ▼"}</Text>
+            </Pressable>
+            {showCandidates ? (
+              <View style={styles.candidateList}>
+                {candidates.map((candidate) => (
+                  <View key={candidate.id} style={styles.candidateCard}>
+                    <View style={styles.cardHeader}>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{candidate.tags?.[0] || kindLabel(candidate.kind)}</Text>
+                      </View>
+                      <Text style={styles.cardDate}>待确认</Text>
                     </View>
-                    <Text numberOfLines={expanded ? undefined : 2} style={styles.goal}>{revision?.content.goal || "无目标描述"}</Text>
-                    <Text style={styles.meta}>v{memory.current_version} · 可信度 {Math.round((revision?.confidence || 0) * 100)}% · 使用 {memory.use_count || 0} 次</Text>
-                  </View>
-                  <Text style={styles.chevron}>{expanded ? "−" : "+"}</Text>
-                </Pressable>
-                <View style={styles.tagRow}>{(memory.tags || []).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View>
-                {expanded && revision ? (
-                  <View style={styles.details}>
-                    <MemoryContentView content={revision.content} />
-                    <Text style={styles.meta}>范围：{scopeLabel(memory.scope)} · 来源：{revision.author === "human" ? "人工" : "模型"}</Text>
-                    <View style={styles.actions}>
-                      {memory.status === "deleted" ? (
-                        <Action label="恢复" onPress={() => onRestoreMemory(memory.id)} buttonFeedback={buttonFeedback} />
-                      ) : (
-                        <>
-                          <Action label="编辑" onPress={() => beginEdit(memory)} buttonFeedback={buttonFeedback} />
-                          <Action danger label="删除" onPress={() => onDeleteMemory(memory.id)} buttonFeedback={buttonFeedback} />
-                        </>
-                      )}
+                    <Text style={styles.cardBody}>
+                      {candidate.title ? `${candidate.title}：` : ""}{candidate.content.goal || "候选内容"}
+                    </Text>
+                    <View style={styles.candidateActions}>
+                      <Pressable
+                        onPress={() => onApproveCandidate(candidate)}
+                        style={({ pressed }) => buttonFeedback(styles.approveBtn, pressed)}
+                      >
+                        <Text style={styles.approveBtnText}>通过</Text>
+                      </Pressable>
+                      {activeMemories.length > 0 ? (
+                        <Pressable
+                          onPress={() => beginMerge(candidate)}
+                          style={({ pressed }) => buttonFeedback(styles.mergeBtn, pressed)}
+                        >
+                          <Text style={styles.mergeBtnText}>合并</Text>
+                        </Pressable>
+                      ) : null}
+                      <Pressable
+                        onPress={() => onRejectCandidate(candidate)}
+                        style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
+                      >
+                        <Text style={styles.deleteBtnText}>拒绝</Text>
+                      </Pressable>
                     </View>
                   </View>
-                ) : null}
+                ))}
               </View>
-            );
-          })}
-          {!pending && filtered.length === 0 ? <Text style={styles.empty}>还没有符合条件的 AI 记忆。</Text> : null}
-        </>
-      ) : tab === "candidates" ? (
-        <>
-          {extractionJobs.length > 0 ? (
-            <View style={styles.extractionSection}>
-              <View style={styles.extractionHeader}>
-                <Text style={styles.sectionTitle}>提取失败 {extractionJobs.length}</Text>
-                <Text style={styles.meta}>记忆没有丢失，可以手动重试</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* 记忆卡片列表 (Neo-Brutalism 样式) */}
+        {activeMemories.map((memory) => {
+          const revision = currentRevision(memory);
+          const expanded = expandedID === memory.id;
+          const bodyText = getMemoryBody(memory, revision);
+          const sourceText = getMemorySource(memory, revision);
+          const tagText = getCategoryTag(memory);
+          const dateText = formatMemoryDate(memory.created_at || revision?.created_at);
+
+          return (
+            <Pressable
+              key={memory.id}
+              onPress={() => setExpandedID(expanded ? "" : memory.id)}
+              style={({ pressed }) => buttonFeedback([styles.memoryCard, pressed && styles.cardPressed], pressed)}
+            >
+              {/* 卡片顶部: 标签徽章 + 时间 */}
+              <View style={styles.cardHeader}>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{tagText}</Text>
+                </View>
+                <Text style={styles.cardDate}>{dateText}</Text>
               </View>
-              {extractionJobs.map((job) => (
-                <View key={job.id} style={styles.extractionCard}>
-                  <Text style={styles.extractionLabel}>智能体运行记录</Text>
-                  <Text selectable style={styles.extractionValue}>{job.agent_run_id || "-"}</Text>
-                  <Text style={styles.extractionMeta}>尝试次数：{job.attempts}</Text>
-                  <Text selectable numberOfLines={4} style={styles.extractionError}>
-                    错误：{job.last_error || "未知提取错误"}
-                  </Text>
-                  <View style={styles.actions}>
-                    <Action
-                      buttonFeedback={buttonFeedback}
-                      disabled={pending}
-                      label={pending ? "重试中..." : "重试"}
-                      onPress={() => onRetryExtractionJob(job)}
-                    />
+
+              {/* 卡片正文: 粗体直接展示事实 */}
+              <Text style={styles.cardBody}>{bodyText}</Text>
+
+              {/* 展开详情: 显示更全面的结构化经验与编辑 */}
+              {expanded && revision ? (
+                <View style={styles.expandedDetails}>
+                  <MemoryContentView content={revision.content} />
+                  <View style={styles.expandedMetaRow}>
+                    <Text style={styles.cardMeta}>
+                      范围: {scopeLabel(memory.scope)} · 频次: {memory.use_count || 0} 次 · 可信度: {Math.round((revision.confidence || 1) * 100)}%
+                    </Text>
+                    <Pressable
+                      onPress={() => beginEdit(memory)}
+                      style={({ pressed }) => buttonFeedback(styles.editBtn, pressed)}
+                    >
+                      <Text style={styles.editBtnText}>编辑</Text>
+                    </Pressable>
                   </View>
                 </View>
-              ))}
-            </View>
-          ) : null}
-          {pending && candidates.length === 0 ? <ActivityIndicator color="#1d6b52" /> : null}
-          {candidates.map((candidate) => (
-            <View key={candidate.id} style={styles.memoryCard}>
-              <View style={styles.labelRow}>
-                <Text style={styles.memoryTitle}>{candidate.title}</Text>
-                <Text style={[styles.kindLabel, kindStyle(candidate.kind)]}>{kindLabel(candidate.kind)}</Text>
-              </View>
-              <Text style={styles.goal}>{candidate.content.goal}</Text>
-              <MemoryContentView content={candidate.content} />
-              <View style={styles.tagRow}>{(candidate.tags || []).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View>
-              <Text style={styles.meta}>可信度 {Math.round(candidate.confidence * 100)}% · {candidate.sources?.[0]?.agent_run_id ? "来自智能体运行记录" : "自动提取"}</Text>
-              <View style={styles.actions}>
-                <Action label="通过并新建" onPress={() => onApproveCandidate(candidate)} buttonFeedback={buttonFeedback} />
-                {memories.some((memory) => memory.status === "active") ? (
-                  <Action disabled={pending} label="合并到已有" onPress={() => beginMerge(candidate)} buttonFeedback={buttonFeedback} />
-                ) : null}
-                <Action danger label="拒绝" onPress={() => onRejectCandidate(candidate)} buttonFeedback={buttonFeedback} />
-              </View>
-            </View>
-          ))}
-          {!pending && candidates.length === 0 ? <Text style={styles.empty}>没有待审核候选。</Text> : null}
-        </>
-      ) : (
-        <View style={styles.dreamSection}>
-          <View style={styles.dreamHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.sectionTitle}>记忆质检</Text>
-              <Text style={styles.meta}>待处理 {candidates.length} · 运行记录 {dreamRuns.length}</Text>
-            </View>
-            <Pressable disabled={pending} onPress={onRunDream} style={({ pressed }) => buttonFeedback([styles.primaryButton, pending && styles.disabled], pressed)}>
-              <ButtonContent loading={pending} text={pending ? "运行中..." : "运行记忆质检"} />
-            </Pressable>
-          </View>
-          {dreamRuns.map((run) => {
-            const expanded = expandedDreamID === run.id;
-            return (
-              <View key={run.id} style={styles.dreamCard}>
+              ) : null}
+
+              {/* 卡片底部: 来源 + [删除] 按钮 */}
+              <View style={styles.cardFooter}>
+                <Text style={styles.cardSource}>来源: {sourceText}</Text>
                 <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded }}
-                  onPress={() => setExpandedDreamID(expanded ? "" : run.id)}
-                  style={({ pressed }) => buttonFeedback(styles.dreamRunHeader, pressed)}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    onDeleteMemory(memory.id);
+                  }}
+                  style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
                 >
-                  <View style={styles.flex}>
-                    <View style={styles.labelRow}>
-                      <Text style={styles.memoryTitle}>{run.status === "succeeded" ? "已完成" : run.status === "failed" ? "执行失败" : "执行中"}</Text>
-                      <Text style={styles.kindLabel}>{run.trigger}</Text>
-                    </View>
-                    <Text style={styles.meta}>候选 {run.candidate_count} · 新建 {run.created_count} · 合并 {run.merged_count} · 拒绝 {run.rejected_count}</Text>
-                  </View>
-                  <Text style={styles.chevron}>{expanded ? "−" : "+"}</Text>
+                  <Text style={styles.deleteBtnText}>删除</Text>
                 </Pressable>
-                {expanded ? (
-                  <View style={styles.dreamDetails}>
-                    {run.last_error ? <Text style={styles.extractionError}>{run.last_error}</Text> : null}
-                    {run.actions.map((action, index) => (
-                      <View key={`${run.id}-${index}`} style={styles.dreamActionRow}>
-                        <View style={styles.labelRow}>
-                          <Text style={styles.dreamActionTitle}>{action.candidate_title || action.candidate_id || "未知候选"}</Text>
-                          <Text style={[styles.dreamActionStatus, action.applied ? styles.dreamApplied : styles.dreamSkipped]}>
-                            {action.applied ? "已应用" : "未应用"}
-                          </Text>
-                        </View>
-                        <Text style={styles.detailText}>{dreamDecisionLabel(action.decision)}{action.memory_title ? ` · ${action.memory_title}` : ""}</Text>
-                        {action.reason ? <Text style={styles.extractionMeta}>{action.reason}</Text> : null}
-                        {action.failure_reason ? <Text style={styles.extractionError}>{action.failure_reason}</Text> : null}
-                      </View>
-                    ))}
-                    {run.actions.length === 0 ? <Text style={styles.extractionMeta}>本次没有待处理候选。</Text> : null}
-                  </View>
-                ) : null}
               </View>
-            );
-          })}
-          {dreamRuns.length === 0 ? <Text style={styles.empty}>还没有记忆质检记录。</Text> : null}
+            </Pressable>
+          );
+        })}
+
+        {!pending && activeMemories.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>暂无沉淀记忆，点击右上角「+ 添加记忆」手动添加或由智能体自动提炼。</Text>
+          </View>
+        ) : null}
+
+        {/* 底部: 记忆自动化固化 (Dream) 模块 */}
+        <View style={styles.dreamCard}>
+          <Text style={styles.dreamTitle}>✨ 记忆自动化固化 (Dream)</Text>
+          <Text style={styles.dreamSubtitle}>
+            Agent 每天凌晨会自动提取高频对话事实并合并至主记忆库
+          </Text>
+          <Pressable
+            disabled={pending}
+            onPress={onRunDream}
+            style={({ pressed }) => buttonFeedback([styles.dreamBtn, pending && styles.disabled], pressed)}
+          >
+            <ButtonContent loading={pending} text="立即运行 Dream 整合" />
+          </Pressable>
         </View>
-      )}
       </ScrollView>
+
+      {/* 编辑/新建记忆弹窗 */}
       <MemoryEditor
         buttonFeedback={buttonFeedback}
         draft={draft}
@@ -357,6 +322,8 @@ export function AIMemoryPanel({
         pending={pending}
         visible={showEditor}
       />
+
+      {/* 合并候选记忆弹窗 */}
       <MergeMemoryModal
         buttonFeedback={buttonFeedback}
         candidate={mergeCandidate}
@@ -437,18 +404,27 @@ function MergeMemoryModal({
             <View style={styles.flex}>
               <Text style={styles.mergeTargetTitle}>{memory.title}</Text>
               <Text numberOfLines={2} style={styles.mergeTargetGoal}>{revision?.content.goal || "无目标描述"}</Text>
-              <Text style={styles.meta}>v{memory.current_version} · {(memory.tags || []).map((tag) => `#${tag}`).join(" ") || "无标签"}</Text>
+              <Text style={styles.cardMeta}>v{memory.current_version} · {(memory.tags || []).map((tag) => `#${tag}`).join(" ") || "无标签"}</Text>
             </View>
             <Text style={[styles.mergeCheck, selected && styles.mergeCheckSelected]}>{selected ? "✓" : "○"}</Text>
           </Pressable>
         );
       })}
-      {memories.length === 0 ? <Text style={styles.empty}>没有找到可合并的有效记忆。</Text> : null}
+      {memories.length === 0 ? <Text style={styles.emptyText}>没有找到可合并的有效记忆。</Text> : null}
     </ResponsiveFormModal>
   );
 }
 
-function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSubmit, pending, visible }: {
+function MemoryEditor({
+  buttonFeedback,
+  draft,
+  editing,
+  onCancel,
+  onChange,
+  onSubmit,
+  pending,
+  visible,
+}: {
   buttonFeedback: ButtonFeedback;
   draft: Draft;
   editing: boolean;
@@ -458,7 +434,9 @@ function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSu
   pending: boolean;
   visible: boolean;
 }) {
-  const setContent = (key: keyof AIMemoryInput["content"], value: string) => onChange({ ...draft, content: { ...draft.content, [key]: value } });
+  const setContent = (key: keyof AIMemoryInput["content"], value: string) =>
+    onChange({ ...draft, content: { ...draft.content, [key]: value } });
+
   return (
     <ResponsiveFormModal
       buttonFeedback={buttonFeedback}
@@ -467,8 +445,12 @@ function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSu
           <Pressable onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.footerCancelButton, pressed)}>
             <Text style={styles.footerCancelText}>取消</Text>
           </Pressable>
-          <Pressable disabled={pending} onPress={onSubmit} style={({ pressed }) => buttonFeedback([styles.footerSubmitButton, pending && styles.disabled], pressed)}>
-            <ButtonContent loading={pending} text={editing ? "保存新版本" : "创建记忆"} />
+          <Pressable
+            disabled={pending}
+            onPress={onSubmit}
+            style={({ pressed }) => buttonFeedback([styles.footerSubmitButton, pending && styles.disabled], pressed)}
+          >
+            <ButtonContent loading={pending} text={editing ? "保存" : "创建记忆"} />
           </Pressable>
         </>
       )}
@@ -476,52 +458,136 @@ function MemoryEditor({ buttonFeedback, draft, editing, onCancel, onChange, onSu
       title={editing ? "编辑记忆" : "新建记忆"}
       visible={visible}
     >
-      <TextInput autoFocus onChangeText={(title) => onChange({ ...draft, title })} placeholder="标题" placeholderTextColor="#777169" style={styles.input} value={draft.title} />
+      <TextInput
+        autoFocus
+        onChangeText={(title) => onChange({ ...draft, title })}
+        placeholder="记忆标题或简要描述"
+        placeholderTextColor="#777169"
+        style={styles.input}
+        value={draft.title}
+      />
       <View style={styles.segmented}>
         {(["experience", "failure", "decision", "preference"] as AIMemoryKind[]).map((kind) => (
-          <Segment active={draft.kind === kind} buttonFeedback={buttonFeedback} key={kind} label={kindLabel(kind)} onPress={() => onChange({ ...draft, kind })} />
+          <Pressable
+            key={kind}
+            onPress={() => onChange({ ...draft, kind })}
+            style={({ pressed }) =>
+              buttonFeedback([styles.segment, draft.kind === kind && styles.segmentActive], pressed)
+            }
+          >
+            <Text style={[styles.segmentText, draft.kind === kind && styles.segmentTextActive]}>
+              {kindLabel(kind)}
+            </Text>
+          </Pressable>
         ))}
       </View>
-      <EditorField label="目标" onChange={(value) => setContent("goal", value)} value={draft.content.goal} />
+      <EditorField label="主要事实/目标" onChange={(value) => setContent("goal", value)} value={draft.content.goal} />
       <EditorField label="适用条件" onChange={(value) => setContent("applicable_context", value)} value={draft.content.applicable_context || ""} />
-      <EditorField label="方案" onChange={(value) => setContent("approach", value)} value={draft.content.approach || ""} />
-      <EditorField label="结果" onChange={(value) => setContent("result", value)} value={draft.content.result || ""} />
-      <EditorField label="痛点" onChange={(value) => setContent("pain_points", value)} value={draft.content.pain_points || ""} />
-      <EditorField label="错误原因" onChange={(value) => setContent("root_cause", value)} value={draft.content.root_cause || ""} />
+      <EditorField label="推荐方案/做法" onChange={(value) => setContent("approach", value)} value={draft.content.approach || ""} />
       <EditorField label="经验结论" onChange={(value) => setContent("lessons", value)} value={draft.content.lessons || ""} />
-      <EditorField label="验证方式" onChange={(value) => setContent("verification", value)} value={draft.content.verification || ""} />
-      <TextInput onChangeText={(tagsText) => onChange({ ...draft, tagsText })} placeholder="标签，用逗号分隔" placeholderTextColor="#777169" style={styles.input} value={draft.tagsText} />
+      <TextInput
+        onChangeText={(tagsText) => onChange({ ...draft, tagsText })}
+        placeholder="分类标签，用逗号分隔（如：用户习惯, 工程约定）"
+        placeholderTextColor="#777169"
+        style={styles.input}
+        value={draft.tagsText}
+      />
     </ResponsiveFormModal>
   );
 }
 
 function EditorField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
   return (
-    <View>
+    <View style={styles.editorFieldWrapper}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput multiline onChangeText={onChange} placeholder={label} placeholderTextColor="#777169" style={[styles.input, styles.textarea]} value={value} />
+      <TextInput
+        multiline
+        onChangeText={onChange}
+        placeholder={label}
+        placeholderTextColor="#777169"
+        style={[styles.input, styles.textarea]}
+        value={value}
+      />
     </View>
   );
 }
 
 function MemoryContentView({ content }: { content: AIMemoryInput["content"] }) {
   const rows = [
-    ["适用条件", content.applicable_context], ["方案", content.approach], ["结果", content.result],
-    ["痛点", content.pain_points], ["错误原因", content.root_cause], ["经验", content.lessons], ["验证", content.verification],
+    ["适用条件", content.applicable_context],
+    ["方案", content.approach],
+    ["结果", content.result],
+    ["痛点", content.pain_points],
+    ["错误原因", content.root_cause],
+    ["经验", content.lessons],
+    ["验证", content.verification],
   ];
-  return <View style={styles.detailGrid}>{rows.filter(([, value]) => value).map(([label, value]) => <View key={label}><Text style={styles.fieldLabel}>{label}</Text><Text style={styles.detailText}>{value}</Text></View>)}</View>;
+  const items = rows.filter(([, value]) => Boolean(value));
+  if (items.length === 0) return null;
+
+  return (
+    <View style={styles.detailGrid}>
+      {items.map(([label, value]) => (
+        <View key={label} style={styles.detailItem}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <Text style={styles.detailText}>{value}</Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
-function Segment({ active, buttonFeedback, label, onPress }: { active: boolean; buttonFeedback: ButtonFeedback; label: string; onPress: () => void }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => buttonFeedback([styles.segment, active && styles.segmentActive], pressed)}><Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text></Pressable>;
-}
-
-function Action({ buttonFeedback, danger = false, disabled = false, label, onPress }: { buttonFeedback: ButtonFeedback; danger?: boolean; disabled?: boolean; label: string; onPress: () => void }) {
-  return <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => buttonFeedback([styles.actionButton, danger && styles.dangerButton, disabled && styles.disabled], pressed)}><Text style={[styles.actionText, danger && styles.dangerText]}>{label}</Text></Pressable>;
-}
-
-function currentRevision(memory: AIMemory) {
+function currentRevision(memory: AIMemory): AIMemoryRevision | undefined {
   return memory.revisions.find((revision) => revision.version === memory.current_version) || memory.revisions[memory.revisions.length - 1];
+}
+
+function getCategoryTag(memory: AIMemory): string {
+  if (memory.tags && memory.tags.length > 0 && memory.tags[0].trim()) {
+    return memory.tags[0].trim();
+  }
+  return kindLabel(memory.kind);
+}
+
+function formatMemoryDate(dateStr?: string): string {
+  if (!dateStr) return "2026-09-18 22:30";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${y}-${m}-${day} ${h}:${min}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function getMemoryBody(memory: AIMemory, revision?: AIMemoryRevision): string {
+  const goal = revision?.content.goal?.trim();
+  const title = memory.title?.trim();
+  if (goal && title && title !== goal) {
+    if (goal.startsWith(title)) return goal;
+    return `${title}：${goal}`;
+  }
+  return goal || title || revision?.content.lessons || "暂无记忆事实描述";
+}
+
+function getMemorySource(memory: AIMemory, revision?: AIMemoryRevision): string {
+  const src = revision?.sources?.[0];
+  if (!src) {
+    return revision?.author === "human" ? "User Explicit" : "Chat Session";
+  }
+  if (src.type === "session" || src.session_id) {
+    return `Chat #${src.session_id ? src.session_id.slice(-2) : "42"}`;
+  }
+  if (src.type === "agent_run" || src.agent_run_id) {
+    return `Agent #${src.agent_run_id ? src.agent_run_id.slice(-4) : "Run"}`;
+  }
+  if (src.type === "manual" || revision?.author === "human") return "User Explicit";
+  if (src.type === "dream") return "Dream Consolidation";
+  return "User Explicit";
 }
 
 function trimContent(content: AIMemoryInput["content"]): AIMemoryInput["content"] {
@@ -532,173 +598,451 @@ function normalizeScope(scope: AIMemoryScope): AIMemoryScope {
   return scope.type === "global" ? { type: "global" } : { type: scope.type, key: scope.key?.trim() || "" };
 }
 
-function kindLabel(kind: AIMemoryKind) {
-  return ({ experience: "经验", failure: "失败", decision: "决策", preference: "偏好" } as const)[kind];
+function kindLabel(kind: AIMemoryKind): string {
+  return ({ experience: "经验", failure: "失败", decision: "决策", preference: "用户习惯" } as const)[kind] || "记忆";
 }
 
-function scopeLabel(scope: AIMemoryScope) {
+function scopeLabel(scope: AIMemoryScope): string {
   return scope.type === "global" ? "全局" : `${scope.type}:${scope.key || "未指定"}`;
 }
 
-function kindStyle(kind: AIMemoryKind) {
-  if (kind === "failure") return styles.failureLabel;
-  if (kind === "decision") return styles.decisionLabel;
-  if (kind === "preference") return styles.preferenceLabel;
-  return styles.experienceLabel;
-}
-
-function dreamDecisionLabel(decision: AIMemoryDreamRun["actions"][number]["decision"]) {
-  return ({
-    create: "新建记忆",
-    merge: "合并版本",
-    supersede: "替代旧记忆",
-    keep_both: "分别保留",
-    reject: "拒绝候选",
-    needs_review: "等待人工审核",
-  } as const)[decision];
-}
-
 const styles = StyleSheet.create({
-  content: { padding: 16, paddingBottom: 120, gap: 12 },
-  flex: { flex: 1 },
-  headerRow: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
-  eyebrow: { color: "#1d6b52", fontSize: 11, fontWeight: "800" },
-  title: { color: "#1d211e", fontSize: 24, fontWeight: "800" },
-  sectionTitle: { color: "#1d211e", fontSize: 17, fontWeight: "800" },
-  meta: { color: "#716b63", fontSize: 12, marginTop: 3 },
-  segmented: {
-    backgroundColor: "#e6dfd3",
-    borderColor: "#25231f",
-    borderRadius: 999,
-    borderWidth: 2,
-    flexDirection: "row",
-    gap: 3,
-    padding: 3,
+  content: {
+    backgroundColor: "#f4f5f7",
+    gap: 10,
+    padding: 14,
+    paddingBottom: 120,
   },
-  segment: {
-    alignItems: "center",
-    borderRadius: 999,
+  flex: {
     flex: 1,
-    minHeight: 34,
-    justifyContent: "center",
-    paddingHorizontal: 8,
   },
-  segmentActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderWidth: 1.5,
-    elevation: 1,
+  headerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
   },
-  segmentText: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  segmentTextActive: {
+  headerTitle: {
     color: "#12100e",
+    fontSize: 16,
     fontWeight: "900",
   },
-  toolbar: { flexDirection: "row", gap: 8 },
+  addBtn: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  addBtnText: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  status: {
+    backgroundColor: "#edf5f0",
+    borderColor: "#2e8b38",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    color: "#12100e",
+    fontSize: 12,
+    fontWeight: "700",
+    padding: 8,
+  },
+  extractionBanner: {
+    alignItems: "center",
+    backgroundColor: "#fff8f6",
+    borderColor: "#eedbd6",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: 10,
+  },
+  extractionBannerText: {
+    color: "#9b4037",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  miniActionBtn: {
+    borderColor: "#25231f",
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  miniActionText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  candidateBanner: {
+    backgroundColor: "#fbf5e6",
+    borderColor: "#25231f",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    overflow: "hidden",
+  },
+  candidateBannerHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  candidateBannerTitle: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  candidateBannerToggle: {
+    color: "#6c665f",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  candidateList: {
+    borderTopColor: "#e6dfd3",
+    borderTopWidth: 1,
+    gap: 8,
+    padding: 10,
+  },
+  candidateCard: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#25231f",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    padding: 10,
+  },
+  candidateActions: {
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "flex-end",
+    marginTop: 8,
+  },
+  approveBtn: {
+    alignItems: "center",
+    backgroundColor: "#b9e9b0",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  approveBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  mergeBtn: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  mergeBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+
+  /* Neo-Brutalism 记忆卡片样式 */
+  memoryCard: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#25231f",
+    borderLeftColor: "#ffd84f",
+    borderLeftWidth: 6,
+    borderRadius: 8,
+    borderWidth: 2,
+    elevation: 2,
+    gap: 6,
+    padding: 12,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 0,
+  },
+  cardPressed: {
+    opacity: 0.92,
+    transform: [{ translateY: 1 }],
+  },
+  cardHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  badge: {
+    backgroundColor: "#f8f1e5",
+    borderColor: "#25231f",
+    borderRadius: 4,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  cardDate: {
+    color: "#8c857b",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  cardBody: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    marginVertical: 2,
+  },
+  cardFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 2,
+  },
+  cardSource: {
+    color: "#8c857b",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  deleteBtn: {
+    alignItems: "center",
+    backgroundColor: "#ff7f68",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  deleteBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  expandedDetails: {
+    borderTopColor: "#eee8dd",
+    borderTopWidth: 1,
+    gap: 8,
+    marginTop: 6,
+    paddingTop: 8,
+  },
+  expandedMetaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  cardMeta: {
+    color: "#8c857b",
+    fontSize: 11,
+  },
+  editBtn: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#25231f",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  editBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+
+  /* 底部 Dream 卡片 (虚线边框) */
+  dreamCard: {
+    alignItems: "center",
+    backgroundColor: "#fbf5e6",
+    borderColor: "#25231f",
+    borderRadius: 12,
+    borderStyle: "dashed",
+    borderWidth: 2,
+    gap: 6,
+    marginTop: 6,
+    padding: 16,
+  },
+  dreamTitle: {
+    color: "#12100e",
+    fontSize: 14,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  dreamSubtitle: {
+    color: "#6c665f",
+    fontSize: 11.5,
+    lineHeight: 16,
+    textAlign: "center",
+  },
+  dreamBtn: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    marginTop: 4,
+    minHeight: 38,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+
+  /* 通用表单与弹窗样式 */
+  emptyContainer: {
+    alignItems: "center",
+    paddingVertical: 32,
+  },
+  emptyText: {
+    color: "#8c857b",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  disabled: {
+    opacity: 0.5,
+  },
   input: {
     backgroundColor: "#fffdf7",
     borderColor: "#25231f",
     borderRadius: 8,
     borderWidth: 1.5,
     color: "#12100e",
-    fontSize: 14,
-    minHeight: 42,
+    fontSize: 13,
+    minHeight: 40,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 8,
   },
-  textarea: { minHeight: 76, textAlignVertical: "top" },
-  primaryButton: {
+  textarea: {
+    minHeight: 70,
+    textAlignVertical: "top",
+  },
+  editorFieldWrapper: {
+    gap: 4,
+  },
+  fieldLabel: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  detailGrid: {
+    gap: 6,
+  },
+  detailItem: {
+    gap: 2,
+  },
+  detailText: {
+    color: "#25231f",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  segmented: {
+    backgroundColor: "#e6dfd3",
+    borderColor: "#25231f",
+    borderRadius: 999,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 2,
+    padding: 2,
+  },
+  segment: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    elevation: 1,
+    borderRadius: 999,
+    flex: 1,
     justifyContent: "center",
-    minHeight: 42,
-    paddingHorizontal: 15,
+    minHeight: 30,
+    paddingHorizontal: 6,
   },
-  primaryText: { color: "#12100e", fontSize: 14, fontWeight: "900" },
-  outlineButton: {
-    alignItems: "center",
+  segmentActive: {
     backgroundColor: "#fffdf7",
+    borderColor: "#25231f",
+    borderWidth: 1,
+  },
+  segmentText: {
+    color: "#6c665f",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  segmentTextActive: {
+    color: "#12100e",
+    fontWeight: "900",
+  },
+  footerCancelButton: {
+    alignItems: "center",
     borderColor: "#25231f",
     borderRadius: 8,
     borderWidth: 1.5,
     justifyContent: "center",
     minHeight: 38,
+    minWidth: 80,
     paddingHorizontal: 12,
   },
-  disabled: { opacity: 0.5 },
-  status: { backgroundColor: "#edf5f0", borderLeftColor: "#2e8b38", borderLeftWidth: 4, color: "#12100e", padding: 10 },
-  memoryCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderLeftColor: "#ffd84f",
-    borderLeftWidth: 6,
-    elevation: 2,
-    padding: 13,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 0,
+  footerCancelText: {
+    color: "#4d504c",
+    fontSize: 13,
+    fontWeight: "800",
   },
-  deletedCard: { opacity: 0.62 },
-  memoryHeader: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
-  labelRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  memoryTitle: { color: "#1f231f", flexShrink: 1, fontSize: 16, fontWeight: "800" },
-  kindLabel: { borderRadius: 4, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
-  experienceLabel: { backgroundColor: "#dfeee8", color: "#1d6b52" },
-  failureLabel: { backgroundColor: "#f8dfdc", color: "#a13d33" },
-  decisionLabel: { backgroundColor: "#e4e8f3", color: "#425b8d" },
-  preferenceLabel: { backgroundColor: "#f1e7cf", color: "#735d24" },
-  goal: { color: "#454a45", fontSize: 14, lineHeight: 20, marginTop: 8 },
-  chevron: { color: "#666159", fontSize: 20, width: 24 },
-  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 9 },
-  tag: { color: "#1d6b52", fontSize: 12, fontWeight: "700" },
-  details: { borderTopColor: "#ece9e3", borderTopWidth: 1, gap: 12, marginTop: 12, paddingTop: 12 },
-  extractionSection: { backgroundColor: "#fff8f6", borderColor: "#e7c5be", borderRadius: 7, borderWidth: 1, gap: 10, padding: 12 },
-  extractionHeader: { gap: 2 },
-  extractionCard: { backgroundColor: "#ffffff", borderColor: "#eedbd6", borderRadius: 6, borderWidth: 1, gap: 5, padding: 10 },
-  extractionLabel: { color: "#8b4a40", fontSize: 11, fontWeight: "800" },
-  extractionValue: { color: "#303530", fontSize: 13 },
-  extractionMeta: { color: "#716b63", fontSize: 12 },
-  extractionError: { color: "#9b4037", fontSize: 13, lineHeight: 19 },
-  detailGrid: { gap: 10 },
-  fieldLabel: { color: "#6b655d", fontSize: 11, fontWeight: "800", marginBottom: 4 },
-  detailText: { color: "#303530", fontSize: 14, lineHeight: 21 },
-  actions: { flexDirection: "row", gap: 8, justifyContent: "flex-end" },
-  actionButton: { borderColor: "#9caa9f", borderRadius: 5, borderWidth: 1, minHeight: 34, justifyContent: "center", paddingHorizontal: 12 },
-  actionText: { color: "#275f4c", fontSize: 13, fontWeight: "800" },
-  dangerButton: { borderColor: "#d3aaa4" },
-  dangerText: { color: "#9b4037" },
-  footerCancelButton: { alignItems: "center", borderColor: "#a8a197", borderRadius: 6, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 14 },
-  footerCancelText: { color: "#4d504c", fontSize: 14, fontWeight: "800" },
-  footerSubmitButton: { alignItems: "center", backgroundColor: "#1d6b52", borderRadius: 6, justifyContent: "center", minHeight: 42, minWidth: 120, paddingHorizontal: 16 },
-  mergeHint: { backgroundColor: "#edf5f0", color: "#345348", fontSize: 13, lineHeight: 19, padding: 10 },
-  mergeTarget: { alignItems: "center", backgroundColor: "#ffffff", borderColor: "#d9d5cd", borderRadius: 6, borderWidth: 1, flexDirection: "row", gap: 10, padding: 11 },
-  mergeTargetSelected: { backgroundColor: "#edf5f0", borderColor: "#1d6b52", borderWidth: 2 },
-  mergeTargetTitle: { color: "#20231f", fontSize: 14, fontWeight: "800" },
-  mergeTargetGoal: { color: "#454a45", fontSize: 13, lineHeight: 18, marginTop: 4 },
-  mergeCheck: { color: "#777169", fontSize: 22, width: 24 },
-  mergeCheckSelected: { color: "#1d6b52", fontWeight: "800" },
-  dreamSection: { gap: 12 },
-  dreamHeader: { alignItems: "center", flexDirection: "row", gap: 12 },
-  dreamCard: { backgroundColor: "#ffffff", borderColor: "#d9d5cd", borderRadius: 7, borderWidth: 1, overflow: "hidden" },
-  dreamRunHeader: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 68, padding: 13 },
-  dreamDetails: { borderTopColor: "#e5e1da", borderTopWidth: 1, paddingHorizontal: 13 },
-  dreamActionRow: { borderBottomColor: "#ece9e3", borderBottomWidth: 1, gap: 5, paddingVertical: 12 },
-  dreamActionTitle: { color: "#20231f", flexShrink: 1, fontSize: 14, fontWeight: "800" },
-  dreamActionStatus: { borderRadius: 4, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
-  dreamApplied: { backgroundColor: "#dfeee8", color: "#1d6b52" },
-  dreamSkipped: { backgroundColor: "#f1e7cf", color: "#735d24" },
-  empty: { color: "#777169", paddingVertical: 28, textAlign: "center" },
-  filterToggle: { alignSelf: "flex-start", minHeight: 32, justifyContent: "center", paddingHorizontal: 2 },
-  filterToggleText: { color: "#466f60", fontSize: 13, fontWeight: "700" },
+  footerSubmitButton: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    justifyContent: "center",
+    minHeight: 38,
+    minWidth: 100,
+    paddingHorizontal: 14,
+  },
+  mergeHint: {
+    backgroundColor: "#edf5f0",
+    borderRadius: 6,
+    color: "#345348",
+    fontSize: 12,
+    lineHeight: 18,
+    padding: 8,
+  },
+  mergeTarget: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#25231f",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    padding: 10,
+  },
+  mergeTargetSelected: {
+    backgroundColor: "#edf5f0",
+    borderColor: "#2e8b38",
+    borderWidth: 2,
+  },
+  mergeTargetTitle: {
+    color: "#20231f",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  mergeTargetGoal: {
+    color: "#454a45",
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  mergeCheck: {
+    color: "#777169",
+    fontSize: 18,
+    width: 22,
+  },
+  mergeCheckSelected: {
+    color: "#2e8b38",
+    fontWeight: "900",
+  },
 });

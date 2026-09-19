@@ -59,6 +59,32 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
     );
   }
 
+  if (message.role === "user") {
+    return (
+      <View style={styles.userTurnWrapper}>
+        <View style={[styles.message, styles.userMessage]}>
+          {message.text ? (
+            <Text selectable style={styles.userMessageText}>
+              {message.text}
+            </Text>
+          ) : null}
+          {message.attachments?.length ? (
+            <View style={styles.messageAttachments}>
+              {message.attachments.map((attachment, index) => (
+                <ChatAttachmentCard
+                  attachment={attachment}
+                  buttonFeedback={buttonFeedback}
+                  key={`${message.id}-attachment-${index}`}
+                />
+              ))}
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.userTurnMeta}>已发送</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.message, styles[`${message.role}Message`]]}>
       {message.reasoning && !hideReasoning ? (

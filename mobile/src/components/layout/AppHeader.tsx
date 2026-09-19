@@ -56,10 +56,21 @@ export function AppHeader({
           />
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.title}>MYAI</Text>
-          <Text numberOfLines={1} style={styles.subtitle}>
-            {activityText || connectionText}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>MYAI</Text>
+            {connected ? (
+              <View style={styles.devicePill}>
+                <Text numberOfLines={1} style={styles.devicePillText}>
+                  {deviceID.trim() || "pc-local"}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.contextRow}>
+            <Text numberOfLines={1} style={styles.subtitle}>
+              {activityText || (connected ? `📁 ${userID.trim() || "local"} · 电脑已连接` : disconnectedLabel(status))}
+            </Text>
+          </View>
         </View>
       </View>
       <View style={styles.headerActions}>
@@ -73,7 +84,7 @@ export function AppHeader({
           {animated || isBusy ? (
             <ActivityIndicator color="#12100e" size="small" />
           ) : (
-            <View style={styles.statusDot} />
+            <View style={[styles.statusDot, connected && styles.statusDotOnline]} />
           )}
           <Text style={styles.statusPillText}>{statusText}</Text>
         </View>
@@ -177,35 +188,62 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     gap: 8,
   },
+  titleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
   title: {
     color: "#12100e",
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "900",
-    lineHeight: 24,
+    letterSpacing: -0.2,
+    lineHeight: 22,
+  },
+  devicePill: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    maxWidth: 90,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  devicePillText: {
+    color: "#12100e",
+    fontSize: 9.5,
+    fontWeight: "900",
+  },
+  contextRow: {
+    marginTop: 1,
   },
   subtitle: {
     color: "#6c665f",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
-    marginTop: 2,
   },
   ghostButton: {
     alignItems: "center",
     backgroundColor: "#4fd7ee",
     borderColor: "#12100e",
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 2,
-    height: 40,
+    elevation: 2,
+    height: 34,
     justifyContent: "center",
-    minWidth: 40,
-    paddingHorizontal: 10,
+    minWidth: 34,
+    paddingHorizontal: 8,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   ghostButtonActive: {
     backgroundColor: "#ffd84f",
   },
   ghostButtonText: {
     color: "#12100e",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "900",
   },
   statusPill: {
@@ -213,11 +251,16 @@ const styles = StyleSheet.create({
     borderColor: "#12100e",
     borderRadius: 999,
     borderWidth: 2,
+    elevation: 2,
     flexDirection: "row",
-    gap: 6,
+    gap: 5,
     minHeight: 34,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   statusPillOnline: {
     backgroundColor: "#b9e9b0",
@@ -228,12 +271,15 @@ const styles = StyleSheet.create({
   statusDot: {
     backgroundColor: "#12100e",
     borderRadius: 4,
-    height: 8,
-    width: 8,
+    height: 7,
+    width: 7,
+  },
+  statusDotOnline: {
+    backgroundColor: "#0e4e16",
   },
   statusPillText: {
     color: "#12100e",
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "900",
   },
 });

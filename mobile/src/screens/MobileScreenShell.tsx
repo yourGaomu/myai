@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -18,6 +18,12 @@ export function MobileScreenShell({
   scrollEnabled = true,
   topSafePadding,
 }: Props) {
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      document.body.style.backgroundColor = "#f4f5f7";
+    }
+  }, []);
+
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.safe}>
       <StatusBar style="dark" />

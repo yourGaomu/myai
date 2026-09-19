@@ -11,8 +11,9 @@ import {
 import type { AgentRunSnapshot } from "../../protocol";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { groupToolActivity, type ChatRenderItem } from "../../utils/chatRenderItems";
+import { buildChatTurns, groupToolActivity, type ChatRenderItem } from "../../utils/chatRenderItems";
 import { AgentRunTimeline } from "./AgentRunTimeline";
+import { AgentTurnCard } from "./AgentTurnCard";
 import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
 import { ChatJumpNav, type ChatJumpAnchor } from "./ChatJumpNav";
 import { MessageBubble } from "./MessageBubble";
@@ -43,7 +44,7 @@ export function ChatPanel({
 }: Props) {
   const renderItems = useMemo(() => {
     const visibleMessages = messages.filter((message) => !isCoveredToolActivity(message, runs));
-    return injectAgentRuns(groupToolActivity(visibleMessages), visibleMessages, runs);
+    return buildChatTurns(visibleMessages);
   }, [messages, runs]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});
@@ -73,15 +74,10 @@ export function ChatPanel({
   );
 
   return (
-    <View style={[styles.panel, styles.chatPanel]}>
-      <View style={styles.panelHeader}>
-        <Text style={styles.panelTitle}>对话</Text>
-        <Text style={styles.pathText}>{messages.length} 条消息</Text>
-      </View>
+    <View style={styles.chatContainer}>
       <ScrollView
         contentContainerStyle={styles.messages}
         keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
         onContentSizeChange={() => {
           if (followTailRef.current) {
             chatScrollRef.current?.scrollToEnd({ animated: true });
@@ -105,16 +101,43 @@ export function ChatPanel({
         ) : messages.length === 0 && runs.length === 0 ? (
           <Text style={styles.emptyText}>消息会显示在这里。</Text>
         ) : (
-          renderItems.map((item) =>
-            item.type === "run" ? (
-              <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
-                <AgentRunTimeline buttonFeedback={buttonFeedback} snapshot={item.snapshot} />
-              </View>
-            ) : item.type === "tool_group" ? (
-              <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
-                <ToolActivityGroup buttonFeedback={buttonFeedback} group={item.group} />
-              </View>
-            ) : (
+          renderItems.map((item) => {
+            if (item.type === "agent_turn") {
+              return (
+                <View
+                  key={item.id}
+                  onLayout={(event) => {
+                    rememberItemOffset(item.id, event);
+                    rememberItemOffset(item.primaryMessageID, event);
+                  }}
+                >
+                  <AgentTurnCard
+                    buttonFeedback={buttonFeedback}
+                    onRegenerate={onRegenerate}
+                    turn={item}
+                  />
+                </View>
+              );
+            }
+            if (item.type === "user_turn") {
+              return (
+                <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
+                  <MessageBubble
+                    buttonFeedback={buttonFeedback}
+                    message={item.message}
+                    onRegenerate={onRegenerate}
+                  />
+                </View>
+              );
+            }
+            if (item.type === "tool_group") {
+              return (
+                <View key={item.id} onLayout={(event) => rememberItemOffset(item.id, event)}>
+                  <ToolActivityGroup buttonFeedback={buttonFeedback} group={item.group} />
+                </View>
+              );
+            }
+            return (
               <View key={item.id} onLayout={(event) => rememberItemOffset(item.message.id, event)}>
                 <MessageBubble
                   buttonFeedback={buttonFeedback}
@@ -123,10 +146,12 @@ export function ChatPanel({
                   onRegenerate={onRegenerate}
                 />
               </View>
-            ),
-          )
+            );
+          })
         )}
-        {pendingRequestID ? <AssistantLoadingBubble label={assistantLoadingLabel} /> : null}
+        {pendingRequestID && !renderItems.some((it) => it.type === "agent_turn" && it.status === "running") ? (
+          <AssistantLoadingBubble label={assistantLoadingLabel} />
+        ) : null}
       </ScrollView>
       <ChatJumpNav
         anchors={jumpAnchors}
@@ -151,10 +176,15 @@ function injectAgentRuns(items: ChatRenderItem[], messages: ChatItem[], runs: Ag
 
   items.forEach((item) => {
     result.push(item);
-    if (item.type !== "message") {
+    const anchor =
+      item.type === "user_turn"
+        ? item.message
+        : item.type === "message"
+          ? item.message
+          : undefined;
+    if (!anchor) {
       return;
     }
-    const anchor = item.message;
     const nextUser = anchor.role === "user" ? users[users.indexOf(anchor) + 1] : undefined;
     runs.forEach((snapshot) => {
       if (inserted.has(snapshot.run.id)) {
@@ -286,61 +316,34 @@ function messageTitle(text: string) {
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#d7cfc2",
-    borderRadius: 16,
-    borderWidth: 1,
-    elevation: 2,
-    gap: 10,
-    padding: 10,
-    shadowColor: "#171613",
-    shadowOffset: { height: 3, width: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-  },
-  chatPanel: {
+  chatContainer: {
     flex: 1,
-    minHeight: 220,
-    overflow: "hidden",
-  },
-  panelHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 10,
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    paddingTop: 2,
-  },
-  panelTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  pathText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 3,
+    minHeight: 0,
+    position: "relative",
   },
   messagesScroll: {
     flex: 1,
   },
   messages: {
-    gap: 8,
-    paddingBottom: 8,
-    paddingTop: 3,
+    gap: 12,
+    paddingBottom: 16,
+    paddingTop: 4,
   },
   inlineLoading: {
     alignItems: "center",
-    backgroundColor: "#fff4cc",
-    borderColor: "#d7cfc2",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 1.5, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 2,
   },
   inlineLoadingText: {
     color: "#12100e",
@@ -349,5 +352,9 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#6c665f",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 32,
   },
 });

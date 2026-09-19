@@ -3,63 +3,363 @@
  * 8大核心业务屏幕专有样式（对话、文件、变更、Diff、知识库与记忆、规划、会话、设置与子智能体）
  */
 
-/* ==================== 1. 对话主屏幕 (Chat Screen) ==================== */
+/* ==================== 1. 对话主屏幕 (Chat Screen - Agent Turn 规范) ==================== */
 .chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 6px;
-}
-
-/* Agent 任务时间线 (Agent Run Timeline) */
-.agent-run-timeline {
-  background: #fff8db;
-  border: 1px solid #d4cbb8;
-  border-radius: var(--radius-pill);
-  padding: 3px 10px;
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
-.timeline-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 800;
-  font-size: 11px;
-}
-
-.timeline-steps {
-  display: flex;
-  gap: 4px;
-}
-
-.step-indicator {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #ccc4b6;
-}
-
-.step-indicator.done { background: var(--green-dark); }
-.step-indicator.active { background: var(--yellow); animation: pulse-dot 1s infinite alternate; }
-
-/* 聊天消息流列表 */
+/* 消息流滚动列表 */
 .chat-messages {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   overflow-y: auto;
-  padding: 2px 2px;
+  padding: 4px 2px 14px 2px;
 }
 
-/* 用户气泡 */
+/* 回合容器 (Turn Wrapper) */
+.turn-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+/* 用户提问气泡 */
+.user-turn-wrapper {
+  align-items: flex-end;
+}
+
+.user-turn-bubble {
+  max-width: 86%;
+  background-color: var(--yellow);
+  border: 1.5px solid var(--ink);
+  border-radius: 16px 16px 4px 16px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  box-shadow: 0 1.5px 0 var(--ink);
+  line-height: 1.45;
+}
+
+.user-turn-meta {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  font-weight: 700;
+  margin-top: 2px;
+  padding-right: 4px;
+}
+
+/* Agent 回合复合卡片 (Agent Turn Container) */
+.agent-turn-wrapper {
+  align-items: stretch;
+  width: 100%;
+}
+
+/* Agent 头部元信息栏 (身份 + 状态胶囊) */
+.agent-turn-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 4px 2px;
+}
+
+.agent-identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-avatar-icon {
+  width: 20px;
+  height: 20px;
+  background: var(--yellow);
+  border: 1.5px solid var(--ink);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.agent-name {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.agent-model-pill {
+  font-size: 9.5px;
+  font-weight: 800;
+  background: #ede7da;
+  color: #555047;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid #d4ccbd;
+}
+
+.agent-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--ink);
+}
+
+.agent-status-badge.completed {
+  background: var(--green);
+  color: #0e4e16;
+  border-color: #0e4e16;
+}
+
+.agent-status-badge.running {
+  background: var(--yellow);
+  color: #684d00;
+  border-color: #b58c00;
+}
+
+.agent-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b58c00;
+  animation: pulse-dot 0.8s infinite alternate;
+}
+
+/* Agent 回合大卡片主体 (Neo-Brutalism) */
+.agent-turn-box {
+  background: var(--surface);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px 14px 14px 4px;
+  box-shadow: 0 2px 0 var(--ink);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部紧凑折叠过程托盘 (Process Tray) */
+.agent-process-tray {
+  background: #f8f4ec;
+  border-bottom: 1px solid #e5dfd2;
+}
+
+.process-tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.process-tray-header:hover {
+  background: #f1ebd7;
+}
+
+.tray-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tray-bolt-icon {
+  font-size: 11px;
+}
+
+.tray-summary-text {
+  font-size: 11px;
+  font-weight: 800;
+  color: #49443c;
+}
+
+.tray-toggle-btn {
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #7d7568;
+  background: #ece5d8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #dcd4c5;
+}
+
+/* 托盘抽屉内部 (思考 + 工具链) */
+.process-tray-body {
+  padding: 8px 9px;
+  background: #fffdfa;
+  border-top: 1px dashed #dcd4c5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tray-sub-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tray-sub-title {
+  font-size: 9.5px;
+  font-weight: 900;
+  color: #7a7367;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* 思考过程内容块 */
+.tray-reasoning-box {
+  background: #f5f0e6;
+  border-left: 3px solid #8d8373;
+  padding: 6px 8px;
+  border-radius: 0 4px 4px 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #4c463d;
+  white-space: pre-wrap;
+}
+
+/* 工具链列表条目 */
+.tool-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-chain-item {
+  background: #f7f3eb;
+  border: 1px solid #ded5c6;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.tool-chain-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 10.5px;
+  background: #f0e9dc;
+}
+
+.tool-status-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 900;
+  background: var(--green);
+  border: 1px solid var(--ink);
+}
+
+.tool-fn-name {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  color: var(--ink);
+  flex: 1;
+}
+
+.tool-duration-tag {
+  font-size: 9.5px;
+  color: #7a7367;
+  font-weight: 700;
+}
+
+.tool-step-arrow {
+  font-size: 9px;
+  color: #8c8475;
+}
+
+.tool-chain-detail {
+  padding: 6px 8px;
+  background: #fffdfa;
+  border-top: 1px solid #ded5c6;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tool-detail-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: #8c8475;
+  margin-bottom: 2px;
+}
+
+.tool-detail-pre {
+  background: #25231f;
+  color: #f7f5f0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-x: auto;
+  max-height: 120px;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+}
+
+/* AI 答复正文 (Markdown Body) */
+.agent-turn-body {
+  padding: 9px 11px;
+}
+
+/* 底部操作与 Token 区域 */
+.agent-turn-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 9px;
+  background: #faf6ee;
+  border-top: 1px solid #eae3d5;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.agent-btn-mini {
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.agent-btn-mini:hover {
+  background: var(--yellow);
+}
+
+.agent-token-stat {
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.token-highlight {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+/* 旧版兼容器泡保留 */
 .message-bubble-user {
   align-self: flex-end;
   max-width: 82%;
@@ -74,7 +374,6 @@
   line-height: 1.4;
 }
 
-/* Assistant 回复气泡 */
 .message-bubble-assistant {
   align-self: flex-start;
   width: 100%;
@@ -86,44 +385,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-/* Thinking 深度思考折叠块 (默认折叠以节省空间) */
-.thinking-box {
-  background: #fbf9f4;
-  border: 1px dashed #d9d1c3;
-  border-radius: 6px;
-  overflow: hidden;
-  font-size: 11px;
-}
-
-.thinking-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-weight: 800;
-  font-size: 11px;
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.thinking-badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.thinking-content {
-  display: none; /* 默认折叠 */
-  padding: 6px 8px;
-  color: #555047;
-  font-size: 11px;
-  line-height: 1.45;
-  border-top: 1px dashed #d9d1c3;
-  white-space: pre-wrap;
-  font-family: var(--font-mono);
 }
 
 /* Markdown 文本解析渲染 */

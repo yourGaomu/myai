@@ -21,7 +21,7 @@ export function KnowledgeWorkspacePanel({ aiMemory, buttonFeedback, knowledge }:
             onPress={() => setMode("documents")}
             style={({ pressed }) => buttonFeedback([styles.tab, mode === "documents" && styles.tabActive], pressed)}
           >
-            <Text style={[styles.tabText, mode === "documents" && styles.tabTextActive]}>📚 资料知识库</Text>
+            <Text style={[styles.tabText, mode === "documents" && styles.tabTextActive]}>资料知识库</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -32,7 +32,7 @@ export function KnowledgeWorkspacePanel({ aiMemory, buttonFeedback, knowledge }:
             }}
             style={({ pressed }) => buttonFeedback([styles.tab, mode === "memory" && styles.tabActive], pressed)}
           >
-            <Text style={[styles.tabText, mode === "memory" && styles.tabTextActive]}>🧠 AI 记忆</Text>
+            <Text style={[styles.tabText, mode === "memory" && styles.tabTextActive]}>AI 记忆</Text>
           </Pressable>
         </View>
       </View>
@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
   },
   tabs: {
     backgroundColor: "#e6dfd3",
-    borderColor: "#25231f",
+    borderColor: "#12100e",
     borderRadius: 999,
     borderWidth: 2,
     flexDirection: "row",
@@ -71,13 +71,13 @@ const styles = StyleSheet.create({
   },
   tabActive: {
     backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderWidth: 1.5,
+    borderColor: "#12100e",
+    borderWidth: 2,
     elevation: 2,
     shadowColor: "#12100e",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 1,
+    shadowOpacity: 0.2,
+    shadowRadius: 0,
   },
   tabText: {
     color: "#6c665f",

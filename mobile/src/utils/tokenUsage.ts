@@ -14,12 +14,34 @@ export function usageHasValues(usage: TokenUsage) {
   ].some((value) => typeof value === "number");
 }
 
-export function usageSummary(usage: TokenUsage) {
-  if (usage.total_tokens !== undefined) {
-    return `${usage.total_tokens} tokens`;
+export function formatTokenCount(num?: number): string {
+  if (typeof num !== "number") return "n/a";
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(/\.0$/, "") + "k";
   }
-  if (usage.prompt_tokens !== undefined || usage.completion_tokens !== undefined) {
-    return `${tokenCount(usage.prompt_tokens)} in / ${tokenCount(usage.completion_tokens)} out`;
+  return `${num}`;
+}
+
+export function usageSummary(usage: TokenUsage) {
+  const total = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+  if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined) {
+    return `${formatTokenCount(total)} tokens (入 ${formatTokenCount(usage.prompt_tokens)} · 出 ${formatTokenCount(usage.completion_tokens)})`;
+  }
+  if (total !== undefined) {
+    return `${formatTokenCount(total)} tokens`;
   }
   return "Usage unavailable";
+}
+
+export function usageBreakdown(usage?: TokenUsage) {
+  if (!usage || !usageHasValues(usage)) return null;
+  const total = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+  const hasBreakdown = usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined;
+  return {
+    total: formatTokenCount(total),
+    rawTotal: total,
+    input: formatTokenCount(usage.prompt_tokens),
+    output: formatTokenCount(usage.completion_tokens),
+    hasBreakdown,
+  };
 }

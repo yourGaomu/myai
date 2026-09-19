@@ -53,7 +53,7 @@ export function BottomTabs({
 const styles = StyleSheet.create({
   segmented: {
     backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
+    borderColor: "#12100e",
     borderRadius: 16,
     borderWidth: 2,
     elevation: 3,
@@ -61,8 +61,8 @@ const styles = StyleSheet.create({
     padding: 3,
     shadowColor: "#12100e",
     shadowOffset: { height: 2, width: 0 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   segment: {
     alignItems: "center",
@@ -76,6 +76,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffd84f",
     borderColor: "#12100e",
     borderWidth: 1.5,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 1.5, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   segmentText: {
     color: "#6c665f",

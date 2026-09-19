@@ -114,12 +114,6 @@ export function KnowledgePanel({
   }, [onSelectKnowledgeBase, selectedID, sortedBases]);
 
   useEffect(() => {
-    if (knowledgeBases.length === 0) {
-      setShowCatalogManagement(true);
-    }
-  }, [knowledgeBases.length]);
-
-  useEffect(() => {
     if (!pendingSettings) {
       setPendingRAGMode(null);
       setTopKDraft(String(settings.top_k));
@@ -163,104 +157,190 @@ export function KnowledgePanel({
   return (
     <>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.headerRow}>
-          <View style={styles.flex}>
-            <Text style={styles.eyebrow}>知识管理</Text>
-            <Text style={styles.title}>知识库</Text>
-          </View>
+        {/* 1. 向量知识库区域 */}
+        <View style={styles.protoSectionHeader}>
+          <Text style={styles.protoSectionTitle}>向量知识库</Text>
           <Pressable
             disabled={pendingKnowledge}
-            onPress={onRefresh}
-            style={({ pressed }) =>
-              buttonFeedback([styles.outlineButton, pendingKnowledge && styles.disabledButton], pressed)
-            }
-          >
-            <ButtonContent loading={pendingKnowledge} text={pendingKnowledge ? "刷新中" : "刷新"} />
-          </Pressable>
-        </View>
-
-      <View style={styles.toolbarRow}>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={setFilterText}
-          placeholder="搜索目录或文档"
-          placeholderTextColor="#776f66"
-          style={[styles.input, styles.flex]}
-          value={filterText}
-        />
-        <Pressable
-          disabled={pendingKnowledge}
-          onPress={() => {
-            if (selectedBase) {
-              onUploadDocument();
-              return;
-            }
-            setShowCatalogManagement(true);
-          }}
-          style={({ pressed }) =>
-            buttonFeedback(
-              [styles.primaryButton, pendingKnowledge && styles.disabledButton],
-              pressed,
-            )
-          }
-        >
-          <ButtonContent loading={pendingKnowledge} text={selectedBase ? "上传文档" : "新建知识库"} />
-        </Pressable>
-      </View>
-
-      {message ? <Text style={styles.statusMessage}>{message}</Text> : null}
-
-      <View style={styles.explorerSection}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>目录</Text>
-            <Text style={styles.meta}>
-              {categories.length} 个目录 · {knowledgeBases.length} 个知识库
-            </Text>
-          </View>
-          <Pressable
             onPress={() => {
               setManagedCategoryID("");
               setRecursiveDeleteID("");
               setShowCatalogManagement(true);
             }}
-            style={({ pressed }) => buttonFeedback(styles.newButton, pressed)}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.protoNewKbBtn, pendingKnowledge && styles.disabledButton],
+                pressed,
+              )
+            }
           >
-            <Text style={styles.newButtonText}>+ 新建</Text>
+            <Text style={styles.protoNewKbBtnText}>+ 新建知识库</Text>
           </Pressable>
         </View>
 
-        <KnowledgeExplorer
-          bases={sortedBases}
-          buttonFeedback={buttonFeedback}
-          categories={categories}
-          documents={documents}
-          expanded={expanded}
-          filterText={filterText}
-          jobs={jobs}
-          onDeleteDocument={onDeleteDocument}
-          onManageBase={openBaseSettings}
-          onManageCategory={(category) => {
-            setManagedCategoryID(category.id);
-            setCategoryMoveParentID(category.parent_id || "");
-            setRecursiveDeleteID("");
-            setShowCatalogManagement(true);
-          }}
-          onRetryDocument={onRetryDocument}
-          onSelectBase={selectBase}
-          onToggleCategory={(id) =>
-            setExpanded((current) => ({ ...current, [id]: current[id] === false }))
-          }
-          pending={pendingKnowledge}
-          selectedBaseID={selectedID}
-        />
+        {message ? <Text style={styles.statusMessage}>{message}</Text> : null}
 
-        {categories.length === 0 && knowledgeBases.length === 0 && !showCatalogManagement ? (
-          <Text style={styles.emptyText}>还没有内容，请先创建知识库。</Text>
-        ) : null}
+        {/* 知识库卡片流 */}
+        <View style={styles.kbList}>
+          {sortedBases.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyCardTitle}>暂无向量知识库</Text>
+              <Text style={styles.emptyCardSubtitle}>
+                点击右上角“+ 新建知识库”开始添加
+              </Text>
+            </View>
+          ) : (
+            sortedBases.map((kb) => {
+              const isSelected = kb.id === selectedID;
+              const docCount = isSelected ? documents.length : 0;
+              const chunkCount = isSelected
+                ? jobs.reduce((acc, job) => acc + (job.total_chunks || 0), 0)
+                : 0;
 
-      </View>
+              return (
+                <Pressable
+                  key={kb.id}
+                  onPress={() => selectBase(kb.id)}
+                  style={({ pressed }) =>
+                    buttonFeedback(
+                      [styles.kbCard, isSelected && styles.kbCardSelected],
+                      pressed,
+                    )
+                  }
+                >
+                  <View style={styles.kbHeaderRow}>
+                    <View style={styles.kbTitleGroup}>
+                      <Text style={styles.kbIcon}>📑</Text>
+                      <Text numberOfLines={1} style={styles.kbTitle}>
+                        {kb.name}
+                      </Text>
+                    </View>
+                    <View style={styles.connectedBadge}>
+                      <Text style={styles.connectedText}>
+                        {isSelected ? "已连接" : "就绪"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text numberOfLines={2} style={styles.kbDesc}>
+                    {kb.description || "涵盖相关业务文档与向量检索切片数据"}
+                  </Text>
+
+                  <View style={styles.kbFooterRow}>
+                    <Text style={styles.kbStatText}>
+                      {docCount > 0 ? `${docCount} 篇文档` : "文档已同步"}
+                    </Text>
+                    <Text style={styles.kbStatText}>
+                      {chunkCount > 0 ? `${chunkCount} 个向量分块` : "已连接"}
+                    </Text>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        openBaseSettings(kb.id);
+                      }}
+                      style={styles.kbManageBtn}
+                    >
+                      <Text style={styles.kbManageBtnText}>⚙ 管理</Text>
+                    </Pressable>
+                  </View>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+
+        {/* 2. 已索引文档区域 */}
+        <View style={styles.docPanel}>
+          <View style={styles.docPanelHeader}>
+            <Text style={styles.docPanelTitle}>已索引文档</Text>
+            <Pressable
+              disabled={pendingKnowledge}
+              onPress={() => {
+                if (selectedBase) {
+                  onUploadDocument();
+                } else if (sortedBases.length > 0) {
+                  selectBase(sortedBases[0].id);
+                  onUploadDocument();
+                } else {
+                  setShowCatalogManagement(true);
+                }
+              }}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [styles.uploadDocBtn, pendingKnowledge && styles.disabledButton],
+                  pressed,
+                )
+              }
+            >
+              <Text style={styles.uploadDocBtnText}>上传文档</Text>
+            </Pressable>
+          </View>
+
+          {documents.length === 0 ? (
+            <View style={styles.emptyDocBox}>
+              <Text style={styles.emptyDocText}>
+                {selectedBase
+                  ? "当前知识库暂无文档，可点击右上角“上传文档”"
+                  : "请选择或新建一个知识库以查看文档"}
+              </Text>
+            </View>
+          ) : (
+            documents.map((doc, idx) => {
+              const isReady = doc.status === "ready";
+              const isFailed = doc.status === "failed";
+              const sizeLabel = doc.content_type || "通用文档";
+
+              return (
+                <View
+                  key={doc.id}
+                  style={[
+                    styles.docItemRow,
+                    idx === documents.length - 1 && styles.docItemRowLast,
+                  ]}
+                >
+                  <View style={styles.docInfo}>
+                    <Text numberOfLines={1} style={styles.docTitle}>
+                      📄 {doc.file_name}
+                    </Text>
+                    <Text style={styles.docMeta}>
+                      {sizeLabel}
+                      {doc.updated_at ? ` · ${formatDate(doc.updated_at)}` : ""}
+                    </Text>
+                  </View>
+                  <View style={styles.docActions}>
+                    <View
+                      style={[
+                        styles.docStatusBadge,
+                        isReady && styles.docStatusBadgeReady,
+                        isFailed && styles.docStatusBadgeFailed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.docStatusText,
+                          isReady && styles.docStatusTextReady,
+                          isFailed && styles.docStatusTextFailed,
+                        ]}
+                      >
+                        {isReady ? "已解析" : isFailed ? "失败" : "解析中"}
+                      </Text>
+                    </View>
+                    <Pressable
+                      hitSlop={6}
+                      onPress={() => {
+                        if (selectedBase) onDeleteDocument(selectedBase.id, doc.id);
+                      }}
+                      style={styles.docDeleteBtn}
+                    >
+                      <Text style={styles.docDeleteBtnText}>✕</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
 
       <View style={styles.sessionSection}>
         <Pressable
@@ -1134,4 +1214,251 @@ const styles = StyleSheet.create({
   modeButtonActive: { backgroundColor: "#ffd84f", borderColor: "#12100e" },
   modeText: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
   modeTextActive: { color: "#12100e" },
+  protoSectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+    paddingHorizontal: 2,
+  },
+  protoSectionTitle: {
+    color: "#12100e",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  protoNewKbBtn: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    elevation: 2,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 1.5, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  protoNewKbBtnText: {
+    color: "#12100e",
+    fontSize: 11.5,
+    fontWeight: "900",
+  },
+  kbList: {
+    gap: 10,
+  },
+  kbCard: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 14,
+    borderWidth: 2,
+    elevation: 2,
+    gap: 6,
+    padding: 13,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  kbCardSelected: {
+    borderColor: "#12100e",
+    borderWidth: 2.5,
+  },
+  kbHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  kbTitleGroup: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    marginRight: 8,
+  },
+  kbIcon: {
+    fontSize: 14,
+  },
+  kbTitle: {
+    color: "#12100e",
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  connectedBadge: {
+    alignItems: "center",
+    backgroundColor: "#b9e9b0",
+    borderColor: "#12100e",
+    borderRadius: 999,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  connectedText: {
+    color: "#0e4e16",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  kbDesc: {
+    color: "#6c665f",
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  kbFooterRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 2,
+  },
+  kbStatText: {
+    color: "#8c857b",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  kbManageBtn: {
+    marginLeft: "auto",
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  kbManageBtnText: {
+    color: "#6c665f",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  emptyCard: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#ded7cc",
+    borderRadius: 14,
+    borderStyle: "dashed",
+    borderWidth: 2,
+    padding: 24,
+  },
+  emptyCardTitle: {
+    color: "#12100e",
+    fontSize: 13.5,
+    fontWeight: "900",
+  },
+  emptyCardSubtitle: {
+    color: "#8c857b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  docPanel: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 14,
+    borderWidth: 2,
+    elevation: 2,
+    gap: 8,
+    padding: 13,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  docPanelHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: 4,
+  },
+  docPanelTitle: {
+    color: "#12100e",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  uploadDocBtn: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  uploadDocBtnText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  emptyDocBox: {
+    paddingVertical: 14,
+  },
+  emptyDocText: {
+    color: "#8c857b",
+    fontSize: 11.5,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  docItemRow: {
+    alignItems: "center",
+    borderBottomColor: "#ede7da",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+  },
+  docItemRowLast: {
+    borderBottomWidth: 0,
+  },
+  docInfo: {
+    flex: 1,
+    gap: 3,
+    marginRight: 8,
+  },
+  docTitle: {
+    color: "#12100e",
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  docMeta: {
+    color: "#8c857b",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  docActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  docStatusBadge: {
+    alignItems: "center",
+    backgroundColor: "#f0eae1",
+    borderColor: "#12100e",
+    borderRadius: 999,
+    borderWidth: 1.5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  docStatusBadgeReady: {
+    backgroundColor: "#b9e9b0",
+  },
+  docStatusBadgeFailed: {
+    backgroundColor: "#ff7f68",
+  },
+  docStatusText: {
+    color: "#6c665f",
+    fontSize: 9.5,
+    fontWeight: "800",
+  },
+  docStatusTextReady: {
+    color: "#0e4e16",
+  },
+  docStatusTextFailed: {
+    color: "#7a1f1a",
+  },
+  docDeleteBtn: {
+    padding: 4,
+  },
+  docDeleteBtnText: {
+    color: "#8c857b",
+    fontSize: 12,
+    fontWeight: "900",
+  },
 });

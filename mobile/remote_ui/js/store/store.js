@@ -110,26 +110,36 @@ class Store {
   simulateStreamingResponse(onProgress, onDone) {
     if (this.state.isBusy) return;
 
+    // 先推入用户指令
+    this.state.chatMessages.push({
+      id: `msg-user-${Date.now()}`,
+      role: "user",
+      text: "请帮我分析对话界面重构为 Agent Turn 后的优势。",
+      createdAt: Date.now(),
+      status: "completed"
+    });
+
     this.state.isBusy = true;
     this.state.activity = "thinking";
     this.state.statusText = "正在思考...";
     this.notify();
 
-    // 1.5 秒后完成思考，开始输出流式消息
+    // 1.2 秒后思考完毕，开始输出流式消息
     setTimeout(() => {
       this.state.activity = "idle";
       this.state.statusText = "生成中...";
 
       const newMsgId = `msg-stream-${Date.now()}`;
-      const fullText = "收到！我已经为您在 `mobile/remote_ui` 目录下构建好了高保真的 UI 原型系统。\n\n- **设计系统**：复刻 Neo-Brutalism 漫画粗黑线条与高明度配色；\n- **架构体系**：采用解耦的 Store 响应式模型与数据源，支持任意场景一键预览。";
+      const fullText = "重构为统一 **Agent Turn（智能体回合）** 后具有以下三大飞跃式提升：\n\n1. **杜绝孤儿卡片**：不再有漂浮在底部的系统运行框，所有思考、工具与回答收拢在同一 AI 容器内；\n2. **垂直屏效倍增**：思考推导与多步工具轨迹默认收进顶部紧凑折叠托盘（28px），不抢占正文空间；\n3. **Token 透明化**：清晰呈现 `输入 21.2k · 输出 86`，消除几句对话两万 Token 的误解。";
 
       const streamMsg = {
         id: newMsgId,
         role: "assistant",
-        reasoning: "用户触发了实时流式消息演示：\n1. 初始化打字机定时器；\n2. 动态追加字符至当前气泡；\n3. 触发滚动条吸底。",
+        reasoning: "正在推演 Agent Turn 架构收益：\n1. 消息模型从平铺流升级为聚合回合模型；\n2. 思考推导与工具链紧凑折叠收纳；\n3. 输入/输出 Token 明细化拆解呈现；\n4. 消除底部孤儿卡片堆积现象。",
         text: "",
         createdAt: Date.now(),
-        status: "streaming"
+        status: "streaming",
+        tokens: { input: 21240, output: 86, total: 21326 }
       };
 
       this.state.chatMessages.push(streamMsg);
@@ -138,7 +148,7 @@ class Store {
       let charIndex = 0;
       const timer = setInterval(() => {
         if (charIndex < fullText.length) {
-          charIndex += 2;
+          charIndex += 3;
           streamMsg.text = fullText.slice(0, charIndex);
           if (onProgress) onProgress();
           this.notify();
@@ -150,12 +160,23 @@ class Store {
           if (onDone) onDone();
           this.notify();
         }
-      }, 40);
-    }, 1500);
+      }, 30);
+    }, 1200);
   }
 
   // 2. 模拟工具调用执行过程
   simulateToolExecution() {
+    if (this.state.isBusy) return;
+
+    // 先推入用户指令
+    this.state.chatMessages.push({
+      id: `msg-user-tool-${Date.now()}`,
+      role: "user",
+      text: "请运行类型检查，确认 TypeScript 编译是否通过。",
+      createdAt: Date.now(),
+      status: "completed"
+    });
+
     this.state.isBusy = true;
     this.state.activity = "tool";
     this.state.statusText = "正在调用工具...";
@@ -164,8 +185,8 @@ class Store {
     const toolCallMsg = {
       id: toolCallId,
       role: "tool_call",
-      toolName: "git_diff_summary",
-      toolArguments: JSON.stringify({ staged: false, targetPath: "mobile/remote_ui" }, null, 2),
+      toolName: "run_command",
+      toolArguments: JSON.stringify({ CommandLine: "npm run typecheck", Cwd: "mobile" }, null, 2),
       status: "running"
     };
 
@@ -177,16 +198,28 @@ class Store {
       const toolResMsg = {
         id: `tool-res-${Date.now()}`,
         role: "tool",
-        toolName: "git_diff_summary",
-        text: "Summary: 8 files created, +1,240 lines added, 0 deletions.",
+        toolName: "run_command",
+        text: "Exit Code: 0\nOutput: > tsc --noEmit\nDone in 1.48s. 0 errors found.",
         status: "completed"
       };
       this.state.chatMessages.push(toolResMsg);
+
+      // 伴随最终助手回答
+      const finalReplyMsg = {
+        id: `tool-reply-${Date.now()}`,
+        role: "assistant",
+        text: "TypeScript 类型检查已顺利执行完成！全工程 **0 编译错误**，类型系统完好就绪。",
+        createdAt: Date.now(),
+        status: "completed",
+        tokens: { input: 12400, output: 42, total: 12442 }
+      };
+      this.state.chatMessages.push(finalReplyMsg);
+
       this.state.isBusy = false;
       this.state.activity = "idle";
       this.state.statusText = "在线";
       this.notify();
-    }, 2000);
+    }, 1600);
   }
 
   // 3. 触发危险权限拦截弹窗

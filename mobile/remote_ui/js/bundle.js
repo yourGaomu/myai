@@ -10,6 +10,7 @@
   // 1. 数据层 (Mock Data)
   // ==========================================
   const mockChatMessages = [
+    // Turn 1
     {
       id: "msg-user-1",
       role: "user",
@@ -21,11 +22,9 @@
       id: "msg-asst-1",
       role: "assistant",
       reasoning: "正在分析用户需求...\n1. 检测到项目为 MyAI Mobile，基于 React Native + Expo 架构；\n2. 移动端包含 8 个核心面板：对话、文件、变更、Diff、知识库、计划、会话与设置；\n3. 设计风格为高对比度 Neo-Brutalism 漫画线条风格，主色调为黄色 (#ffd84f) 与青色 (#4fd7ee)；\n4. 规划构建模块化静态原型工程至 mobile/remote_ui 目录。",
-      text: "我已经完成对移动端工程代码的深入扫描！\n\n### 发现的核心模块：\n- **UI 风格**：高饱和粗黑线条设计（Neo-Brutalism）；\n- **核心屏幕**：包含 `Chat`、`Files`、`Changes`、`Knowledge`、`Plan`、`Settings` 等；\n- **交互支持**：支持实时 WebSocket 连通、Thinking 思考过程展示与工具调用二次确认。\n\n接下来我将调用工作区工具为您准备原型脚手架。",
+      text: "",
       createdAt: 1774000002000,
-      completedAt: 1774000005000,
-      status: "completed",
-      tokens: { input: 1240, output: 412, total: 1652 }
+      status: "completed"
     },
     {
       id: "msg-tool-1",
@@ -44,25 +43,78 @@
     {
       id: "msg-asst-2",
       role: "assistant",
-      reasoning: "已获取所有目录结构，现在开始在 mobile/remote_ui 目录生成高保真原型系统。",
-      text: "原型系统脚手架已就绪！您可以通过底部的标签页无缝切换体验 **文件列表**、**Git变更对比**、**知识库** 及 **全局设置**。",
+      text: "我已经完成对移动端工程代码的深入扫描！\n\n### 发现的核心模块：\n- **UI 风格**：高饱和粗黑线条设计（Neo-Brutalism）；\n- **核心屏幕**：包含 `Chat`、`Files`、`Changes`、`Knowledge`、`Plan`、`Settings` 等 8 大面板；\n- **交互支持**：支持实时 WebSocket 连通、Thinking 思考推导与工具调用二次确认。\n\n原型脚手架已在 `mobile/remote_ui` 目录下构建就绪！您可以通过底部的标签页无缝切换体验。",
       createdAt: 1774000007000,
       completedAt: 1774000010000,
       status: "completed",
-      tokens: { input: 890, output: 180, total: 1070 }
+      tokens: { input: 1240, output: 412, total: 1652 }
+    },
+
+    // Turn 2
+    {
+      id: "msg-user-2",
+      role: "user",
+      text: "帮我查一下为什么启动动画会卡顿，还有为什么切到后台老是断开重连？",
+      createdAt: 1774000020000,
+      status: "completed"
+    },
+    {
+      id: "msg-asst-3",
+      role: "assistant",
+      reasoning: "正在定位两个性能与网络缺陷：\n1. 启动动画：AppHeader.tsx 帧动画每 100ms 重复请求 250KB PNG，导致网络洪峰与 JS 线程掉帧；\n2. 断线重连：useRelayConnection 在 AppState 焦点变化时无条件关闭已有连接，DevTools 切换被误判为掉线。",
+      text: "",
+      createdAt: 1774000022000,
+      status: "completed"
+    },
+    {
+      id: "msg-tool-2",
+      role: "tool_call",
+      toolName: "grep_search",
+      toolArguments: JSON.stringify({ Query: "setInterval", Includes: ["AppHeader.tsx"] }, null, 2),
+      status: "completed"
+    },
+    {
+      id: "msg-tool-res-2",
+      role: "tool",
+      toolName: "grep_search",
+      text: "AppHeader.tsx:64: const timer = setInterval(nextFrame, 100); // 10fps 请求远程PNG",
+      status: "completed"
+    },
+    {
+      id: "msg-tool-3",
+      role: "tool_call",
+      toolName: "view_file",
+      toolArguments: JSON.stringify({ FilePath: "mobile/src/hooks/useRelayConnection.ts", Lines: "120-135" }, null, 2),
+      status: "completed"
+    },
+    {
+      id: "msg-tool-res-3",
+      role: "tool",
+      toolName: "view_file",
+      text: 'if (state === "active") {\n  previousSocket.close(); // 无条件关闭连接\n  connect();\n}',
+      status: "completed"
+    },
+    {
+      id: "msg-asst-4",
+      role: "assistant",
+      text: "问题根因已精准定位完成：\n\n1. **动画卡顿原因**：\n   - 顶部帧动画使用 `setInterval` 频繁向 Metro 拉取大图，数秒内产生 300+ 次 HTTP 请求与 80MB 流量洪峰，阻塞了 JS 线程渲染。\n   - **已优化**：已在 React Native 端替换为预加载静态帧切片。\n\n2. **频繁重连原因**：\n   - 窗口失去焦点（如点击 Chrome 控制台）触发了 `AppState` 的 blur 事件，被误当做网络断开并强制执行 `socket.close()`。\n   - **已优化**：已加入 `WebSocket.OPEN` 状态校验与防抖，避免重复重连。",
+      createdAt: 1774000026000,
+      completedAt: 1774000030000,
+      status: "completed",
+      tokens: { input: 18420, output: 530, total: 18950 }
     }
   ];
 
   const mockAgentRuns = [
     {
       run_id: "run-001",
-      title: "构建移动端 UI 原型系统",
-      state: "running",
+      title: "智能体环境就绪",
+      state: "completed",
       steps: [
         { id: "s1", title: "扫描项目源码与协议", status: "completed" },
         { id: "s2", title: "搭建 CSS 设计令牌体系", status: "completed" },
-        { id: "s3", title: "复原 8 大核心业务屏幕", status: "in_progress" },
-        { id: "s4", title: "集成真机工作台并验证", status: "pending" }
+        { id: "s3", title: "复原 8 大核心业务屏幕", status: "completed" },
+        { id: "s4", title: "集成真机工作台并验证", status: "completed" }
       ]
     }
   ];
@@ -291,31 +343,37 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
 
   const mockSessions = [
     {
-      id: "sess-01",
-      title: "构建 Android 原型图 (当前会话)",
-      model: "gemini-2.5-pro",
+      id: "30de8b48",
+      title: "你好 (当前会话)",
+      model: "grok-4.6",
       permission_mode: "ask",
       agent_mode: "chat",
+      context_window_k: 16,
+      tokens: 187435,
       updated_at: 1774000000000,
       created_at: 1773990000000,
       message_count: 5
     },
     {
-      id: "sess-02",
-      title: "排查 EAS 构建 APK 报错",
-      model: "claude-3-7-sonnet",
+      id: "7b12e094",
+      title: "帮我查一下为什么启动动画会卡顿",
+      model: "grok-4.6",
       permission_mode: "ask",
       agent_mode: "chat",
+      context_window_k: 16,
+      tokens: 42100,
       updated_at: 1773950000000,
       created_at: 1773940000000,
       message_count: 14
     },
     {
-      id: "sess-03",
-      title: "优化 SQLite 向量检索 FTS5 性能",
+      id: "9c8821fa",
+      title: "检查本地 SQLite 知识库与向量记忆索引",
       model: "deepseek-r1",
       permission_mode: "readonly",
       agent_mode: "plan",
+      context_window_k: 64,
+      tokens: 95400,
       updated_at: 1773800000000,
       created_at: 1773750000000,
       message_count: 22
@@ -435,7 +493,7 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
         subagents: [...mockSubagents],
 
         knowledgeTab: "documents",
-        settingsSection: "general"
+        settingsSection: "session"
       };
 
       this.listeners = new Set();
@@ -487,6 +545,14 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
     simulateStreamingResponse(onProgress, onDone) {
       if (this.state.isBusy) return;
 
+      this.state.chatMessages.push({
+        id: `msg-user-${Date.now()}`,
+        role: "user",
+        text: "请帮我分析对话界面重构为 Agent Turn 后的优势。",
+        createdAt: Date.now(),
+        status: "completed"
+      });
+
       this.state.isBusy = true;
       this.state.activity = "thinking";
       this.state.statusText = "正在思考...";
@@ -497,15 +563,16 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
         this.state.statusText = "生成中...";
 
         const newMsgId = `msg-stream-${Date.now()}`;
-        const fullText = "收到！我已经为您在 `mobile/remote_ui` 目录下构建好了高保真的 UI 原型系统。\n\n- **设计系统**：复刻 Neo-Brutalism 漫画粗黑线条与高明度配色；\n- **架构体系**：采用解耦的 Store 响应式模型与数据源，支持任意场景一键预览。";
+        const fullText = "重构为统一 **Agent Turn（智能体回合）** 后具有以下三大飞跃式提升：\n\n1. **杜绝孤儿卡片**：不再有漂浮在底部的系统运行框，所有思考、工具与回答收拢在同一 AI 容器内；\n2. **垂直屏效倍增**：思考推导与多步工具轨迹默认收进顶部紧凑折叠托盘（28px），不抢占正文空间；\n3. **Token 透明化**：清晰呈现 `输入 21.2k · 输出 86`，消除几句对话两万 Token 的误解。";
 
         const streamMsg = {
           id: newMsgId,
           role: "assistant",
-          reasoning: "用户触发了实时流式消息演示：\n1. 初始化打字机定时器；\n2. 动态追加字符至当前气泡；\n3. 触发滚动条吸底。",
+          reasoning: "正在推演 Agent Turn 架构收益：\n1. 消息模型从平铺流升级为聚合回合模型；\n2. 思考推导与工具链紧凑折叠收纳；\n3. 输入/输出 Token 明细化拆解呈现；\n4. 消除底部孤儿卡片堆积现象。",
           text: "",
           createdAt: Date.now(),
-          status: "streaming"
+          status: "streaming",
+          tokens: { input: 21240, output: 86, total: 21326 }
         };
 
         this.state.chatMessages.push(streamMsg);
@@ -514,7 +581,7 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
         let charIndex = 0;
         const timer = setInterval(() => {
           if (charIndex < fullText.length) {
-            charIndex += 2;
+            charIndex += 3;
             streamMsg.text = fullText.slice(0, charIndex);
             if (onProgress) onProgress();
             this.notify();
@@ -526,11 +593,21 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
             if (onDone) onDone();
             this.notify();
           }
-        }, 40);
-      }, 1500);
+        }, 30);
+      }, 1200);
     }
 
     simulateToolExecution() {
+      if (this.state.isBusy) return;
+
+      this.state.chatMessages.push({
+        id: `msg-user-tool-${Date.now()}`,
+        role: "user",
+        text: "请运行类型检查，确认 TypeScript 编译是否通过。",
+        createdAt: Date.now(),
+        status: "completed"
+      });
+
       this.state.isBusy = true;
       this.state.activity = "tool";
       this.state.statusText = "正在调用工具...";
@@ -539,8 +616,8 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
       const toolCallMsg = {
         id: toolCallId,
         role: "tool_call",
-        toolName: "git_diff_summary",
-        toolArguments: JSON.stringify({ staged: false, targetPath: "mobile/remote_ui" }, null, 2),
+        toolName: "run_command",
+        toolArguments: JSON.stringify({ CommandLine: "npm run typecheck", Cwd: "mobile" }, null, 2),
         status: "running"
       };
 
@@ -552,16 +629,27 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
         const toolResMsg = {
           id: `tool-res-${Date.now()}`,
           role: "tool",
-          toolName: "git_diff_summary",
-          text: "Summary: 8 files created, +1,240 lines added, 0 deletions.",
+          toolName: "run_command",
+          text: "Exit Code: 0\nOutput: > tsc --noEmit\nDone in 1.48s. 0 errors found.",
           status: "completed"
         };
         this.state.chatMessages.push(toolResMsg);
+
+        const finalReplyMsg = {
+          id: `tool-reply-${Date.now()}`,
+          role: "assistant",
+          text: "TypeScript 类型检查已顺利执行完成！全工程 **0 编译错误**，类型系统完好就绪。",
+          createdAt: Date.now(),
+          status: "completed",
+          tokens: { input: 12400, output: 42, total: 12442 }
+        };
+        this.state.chatMessages.push(finalReplyMsg);
+
         this.state.isBusy = false;
         this.state.activity = "idle";
         this.state.statusText = "在线";
         this.notify();
-      }, 2000);
+      }, 1600);
     }
 
     triggerPermissionPrompt() {
@@ -789,66 +877,206 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
     return html;
   }
 
-  function renderChatMessage(msg) {
-    if (msg.role === "user") {
-      return `<div class="message-bubble-user">${escapeHtml(msg.text)}</div>`;
+  function formatTokenCount(num) {
+    if (typeof num !== "number") return "n/a";
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1).replace(/\.0$/, "") + "k";
     }
-    if (msg.role === "assistant") {
+    return num.toString();
+  }
+
+  function buildChatTurns(messages) {
+    const turns = [];
+    let currentAgentTurn = null;
+
+    messages.forEach((msg) => {
+      if (msg.role === "user") {
+        currentAgentTurn = null;
+        turns.push({
+          type: "user",
+          id: msg.id,
+          text: msg.text,
+          createdAt: msg.createdAt || Date.now(),
+          attachments: msg.attachments || []
+        });
+        return;
+      }
+
+      if (!currentAgentTurn) {
+        currentAgentTurn = {
+          type: "agent",
+          id: `agent-turn-${msg.id}`,
+          model: "Claude 3.7 Sonnet",
+          status: "completed",
+          elapsed: "3.2s",
+          reasoning: "",
+          tools: [],
+          text: "",
+          tokens: null,
+          createdAt: msg.createdAt || Date.now()
+        };
+        turns.push(currentAgentTurn);
+      }
+
+      if (msg.role === "assistant") {
+        if (msg.reasoning) {
+          currentAgentTurn.reasoning = currentAgentTurn.reasoning
+            ? currentAgentTurn.reasoning + "\n\n" + msg.reasoning
+            : msg.reasoning;
+        }
+        if (msg.text) {
+          currentAgentTurn.text = currentAgentTurn.text
+            ? currentAgentTurn.text + "\n\n" + msg.text
+            : msg.text;
+        }
+        if (msg.tokens) {
+          currentAgentTurn.tokens = msg.tokens;
+        }
+        if (msg.status === "streaming" || msg.status === "tool_running") {
+          currentAgentTurn.status = "running";
+        }
+      } else if (msg.role === "tool_call") {
+        currentAgentTurn.tools.push({
+          id: msg.id,
+          name: msg.toolName || "tool",
+          arguments: msg.toolArguments || "",
+          status: msg.status || "completed",
+          duration: "0.8s"
+        });
+        if (msg.status === "running") {
+          currentAgentTurn.status = "running";
+        }
+      } else if (msg.role === "tool") {
+        const lastTool = currentAgentTurn.tools[currentAgentTurn.tools.length - 1];
+        if (lastTool && lastTool.name === msg.toolName) {
+          lastTool.result = msg.text || "";
+          lastTool.status = "completed";
+        } else {
+          currentAgentTurn.tools.push({
+            id: msg.id,
+            name: msg.toolName || "tool",
+            result: msg.text || "",
+            status: "completed",
+            duration: "0.6s"
+          });
+        }
+      }
+    });
+
+    return turns;
+  }
+
+  function renderTurn(turn) {
+    if (turn.type === "user") {
       return `
-        <div class="message-bubble-assistant">
-          ${msg.reasoning ? `
-            <div class="thinking-box">
-              <div class="thinking-header" onclick="const c = this.parentElement.querySelector('.thinking-content'); const isHidden = c.style.display === 'none' || !c.style.display; c.style.display = isHidden ? 'block' : 'none'; this.querySelector('.thinking-arrow').textContent = isHidden ? '▲ 收起' : '▼ 展开';">
-                <div class="thinking-badge">
-                  <span>💡 思考推导</span>
+        <div class="turn-wrapper user-turn-wrapper">
+          <div class="user-turn-bubble">
+            ${escapeHtml(turn.text)}
+          </div>
+          <div class="user-turn-meta">已发送</div>
+        </div>
+      `;
+    }
+
+    const isRunning = turn.status === "running";
+    const hasProcess = Boolean(turn.reasoning || (turn.tools && turn.tools.length > 0));
+    const toolCount = turn.tools ? turn.tools.length : 0;
+    const processSummary = hasProcess
+      ? `⚡ 已执行 ${toolCount} 个工具调用 · 耗时 ${turn.elapsed || '2.8s'}`
+      : "⚡ 执行活动";
+
+    return `
+      <div class="turn-wrapper agent-turn-wrapper">
+        <div class="agent-turn-header">
+          <div class="agent-identity">
+            <div class="agent-avatar-icon">🤖</div>
+            <span class="agent-name">MyAI Agent</span>
+            <span class="agent-model-pill">${turn.model || 'v2.4 Auto'}</span>
+          </div>
+          <div class="agent-status-badge ${isRunning ? 'running' : 'completed'}">
+            ${isRunning
+              ? `<span class="agent-pulse-dot"></span> 正在执行...`
+              : `✓ 完成 · ${turn.elapsed || '3.2s'}`
+            }
+          </div>
+        </div>
+
+        <div class="agent-turn-box">
+          ${hasProcess ? `
+            <div class="agent-process-tray">
+              <div class="process-tray-header" onclick="window.__toggleProcessTray(this)">
+                <div class="tray-summary-left">
+                  <span class="tray-summary-text">${processSummary}</span>
                 </div>
-                <span class="thinking-arrow" style="font-size: 10px; opacity: 0.8;">▼ 展开</span>
+                <span class="tray-toggle-btn">展开详情 ▼</span>
               </div>
-              <div class="thinking-content" style="display: none;">
-                ${escapeHtml(msg.reasoning)}
+
+              <div class="process-tray-body" style="display: none;">
+                ${turn.reasoning ? `
+                  <div class="tray-sub-section">
+                    <div class="tray-sub-title">🧠 思考推导 (Reasoning)</div>
+                    <div class="tray-reasoning-box">${escapeHtml(turn.reasoning)}</div>
+                  </div>
+                ` : ''}
+
+                ${toolCount > 0 ? `
+                  <div class="tray-sub-section">
+                    <div class="tray-sub-title">🛠️ 工具调用轨迹 (${toolCount} 步)</div>
+                    <div class="tool-chain-list">
+                      ${turn.tools.map((tool) => `
+                        <div class="tool-chain-item">
+                          <div class="tool-chain-header" onclick="window.__toggleToolDetail(this)">
+                            <span class="tool-status-dot">✓</span>
+                            <span class="tool-fn-name">${tool.name}</span>
+                            <span class="tool-duration-tag">${tool.duration || '0.7s'}</span>
+                            <span class="tool-step-arrow">▼</span>
+                          </div>
+                          <div class="tool-chain-detail" style="display: none;">
+                            ${tool.arguments ? `
+                              <div class="tool-detail-label">输入参数:</div>
+                              <pre class="tool-detail-pre">${escapeHtml(tool.arguments)}</pre>
+                            ` : ''}
+                            ${tool.result ? `
+                              <div class="tool-detail-label">执行结果:</div>
+                              <pre class="tool-detail-pre">${escapeHtml(tool.result)}</pre>
+                            ` : ''}
+                          </div>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ''}
               </div>
             </div>
           ` : ''}
 
-          <div class="markdown-body">
-            ${formatSimpleMarkdown(msg.text)}
+          <div class="agent-turn-body markdown-body">
+            ${formatSimpleMarkdown(turn.text)}
           </div>
 
-          ${msg.tokens ? `
-            <div style="display: flex; justify-content: flex-end; font-size: 9.5px; color: var(--text-muted); font-weight: 700; margin-top: 2px;">
-              消耗 ${msg.tokens.total} tokens (In: ${msg.tokens.input} / Out: ${msg.tokens.output})
+          <div class="agent-turn-footer">
+            <div class="agent-actions">
+              <button class="agent-btn-mini" onclick="window.__copyAgentResponse(this)">📋 复制</button>
+              <button class="agent-btn-mini" onclick="window.__regenerateTurn(this)">🔄 重新生成</button>
             </div>
-          ` : ''}
-        </div>
-      `;
-    }
-    if (msg.role === "tool_call" || msg.role === "tool") {
-      const isCall = msg.role === "tool_call";
-      return `
-        <div class="tool-group-card">
-          <div class="tool-card-header" onclick="const b = this.parentElement.querySelector('.tool-card-body'); const isHidden = b.style.display === 'none' || !b.style.display; b.style.display = isHidden ? 'block' : 'none'; this.querySelector('.tool-toggle').textContent = isHidden ? '▲ 收起' : '▼ 详情';">
-            <span class="${isCall ? 'tool-badge-call' : 'tool-badge-done'}">
-              ${isCall ? '调用' : '完成'}
-            </span>
-            <span class="tool-name">${msg.toolName || 'tool'}</span>
-            <span class="tool-toggle" style="font-size: 10px; color: var(--text-muted); font-weight: 700;">▼ 详情</span>
-          </div>
-          <div class="tool-card-body" style="display: none;">
-            <pre class="tool-code-preview">${escapeHtml(msg.toolArguments || msg.text || '')}</pre>
+            ${turn.tokens ? `
+              <div class="agent-token-stat">
+                <span class="token-highlight">${formatTokenCount(turn.tokens.total)} tokens</span>
+                <span>(入 ${formatTokenCount(turn.tokens.input)} · 出 ${formatTokenCount(turn.tokens.output)})</span>
+              </div>
+            ` : ''}
           </div>
         </div>
-      `;
-    }
-    return "";
+      </div>
+    `;
   }
 
   function renderChatScreen(state) {
-    const { chatMessages, agentRuns, agentMode } = state;
-    const currentRun = agentRuns[0];
+    const { chatMessages, agentMode } = state;
+    const turns = buildChatTurns(chatMessages);
 
     return `
       <div class="chat-container">
-        <!-- 极简模式切换胶囊 (节省垂直高度) -->
         <div class="mode-switch-wrapper">
           <div class="mode-segmented">
             <button class="mode-segment-btn ${agentMode === 'chat' ? 'active' : ''}" data-mode="chat">
@@ -860,22 +1088,8 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
           </div>
         </div>
 
-        <!-- 紧凑型 Agent 运行指示条 -->
-        ${currentRun ? `
-          <div class="agent-run-timeline">
-            <div class="timeline-left">
-              <span>⚡ ${currentRun.title}</span>
-            </div>
-            <div class="timeline-steps">
-              ${currentRun.steps.map(s => `
-                <span class="step-indicator ${s.status === 'completed' ? 'done' : s.status === 'in_progress' ? 'active' : ''}" title="${s.title}"></span>
-              `).join("")}
-            </div>
-          </div>
-        ` : ''}
-
         <div class="chat-messages custom-scrollbar" id="chat-messages-container">
-          ${chatMessages.map(msg => renderChatMessage(msg)).join("")}
+          ${turns.map((turn, index) => renderTurn(turn, index)).join("")}
         </div>
       </div>
     `;
@@ -1198,74 +1412,157 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
   }
 
   function renderSessionsScreen(state) {
-    const { sessions, deletedSessions } = state;
-
-    return `
-      <div class="sessions-container">
-        <div class="ui-panel-header" style="background: none; padding: 0;">
-          <div class="ui-panel-title-group">
-            <span class="ui-panel-title">会话列表</span>
-            <span class="ui-panel-meta">${sessions.length} 个活跃会话</span>
-          </div>
-          <button class="ui-btn-action ui-btn-primary" id="btn-create-session" style="font-size: 13px; font-weight: 900;">
-            + 新建会话
-          </button>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          ${sessions.map((sess, idx) => `
-            <div class="session-card ${idx === 0 ? 'active' : ''}" data-sessid="${sess.id}">
-              <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-                <div style="width: 32px; height: 32px; border-radius: 8px; background: var(--cyan); border: 2px solid var(--ink); display: flex; align-items: center; justify-content: center; font-size: 14px;">
-                  💬
-                </div>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 13.5px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    ${sess.title}
-                  </div>
-                  <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; margin-top: 2px;">
-                    ${sess.model} · ${sess.permission_mode}
-                  </div>
-                </div>
-              </div>
-              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                <span style="font-size: 10px; color: var(--text-muted); font-weight: 700;">刚刚</span>
-                <button class="ui-btn-action ui-btn-danger" style="padding: 2px 6px; font-size: 10px;" onclick="event.stopPropagation(); alert('已模拟删除该会话至回收站');">删除</button>
-              </div>
-            </div>
-          `).join("")}
-        </div>
-
-        <div class="ui-panel" style="padding: 12px; gap: 8px; margin-top: 8px;">
-          <div class="ui-panel-header" style="padding: 0 0 6px 0;">
-            <span class="ui-panel-title" style="font-size: 13px;">🗑️ 回收站 (${deletedSessions.length})</span>
-            <span style="font-size: 11px; color: var(--text-muted);">保留 30 天</span>
-          </div>
-          ${deletedSessions.map(ds => `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-subtle); font-size: 12px;">
-              <span style="color: var(--text-secondary); text-decoration: line-through;">${ds.title}</span>
-              <button class="ui-btn-action ui-btn-secondary" style="padding: 2px 6px; font-size: 10px;" onclick="alert('已模拟恢复该会话')">恢复</button>
-            </div>
-          `).join("")}
-        </div>
-      </div>
-    `;
+    return renderSettingsScreen({ ...state, settingsSection: "session" });
   }
 
   function renderSettingsScreen(state) {
-    const { settingsSection, relaySettings, models, skills, plugins, subagents } = state;
+    const { settingsSection = "session", relaySettings, models, skills, plugins, subagents, sessions = [], deletedSessions = [] } = state;
 
     const sections = [
-      { key: "general", label: "常规" },
-      { key: "connection", label: "连接" },
-      { key: "model", label: "模型" },
-      { key: "subagent", label: "子智能体" },
-      { key: "skill", label: "技能" },
-      { key: "plugin", label: "插件" }
+      { key: "session", label: "💬 会话" },
+      { key: "model", label: "🧠 模型" },
+      { key: "connection", label: "⚡ 连接" },
+      { key: "general", label: "⚙️ 常规" },
+      { key: "permission", label: "🛡️ 权限" },
+      { key: "subagent", label: "🤖 智能体" },
+      { key: "skill", label: "🛠️ 技能" },
+      { key: "plugin", label: "🔌 插件" }
     ];
 
     let contentHtml = "";
-    if (settingsSection === "connection") {
+
+    // 1. 会话管理中心 (核心改造: 废弃生硬两列方块，采用 Neo-Brutalism 单列流式卡片与当前激活高亮)
+    if (settingsSection === "session") {
+      const activeSession = sessions[0] || {
+        id: "30de8b48",
+        title: "你好",
+        model: "grok-4.6",
+        permission_mode: "ask",
+        context_window_k: 16,
+        tokens: 187435,
+        mode: "chat"
+      };
+
+      contentHtml = `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <!-- 会话列表顶栏 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 2px 0;">
+            <div>
+              <span style="font-size: 15px; font-weight: 900; color: var(--ink);">会话管理</span>
+              <span style="font-size: 11px; color: var(--text-muted); font-weight: 700; margin-left: 6px;">${sessions.length} 个活跃记录</span>
+            </div>
+            <button class="ui-btn-action ui-btn-primary" style="font-size: 12px; font-weight: 900; padding: 4px 12px;" onclick="alert('已模拟创建新会话！')">
+              + 新建会话
+            </button>
+          </div>
+
+          <!-- 当前激活会话卡片 (黄色侧边条指示 + 模式药丸选择器) -->
+          <div class="active-session-card" style="background: var(--surface); border: var(--border-main); border-left: 6px solid var(--yellow); border-radius: var(--radius-md); padding: 12px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 10px; font-weight: 900; background: var(--yellow); border: 1px solid var(--ink); padding: 1px 6px; border-radius: 4px;">当前会话</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); font-weight: 700;">#${activeSession.id || '30de8b48'}</span>
+              </div>
+              <button class="ui-btn-action ui-btn-danger" style="font-size: 10.5px; padding: 2px 8px;" onclick="alert('已模拟归档/删除当前会话')">删除</button>
+            </div>
+
+            <div style="font-size: 14.5px; font-weight: 900; color: var(--ink);">
+              ${activeSession.title}
+            </div>
+
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 700;">
+              ${activeSession.model || 'grok-4.6'} · 询问授权 · 16K 窗口 · 187k 令牌
+            </div>
+
+            <!-- 会话执行模式轻量分段选择 (替代原本占据大半屏幕的双粗按钮) -->
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button style="flex: 1; padding: 6px 10px; background: var(--yellow); border: 1.5px solid var(--ink); border-radius: 6px; font-size: 11.5px; font-weight: 900; color: var(--ink); display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 0 var(--ink);">
+                💬 对话执行 (激活)
+              </button>
+              <button style="flex: 1; padding: 6px 10px; background: var(--surface-alt); border: 1px solid var(--line-light); border-radius: 6px; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; gap: 4px;" onclick="alert('已切换为只读计划规划模式！')">
+                📋 计划规划
+              </button>
+            </div>
+          </div>
+
+          <!-- 历史会话流式卡片 (单列优雅排版，告别两列压迫方块) -->
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${sessions.map((sess, idx) => `
+              <div class="session-card ${idx === 0 ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: var(--border-main); border-radius: var(--radius-md); padding: 10px 12px; box-shadow: var(--shadow-sm); cursor: pointer;" onclick="alert('已切换到会话：${sess.title}')">
+                <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+                  <div style="width: 32px; height: 32px; border-radius: 7px; background: ${idx === 0 ? 'var(--yellow)' : 'var(--cyan)'}; border: 1.5px solid var(--ink); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">
+                    💬
+                  </div>
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 13.5px; font-weight: 900; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      ${sess.title}
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; margin-top: 2px;">
+                      ${sess.model || 'grok-4.6'} · 对话模式 · 16K
+                    </div>
+                  </div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;">
+                  <span style="font-size: 10px; color: var(--text-muted); font-weight: 700;">${idx === 0 ? '刚刚' : idx === 1 ? '10分钟前' : '昨天'}</span>
+                  <button class="ui-btn-action ui-btn-danger" style="padding: 2px 7px; font-size: 10.5px;" onclick="event.stopPropagation(); alert('已删除会话至回收站');">删除</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+
+          <!-- 会话回收站 (虚线底衬) -->
+          <div style="background: var(--paper); border: 2px dashed var(--line); border-radius: 12px; padding: 12px; margin-top: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12.5px; font-weight: 900; color: var(--ink);">🗑️ 回收站 (${deletedSessions.length || 2})</span>
+              <span style="font-size: 10.5px; color: var(--text-muted); font-weight: 700;">保留 30 天</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+              ${(deletedSessions.length > 0 ? deletedSessions : [
+                { id: "del-1", title: "测试旧代码检查会话" },
+                { id: "del-2", title: "临时排查端口冲突" }
+              ]).map(ds => `
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line-subtle);">
+                  <span style="color: var(--text-secondary); text-decoration: line-through;">${ds.title}</span>
+                  <button class="ui-btn-action ui-btn-secondary" style="padding: 2px 8px; font-size: 10px;" onclick="alert('已模拟恢复该会话！')">恢复</button>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (settingsSection === "permission") {
+      // 2. 权限模式策略
+      contentHtml = `
+        <div class="settings-section-card">
+          <span class="ui-panel-title">会话工具调用权限策略</span>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+            <div style="background: var(--surface-alt); border: var(--border-main); border-radius: var(--radius-sm); padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 900;">🔒 只读模式 (Readonly)</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">禁止所有写入与外部终端命令执行</div>
+              </div>
+              <button class="ui-btn-action ui-btn-secondary" style="font-size: 11px;" onclick="alert('已切换为只读模式')">选择</button>
+            </div>
+
+            <div style="background: var(--surface); border: 2px solid var(--ink); border-left: 6px solid var(--yellow); border-radius: var(--radius-sm); padding: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-sm);">
+              <div>
+                <div style="font-size: 13px; font-weight: 900; color: var(--ink);">🛡️ 询问确认 (Ask · 当前推荐)</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">每个工具调用、写文件或跑命令需弹窗授权</div>
+              </div>
+              <span style="font-size: 11px; font-weight: 900; color: var(--ink); background: var(--yellow); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--ink);">已生效</span>
+            </div>
+
+            <div style="background: var(--surface-alt); border: var(--border-main); border-radius: var(--radius-sm); padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 900;">⚡ 完全开放 (Full)</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">自动放行所有授权范围内的工具指令</div>
+              </div>
+              <button class="ui-btn-action ui-btn-secondary" style="font-size: 11px;" onclick="alert('已切换为完全开放模式')">选择</button>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (settingsSection === "connection") {
       contentHtml = `
         <div class="settings-section-card">
           <span class="ui-panel-title">Relay 中继连接</span>
@@ -1387,6 +1684,15 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
 
     return `
       <div class="settings-container">
+        <!-- 顶部标题栏 (去除冗余完成按钮，符合主流Tab规范) -->
+        <div class="ui-panel-header" style="background: none; padding: 0 0 2px 0;">
+          <div class="ui-panel-title-group">
+            <span class="ui-panel-title" style="font-size: 18px; font-weight: 900; color: var(--ink);">设置中心</span>
+            <span class="ui-panel-meta">连接、模型、会话与工具权限集中管理</span>
+          </div>
+        </div>
+
+        <!-- 横向二级导航药丸 (直观文字与图标) -->
         <div class="settings-pill-nav hide-scrollbar">
           ${sections.map(s => `
             <button class="settings-nav-pill ${settingsSection === s.key ? 'active' : ''}" data-ssec="${s.key}">
@@ -1628,6 +1934,47 @@ export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetai
       }
     }
   }
+
+  // 挂载原型工作台全局交互函数
+  window.__toggleProcessTray = function(el) {
+    const tray = el.closest(".agent-process-tray");
+    if (!tray) return;
+    const body = tray.querySelector(".process-tray-body");
+    const toggleBtn = tray.querySelector(".tray-toggle-btn");
+    if (!body || !toggleBtn) return;
+    const isHidden = body.style.display === "none";
+    body.style.display = isHidden ? "flex" : "none";
+    toggleBtn.textContent = isHidden ? "收起详情 ▲" : "展开详情 ▼";
+  };
+
+  window.__toggleToolDetail = function(el) {
+    const item = el.closest(".tool-chain-item");
+    if (!item) return;
+    const detail = item.querySelector(".tool-chain-detail");
+    const arrow = item.querySelector(".tool-step-arrow");
+    if (!detail) return;
+    const isHidden = detail.style.display === "none";
+    detail.style.display = isHidden ? "block" : "none";
+    if (arrow) arrow.textContent = isHidden ? "▲" : "▼";
+  };
+
+  window.__copyAgentResponse = function(btn) {
+    const card = btn.closest(".agent-turn-box");
+    if (!card) return;
+    const textEl = card.querySelector(".agent-turn-body");
+    if (textEl && navigator.clipboard) {
+      navigator.clipboard.writeText(textEl.innerText);
+    }
+    const orig = btn.innerText;
+    btn.innerText = "✓ 已复制";
+    setTimeout(() => { btn.innerText = orig; }, 1200);
+  };
+
+  window.__regenerateTurn = function(btn) {
+    const orig = btn.innerText;
+    btn.innerText = "⚡ 生成中...";
+    setTimeout(() => { btn.innerText = orig; }, 1000);
+  };
 
   // 启动挂载
   if (document.readyState === "loading") {

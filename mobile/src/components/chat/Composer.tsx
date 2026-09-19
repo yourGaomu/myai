@@ -1,9 +1,8 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { ButtonContent } from "../common/ButtonContent";
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { attachmentKey, attachmentMeta, attachmentTitle, isUploadedAssetAttachment } from "../../utils/attachments";
+import { attachmentKey, attachmentTitle, isUploadedAssetAttachment } from "../../utils/attachments";
 
 type Props = {
   attachedFiles: ChatAttachment[];
@@ -34,181 +33,293 @@ export function Composer({
   pendingSend,
   pendingUpload,
 }: Props) {
+  const isBusy = pendingSend || canPause || pendingPause;
+
   return (
-    <View style={styles.composer}>
+    <View style={styles.composerWrapper}>
+      {/* 悬浮附件预览条 */}
       {attachedFiles.length > 0 ? (
-        <View style={styles.attachmentTray}>
+        <ScrollView
+          contentContainerStyle={styles.attachmentTray}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+        >
           {attachedFiles.map((file) => (
-            <View key={attachmentKey(file)} style={[styles.attachmentChip, isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip]}>
-              <View style={styles.flex}>
-                <Text style={styles.attachmentTitle}>{attachmentTitle(file)}</Text>
-                <Text numberOfLines={2} style={styles.attachmentMeta}>{attachmentMeta(file)}</Text>
-              </View>
+            <View
+              key={attachmentKey(file)}
+              style={[
+                styles.attachmentChip,
+                isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip,
+              ]}
+            >
+              <Text style={styles.attachmentIcon}>📎</Text>
+              <Text numberOfLines={1} style={styles.attachmentTitle}>
+                {attachmentTitle(file)}
+              </Text>
               <Pressable
+                accessibilityLabel="移除附件"
                 onPress={() => onRemoveAttachedFile(attachmentKey(file))}
-                style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
+                style={({ pressed }) =>
+                  buttonFeedback(styles.attachmentRemove, pressed)
+                }
               >
-                <Text style={styles.attachmentRemoveText}>移除</Text>
+                <Text style={styles.attachmentRemoveText}>✕</Text>
               </Pressable>
             </View>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
-      <View style={styles.composerInputRow}>
-        <TextInput
-          multiline
-          onChangeText={onChangeMessage}
-          placeholder="输入消息，@引用文件，/使用命令"
-          placeholderTextColor="#776f66"
-          style={styles.messageInput}
-          value={messageInput}
-        />
+
+      {/* 快捷任务提示条 (Agents-Anywhere Workbench Composer Layout) */}
+      <View style={styles.composerHeaderRow}>
+        <View style={styles.composerModeBadge}>
+          <View style={styles.modeLiveDot} />
+          <Text style={styles.modeText}>Agent 任务执行</Text>
+        </View>
+        {Platform.OS === "web" ? (
+          <Text style={styles.composerHintText}>Enter 发送 · Shift+Enter 换行</Text>
+        ) : null}
       </View>
-      <View style={styles.composerActions}>
+
+      {/* 单行一体化输入胶囊 (Neo-Brutalism Composer Bar) */}
+      <View style={styles.composerBox}>
+        {/* 左侧上传附件按钮 */}
         <Pressable
+          accessibilityLabel="附加文件"
           disabled={pendingUpload}
           onPress={onUploadFile}
-          style={({ pressed }) => buttonFeedback([styles.uploadButton, pendingUpload && styles.disabledButton], pressed)}
+          style={({ pressed }) =>
+            buttonFeedback(
+              [styles.uploadBtn, pendingUpload && styles.disabledBtn],
+              pressed,
+            )
+          }
         >
-          <ButtonContent loading={pendingUpload} text={pendingUpload ? "上传中" : "文件"} />
+          {pendingUpload ? (
+            <ActivityIndicator color="#12100e" size="small" />
+          ) : (
+            <Text style={styles.uploadBtnIcon}>📎</Text>
+          )}
         </Pressable>
-        {!pendingSend ? (
+
+        {/* 中间输入框 */}
+        <TextInput
+          accessibilityLabel="输入需求"
+          multiline
+          onChangeText={onChangeMessage}
+          onKeyPress={(e: any) => {
+            if (
+              Platform.OS === "web" &&
+              e.nativeEvent.key === "Enter" &&
+              !e.nativeEvent.shiftKey
+            ) {
+              e.preventDefault();
+              if (!isBusy && messageInput.trim()) {
+                onSend();
+              }
+            }
+          }}
+          placeholder="输入需求，AI 将控制电脑执行..."
+          placeholderTextColor="#8c857b"
+          style={styles.input}
+          value={messageInput}
+        />
+
+        {/* 右侧动作按钮：空闲为 ▶ 发送，执行中为 ■ 暂停 */}
+        {isBusy ? (
           <Pressable
-            onPress={onSend}
-            style={({ pressed }) => buttonFeedback(styles.sendButton, pressed)}
-          >
-            <ButtonContent text="发送" />
-          </Pressable>
-        ) : null}
-        {canPause ? (
-          <Pressable
+            accessibilityLabel="暂停任务"
             disabled={pendingPause}
             onPress={onPause}
-            style={({ pressed }) => buttonFeedback([styles.pauseButton, pendingPause && styles.disabledButton], pressed)}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.actionBtn, styles.pauseBtn, pendingPause && styles.disabledBtn],
+                pressed,
+              )
+            }
           >
-            <ButtonContent loading={pendingPause} text={pendingPause ? "暂停中" : "暂停"} />
+            {pendingPause ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Text style={styles.pauseBtnText}>■</Text>
+            )}
           </Pressable>
-        ) : null}
+        ) : (
+          <Pressable
+            accessibilityLabel="发送需求"
+            onPress={onSend}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.actionBtn, styles.sendBtn],
+                pressed,
+              )
+            }
+          >
+            <Text style={styles.sendBtnText}>▶</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  composer: {
-    gap: 7,
+  composerWrapper: {
+    gap: 4,
+    width: "100%",
+  },
+  composerHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingBottom: 2,
+  },
+  composerModeBadge: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  modeLiveDot: {
+    backgroundColor: "#2e8b38",
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  modeText: {
+    color: "#12100e",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  composerHintText: {
+    color: "#8c857b",
+    fontSize: 10,
+    fontWeight: "700",
   },
   attachmentTray: {
-    gap: 8,
+    flexDirection: "row",
+    gap: 6,
+    paddingBottom: 2,
   },
   attachmentChip: {
     alignItems: "center",
-    backgroundColor: "#f5eefc",
+    backgroundColor: "#fffdf7",
     borderColor: "#12100e",
     borderRadius: 8,
-    borderWidth: 3,
+    borderWidth: 1.5,
+    elevation: 2,
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 1.5, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   uploadedAttachmentChip: {
     backgroundColor: "#b9e9b0",
   },
+  attachmentIcon: {
+    fontSize: 11,
+  },
   attachmentTitle: {
     color: "#12100e",
+    fontSize: 11,
+    fontWeight: "800",
+    maxWidth: 160,
+  },
+  attachmentRemove: {
+    paddingHorizontal: 2,
+  },
+  attachmentRemoveText: {
+    color: "#d94b34",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  composerBox: {
+    alignItems: "center",
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 14,
+    borderWidth: 2,
+    elevation: 3,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    shadowColor: "#12100e",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    width: "100%",
+  },
+  uploadBtn: {
+    alignItems: "center",
+    backgroundColor: "#f8f1e5",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
+  },
+  uploadBtnIcon: {
+    color: "#12100e",
+    fontSize: 14,
+  },
+  input: {
+    backgroundColor: "transparent",
+    color: "#12100e",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    includeFontPadding: false,
+    lineHeight: 18,
+    maxHeight: 72,
+    minHeight: 32,
+    paddingHorizontal: 4,
+    paddingVertical: Platform.OS === "ios" ? 6 : 2,
+    textAlignVertical: "center",
+  },
+  actionBtn: {
+    alignItems: "center",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
+  },
+  sendBtn: {
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    shadowColor: "#12100e",
+    shadowOffset: { height: 1.5, width: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  sendBtnText: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+    marginLeft: 1,
+  },
+  pauseBtn: {
+    backgroundColor: "#25231f",
+    borderColor: "#12100e",
+  },
+  pauseBtnText: {
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "900",
   },
-  attachmentMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    marginTop: 2,
-  },
-  attachmentRemove: {
-    backgroundColor: "#ff7f68",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  attachmentRemoveText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  composerInputRow: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#d7cfc2",
-    borderRadius: 16,
-    borderWidth: 1,
-    elevation: 2,
-    overflow: "hidden",
-    minHeight: 64,
-    shadowColor: "#171613",
-    shadowOffset: { height: 2, width: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    width: "100%",
-  },
-  composerActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 7,
-    width: "100%",
-  },
-  messageInput: {
-    backgroundColor: "transparent",
-    color: "#12100e",
-    includeFontPadding: false,
-    lineHeight: 22,
-    maxHeight: 120,
-    minHeight: 64,
-    paddingBottom: 10,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    textAlignVertical: "top",
-    width: "100%",
-  },
-  sendButton: {
-    alignItems: "center",
-    backgroundColor: "#ff7f68",
-    borderColor: "#25231f",
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 42,
-    minWidth: 78,
-    paddingHorizontal: 14,
-  },
-  uploadButton: {
-    alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#25231f",
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 42,
-    minWidth: 78,
-    paddingHorizontal: 12,
-  },
-  pauseButton: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#25231f",
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 42,
-    minWidth: 78,
-    paddingHorizontal: 12,
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  flex: {
-    flex: 1,
-    minWidth: 0,
+  disabledBtn: {
+    opacity: 0.5,
   },
 });

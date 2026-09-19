@@ -19,7 +19,7 @@ type Props = {
 const maxRailMarkers = 24;
 
 export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }: Props) {
-  if (anchors.length < 2) {
+  if (anchors.length < 8) {
     return null;
   }
 

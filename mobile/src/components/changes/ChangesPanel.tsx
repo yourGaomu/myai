@@ -73,23 +73,35 @@ export function ChangesPanel({
           {!changesMessage && changes.length === 0 ? (
             <Text style={styles.emptyText}>{clientToken ? "当前工作区暂无未提交变更" : "请先完成配对"}</Text>
           ) : (
-            changes.map((entry) => (
-              <Pressable
-                key={`${entry.path}-${entry.index_status || ""}-${entry.worktree_status || ""}`}
-                disabled={pendingDiff}
-                onPress={() => onOpenChange(entry)}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.changeRow, selectedChange === entry.path && styles.changeRowActive, pendingDiff && styles.disabledButton], pressed)
-                }
-              >
-                <Text style={[styles.changeBadge, changeBadgeStyle(entry)]}>{changeLabel(entry)}</Text>
-                <View style={styles.flex}>
-                  <Text numberOfLines={1} style={styles.fileName}>{entry.path}</Text>
-                  <Text style={styles.fileMeta}>{changeMeta(entry)}</Text>
-                </View>
-                <Text style={styles.viewDiffText}>查看 Diff ❯</Text>
-              </Pressable>
-            ))
+            changes.map((entry) => {
+              const lastSlash = entry.path.lastIndexOf("/");
+              const dir = lastSlash >= 0 ? entry.path.slice(0, lastSlash + 1) : "";
+              const baseName = lastSlash >= 0 ? entry.path.slice(lastSlash + 1) : entry.path;
+
+              return (
+                <Pressable
+                  key={`${entry.path}-${entry.index_status || ""}-${entry.worktree_status || ""}`}
+                  disabled={pendingDiff}
+                  onPress={() => onOpenChange(entry)}
+                  style={({ pressed }) =>
+                    buttonFeedback(
+                      [styles.changeRow, selectedChange === entry.path && styles.changeRowActive, pendingDiff && styles.disabledButton],
+                      pressed,
+                    )
+                  }
+                >
+                  <Text style={[styles.changeBadge, changeBadgeStyle(entry)]}>{changeLabel(entry)}</Text>
+                  <View style={styles.flex}>
+                    <Text numberOfLines={1} style={styles.fileName}>
+                      {dir ? <Text style={styles.fileDir}>{dir}</Text> : null}
+                      {baseName}
+                    </Text>
+                    <Text style={styles.fileMeta}>{changeMeta(entry)}</Text>
+                  </View>
+                  <Text style={styles.viewDiffText}>查看 Diff ❯</Text>
+                </Pressable>
+              );
+            })
           )}
         </View>
       </View>

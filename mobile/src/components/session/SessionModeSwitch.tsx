@@ -11,20 +11,14 @@ type Props = {
   pending: boolean;
 };
 
-const modes: Array<{ label: string; mode: SessionAgentMode }> = [
-  { label: "对话", mode: "chat" },
-  { label: "计划", mode: "plan" },
+const modes: Array<{ icon: string; label: string; mode: SessionAgentMode }> = [
+  { icon: "💬", label: "对话模式", mode: "chat" },
+  { icon: "🎯", label: "规划模式", mode: "plan" },
 ];
 
 export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pending }: Props) {
   return (
-    <View style={styles.row}>
-      <View style={styles.copy}>
-        <Text style={styles.title}>会话模式</Text>
-        <Text numberOfLines={1} style={styles.description}>
-          {pending ? "正在切换模式..." : mode === "plan" ? "先生成计划，再确认执行" : "直接对话并执行任务"}
-        </Text>
-      </View>
+    <View style={styles.wrapper}>
       <View accessibilityRole="tablist" style={styles.control}>
         {modes.map((item) => {
           const selected = mode === item.mode;
@@ -35,9 +29,25 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
               disabled={disabled || pending || selected}
               key={item.mode}
               onPress={() => onChange(item.mode)}
-              style={({ pressed }) => buttonFeedback([styles.button, selected && styles.buttonActive], pressed)}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [styles.button, selected && styles.buttonActive],
+                  pressed,
+                )
+              }
             >
-              {pending && selected ? <ActivityIndicator color="#171613" size="small" /> : <Text style={styles.buttonText}>{item.label}</Text>}
+              {pending && selected ? (
+                <ActivityIndicator color="#12100e" size="small" />
+              ) : (
+                <Text
+                  style={[
+                    styles.buttonText,
+                    selected && styles.buttonTextActive,
+                  ]}
+                >
+                  {`${item.icon} ${item.label}`}
+                </Text>
+              )}
             </Pressable>
           );
         })}
@@ -47,26 +57,10 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
 }
 
 const styles = StyleSheet.create({
-  row: {
+  wrapper: {
     alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-  },
-  copy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  title: {
-    color: "#171613",
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  description: {
-    color: "#777269",
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 3,
+    justifyContent: "center",
+    paddingVertical: 2,
   },
   control: {
     backgroundColor: "#ded7cc",
@@ -74,27 +68,32 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 2,
     flexDirection: "row",
+    gap: 2,
     padding: 3,
   },
   button: {
     alignItems: "center",
     borderRadius: 999,
-    height: 34,
+    height: 32,
     justifyContent: "center",
-    minWidth: 64,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
   },
   buttonActive: {
     backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderWidth: 1.5,
     elevation: 2,
-    shadowColor: "#171613",
+    shadowColor: "#12100e",
     shadowOffset: { height: 1, width: 0 },
-    shadowOpacity: 0.14,
-    shadowRadius: 3,
+    shadowOpacity: 0.16,
+    shadowRadius: 2,
   },
   buttonText: {
-    color: "#171613",
+    color: "#6c665f",
     fontSize: 12,
     fontWeight: "900",
+  },
+  buttonTextActive: {
+    color: "#12100e",
   },
 });

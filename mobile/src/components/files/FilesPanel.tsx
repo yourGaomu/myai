@@ -1,4 +1,4 @@
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { ButtonContent } from "../common/ButtonContent";
 import type { AssetSummary, FileEntry, FileReadResultPayload } from "../../protocol";
@@ -113,7 +113,7 @@ export function FilesPanel({
             onPress={onGoToParent}
             style={({ pressed }) => buttonFeedback([styles.smallParentButton, (!fileParent || pendingFiles) && styles.disabledButton], pressed)}
           >
-            <Text style={styles.smallParentButtonText}>上一级</Text>
+            <Text style={styles.smallParentButtonText}>❮ 返回上一级</Text>
           </Pressable>
         </View>
 
@@ -138,7 +138,14 @@ export function FilesPanel({
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.fileName}>{entry.name}</Text>
                 </View>
-                <Text style={styles.fileSizeText}>{entry.type === "dir" ? "目录" : formatBytes(entry.size || 0)}</Text>
+                {entry.type === "dir" ? (
+                  <View style={styles.dirRowRight}>
+                    <Text style={styles.dirTag}>目录</Text>
+                    <Text style={styles.dirChevron}>❯</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.fileSizeText}>{formatBytes(entry.size || 0)}</Text>
+                )}
               </Pressable>
             ))
           )}
@@ -193,16 +200,16 @@ const styles = StyleSheet.create({
   },
   panel: {
     backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
+    borderColor: "#12100e",
     borderRadius: 16,
     borderWidth: 2,
     elevation: 3,
     gap: 10,
     padding: 12,
     shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   panelHeader: {
     alignItems: "center",
@@ -236,9 +243,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 1,
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   primaryButtonText: {
     color: "#12100e",
@@ -256,9 +263,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   actionButtonText: {
     color: "#12100e",
@@ -270,28 +277,36 @@ const styles = StyleSheet.create({
   },
   breadcrumbBar: {
     alignItems: "center",
-    backgroundColor: "#f8f1e5",
-    borderColor: "#d7cfc2",
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: "#fdfbf7",
+    borderColor: "#12100e",
+    borderRadius: 10,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   breadcrumbText: {
-    color: "#4a453e",
+    color: "#12100e",
     fontFamily: "monospace",
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   smallParentButton: {
-    backgroundColor: "#fffdf7",
+    backgroundColor: "#ffd84f",
     borderColor: "#12100e",
     borderRadius: 6,
     borderWidth: 1.5,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   smallParentButtonText: {
     color: "#12100e",
@@ -303,26 +318,30 @@ const styles = StyleSheet.create({
   },
   assetRow: {
     alignItems: "center",
-    backgroundColor: "#f8f1e5",
-    borderColor: "#d7cfc2",
+    backgroundColor: "#fdfbf7",
+    borderColor: "#12100e",
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 10,
-    padding: 9,
+    padding: 10,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
   },
   assetEmoji: {
     fontSize: 16,
   },
   fileRow: {
     alignItems: "center",
-    borderBottomColor: "#eee8df",
+    borderBottomColor: "#ede7dd",
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 8,
     minHeight: 40,
     paddingHorizontal: 4,
-    paddingVertical: 7,
+    paddingVertical: 8,
   },
   fileRowLast: {
     borderBottomWidth: 0,
@@ -332,7 +351,8 @@ const styles = StyleSheet.create({
   },
   fileName: {
     color: "#12100e",
-    fontSize: 13,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontSize: 12.5,
     fontWeight: "800",
   },
   fileMeta: {
@@ -340,8 +360,30 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
   },
+  dirRowRight: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+  },
+  dirTag: {
+    backgroundColor: "#f3ede2",
+    borderColor: "#d5cabb",
+    borderRadius: 4,
+    borderWidth: 1,
+    color: "#6c665f",
+    fontSize: 10,
+    fontWeight: "800",
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  dirChevron: {
+    color: "#8c857b",
+    fontSize: 12,
+    fontWeight: "900",
+  },
   fileSizeText: {
     color: "#777066",
+    fontFamily: "monospace",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -349,7 +391,7 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   darkCodeContainer: {
-    backgroundColor: "#1e1e1e",
+    backgroundColor: "#12100e",
     borderColor: "#25231f",
     borderRadius: 10,
     borderWidth: 1.5,
