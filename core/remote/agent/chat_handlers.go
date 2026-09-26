@@ -12,6 +12,7 @@ import (
 	domainagentrun "myai/core/domain/agentrun"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
+	intentport "myai/core/port/intent"
 	"myai/core/remote/protocol"
 	"myai/core/service"
 )
@@ -59,6 +60,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	if sessionID == "" {
 		return fmt.Errorf("session id is empty")
 	}
+	ctx = intentport.WithRequestID(ctx, message.RequestID)
 
 	//调用流式回答
 	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {

@@ -30,10 +30,11 @@ const (
 // being inferred from Intent so a future classifier can refuse planning for
 // an implementation-shaped request when context or permissions are missing.
 type AutoPlanDecision struct {
-	Intent     AutoPlanIntent
-	ShouldPlan bool
-	Confidence float64
-	Reason     string
+	Intent        AutoPlanIntent
+	ShouldPlan    bool
+	ShouldExecute bool
+	Confidence    float64
+	Reason        string
 }
 
 // AutoPlanClassifier decides whether a root user request should enter the
@@ -72,10 +73,11 @@ func (RuleBasedAutoPlanClassifier) Classify(_ context.Context, current *session.
 	}
 	if shouldAutoPlanRequest(current, trimmed) {
 		return AutoPlanDecision{
-			Intent:     AutoPlanIntentImplementation,
-			ShouldPlan: true,
-			Confidence: 0.9,
-			Reason:     "implementation request has sufficient code or project context",
+			Intent:        AutoPlanIntentImplementation,
+			ShouldPlan:    true,
+			ShouldExecute: true,
+			Confidence:    0.9,
+			Reason:        "implementation request has sufficient code or project context",
 		}, nil
 	}
 	return AutoPlanDecision{
@@ -240,7 +242,7 @@ func parseAutoPlanDecision(content string, minConfidence float64) (AutoPlanDecis
 	var reason string
 	_ = decodeClassifierField(raw, "reason", &reason)
 	return AutoPlanDecision{
-		Intent: intent, ShouldPlan: shouldPlan, Confidence: confidence,
+		Intent: intent, ShouldPlan: shouldPlan, ShouldExecute: shouldPlan, Confidence: confidence,
 		Reason: strings.TrimSpace(reason),
 	}, nil
 }

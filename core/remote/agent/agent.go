@@ -347,6 +347,18 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleModelConfigEnabledSet(ctx, conn, message)
 	case protocol.TypeModelConfigDefaultSet:
 		return a.handleModelConfigDefaultSet(ctx, conn, message)
+	case protocol.TypeIntentConfigQuery:
+		return a.handleIntentConfigQuery(ctx, conn, message)
+	case protocol.TypeIntentConfigSet:
+		return a.handleIntentConfigSet(ctx, conn, message)
+	case protocol.TypeIntentConfigTest:
+		return a.handleIntentConfigTest(ctx, conn, message)
+	case protocol.TypeIntentTraceList:
+		return a.handleIntentTraceList(ctx, conn, message)
+	case protocol.TypeIntentTraceGet:
+		return a.handleIntentTraceGet(ctx, conn, message)
+	case protocol.TypeIntentTraceClear:
+		return a.handleIntentTraceClear(ctx, conn, message)
 	case protocol.TypeSkillList:
 		return a.handleSkillList(ctx, conn, message)
 	case protocol.TypeSkillReload:

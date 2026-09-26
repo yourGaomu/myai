@@ -80,6 +80,7 @@ type Configuration struct {
 	AgentRuns        agentrunport.Repository
 	AgentRunObserver agentrunport.CompletionObserver
 	MemoryContext    memoryretrievalapi.ContextPreparer
+	IntentController *service.IntentController
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -338,13 +339,16 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	}
 
 	// ChatService 只拿接口，不知道 Mongo、Redis、LangChainGo 等具体技术实现。
+	classifier := service.AutoPlanClassifier(service.ModelAutoPlanClassifier{Models: configuration.Models, Metadata: configuration.Models})
+	if configuration.IntentController != nil {
+		classifier = configuration.IntentController
+	}
 	return service.ChatDependencies{
-		Models:          configuration.Models,
-		AutoPlanEnabled: true,
-		AutoPlanClassifier: service.ModelAutoPlanClassifier{
-			Models: configuration.Models, Metadata: configuration.Models,
-		},
-		ModelMetadata: configuration.Models,
+		Models:             configuration.Models,
+		AutoPlanEnabled:    true,
+		AutoPlanClassifier: classifier,
+		IntentController:   configuration.IntentController,
+		ModelMetadata:      configuration.Models,
 
 		GenerationTasks: generationTasks,
 		TurnInputQueue:  turnInputQueue,

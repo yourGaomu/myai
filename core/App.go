@@ -22,6 +22,8 @@ import (
 	contenthashid "myai/core/adapter/id/contenthash"
 	snowflakeid "myai/core/adapter/id/snowflake"
 	uuidadapter "myai/core/adapter/id/uuid"
+	jevclient "myai/core/adapter/intent/jev"
+	intentstore "myai/core/adapter/intent/store"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
 	memorydreamadapter "myai/core/adapter/memory/dream"
 	memoryextractor "myai/core/adapter/memory/extractor"
@@ -89,6 +91,7 @@ import (
 	agentrunport "myai/core/port/agentrun"
 	cacheport "myai/core/port/cache"
 	executionport "myai/core/port/execution"
+	intentport "myai/core/port/intent"
 	knowledgeport "myai/core/port/knowledge"
 	documentprocessorport "myai/core/port/knowledge/documentprocessor"
 	memoryport "myai/core/port/memory"
@@ -740,8 +743,21 @@ func (app *Application) InitWorkspaceIsolation() {
 }
 
 func (app *Application) InitChatService() {
+	var intentRepository intentport.Store = intentstore.NewMemory()
+	if app.mongoDb != nil {
+		mongoStore, err := intentstore.NewMongo(context.Background(), app.mongoDb, app.properties.Mongo.Database)
+		if err != nil {
+			panic(fmt.Errorf("init intent store failed: %w", err))
+		}
+		intentRepository = mongoStore
+	}
+	intentController, err := service.NewIntentController(context.Background(), intentRepository, jevclient.Client{}, service.ModelAutoPlanClassifier{Models: app.client, Metadata: app.client})
+	if err != nil {
+		panic(fmt.Errorf("init intent controller failed: %w", err))
+	}
 	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
+		IntentController: intentController,
 		Models:           app.client,
 		ModelFactory:     adaptermodel.NewFactory(),
 		Sessions:         app.sessionMemory,

@@ -225,6 +225,32 @@ func TestSendMessageAutomaticallyPlansAndExecutesDevelopmentRequest(t *testing.T
 	}
 }
 
+func TestSendMessagePlansWithoutExecutingWhenDecisionRequiresConfirmation(t *testing.T) {
+	current := &session.Session{ID: "session-1", Kind: session.KindUser, Model: "model-1", AgentMode: session.AgentModeChat}
+	plan := &agentplan.Plan{ID: "plan-1", SessionID: current.ID, Status: agentplan.StatusDraft,
+		Steps: []agentplan.Step{{ID: "step-1", Order: 1, Title: "Implement", Status: agentplan.StepStatusPending}}}
+	planner := &recordingAutoPlanGeneration{response: generationresult.GenerationResponse{
+		SessionID: current.ID, Plan: plan, Result: modelport.ChatResult{Content: "plan ready"},
+	}}
+	executor := &recordingAutoPlanExecution{}
+	chat := NewChatService(ChatDependencies{
+		AutoPlanEnabled: true, AutoPlanClassifier: planOnlyClassifier{},
+		Models: autoPlanModelRegistry{}, SessionLoader: autoPlanSessionLoader{current: current},
+		MessageCommands: &recordingAutoPlanMessages{current: current},
+		GenerationTasks: planner, PlanExecution: executor,
+	})
+	response, err := chat.SendMessageStreamForSession(context.Background(), current.ID, "实现一个功能", modelport.ChatStreamHandler{})
+	if err != nil || response.Plan == nil || len(executor.commands) != 0 {
+		t.Fatalf("plan-only response = %#v, executor calls = %d, error = %v", response, len(executor.commands), err)
+	}
+}
+
+type planOnlyClassifier struct{}
+
+func (planOnlyClassifier) Classify(context.Context, *session.Session, string) (AutoPlanDecision, error) {
+	return AutoPlanDecision{Intent: AutoPlanIntentImplementation, ShouldPlan: true}, nil
+}
+
 func TestSendMessageResumesExistingPlanOnContinuationCommand(t *testing.T) {
 	current := &session.Session{
 		ID: "session-1", Kind: session.KindUser, Model: "model-1", AgentMode: session.AgentModeChat,

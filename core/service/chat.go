@@ -136,7 +136,8 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	var currentBefore *session.Session
 	autoPlan := false
 	resumePlan := false
-	//如果启动了自动计划模式
+	var autoPlanDecision AutoPlanDecision
+	// Explicit continuation bypasses intent classification, including when Jev is disabled.
 	if s.dependencies.AutoPlanEnabled {
 		if s.dependencies.SessionLoader == nil {
 			return ChatResponse{}, errors.New("session loader is nil")
@@ -145,10 +146,11 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		if err != nil {
 			return ChatResponse{}, err
 		}
-		//判断用户输入属于什么意图
-		autoPlanDecision := s.classifyAutoPlanRequest(ctx, currentBefore, input)
-		autoPlan = autoPlanDecision.ShouldPlan
 		resumePlan = shouldResumePlanRequest(currentBefore, input)
+		if !resumePlan {
+			autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
+			autoPlan = autoPlanDecision.ShouldPlan
+		}
 	}
 
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
@@ -195,7 +197,10 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	}
 
 	if autoPlan {
-		return s.generateAndExecutePlan(ctx, current, input, title, retrievalInfo, stream)
+		if autoPlanDecision.ShouldExecute {
+			return s.generateAndExecutePlan(ctx, current, input, title, retrievalInfo, stream)
+		}
+		return s.generatePlanOnly(ctx, current, input, title, retrievalInfo, stream)
 	}
 	if resumePlan {
 		return s.executeExistingPlan(ctx, current.ID, stream, retrievalInfo)
@@ -225,6 +230,32 @@ func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *sess
 // the existing step executor. The planning snapshot is isolated from the
 // live session, while its captured plan is persisted to the same session.
 func (s *ChatService) generateAndExecutePlan(ctx context.Context, current *session.Session, input string, title string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	planning, err := s.generatePlanOnly(ctx, current, input, title, retrievalInfo, stream)
+	if err != nil || planning.Plan == nil || planning.Plan.Status == agentplan.StatusDone {
+		return planning, err
+	}
+	if s.dependencies.PlanExecution == nil {
+		return planning, errors.New("plan execution service is nil")
+	}
+	execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
+		SessionID: current.ID, ParentRunID: planning.RunID,
+		Stream: stream,
+	}, nil)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	return ChatResponse{
+		SessionID: execution.SessionID,
+		RunID:     execution.RunID,
+		Result:    execution.Result,
+		Context:   execution.Context,
+		Compact:   execution.Compact,
+		Plan:      execution.Plan,
+		Retrieval: retrievalInfo,
+	}, nil
+}
+
+func (s *ChatService) generatePlanOnly(ctx context.Context, current *session.Session, input string, title string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	planningSession := session.Clone(current)
 	planningSession.AgentMode = session.AgentModePlan
 	// The plan is delivered through OnPlanUpdate. Keeping the planning answer
@@ -242,26 +273,7 @@ func (s *ChatService) generateAndExecutePlan(ctx context.Context, current *sessi
 	if planning.Plan.Status == agentplan.StatusDone {
 		return planning, nil
 	}
-	if s.dependencies.PlanExecution == nil {
-		return planning, errors.New("plan execution service is nil")
-	}
-
-	execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
-		SessionID: current.ID, ParentRunID: planning.RunID,
-		Stream: stream,
-	}, nil)
-	if err != nil {
-		return ChatResponse{}, err
-	}
-	return ChatResponse{
-		SessionID: execution.SessionID,
-		RunID:     execution.RunID,
-		Result:    execution.Result,
-		Context:   execution.Context,
-		Compact:   execution.Compact,
-		Plan:      execution.Plan,
-		Retrieval: retrievalInfo,
-	}, nil
+	return planning, nil
 }
 
 func (s *ChatService) executeExistingPlan(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, retrievalInfo chatretrievalresult.Context) (ChatResponse, error) {

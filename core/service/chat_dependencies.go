@@ -37,6 +37,7 @@ type ChatDependencies struct {
 	// whether an incoming request enters autonomous planning. When nil, the
 	// compatibility RuleBasedAutoPlanClassifier is used.
 	AutoPlanClassifier AutoPlanClassifier
+	IntentController   *IntentController
 	Models             modelport.Registry
 	ModelMetadata      modelport.MetadataProvider
 

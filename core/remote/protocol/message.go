@@ -80,6 +80,18 @@ const (
 	TypeModelConfigEnabledSet            MessageType = "model_config_enabled_set"
 	TypeModelConfigDefaultSet            MessageType = "model_config_default_set"
 	TypeModelConfigMutationResult        MessageType = "model_config_mutation_result"
+	TypeIntentConfigQuery                MessageType = "intent_config_query"
+	TypeIntentConfigQueryResult          MessageType = "intent_config_query_result"
+	TypeIntentConfigSet                  MessageType = "intent_config_set"
+	TypeIntentConfigSetResult            MessageType = "intent_config_set_result"
+	TypeIntentConfigTest                 MessageType = "intent_config_test"
+	TypeIntentConfigTestResult           MessageType = "intent_config_test_result"
+	TypeIntentTraceList                  MessageType = "intent_trace_list"
+	TypeIntentTraceListResult            MessageType = "intent_trace_list_result"
+	TypeIntentTraceGet                   MessageType = "intent_trace_get"
+	TypeIntentTraceGetResult             MessageType = "intent_trace_get_result"
+	TypeIntentTraceClear                 MessageType = "intent_trace_clear"
+	TypeIntentTraceClearResult           MessageType = "intent_trace_clear_result"
 	TypeSkillList                        MessageType = "skill_list"
 	TypeSkillListResult                  MessageType = "skill_list_result"
 	TypeSkillReload                      MessageType = "skill_reload"
@@ -826,6 +838,77 @@ type ModelConfigMutationResultPayload struct {
 	DeletedID string         `json:"deleted_id,omitempty"`
 	Models    []ModelSummary `json:"models"`
 	Message   string         `json:"message,omitempty"`
+}
+
+type IntentConfigPayload struct {
+	Strategy          string  `json:"strategy"`
+	BaseURL           string  `json:"base_url"`
+	APIKey            string  `json:"api_key,omitempty"`
+	ClearAPIKey       bool    `json:"clear_api_key,omitempty"`
+	Model             string  `json:"model"`
+	PlanConfidence    float64 `json:"plan_confidence"`
+	ExecuteConfidence float64 `json:"execute_confidence"`
+}
+
+type IntentConfigResultPayload struct {
+	Strategy          string  `json:"strategy"`
+	BaseURL           string  `json:"base_url"`
+	HasAPIKey         bool    `json:"has_api_key"`
+	Model             string  `json:"model"`
+	PlanConfidence    float64 `json:"plan_confidence"`
+	ExecuteConfidence float64 `json:"execute_confidence"`
+}
+
+type IntentConfigTestResultPayload struct {
+	Success   bool  `json:"success"`
+	LatencyMS int64 `json:"latency_ms"`
+}
+
+type IntentTraceListPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type IntentTraceGetPayload struct {
+	TraceID string `json:"trace_id"`
+}
+
+type IntentTraceClearPayload struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type IntentTracePayload struct {
+	TraceID           string    `json:"trace_id"`
+	SessionID         string    `json:"session_id,omitempty"`
+	RequestID         string    `json:"request_id,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	DurationMS        int64     `json:"duration_ms"`
+	BaseURL           string    `json:"base_url"`
+	RequestedModel    string    `json:"requested_model"`
+	ResponseModel     string    `json:"response_model,omitempty"`
+	RequestBody       string    `json:"request_body,omitempty"`
+	ResponseBody      string    `json:"response_body,omitempty"`
+	ResponseTruncated bool      `json:"response_truncated,omitempty"`
+	HTTPStatus        int       `json:"http_status,omitempty"`
+	Status            string    `json:"status"`
+	ErrorCode         string    `json:"error_code,omitempty"`
+	Choice            string    `json:"choice,omitempty"`
+	Confidence        float64   `json:"confidence,omitempty"`
+	ShouldPlan        bool      `json:"should_plan"`
+	ShouldExecute     bool      `json:"should_execute"`
+	Route             string    `json:"route,omitempty"`
+}
+
+type IntentTraceListResultPayload struct {
+	Traces []IntentTracePayload `json:"traces"`
+}
+
+type IntentTraceGetResultPayload struct {
+	Trace IntentTracePayload `json:"trace"`
+}
+
+type IntentTraceClearResultPayload struct {
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type SkillListPayload struct{}

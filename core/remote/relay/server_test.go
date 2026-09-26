@@ -41,6 +41,22 @@ func TestAgentRunMessagesDoNotFinishChatRoute(t *testing.T) {
 	}
 }
 
+func TestIntentResponsesFinishTheirRoutes(t *testing.T) {
+	cases := []struct{ request, response protocol.MessageType }{
+		{protocol.TypeIntentConfigQuery, protocol.TypeIntentConfigQueryResult},
+		{protocol.TypeIntentConfigSet, protocol.TypeIntentConfigSetResult},
+		{protocol.TypeIntentConfigTest, protocol.TypeIntentConfigTestResult},
+		{protocol.TypeIntentTraceList, protocol.TypeIntentTraceListResult},
+		{protocol.TypeIntentTraceGet, protocol.TypeIntentTraceGetResult},
+		{protocol.TypeIntentTraceClear, protocol.TypeIntentTraceClearResult},
+	}
+	for _, tc := range cases {
+		if !isTerminalResponseForRequest(tc.request, tc.response) || !isTerminalResponseForRequest(tc.request, protocol.TypeError) {
+			t.Fatalf("request %s is not finished by %s or error", tc.request, tc.response)
+		}
+	}
+}
+
 func TestAgentRegistrationSupersedesPreviousPeer(t *testing.T) {
 	server := newTestServer()
 	previous := &peer{}
