@@ -14,10 +14,13 @@ import (
 )
 
 const (
-	EventPreToolUse     EventType = "pre_tool_use"
-	EventPostToolUse    EventType = "post_tool_use"
-	EventSessionChanged EventType = "session_changed"
-	EventSkillReloaded  EventType = "skill_reloaded"
+	EventPreToolUse       EventType = "pre_tool_use"
+	EventPostToolUse      EventType = "post_tool_use"
+	EventSessionChanged   EventType = "session_changed"
+	EventSkillReloaded    EventType = "skill_reloaded"
+	EventSessionStart     EventType = "session_start"
+	EventUserPromptSubmit EventType = "user_prompt_submit"
+	EventStop             EventType = "stop"
 )
 
 const (
@@ -41,6 +44,7 @@ type Event struct {
 	Result        string    `json:"result,omitempty"`
 	Error         string    `json:"error,omitempty"`
 	SkillCount    int       `json:"skill_count,omitempty"`
+	Prompt        string    `json:"prompt,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
@@ -113,6 +117,18 @@ func (m *Manager) Emit(ctx context.Context, event Event) error {
 	event = normalizeEvent(event)
 	_, err := m.handle(ctx, event)
 	return err
+}
+
+func (m *Manager) RunLifecycle(ctx context.Context, event Event) (Result, error) {
+	event = normalizeEvent(event)
+	if event.Type == "" {
+		return Result{}, nil
+	}
+	results, err := m.handle(ctx, event)
+	if err != nil {
+		return Result{}, err
+	}
+	return aggregatePreToolUse(results), nil
 }
 
 func (m *Manager) handle(ctx context.Context, event Event) ([]Result, error) {
@@ -263,7 +279,7 @@ func normalizeEvent(event Event) Event {
 func normalizeEventType(event EventType) EventType {
 	value := EventType(strings.ToLower(strings.TrimSpace(string(event))))
 	switch value {
-	case EventPreToolUse, EventPostToolUse, EventSessionChanged, EventSkillReloaded:
+	case EventPreToolUse, EventPostToolUse, EventSessionChanged, EventSkillReloaded, EventSessionStart, EventUserPromptSubmit, EventStop:
 		return value
 	default:
 		return ""

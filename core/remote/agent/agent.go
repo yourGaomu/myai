@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	mathRand "math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -95,6 +96,8 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	backoff := time.Second
 	for {
+		//循环调用
+		connectedAt := time.Now()
 		connected, err := a.runConnection(ctx)
 		if ctx.Err() != nil {
 			fmt.Println("agent stopped.")
@@ -103,7 +106,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err != nil {
 			log.Printf("agent connection ended: %v; reconnecting in %s", err, backoff)
 		}
-		if connected {
+
+		if connected && time.Since(connectedAt) >= 30*time.Second {
 			backoff = time.Second
 		}
 		timer := time.NewTimer(backoff)
@@ -115,10 +119,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-timer.C:
 		}
 		if backoff < 30*time.Second {
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
+			backoffMax := float64(backoff) * 1.2
+			backoffMin := float64(backoff) * 0.8
+			delta := backoffMax - backoffMin
+			randVal := backoffMin + delta*mathRand.Float64()
+			backoff = time.Duration(randVal)
+		}
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
 		}
 	}
 }
@@ -146,8 +154,10 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	}); err != nil {
 		return true, err
 	}
+	//是否存在子智能体调用能力
 	if a.subagentEvents != nil {
 		if source, ok := a.subagentEvents.(SubagentTaskEventSource); ok {
+			//如果有高级功能
 			events, unsubscribe := source.SubscribeTaskEvents("", 0, 32)
 			defer unsubscribe()
 			go a.forwardSubagentTaskEvents(ctx, conn, events)
@@ -167,12 +177,15 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	defer ticker.Stop()
 	for {
 		select {
+		//如果进行退出去了，优雅的关闭
 		case <-ctx.Done():
 			_ = a.writeMessage(conn, protocol.TypeAgentOffline, map[string]string{"status": "offline"})
 			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "agent stopped"))
 			return true, nil
+			//如果存在了error
 		case err := <-readDone:
 			return true, err
+			//定时到了，发送消息
 		case <-ticker.C:
 			if err := a.writeMessage(conn, protocol.TypeHeartbeat, map[string]string{"time": time.Now().Format(time.RFC3339)}); err != nil {
 				return true, err
@@ -271,6 +284,7 @@ func (a *Agent) writeRemoteMessage(conn *websocket.Conn, messageType protocol.Me
 func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	// 这里只做协议分发；handler 负责 DTO 映射，真正业务继续委托给 ChatFacade。
 	switch message.Type {
+	//用户发起一次对话
 	case protocol.TypeUserMessage:
 		go a.processUserMessage(ctx, conn, message)
 	case protocol.TypeSessionRegenerate:
@@ -459,18 +473,16 @@ func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, me
 	if sessionID == "" {
 		sessionID = a.chatService.CurrentSessionID()
 	}
-	// 同一 Session 串行执行，避免两次生成同时追加消息或覆盖 Plan；不同 Session 可并行。
+	// start 在状态锁内原子判断并登记运行任务；运行中的追加消息可以立即入队。
 	runtime := a.runtimes.get(sessionID)
-	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
 
 	runCtx, cancel, ok := runtime.start(ctx)
+	// 此时会话已经有对话在生成了。
 	if !ok {
-		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: "session is already running"}); writeErr != nil {
-			log.Printf("send remote busy error failed: %v", writeErr)
-		}
+		a.enqueueRunningTurnInput(conn, message, sessionID)
 		return
 	}
+	// 当前任务结束后清除运行状态并取消其 Context。
 	defer runtime.finish(cancel)
 
 	if err := a.handleUserMessage(runCtx, conn, message); err != nil {

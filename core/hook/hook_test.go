@@ -49,6 +49,27 @@ func TestCommandHookHandlesJSONResult(t *testing.T) {
 	}
 }
 
+func TestManagerRunLifecycleAggregatesDeny(t *testing.T) {
+	manager := &Manager{}
+	manager.Register(handlerFunc(func(ctx context.Context, event Event) (Result, error) {
+		if event.Type != EventUserPromptSubmit || event.Prompt != "hello" {
+			t.Fatalf("unexpected lifecycle event: %+v", event)
+		}
+		return Result{Decision: DecisionDeny, Message: "blocked"}, nil
+	}))
+
+	result, err := manager.RunLifecycle(context.Background(), Event{
+		Type:   EventUserPromptSubmit,
+		Prompt: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != DecisionDeny || result.Message != "blocked" {
+		t.Fatalf("unexpected lifecycle result: %+v", result)
+	}
+}
+
 func TestManagerEmitAndPreToolUse(t *testing.T) {
 	var seen []Event
 	manager := &Manager{}

@@ -17,6 +17,7 @@ import (
 type ChatGenerationFacade interface {
 	// 远程层只声明实际使用的方法，避免依赖 ChatService 的全部实现细节。
 	SendMessageStreamForSession(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler) (service.ChatResponse, error)
+	EnqueueTurnInput(sessionID, input string) error
 	RegenerateLastMessageStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (service.ChatResponse, error)
 	ExecutePlanStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, onPlanUpdate func(*agentplan.Plan)) (service.ChatResponse, error)
 }

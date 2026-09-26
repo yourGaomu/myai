@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	compactionresult "myai/core/application/chat/compaction/result"
 	chatcontextservice "myai/core/application/chat/context/service"
@@ -29,6 +30,7 @@ type AssistantGenerationService struct {
 	ResponseCommitter generationapi.ResponseCommitter
 	Persistence       generationport.Persistence
 	MemoryContext     memoryretrievalapi.ContextPreparer
+	Now               func() time.Time
 	OnCompactError    func(error)
 	OnMemoryError     func(error)
 }
@@ -87,6 +89,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		Model: model, Session: command.Session, Stream: command.Stream,
 		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
 		Settings: settings, MemoryContext: memoryContext,
+		EnvironmentContext: environmentContextPrompt(s.now(), command.Session.WorkspaceRoot),
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
@@ -124,4 +127,11 @@ func (s AssistantGenerationService) resolveGenerationSettings(current *session.S
 
 func (s AssistantGenerationService) contextInfo(current *session.Session) contextmgr.Info {
 	return chatcontextservice.QueryService{Contexts: s.Contexts}.Info(context.Background(), current)
+}
+
+func (s AssistantGenerationService) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }

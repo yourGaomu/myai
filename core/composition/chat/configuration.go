@@ -6,8 +6,10 @@ import (
 	"time"
 
 	generationadapter "myai/core/adapter/chat/generation"
+	pendinginput "myai/core/adapter/chat/pendinginput"
 	taskrecorder "myai/core/adapter/history/taskrecorder"
 	hookevents "myai/core/adapter/hook/events"
+	hooklifecycle "myai/core/adapter/hook/lifecycle"
 	uuidadapter "myai/core/adapter/id/uuid"
 	modelusage "myai/core/adapter/modelusage/session"
 	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
@@ -213,10 +215,18 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 			},
 		},
 	}
+	turnHooks := hooklifecycle.Bridge{Hooks: configuration.Hooks}
+	turnInputQueue := pendinginput.NewQueue()
 	agentLoop := generationservice.AgentLoopService{
 		Contexts:     contexts,
 		Tools:        toolcatalog.Catalog{Tools: configuration.Tools},
 		ToolExecutor: toolExecutor,
+		Compactor:    compactor,
+		TurnHooks:    turnHooks,
+		PendingInput: turnInputQueue,
+		OnCompactError: func(err error) {
+			log.Printf("auto compact failed: %v", err)
+		},
 		ToolRecords: toolrecordsrepository.Recorder{
 			Persistence:        configuration.Store,
 			IDs:                uuidadapter.Generator{},
@@ -256,6 +266,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Recorders:  taskrecorder.Factory{},
 		Generator:  assistantGeneration,
 		Runs:       runCommands,
+		TurnHooks:  turnHooks,
 		OnSaveError: func(err error) {
 			log.Printf("save task history checkpoint failed: %v", err)
 		},
@@ -336,6 +347,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		ModelMetadata: configuration.Models,
 
 		GenerationTasks: generationTasks,
+		TurnInputQueue:  turnInputQueue,
 		PlanExecution:   planExecution,
 		SessionCompaction: compactionservice.SessionService{
 			Sessions:  loader,

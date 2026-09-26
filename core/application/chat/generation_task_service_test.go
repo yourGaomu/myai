@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	generationcommand "myai/core/application/chat/generation/command"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
@@ -68,6 +69,48 @@ func TestGenerationTaskServiceSavesAndClosesWhenGenerationFails(t *testing.T) {
 	}
 	if got := recorder.events; len(got) != 3 || got[1] != "save" || got[2] != "close" {
 		t.Fatalf("expected recorder to save and close on generation error, got %#v", got)
+	}
+}
+
+func TestGenerationTaskServiceDeniesTurnOnUserPromptHook(t *testing.T) {
+	generator := &taskGenerationHandlerFake{result: GenerationResponse{Result: modelport.ChatResult{Content: "should not run"}}}
+	_, err := GenerationTaskService{
+		RequestIDs: taskRequestIDsFake{id: "request-1"},
+		Generator:  generator,
+		TurnHooks: &recordingTurnHooks{byKind: map[string]generationcommand.TurnHookOutcome{
+			"user_prompt_submit": {Denied: true, Continuation: "not allowed"},
+		}},
+	}.Generate(context.Background(), GenerationTaskCommand{
+		Session:     taskSession(),
+		LatestInput: "hello",
+	})
+	if err == nil || err.Error() != "turn denied by user_prompt_submit hook: not allowed" {
+		t.Fatalf("expected user prompt deny, got %v", err)
+	}
+	if generator.command.LatestInput != "" {
+		t.Fatal("expected generation not to run after hook deny")
+	}
+}
+
+func TestGenerationTaskServiceInjectsSessionStartContinuation(t *testing.T) {
+	current := taskSession()
+	hooks := &recordingTurnHooks{outcome: generationcommand.TurnHookOutcome{Continuation: "workspace rules"}}
+	_, err := GenerationTaskService{
+		RequestIDs: taskRequestIDsFake{id: "request-1"},
+		Generator:  &taskGenerationHandlerFake{},
+		TurnHooks:  hooks,
+	}.Generate(context.Background(), GenerationTaskCommand{
+		Session:     current,
+		LatestInput: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hooks.kinds) != 2 || hooks.kinds[0] != "session_start" || hooks.kinds[1] != "user_prompt_submit" {
+		t.Fatalf("expected session_start then user_prompt_submit, got %#v", hooks.kinds)
+	}
+	if len(current.Messages) != 2 {
+		t.Fatalf("expected two hook context messages, got %#v", current.Messages)
 	}
 }
 
@@ -166,4 +209,18 @@ func taskSession() *session.Session {
 		ID:    "session-1",
 		Model: "model-a",
 	}
+}
+
+type recordingTurnHooks struct {
+	kinds   []string
+	outcome generationcommand.TurnHookOutcome
+	byKind  map[string]generationcommand.TurnHookOutcome
+}
+
+func (h *recordingTurnHooks) Handle(ctx context.Context, command generationcommand.TurnHook) (generationcommand.TurnHookOutcome, error) {
+	h.kinds = append(h.kinds, string(command.Kind))
+	if h.byKind != nil {
+		return h.byKind[string(command.Kind)], nil
+	}
+	return h.outcome, nil
 }

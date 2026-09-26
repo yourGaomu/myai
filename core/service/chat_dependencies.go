@@ -7,6 +7,7 @@ import (
 	compactionapi "myai/core/application/chat/compaction/api"
 	chatcontextapi "myai/core/application/chat/context/api"
 	generationapi "myai/core/application/chat/generation/api"
+	generationport "myai/core/application/chat/generation/port"
 	planapi "myai/core/application/chat/plan/api"
 	planport "myai/core/application/chat/plan/port"
 	chatretrievalapi "myai/core/application/chat/retrieval/api"
@@ -40,6 +41,7 @@ type ChatDependencies struct {
 	ModelMetadata      modelport.MetadataProvider
 
 	GenerationTasks   generationapi.TaskService
+	TurnInputQueue    generationport.PendingTurnInput
 	PlanExecution     planapi.Service
 	SessionCompaction compactionapi.SessionService
 	ContextQueries    chatcontextapi.QueryService

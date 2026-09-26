@@ -100,6 +100,17 @@ func (s *ChatService) SendMessageStream(ctx context.Context, input string, strea
 	return s.SendMessageStreamForSession(ctx, s.CurrentSessionID(), input, stream)
 }
 
+func (s *ChatService) EnqueueTurnInput(sessionID, input string) error {
+	if s == nil || s.dependencies.TurnInputQueue == nil {
+		return errors.New("turn input queue is not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	return s.dependencies.TurnInputQueue.Enqueue(sessionID, input)
+}
+
 func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
@@ -115,6 +126,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		}
 		sessionID = s.CurrentSessionID()
 	}
+	//锁定会话，保证整个会话的原子性，避免信息串流
 	unlock, err := s.lockSessionOperation(ctx, sessionID)
 	if err != nil {
 		return ChatResponse{}, err
@@ -124,6 +136,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	var currentBefore *session.Session
 	autoPlan := false
 	resumePlan := false
+	//如果启动了自动计划模式
 	if s.dependencies.AutoPlanEnabled {
 		if s.dependencies.SessionLoader == nil {
 			return ChatResponse{}, errors.New("session loader is nil")
@@ -132,6 +145,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		if err != nil {
 			return ChatResponse{}, err
 		}
+		//判断用户输入属于什么意图
 		autoPlanDecision := s.classifyAutoPlanRequest(ctx, currentBefore, input)
 		autoPlan = autoPlanDecision.ShouldPlan
 		resumePlan = shouldResumePlanRequest(currentBefore, input)
@@ -936,6 +950,7 @@ func (s *ChatService) withSessionOperation(ctx context.Context, sessionID string
 }
 
 func (s *ChatService) lockSessionOperation(ctx context.Context, sessionID string) (func(), error) {
+	//只会运行一次，创建会话管理机制
 	s.operationInit.Do(func() { s.operations = newSessionOperationCoordinator() })
 	return s.operations.lock(ctx, sessionID)
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	agentrunapi "myai/core/application/agentrun/api"
@@ -13,6 +14,7 @@ import (
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
 	domainagentrun "myai/core/domain/agentrun"
+	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -24,6 +26,7 @@ type TaskService struct {
 	Recorders    generationport.TaskRecorderFactory
 	Generator    generationapi.Generator
 	Runs         agentrunapi.CommandService
+	TurnHooks    generationport.TurnLifecycleHooks
 	OnSaveError  func(error)
 	OnCloseError func(error)
 	OnRunError   func(error)
@@ -110,6 +113,9 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 		defer s.closeRecorder(recorder)
 		defer s.saveRecorder(recorder)
 		ctx = recorder.Attach(ctx)
+	}
+	if resultErr = s.applyTurnStartHooks(ctx, command); resultErr != nil {
+		return generationresult.GenerationResponse{RunID: runID}, resultErr
 	}
 	response, resultErr = s.Generator.Generate(ctx, generationcommand.AssistantGeneration{
 		Session: command.Session, LatestInput: command.LatestInput, RequestID: requestID,
@@ -206,4 +212,59 @@ func (s TaskService) reportRunError(err error) {
 	if err != nil && s.OnRunError != nil {
 		s.OnRunError(err)
 	}
+}
+
+func (s TaskService) applyTurnStartHooks(ctx context.Context, command generationcommand.GenerationTask) error {
+	if s.TurnHooks == nil || command.Session == nil || command.Internal {
+		return nil
+	}
+	if isFirstAssistantTurn(command.Session) {
+		if err := s.applyTurnHook(ctx, command, generationcommand.TurnHookSessionStart, "session_start"); err != nil {
+			return err
+		}
+	}
+	return s.applyTurnHook(ctx, command, generationcommand.TurnHookUserPromptSubmit, "user_prompt_submit")
+}
+
+func (s TaskService) applyTurnHook(ctx context.Context, command generationcommand.GenerationTask, kind generationcommand.TurnHookKind, name string) error {
+	outcome, err := s.TurnHooks.Handle(ctx, generationcommand.TurnHook{
+		Kind:      kind,
+		SessionID: command.Session.ID,
+		Prompt:    command.LatestInput,
+	})
+	if err != nil {
+		return err
+	}
+	if outcome.Denied {
+		message := strings.TrimSpace(outcome.Continuation)
+		if message == "" {
+			message = name + " denied the turn"
+		}
+		return fmt.Errorf("turn denied by %s hook: %s", name, message)
+	}
+	appendHookContext(command.Session, outcome.Continuation)
+	return nil
+}
+
+func isFirstAssistantTurn(current *session.Session) bool {
+	if current == nil {
+		return true
+	}
+	for _, message := range current.Messages {
+		if message.Role == domainmessage.RoleAssistant {
+			return false
+		}
+	}
+	return true
+}
+
+func appendHookContext(current *session.Session, text string) {
+	if current == nil {
+		return
+	}
+	message := domainmessage.HookContext(text)
+	if !message.IsSynthetic() {
+		return
+	}
+	current.AppendMessage(message)
 }

@@ -7,11 +7,12 @@ import (
 )
 
 type Run struct {
-	Model         modelport.ChatModelPort
-	Session       *session.Session
-	Stream        modelport.ChatStreamHandler
-	RequestID     string
-	ForceChatMode bool
-	Settings      generation.ResolvedSettings
-	MemoryContext string
+	Model              modelport.ChatModelPort
+	Session            *session.Session
+	Stream             modelport.ChatStreamHandler
+	RequestID          string
+	ForceChatMode      bool
+	Settings           generation.ResolvedSettings
+	MemoryContext      string
+	EnvironmentContext string
 }

@@ -362,10 +362,10 @@ result, err := command.Model.Generate(ctx, GenerateRequest{
 默认：
 
 ```go
-const DefaultMaxToolRounds = 6
+const DefaultMaxToolRounds = 32
 ```
 
-达到 6 轮后，系统额外进行一次不带 Tools 的模型请求，强制产生最终回答。因此最坏情况下是 6 次带工具请求加 1 次无工具请求。
+达到 32 轮后，系统额外进行一次不带 Tools 的模型请求，强制产生最终回答。正常情况在模型不再请求工具、Stop Hook 不续跑、且没有中途插话时结束。
 
 ## 18. 多轮结果汇总
 

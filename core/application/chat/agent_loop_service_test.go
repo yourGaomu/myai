@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	compactionresult "myai/core/application/chat/compaction/result"
 	generationcommand "myai/core/application/chat/generation/command"
 	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
@@ -190,6 +191,57 @@ func TestAgentLoopServiceReusesMemoryContextWithoutPersistingIt(t *testing.T) {
 	}
 }
 
+func TestAgentLoopServiceReusesEnvironmentContextWithoutPersistingIt(t *testing.T) {
+	current := testSession()
+	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{call}},
+		{Content: "done"},
+	}}
+	executor := &recordingToolExecutor{result: ToolExecutionResult{Messages: []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "ok"}),
+	}}}
+
+	_, err := AgentLoopService{Contexts: &recordingContextProvider{}, Tools: &recordingToolCatalog{}, ToolExecutor: executor}.Run(
+		context.Background(),
+		RunCommand{Model: model, Session: current, EnvironmentContext: "Current time: Friday, 2026-09-18 15:04:05 CST (UTC+8, 星期五)."},
+	)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("expected two model requests, got %d", len(model.requests))
+	}
+	for index, request := range model.requests {
+		environmentMessages := 0
+		lastUser := -1
+		environmentAt := -1
+		for messageIndex, message := range request.Messages {
+			if message.Role == domainmessage.RoleUser && !message.IsSynthetic() {
+				lastUser = messageIndex
+			}
+			if message.IsSyntheticReason(domainmessage.SyntheticReasonEnvironmentContext) {
+				environmentMessages++
+				environmentAt = messageIndex
+				if !strings.Contains(message.Text(), "星期五") {
+					t.Fatalf("request %d has unexpected environment context: %q", index, message.Text())
+				}
+			}
+		}
+		if environmentMessages != 1 {
+			t.Fatalf("request %d expected one environment context, got %d", index, environmentMessages)
+		}
+		if lastUser >= 0 && environmentAt >= lastUser {
+			t.Fatalf("request %d expected environment before last user message", index)
+		}
+	}
+	for _, message := range current.Messages {
+		if message.IsSyntheticReason(domainmessage.SyntheticReasonEnvironmentContext) {
+			t.Fatalf("environment context was persisted in the session: %#v", current.Messages)
+		}
+	}
+}
+
 func TestAgentLoopServiceSkipsToolRecordSinkWhenResultHasNoRecords(t *testing.T) {
 	records := &recordingToolExecutionRecordSink{}
 
@@ -307,6 +359,122 @@ func TestAgentLoopServiceInjectsAfterToolRoundBeforeNextGenerate(t *testing.T) {
 	}
 }
 
+func TestAgentLoopServiceDrainsPendingInputBeforeFollowUpSampling(t *testing.T) {
+	current := testSession()
+	current.ID = "session-1"
+	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{call}},
+		{Content: "used steered input"},
+	}}
+	executor := &recordingToolExecutor{result: ToolExecutionResult{Messages: []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "ok"}),
+	}}}
+	pending := &recordingPendingInput{messages: []string{"also check tests"}}
+	result, err := (AgentLoopService{
+		Contexts:     &recordingContextProvider{},
+		Tools:        &recordingToolCatalog{},
+		ToolExecutor: executor,
+		PendingInput: pending,
+	}).Run(context.Background(), RunCommand{Model: model, Session: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "used steered input" || pending.drains != 1 {
+		t.Fatalf("result=%q drains=%d", result.Content, pending.drains)
+	}
+	found := false
+	for _, message := range model.requests[1].Messages {
+		if message.Role == domainmessage.RoleUser && message.Text() == "also check tests" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pending input in second sample, got %#v", model.requests[1].Messages)
+	}
+}
+
+func TestAgentLoopServiceContinuesWhenPendingInputArrivesAfterFinalAnswer(t *testing.T) {
+	current := testSession()
+	current.ID = "session-1"
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{Content: "first"},
+		{Content: "after steer"},
+	}}
+	pending := &recordingPendingInput{has: true}
+	pending.onHas = func() {
+		if !pending.has {
+			return
+		}
+		pending.has = false
+		pending.messages = []string{"continue"}
+	}
+	result, err := (AgentLoopService{
+		Contexts:     &recordingContextProvider{},
+		PendingInput: pending,
+	}).Run(context.Background(), RunCommand{Model: model, Session: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "after steer" || len(model.requests) != 2 {
+		t.Fatalf("expected a follow-up sample after pending input, result=%q requests=%d", result.Content, len(model.requests))
+	}
+}
+
+func TestAgentLoopServiceContinuesAfterStopHook(t *testing.T) {
+	current := testSession()
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{Content: "first draft"},
+		{Content: "after hook"},
+	}}
+	hooks := &scriptedTurnHooks{outcomes: []generationcommand.TurnHookOutcome{
+		{Continuation: "run tests"},
+		{},
+	}}
+
+	result, err := (AgentLoopService{
+		Contexts:  &recordingContextProvider{},
+		TurnHooks: hooks,
+	}).Run(context.Background(), RunCommand{Model: model, Session: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "after hook" {
+		t.Fatalf("expected stop hook continuation to sample again, got %q", result.Content)
+	}
+	if len(model.requests) != 2 || len(hooks.kinds) != 2 {
+		t.Fatalf("expected two samples and two stop hooks, requests=%d hooks=%v", len(model.requests), hooks.kinds)
+	}
+	found := false
+	for _, message := range current.Messages {
+		if message.IsSyntheticReason(domainmessage.SyntheticReasonHookContext) && strings.Contains(message.Text(), "run tests") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected stop continuation in session, got %#v", current.Messages)
+	}
+}
+
+func TestAgentLoopServiceCompactsBeforeSamplingWhenOverWindow(t *testing.T) {
+	model := &scriptedModel{results: []modelport.ChatResult{{Content: "ok"}}}
+	contexts := &fixedContextProvider{snapshot: contextmgr.Snapshot{
+		Info:     contextmgr.Info{WindowK: 4, SelectedTokens: 4001},
+		Messages: []domainmessage.Message{domainmessage.Text(domainmessage.RoleUser, "oversized")},
+	}}
+	compactor := &shrinkingCompactor{contexts: contexts}
+	result, err := (AgentLoopService{
+		Contexts:  contexts,
+		Compactor: compactor,
+	}).Run(context.Background(), RunCommand{Model: model, Session: testSession()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "ok" || compactor.calls != 1 || len(model.requests) != 1 {
+		t.Fatalf("expected compact then generate, compact=%d requests=%d result=%q", compactor.calls, len(model.requests), result.Content)
+	}
+}
+
 func TestAgentLoopServiceRejectsOversizedCurrentTurn(t *testing.T) {
 	model := &scriptedModel{results: []modelport.ChatResult{{Content: "must not run"}}}
 	contexts := &fixedContextProvider{snapshot: contextmgr.Snapshot{
@@ -352,6 +520,59 @@ type fixedContextProvider struct {
 
 func (p *fixedContextProvider) Snapshot(*session.Session) contextmgr.Snapshot {
 	return p.snapshot
+}
+
+type recordingPendingInput struct {
+	messages []string
+	drains   int
+	has      bool
+	onHas    func()
+}
+
+func (p *recordingPendingInput) Enqueue(sessionID, content string) error {
+	p.messages = append(p.messages, content)
+	return nil
+}
+
+func (p *recordingPendingInput) Drain(sessionID string) []string {
+	p.drains++
+	items := p.messages
+	p.messages = nil
+	p.has = false
+	return items
+}
+
+func (p *recordingPendingInput) HasPending(sessionID string) bool {
+	if p.onHas != nil {
+		p.onHas()
+	}
+	return p.has || len(p.messages) > 0
+}
+
+type shrinkingCompactor struct {
+	contexts *fixedContextProvider
+	calls    int
+}
+
+func (c *shrinkingCompactor) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (compactionresult.CompactInfo, error) {
+	c.calls++
+	c.contexts.snapshot.Info.SelectedTokens = 10
+	return compactionresult.CompactInfo{Triggered: true}, nil
+}
+
+type scriptedTurnHooks struct {
+	kinds    []string
+	outcomes []generationcommand.TurnHookOutcome
+}
+
+func (h *scriptedTurnHooks) Handle(ctx context.Context, command generationcommand.TurnHook) (generationcommand.TurnHookOutcome, error) {
+	h.kinds = append(h.kinds, string(command.Kind))
+	if len(h.outcomes) == 0 {
+		return generationcommand.TurnHookOutcome{}, nil
+	}
+	outcome := h.outcomes[0]
+	h.outcomes = h.outcomes[1:]
+	return outcome, nil
 }
 
 func (p *recordingContextProvider) Snapshot(current *session.Session) contextmgr.Snapshot {

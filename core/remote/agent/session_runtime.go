@@ -8,7 +8,7 @@ import (
 const defaultRuntimeSessionID = "__default__"
 
 type sessionRuntime struct {
-	// mu 串行化同一会话的任务，cancelMu 只保护当前任务的取消函数。
+	// mu 保护读取和修改当前任务状态；它不应阻塞正在运行的任务。
 	mu       sync.Mutex
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc
@@ -48,14 +48,15 @@ func (r *sessionRuntime) start(parent context.Context) (context.Context, context
 	ctx, cancel := context.WithCancel(parent)
 
 	r.cancelMu.Lock()
+	defer r.cancelMu.Unlock()
+
 	// cancel 非空表示该 Session 已有任务运行，调用方应返回 busy 而不是并发启动。
 	if r.cancel != nil {
-		r.cancelMu.Unlock()
 		cancel()
 		return ctx, cancel, false
 	}
+
 	r.cancel = cancel
-	r.cancelMu.Unlock()
 
 	return ctx, cancel, true
 }

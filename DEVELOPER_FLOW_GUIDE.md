@@ -619,7 +619,7 @@ plan                     Plan 模式下的 CurrentPlan
 6. 执行结果写成 `ToolCallMessage` 和 `ToolResultMessage` 追加到 Session。
 7. 进入下一轮；本轮已经持久化的 Synthetic runtime message 保持不变。
 
-最大轮数为 `DefaultMaxToolRounds = 6`。超过后会做最后一次无工具生成，防止循环失控。
+最大轮数为 `DefaultMaxToolRounds = 32`，作为安全阀。超过后会做最后一次无工具生成，防止循环失控。正常停靠是模型不再请求工具。
 
 ### 8.2 权限判定顺序
 

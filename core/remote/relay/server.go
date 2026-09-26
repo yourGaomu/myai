@@ -482,7 +482,9 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 	}
 
 	switch requestType {
-	case protocol.TypeUserMessage, protocol.TypeSessionRegenerate:
+	case protocol.TypeUserMessage:
+		return responseType == protocol.TypeAssistantDone || responseType == protocol.TypeUserMessageQueued
+	case protocol.TypeSessionRegenerate:
 		return responseType == protocol.TypeAssistantDone
 	case protocol.TypeAgentRunList:
 		return responseType == protocol.TypeAgentRunListResult

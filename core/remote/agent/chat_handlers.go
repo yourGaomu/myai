@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -14,6 +15,32 @@ import (
 	"myai/core/remote/protocol"
 	"myai/core/service"
 )
+
+func (a *Agent) enqueueRunningTurnInput(conn *websocket.Conn, message protocol.Message, sessionID string) {
+	payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
+	if err != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: fmt.Sprintf("decode user message failed: %v", err)}); writeErr != nil {
+			log.Printf("send queued user message decode error failed: %v", writeErr)
+		}
+		return
+	}
+	if a.chatService == nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: "session is already running"}); writeErr != nil {
+			log.Printf("send remote busy error failed: %v", writeErr)
+		}
+		return
+	}
+	//进入消息队列之中
+	if err := a.chatService.EnqueueTurnInput(sessionID, payload.Content); err != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+			log.Printf("send queued user message error failed: %v", writeErr)
+		}
+		return
+	}
+	if writeErr := a.writeRemoteMessage(conn, protocol.TypeUserMessageQueued, message.RequestID, sessionID, protocol.UserMessageQueuedPayload{Content: payload.Content}); writeErr != nil {
+		log.Printf("send user message queued ack failed: %v", writeErr)
+	}
+}
 
 func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	// Handler 只负责协议校验和流式回包，聊天流程由 ChatService 完成。
@@ -33,6 +60,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		return fmt.Errorf("session id is empty")
 	}
 
+	//调用流式回答
 	response, err := a.streamChatResponse(ctx, conn, message, sessionID, func(stream llm.ChatStreamHandler) (service.ChatResponse, error) {
 		return a.chatService.SendMessageStreamForSession(ctx, sessionID, payload.Content, stream)
 	})

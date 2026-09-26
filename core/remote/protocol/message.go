@@ -16,6 +16,7 @@ const (
 	TypeAgentOnline                      MessageType = "agent_online"
 	TypeAgentOffline                     MessageType = "agent_offline"
 	TypeUserMessage                      MessageType = "user_message"
+	TypeUserMessageQueued                MessageType = "user_message_queued"
 	TypeAssistantDelta                   MessageType = "assistant_delta"
 	TypeAssistantDone                    MessageType = "assistant_done"
 	TypeAgentRunStarted                  MessageType = "agent_run_started"
@@ -317,6 +318,10 @@ type AgentOnlinePayload struct {
 }
 
 type UserMessagePayload struct {
+	Content string `json:"content"`
+}
+
+type UserMessageQueuedPayload struct {
 	Content string `json:"content"`
 }
 

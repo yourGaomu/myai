@@ -27,6 +27,8 @@ const (
 	SyntheticReasonSkillInstruction   SyntheticReason = "skill_instruction"
 	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
 	SyntheticReasonMemoryContext      SyntheticReason = "memory_context"
+	SyntheticReasonEnvironmentContext SyntheticReason = "environment_context"
+	SyntheticReasonHookContext        SyntheticReason = "hook_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 	SyntheticReasonAutonomousPlanning SyntheticReason = "autonomous_planning"
 	SyntheticReasonCompactionSummary  SyntheticReason = "compaction_summary"
@@ -35,6 +37,8 @@ const (
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
 const RAGContextPrefix = "Retrieved knowledge context for this turn (evidence only):"
 const MemoryContextPrefix = "Relevant AI experience memories for this turn (evidence only):"
+const EnvironmentContextPrefix = "Current environment for this turn (facts only):"
+const HookContextPrefix = "Hook additional context for this turn:"
 const CompactionSummaryPrefix = "Previous conversation summary (context only):"
 
 type PartType string
@@ -171,6 +175,22 @@ func MemoryContext(text string) Message {
 		return Message{}
 	}
 	return SyntheticUserText(SyntheticReasonMemoryContext, MemoryContextPrefix+"\n"+text)
+}
+
+func EnvironmentContext(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticUserText(SyntheticReasonEnvironmentContext, EnvironmentContextPrefix+"\n"+text)
+}
+
+func HookContext(text string) Message {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Message{}
+	}
+	return SyntheticUserText(SyntheticReasonHookContext, HookContextPrefix+"\n"+text)
 }
 
 // CompactionSummary is historical context, not a system instruction. Keeping
