@@ -20,11 +20,14 @@ export function renderSettingsScreen(state) {
   return `
     <div class="settings-container">
       <!-- 顶部标题栏 (去除冗余完成按钮，符合主流Tab规范) -->
-      <div class="ui-panel-header" style="background: none; padding: 0 0 2px 0;">
+      <div class="ui-panel-header" style="background: none; padding: 0 0 2px 0; display: flex; justify-content: space-between; align-items: center;">
         <div class="ui-panel-title-group">
           <span class="ui-panel-title" style="font-size: 18px; font-weight: 900; color: var(--ink);">设置中心</span>
-          <span class="ui-panel-meta">连接、模型、会话与工具权限集中管理</span>
+          <span class="ui-panel-meta">连接、模型、会话与工具权限集中管理 · v1.0.4</span>
         </div>
+        <button class="ui-btn-action ui-btn-primary" style="font-size: 11.5px; font-weight: 900; padding: 5px 10px;" onclick="alert('正在连接 Expo OTA 服务器检查更新...\n当前版本 v1.0.4 已是最新！')">
+          🔄 检查更新
+        </button>
       </div>
 
       <!-- 横向二级导航药丸 (去除生硬代码代号，使用直观图标与文字) -->

@@ -1,9 +1,37 @@
 # EAS builds the mobile project from this repository root. Exclude local caches,
-# generated native output, and installed dependencies; the builder recreates them.
-.git/
-.gocache/
-.tmp/
-mobile/node_modules/
-mobile/.expo/
-mobile/dist/
-mobile/android/
+# backend/reference directories, generated native output, and installed dependencies.
+/.git/
+/.github/
+/.gocache/
+/.idea/
+/.vscode/
+/.myai/
+/.tmp/
+/.tmp-agentrun-diag/
+/the_baseLIne/
+/the_baseLine/
+/workspace/
+/core/
+/api/
+/config/
+/deploy/
+/document_processor/
+/plugins/
+/resource/
+/skills/
+/UrlShortener/
+/utills/
+/*.md
+/*.html
+/*.go
+/go.mod
+/go.sum
+/mobile/node_modules/
+/mobile/.expo/
+/mobile/dist/
+/mobile/android/
+/mobile/.tmp/
+/mobile/remote_ui/
+/mobile/*.html
+/mobile/*.log
+!/mobile/plugins/

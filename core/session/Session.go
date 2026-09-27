@@ -72,9 +72,11 @@ type AgentMode string
 type Kind string
 
 const (
-	PermissionModeReadonly PermissionMode = "readonly"
-	PermissionModeAsk      PermissionMode = "ask"
-	PermissionModeFull     PermissionMode = "full"
+	PermissionModeReadonly  PermissionMode = "readonly"
+	PermissionModeReadWrite PermissionMode = "read_write"
+	PermissionModeExecute   PermissionMode = "execute"
+	PermissionModeAsk       PermissionMode = "ask"
+	PermissionModeFull      PermissionMode = "full"
 
 	AgentModeChat AgentMode = "chat"
 	AgentModePlan AgentMode = "plan"
@@ -282,7 +284,7 @@ func NormalizeKind(kind Kind) Kind {
 
 func NormalizePermissionMode(mode PermissionMode) PermissionMode {
 	switch mode {
-	case PermissionModeReadonly, PermissionModeFull:
+	case PermissionModeReadonly, PermissionModeReadWrite, PermissionModeExecute, PermissionModeFull:
 		return mode
 	default:
 		return PermissionModeAsk
@@ -291,7 +293,7 @@ func NormalizePermissionMode(mode PermissionMode) PermissionMode {
 
 func IsPermissionMode(mode PermissionMode) bool {
 	switch mode {
-	case PermissionModeReadonly, PermissionModeAsk, PermissionModeFull:
+	case PermissionModeReadonly, PermissionModeReadWrite, PermissionModeExecute, PermissionModeAsk, PermissionModeFull:
 		return true
 	default:
 		return false

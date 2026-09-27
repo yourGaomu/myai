@@ -84,6 +84,7 @@ export function useChatMessages() {
     ) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
+        activeAssistantID: "",
         messages: [
           ...current.messages.map((item) =>
             item.role === "assistant" &&
@@ -119,6 +120,7 @@ export function useChatMessages() {
     ) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
+        activeAssistantID: "",
         messages: [
           ...current.messages.map((item) =>
             item.role === "assistant" &&
@@ -157,7 +159,7 @@ export function useChatMessages() {
         return;
       }
 
-      // 同一 request 的多个 delta 复用一个 assistant 条目，避免流式输出产生大量消息气泡。
+      // 同一阶段（未被 tool_call 隔断）的多个 delta 复用同一个 assistant 条目，被工具调用隔断后开启新段落以保持时间序交错。
       updateSessionChat(sessionID, (current) => {
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
@@ -215,25 +217,49 @@ export function useChatMessages() {
     ) => {
       const completedAt = new Date().toISOString();
       updateSessionChat(sessionID, (current) => {
+        const hasAnyReasoning = Boolean(
+          requestID &&
+            current.messages.some(
+              (item) =>
+                item.role === "assistant" &&
+                item.requestID === requestID &&
+                Boolean(item.reasoning?.trim()),
+            ),
+        );
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {
-          if (!content && !reasoning && status === "done") {
-            return { ...current, activeAssistantID: "" };
+          const updatedExisting = current.messages.map((item) =>
+            item.role === "assistant" && requestID && item.requestID === requestID
+              ? {
+                  ...item,
+                  completedAt: item.completedAt || completedAt,
+                  status,
+                  usage: usage || item.usage,
+                }
+              : item,
+          );
+          const fallbackReasoning = hasAnyReasoning ? undefined : reasoning || undefined;
+          if (!content && !fallbackReasoning && status === "done") {
+            return {
+              ...current,
+              activeAssistantID: "",
+              messages: updatedExisting,
+            };
           }
           const id = newRequestID();
           return {
             ...current,
             activeAssistantID: "",
             messages: [
-              ...current.messages,
+              ...updatedExisting,
               {
                 completedAt,
                 id,
                 requestID,
                 createdAt: new Date().toISOString(),
                 role: "assistant",
-                reasoning: reasoning || undefined,
+                reasoning: fallbackReasoning,
                 status,
                 text: content || "",
                 usage: usage || undefined,
@@ -248,19 +274,29 @@ export function useChatMessages() {
             current.activeAssistantID === assistantID
               ? ""
               : current.activeAssistantID,
-          messages: current.messages.map((item) =>
-            item.id === assistantID
-              ? {
-                  ...item,
-                  completedAt,
-                  requestID: item.requestID || requestID,
-                  reasoning: reasoning || item.reasoning,
-                  status,
-                  text: item.text || content || "",
-                  usage: usage || item.usage,
-                }
-              : item,
-          ),
+          messages: current.messages.map((item) => {
+            if (item.id === assistantID) {
+              return {
+                ...item,
+                completedAt,
+                requestID: item.requestID || requestID,
+                reasoning:
+                  item.reasoning ||
+                  (hasAnyReasoning ? undefined : reasoning || undefined),
+                status,
+                text: item.text || content || "",
+                usage: usage || item.usage,
+              };
+            }
+            if (item.role === "assistant" && requestID && item.requestID === requestID) {
+              return {
+                ...item,
+                completedAt: item.completedAt || completedAt,
+                status,
+              };
+            }
+            return item;
+          }),
         };
       });
     },
@@ -482,6 +518,9 @@ function findAssistantID(current: SessionChatState, requestID?: string) {
 
   for (let index = current.messages.length - 1; index >= 0; index -= 1) {
     const message = current.messages[index];
+    if (message.role === "tool_call" || message.role === "tool" || message.role === "user") {
+      return "";
+    }
     if (message.role === "assistant" && message.requestID === requestID) {
       return message.id;
     }

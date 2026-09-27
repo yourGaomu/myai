@@ -1,0 +1,69 @@
+package cmd
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/spf13/cobra"
+
+	"myai/core"
+	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
+	remoteagent "myai/core/remote/agent"
+	"myai/core/remote/changes"
+	"myai/core/remote/files"
+)
+
+var (
+	oneBotURL       string
+	oneBotToken     string
+	oneBotUser      string
+	oneBotDevice    string
+	oneBotWorkspace string
+)
+
+var oneBotCmd = &cobra.Command{
+	Use:   "one-bot",
+	Short: "Start oneBot agent",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Agent 进程加载完整 AI 应用，并额外暴露当前 workspace 的文件与变更查询能力。
+		core.SetWorkspace(oneBotWorkspace)
+		core.InitApp()
+		defer func() { _ = core.GetApp().Close() }()
+
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		fileService, err := files.New(oneBotWorkspace)
+		if err != nil {
+			return err
+		}
+		//记录修改历史记录和git diff类似的功能
+		changeService, err := changes.NewWithStoreFactory(oneBotWorkspace, "", sqlitehistory.Factory{})
+		if err != nil {
+			return err
+		}
+
+		// Relay 只接收这个窄 Facade，不直接持有 Application 或数据库对象。
+		a := remoteagent.New(remoteagent.Config{
+			ServerURL:  oneBotURL,
+			RelayToken: oneBotToken,
+			UserID:     oneBotUser,
+			DeviceID:   oneBotDevice,
+			Workspace:  oneBotWorkspace,
+		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetMemoryCatalogService(), core.GetApp().GetMemoryExtractionService(), core.GetApp().GetMemoryDreamService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents(), core.GetApp().GetPluginManager())
+
+		return a.Run(ctx)
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(oneBotCmd)
+
+	oneBotCmd.Flags().StringVar(&oneBotURL, "server", "", "relay server websocket url")
+	oneBotCmd.Flags().StringVar(&oneBotToken, "relay-token", os.Getenv("MYAI_RELAY_AGENT_TOKEN"), "identity-bound token used to authenticate this agent to the relay")
+	oneBotCmd.Flags().StringVar(&oneBotUser, "user", "local", "user id")
+	oneBotCmd.Flags().StringVar(&oneBotDevice, "device", "onebot", "device id")
+	oneBotCmd.Flags().StringVar(&oneBotWorkspace, "workspace", ".", "workspace directory for remote file preview and local tools")
+}

@@ -26,8 +26,11 @@ type manifest struct {
 	SnapshotRoot  string                          `json:"snapshot_root"`
 	Status        domainworkspace.ChangeSetStatus `json:"status"`
 	CheckpointID  string                          `json:"checkpoint_id,omitempty"`
+	OperationID   string                          `json:"operation_id,omitempty"`
+	OperationKind string                          `json:"operation_kind,omitempty"`
 	CreatedAt     time.Time                       `json:"created_at"`
 	AppliedAt     *time.Time                      `json:"applied_at,omitempty"`
+	DiscardedAt   *time.Time                      `json:"discarded_at,omitempty"`
 	BaselineFiles []fileState                     `json:"baseline_files"`
 }
 

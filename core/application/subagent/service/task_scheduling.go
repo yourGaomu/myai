@@ -17,6 +17,7 @@ func (service *Service) scheduleRun(task domainsubagent.Task, run domainsubagent
 	if err == nil {
 		return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, nil
 	}
+	defer service.releaseExecutionLease(task.ID, run.ID)
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	defer service.completeActiveRunLocked(task.ID, run.ID)
@@ -39,5 +40,6 @@ func (service *Service) scheduleRun(task domainsubagent.Task, run domainsubagent
 		return subagentresult.Task{Value: domainsubagent.CloneTask(task)}, errors.Join(err, saveErr)
 	}
 	service.publish(context.Background(), current)
+	service.notifyParentCompletionLocked(current)
 	return subagentresult.Task{Value: domainsubagent.CloneTask(current)}, err
 }

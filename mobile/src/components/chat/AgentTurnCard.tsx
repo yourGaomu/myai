@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import type { AgentTurnItem, ToolCallStep } from "../../utils/chatRenderItems";
+import type { AgentTurnItem, AgentTurnTimelineStep, ToolCallStep } from "../../utils/chatRenderItems";
 import type { ButtonFeedback } from "../../types/ui";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageBreakdown } from "../../utils/tokenUsage";
@@ -14,37 +14,85 @@ type FileChangeTag = {
   path: string;
 };
 
-function extractToolParamSummary(tool: ToolCallStep): string {
-  if (!tool.arguments) return "";
-  try {
-    const parsed = typeof tool.arguments === "string" ? JSON.parse(tool.arguments) : tool.arguments;
-    if (parsed.CommandLine) return String(parsed.CommandLine);
-    if (parsed.TargetFile) {
-      const parts = String(parsed.TargetFile).split(/[/\\]/);
-      return parts.pop() || "";
-    }
-    if (parsed.AbsolutePath) {
-      const parts = String(parsed.AbsolutePath).split(/[/\\]/);
-      return parts.pop() || "";
-    }
-    if (parsed.Query) return `"${parsed.Query}"`;
-    if (parsed.Pattern) return `"${parsed.Pattern}"`;
-    if (parsed.Url) return String(parsed.Url);
-    if (parsed.toolSummary) return String(parsed.toolSummary);
-  } catch {
-    return String(tool.arguments).replace(/[\r\n\t]/g, " ").slice(0, 40);
-  }
-  return "";
+function isShellLikeTool(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("bash") ||
+    lower.includes("shell") ||
+    lower.includes("sh") ||
+    lower.includes("cmd") ||
+    lower.includes("powershell") ||
+    lower.includes("command") ||
+    lower.includes("terminal") ||
+    lower.includes("exec")
+  );
 }
 
-function toolKindIcon(name: string): string {
-  if (name.includes("command") || name.includes("terminal")) return "⚡";
-  if (name.includes("write") || name.includes("replace")) return "📝";
-  if (name.includes("file") || name.includes("read") || name.includes("view")) return "📄";
-  if (name.includes("search") || name.includes("grep") || name.includes("find")) return "🔍";
-  if (name.includes("image")) return "🎨";
-  if (name.includes("subagent")) return "🤖";
-  return "🛠️";
+function extractToolCommand(tool: ToolCallStep): string {
+  if (!tool.arguments) return "";
+  const raw = String(tool.arguments).trim();
+  if (!raw) return "";
+  try {
+    const parsed = typeof tool.arguments === "string" ? JSON.parse(raw) : tool.arguments;
+    if (typeof parsed === "string") {
+      return parsed.trim();
+    }
+    if (parsed && typeof parsed === "object") {
+      const candidate =
+        parsed.command ??
+        parsed.cmd ??
+        parsed.CommandLine ??
+        parsed.command_line ??
+        parsed.script ??
+        parsed.path ??
+        parsed.file_path ??
+        parsed.TargetFile ??
+        parsed.AbsolutePath ??
+        parsed.query ??
+        parsed.Query ??
+        parsed.pattern ??
+        parsed.Pattern ??
+        parsed.url ??
+        parsed.Url ??
+        parsed.toolSummary;
+      if (candidate !== undefined && candidate !== null && String(candidate).trim() !== "") {
+        return String(candidate).trim();
+      }
+    }
+  } catch {
+    return raw;
+  }
+  return raw;
+}
+
+function formatSingleLineCommand(cmd: string): string {
+  return cmd.replace(/\s+/g, " ").trim();
+}
+
+function formatToolActionRowTitle(tool: ToolCallStep): string {
+  const cmd = formatSingleLineCommand(extractToolCommand(tool));
+  const lower = tool.name.toLowerCase();
+
+  if (tool.status === "running") {
+    return cmd ? `正在运行 ${cmd}` : `正在运行 ${tool.name}`;
+  }
+  if (tool.status === "error" || tool.error) {
+    return cmd ? `运行失败 ${cmd}` : `运行失败 ${tool.name}`;
+  }
+
+  if (isShellLikeTool(tool.name)) {
+    return cmd ? `已运行 ${cmd}` : "运行了命令";
+  }
+  if (lower.includes("read") || lower.includes("view")) {
+    return cmd ? `已读取 ${cmd}` : `已调用 ${tool.name}`;
+  }
+  if (lower.includes("write") || lower.includes("edit") || lower.includes("replace") || lower.includes("patch")) {
+    return cmd ? `已修改 ${cmd}` : `已调用 ${tool.name}`;
+  }
+  if (lower.includes("search") || lower.includes("grep") || lower.includes("find") || lower.includes("glob")) {
+    return cmd ? `已搜索 ${cmd}` : `已调用 ${tool.name}`;
+  }
+  return cmd ? `已运行 ${ cmd }` : `运行了 ${tool.name}`;
 }
 
 function extractFileChanges(tools: ToolCallStep[] | undefined): FileChangeTag[] {
@@ -52,15 +100,22 @@ function extractFileChanges(tools: ToolCallStep[] | undefined): FileChangeTag[] 
   const files: FileChangeTag[] = [];
   const seen = new Set<string>();
   for (const t of tools) {
-    if (t.name === "write_to_file" || t.name === "replace_file_content") {
+    const lower = t.name.toLowerCase();
+    if (
+      t.name === "write_to_file" ||
+      t.name === "replace_file_content" ||
+      lower.includes("write") ||
+      lower.includes("edit") ||
+      lower.includes("patch")
+    ) {
       try {
         const parsed = typeof t.arguments === "string" ? JSON.parse(t.arguments) : t.arguments;
-        const target = parsed.TargetFile || parsed.file_path || "";
+        const target = parsed?.TargetFile || parsed?.file_path || parsed?.path || "";
         if (target && !seen.has(target)) {
           seen.add(target);
           files.push({
-            action: t.name === "write_to_file" ? "NEW" : "MOD",
-            path: target,
+            action: lower.includes("write") ? "NEW" : "MOD",
+            path: String(target),
           });
         }
       } catch {
@@ -79,24 +134,48 @@ type Props = {
 
 export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
   const isRunning = turn.status === "running";
-  const hasProcess = Boolean(turn.reasoning || (turn.tools && turn.tools.length > 0));
+  const timeline = useMemo<AgentTurnTimelineStep[]>(() => {
+    if (turn.timeline && turn.timeline.length > 0) {
+      return turn.timeline;
+    }
+    const fallback: AgentTurnTimelineStep[] = [];
+    if (turn.reasoning?.trim()) {
+      fallback.push({
+        type: "thought",
+        id: `${turn.id}-fallback-thought`,
+        text: turn.reasoning.trim(),
+      });
+    }
+    if (turn.tools && turn.tools.length > 0) {
+      fallback.push({
+        type: "tool_group",
+        id: `${turn.id}-fallback-tools`,
+        tools: turn.tools,
+      });
+    }
+    return fallback;
+  }, [turn.id, turn.reasoning, turn.timeline, turn.tools]);
+
+  const hasProcess = timeline.length > 0;
   const toolCount = turn.tools ? turn.tools.length : 0;
-  const [trayOpen, setTrayOpen] = useState(isRunning);
+  const [trayOpen, setTrayOpen] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const tokensInfo = useMemo(() => usageBreakdown(turn.usage), [turn.usage]);
   const fileChanges = useMemo(() => extractFileChanges(turn.tools), [turn.tools]);
 
-  const processSummary = useMemo(() => {
-    const elapsedSuffix = turn.elapsed ? ` · 耗时 ${turn.elapsed}` : "";
+  const durationHeaderLabel = useMemo(() => {
+    if (isRunning) {
+      return turn.elapsed ? `正在思考与执行 · ${turn.elapsed}` : "正在思考与执行...";
+    }
+    if (turn.elapsed) {
+      return `用时 ${turn.elapsed}`;
+    }
     if (toolCount > 0) {
-      return `已执行 ${toolCount} 个操作${elapsedSuffix}`;
+      return `已执行 ${toolCount} 个命令与操作`;
     }
-    if (turn.reasoning) {
-      return `思考推导完成${elapsedSuffix}`;
-    }
-    return "执行活动";
-  }, [toolCount, turn.elapsed, turn.reasoning]);
+    return "思考推导过程";
+  }, [isRunning, toolCount, turn.elapsed]);
 
   const handleCopy = () => {
     setCopied(true);
@@ -141,59 +220,37 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
 
       {/* 复合气泡大卡片 */}
       <View style={styles.cardBox}>
-        {/* 顶部过程折叠托盘 (Process Tray) */}
+        {/* 顶部耗时折叠头 + 交错式过程时间流 (思考段落 ↔ 运行了命令 / Shell 面板) */}
         {hasProcess ? (
-          <View style={styles.processTray}>
+          <View style={styles.processContainer}>
             <Pressable
               onPress={() => setTrayOpen((prev) => !prev)}
-              style={({ pressed }) => buttonFeedback(styles.trayHeader, pressed)}
+              style={({ pressed }) => buttonFeedback(styles.durationHeader, pressed)}
             >
-              <View style={styles.traySummaryLeft}>
-                <Text style={styles.trayBoltIcon}>⚡</Text>
-                <Text numberOfLines={1} style={styles.traySummaryText}>
-                  {processSummary}
-                </Text>
-              </View>
-              <View style={styles.trayToggleBtn}>
-                <Text style={styles.trayToggleBtnText}>{trayOpen ? "收起 ▲" : "展开详情 ▼"}</Text>
-              </View>
+              <Text style={styles.durationHeaderText}>{durationHeaderLabel}</Text>
+              <Text style={styles.durationChevron}>{trayOpen ? "⌄" : "›"}</Text>
             </Pressable>
 
             {trayOpen ? (
-              <View style={styles.trayBody}>
-                {/* 1. 思考推导过程 (Reasoning) */}
-                {turn.reasoning ? (
-                  <View style={styles.traySection}>
-                    <Text style={styles.traySectionTitle}>🧠 思考推导过程 (REASONING)</Text>
-                    <View style={styles.reasoningBox}>
-                      <Text selectable style={styles.reasoningText}>
-                        {turn.reasoning}
-                      </Text>
-                    </View>
-                  </View>
-                ) : null}
+              <View style={styles.interleavedBody}>
+                {timeline.map((step) => {
+                  if (step.type === "thought") {
+                    return (
+                      <View key={step.id} style={styles.thoughtBlock}>
+                        <MarkdownText text={step.text} />
+                      </View>
+                    );
+                  }
+                  return (
+                    <InterleavedToolGroup
+                      buttonFeedback={buttonFeedback}
+                      key={step.id}
+                      tools={step.tools}
+                    />
+                  );
+                })}
 
-                {/* 2. 工具调用轨迹 (Tool Markers Timeline) */}
-                {toolCount > 0 ? (
-                  <View style={styles.traySection}>
-                    <View style={styles.traySectionHeaderRow}>
-                      <Text style={styles.traySectionTitle}>🛠️ 工具调用轨迹 ({toolCount} 步)</Text>
-                      {turn.elapsed ? <Text style={styles.traySectionMeta}>耗时 {turn.elapsed}</Text> : null}
-                    </View>
-                    <View style={styles.toolList}>
-                      {turn.tools.map((tool, idx) => (
-                        <ToolStepItem
-                          buttonFeedback={buttonFeedback}
-                          index={idx + 1}
-                          key={tool.id || `${tool.name}-${idx}`}
-                          tool={tool}
-                        />
-                      ))}
-                    </View>
-                  </View>
-                ) : null}
-
-                {/* 3. 关联文件变更审查卡片 (File Changes Review Card) */}
+                {/* 关联文件变更审查卡片 */}
                 {fileChanges.length > 0 ? (
                   <View style={styles.reviewSection}>
                     <View style={styles.reviewHeaderRow}>
@@ -208,7 +265,12 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
                         return (
                           <View key={`${file.path}-${i}`} style={styles.reviewItem}>
                             <View style={styles.reviewItemLeft}>
-                              <View style={[styles.reviewActionTag, file.action === "NEW" ? styles.reviewActionTagNew : styles.reviewActionTagMod]}>
+                              <View
+                                style={[
+                                  styles.reviewActionTag,
+                                  file.action === "NEW" ? styles.reviewActionTagNew : styles.reviewActionTagMod,
+                                ]}
+                              >
                                 <Text style={styles.reviewActionTagText}>{file.action}</Text>
                               </View>
                               <Text numberOfLines={1} style={styles.reviewFilePath}>
@@ -228,22 +290,24 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
         ) : null}
 
         {/* 最终回答正文 */}
-        <View style={styles.cardBody}>
-          {turn.text ? <MarkdownText text={turn.text} /> : null}
+        {turn.text || (turn.attachments && turn.attachments.length > 0) ? (
+          <View style={[styles.cardBody, hasProcess && styles.cardBodyWithProcess]}>
+            {turn.text ? <MarkdownText text={turn.text} /> : null}
 
-          {/* 附件列表 */}
-          {turn.attachments?.length ? (
-            <View style={styles.attachments}>
-              {turn.attachments.map((attachment, index) => (
-                <ChatAttachmentCard
-                  attachment={attachment}
-                  buttonFeedback={buttonFeedback}
-                  key={`${turn.id}-att-${index}`}
-                />
-              ))}
-            </View>
-          ) : null}
-        </View>
+            {/* 附件列表 */}
+            {turn.attachments?.length ? (
+              <View style={styles.attachments}>
+                {turn.attachments.map((attachment, index) => (
+                  <ChatAttachmentCard
+                    attachment={attachment}
+                    buttonFeedback={buttonFeedback}
+                    key={`${turn.id}-att-${index}`}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* 底部元信息与操作栏 */}
         <View style={styles.cardFooter}>
@@ -280,72 +344,125 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
   );
 }
 
-function ToolStepItem({
+function InterleavedToolGroup({
   buttonFeedback,
-  index,
-  tool,
+  tools,
 }: {
   buttonFeedback: ButtonFeedback;
-  index: number;
-  tool: ToolCallStep;
+  tools: ToolCallStep[];
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const sharedAsset = parseSharedAsset(tool.name, tool.result || "");
-  const isFailed = Boolean(tool.error || tool.status === "error");
-  const summary = extractToolParamSummary(tool);
-  const icon = toolKindIcon(tool.name);
+  const [groupOpen, setGroupOpen] = useState(true);
+
+  if (tools.length === 1) {
+    return <InterleavedToolRow buttonFeedback={buttonFeedback} tool={tools[0]} />;
+  }
 
   return (
-    <View style={styles.toolItem}>
+    <View style={styles.toolGroupBlock}>
       <Pressable
-        onPress={() => setExpanded((prev) => !prev)}
-        style={({ pressed }) => buttonFeedback(styles.toolHeader, pressed)}
+        onPress={() => setGroupOpen((prev) => !prev)}
+        style={({ pressed }) => buttonFeedback(styles.toolInlineRow, pressed)}
       >
-        <View style={[styles.toolStatusDot, isFailed && styles.toolStatusDotError]}>
-          <Text style={styles.toolStatusDotText}>{isFailed ? "✕" : "✓"}</Text>
+        <View style={styles.termIconBadge}>
+          <Text style={styles.termIconText}>{">_"}</Text>
         </View>
-        <Text style={styles.toolKindIcon}>{icon}</Text>
-        <Text numberOfLines={1} style={styles.toolName}>
-          {tool.name}
+        <Text numberOfLines={1} style={styles.toolInlineGroupTitle}>
+          运行了命令
         </Text>
-        {summary ? (
-          <Text numberOfLines={1} style={styles.toolSummarySnippet}>
-            {summary}
-          </Text>
-        ) : null}
-        <Text style={styles.toolDuration}>{tool.duration || `#${index}`}</Text>
-        <Text style={styles.toolArrow}>{expanded ? "▲" : "▼"}</Text>
+        <Text style={styles.toolInlineChevron}>{groupOpen ? "⌄" : "›"}</Text>
       </Pressable>
 
-      {expanded ? (
-        <View style={styles.toolDetail}>
-          {tool.arguments ? (
-            <View style={styles.toolSection}>
-              <Text style={styles.toolDetailLabel}>输入参数 (ARGUMENTS):</Text>
-              <Text selectable style={styles.toolCode}>
-                {tool.arguments}
-              </Text>
-            </View>
-          ) : null}
-          {tool.result ? (
-            <View style={styles.toolSection}>
-              <Text style={styles.toolDetailLabel}>{isFailed ? "错误信息 (ERROR):" : "控制台输出 (OUTPUT):"}</Text>
-              {sharedAsset && !isFailed ? (
-                <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
-              ) : (
-                <View style={styles.terminalBox}>
-                  <Text selectable style={[styles.terminalText, isFailed && styles.terminalTextError]}>
-                    {tool.result}
-                  </Text>
-                </View>
-              )}
-            </View>
-          ) : null}
+      {groupOpen ? (
+        <View style={styles.toolGroupChildren}>
+          {tools.map((tool, index) => (
+            <InterleavedToolRow
+              buttonFeedback={buttonFeedback}
+              key={tool.id || `${tool.name}-${index}`}
+              tool={tool}
+            />
+          ))}
         </View>
       ) : null}
     </View>
   );
 }
+
+function InterleavedToolRow({
+  buttonFeedback,
+  tool,
+}: {
+  buttonFeedback: ButtonFeedback;
+  tool: ToolCallStep;
+}) {
+  const isFailed = Boolean(tool.error || tool.status === "error");
+  const [expanded, setExpanded] = useState(isFailed);
+  const sharedAsset = parseSharedAsset(tool.name, tool.result || "");
+  const commandText = extractToolCommand(tool);
+  const rowTitle = formatToolActionRowTitle(tool);
+  const shellHeaderLabel = isShellLikeTool(tool.name) ? "Shell" : tool.name;
+  const outputText = tool.error || tool.result || "";
+
+  return (
+    <View style={styles.toolStepContainer}>
+      <Pressable
+        onPress={() => setExpanded((prev) => !prev)}
+        style={({ pressed }) => buttonFeedback(styles.toolInlineRow, pressed)}
+      >
+        <View style={[styles.termIconBadge, isFailed && styles.termIconBadgeError]}>
+          <Text style={[styles.termIconText, isFailed && styles.termIconTextError]}>{">_"}</Text>
+        </View>
+        <Text
+          numberOfLines={1}
+          style={[styles.toolInlineText, isFailed && styles.toolInlineTextError]}
+        >
+          {rowTitle}
+        </Text>
+        {tool.duration ? <Text style={styles.toolInlineDuration}>{tool.duration}</Text> : null}
+        <Text style={styles.toolInlineChevron}>{expanded ? "⌄" : "›"}</Text>
+      </Pressable>
+
+      {expanded ? (
+        <View style={styles.shellBox}>
+          <View style={styles.shellHeaderBar}>
+            <Text style={styles.shellHeaderTitle}>{shellHeaderLabel}</Text>
+            {tool.duration ? <Text style={styles.shellHeaderMeta}>{tool.duration}</Text> : null}
+          </View>
+
+          <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            style={styles.shellScroll}
+          >
+            {commandText ? (
+              <Text selectable style={styles.shellCommandText}>
+                {`$ ${commandText}`}
+              </Text>
+            ) : null}
+
+            {sharedAsset && !isFailed ? (
+              <View style={styles.shellAssetWrap}>
+                <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+              </View>
+            ) : outputText ? (
+              <Text
+                selectable
+                style={[styles.shellOutputText, isFailed && styles.shellOutputTextError]}
+              >
+                {outputText}
+              </Text>
+            ) : (
+              <Text style={styles.shellEmptyText}>
+                {tool.status === "running" ? "正在执行命令..." : "(无输出内容)"}
+              </Text>
+            )}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const monoFont = Platform.OS === "ios" ? "Menlo" : "monospace";
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -438,9 +555,9 @@ const styles = StyleSheet.create({
     width: 6,
   },
 
-  /* 复合卡片外框 (Neo-Brutalism) */
+  /* 复合卡片外框 */
   cardBox: {
-    backgroundColor: "#fffdf7",
+    backgroundColor: "#ffffff",
     borderColor: "#12100e",
     borderRadius: 14,
     borderBottomLeftRadius: 4,
@@ -453,199 +570,174 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
   },
 
-  /* 过程抽屉 */
-  processTray: {
-    backgroundColor: "#f8f4ec",
-    borderBottomColor: "#e5dfd2",
+  /* 顶部耗时与交错过程流 (Codex 风格) */
+  processContainer: {
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  durationHeader: {
+    alignItems: "center",
+    borderBottomColor: "#eceae4",
     borderBottomWidth: 1,
-  },
-  trayHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  traySummaryLeft: {
-    alignItems: "center",
-    flex: 1,
     flexDirection: "row",
     gap: 6,
-    marginRight: 8,
+    paddingBottom: 8,
   },
-  trayBoltIcon: {
-    color: "#ffd84f",
+  durationHeaderText: {
+    color: "#5e5a53",
     fontSize: 13,
-  },
-  traySummaryText: {
-    color: "#49443c",
-    fontSize: 11.5,
-    fontWeight: "800",
-  },
-  trayToggleBtn: {
-    backgroundColor: "#ece5d8",
-    borderColor: "#dcd4c5",
-    borderRadius: 4,
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  trayToggleBtnText: {
-    color: "#6c665f",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  trayBody: {
-    backgroundColor: "#fffdfa",
-    borderTopColor: "#e8e2d7",
-    borderTopWidth: 1,
-    gap: 8,
-    padding: 10,
-  },
-  traySection: {
-    gap: 4,
-  },
-  traySectionTitle: {
-    color: "#7a7367",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.3,
-  },
-  reasoningBox: {
-    backgroundColor: "#f5f0e6",
-    borderLeftColor: "#ffd84f",
-    borderLeftWidth: 3,
-    borderRadius: 4,
-    padding: 8,
-  },
-  reasoningText: {
-    color: "#4c463d",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  traySectionHeaderRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  traySectionMeta: {
-    color: "#8c857b",
-    fontSize: 10,
     fontWeight: "700",
   },
-  toolList: {
+  durationChevron: {
+    color: "#7a756c",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  interleavedBody: {
+    gap: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  thoughtBlock: {
+    paddingVertical: 1,
+  },
+
+  /* 工具调用单行与折叠组 */
+  toolGroupBlock: {
     gap: 4,
   },
-  toolItem: {
-    backgroundColor: "#f7f3eb",
-    borderColor: "#ded5c6",
-    borderRadius: 6,
-    borderWidth: 1,
-    overflow: "hidden",
+  toolGroupChildren: {
+    gap: 4,
   },
-  toolHeader: {
+  toolStepContainer: {
+    gap: 6,
+  },
+  toolInlineRow: {
     alignItems: "center",
-    backgroundColor: "#f0e9dc",
     flexDirection: "row",
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    gap: 8,
+    paddingVertical: 3,
   },
-  toolStatusDot: {
+  termIconBadge: {
     alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#25231f",
-    borderRadius: 3,
-    borderWidth: 1,
-    height: 14,
+    backgroundColor: "#f7f6f2",
+    borderColor: "#8c877e",
+    borderRadius: 4,
+    borderWidth: 1.2,
+    height: 18,
     justifyContent: "center",
-    width: 14,
+    minWidth: 20,
+    paddingHorizontal: 3,
   },
-  toolStatusDotError: {
-    backgroundColor: "#ff7f68",
+  termIconBadgeError: {
+    backgroundColor: "#fff0ee",
+    borderColor: "#c94a3f",
   },
-  toolStatusDotText: {
-    color: "#12100e",
-    fontSize: 9,
+  termIconText: {
+    color: "#5e5a53",
+    fontFamily: monoFont,
+    fontSize: 9.5,
     fontWeight: "900",
     lineHeight: 11,
   },
-  toolKindIcon: {
-    fontSize: 11,
+  termIconTextError: {
+    color: "#c94a3f",
   },
-  toolName: {
-    color: "#12100e",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 11,
-    fontWeight: "900",
+  toolInlineGroupTitle: {
+    color: "#6b665e",
+    fontSize: 13,
+    fontWeight: "600",
   },
-  toolSummarySnippet: {
-    color: "#6c665f",
+  toolInlineText: {
+    color: "#6b665e",
     flex: 1,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 10,
-    marginHorizontal: 3,
+    fontSize: 13,
+    fontWeight: "500",
   },
-  toolDuration: {
-    color: "#8c857b",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 9.5,
+  toolInlineTextError: {
+    color: "#b83b30",
+  },
+  toolInlineDuration: {
+    color: "#9a948a",
+    fontFamily: monoFont,
+    fontSize: 11,
+  },
+  toolInlineChevron: {
+    color: "#7a756c",
+    fontSize: 13,
     fontWeight: "700",
+    paddingHorizontal: 2,
   },
-  toolArrow: {
-    color: "#7d7568",
-    fontSize: 9.5,
-  },
-  toolDetail: {
-    backgroundColor: "#ffffff",
-    borderTopColor: "#ded5c6",
-    borderTopWidth: 1,
-    gap: 6,
-    padding: 8,
-  },
-  toolSection: {
-    gap: 3,
-  },
-  toolDetailLabel: {
-    color: "#6c665f",
-    fontSize: 9.5,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  toolCode: {
-    backgroundColor: "#f5f2eb",
-    borderColor: "#ded5c6",
-    borderRadius: 4,
+
+  /* Shell 灰底展开面板 */
+  shellBox: {
+    backgroundColor: "#f4f3ef",
+    borderColor: "#e2dfd7",
+    borderRadius: 10,
     borderWidth: 1,
-    color: "#12100e",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 10.5,
-    lineHeight: 15,
-    padding: 6,
+    marginTop: 2,
+    overflow: "hidden",
   },
-  terminalBox: {
-    backgroundColor: "#12100e",
-    borderColor: "#25231f",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    padding: 8,
+  shellHeaderBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
-  terminalText: {
-    color: "#50fa7b",
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    fontSize: 10.5,
-    lineHeight: 15,
+  shellHeaderTitle: {
+    color: "#6e6a63",
+    fontSize: 12,
+    fontWeight: "600",
   },
-  terminalTextError: {
-    color: "#ff7f68",
+  shellHeaderMeta: {
+    color: "#8c867c",
+    fontFamily: monoFont,
+    fontSize: 11,
   },
+  shellScroll: {
+    maxHeight: 240,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  shellCommandText: {
+    color: "#2c2a26",
+    fontFamily: monoFont,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  shellOutputText: {
+    color: "#57534c",
+    fontFamily: monoFont,
+    fontSize: 11.5,
+    lineHeight: 17,
+  },
+  shellOutputTextError: {
+    color: "#b83b30",
+  },
+  shellEmptyText: {
+    color: "#8c867c",
+    fontFamily: monoFont,
+    fontSize: 11.5,
+    fontStyle: "italic",
+  },
+  shellAssetWrap: {
+    marginTop: 4,
+  },
+
+  /* 关联文件变更审查 */
   reviewSection: {
     backgroundColor: "#fffdf7",
     borderColor: "#12100e",
     borderRadius: 8,
     borderWidth: 1.5,
     gap: 6,
+    marginTop: 4,
     padding: 8,
   },
   reviewHeaderRow: {
@@ -714,7 +806,7 @@ const styles = StyleSheet.create({
   reviewFilePath: {
     color: "#12100e",
     flex: 1,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    fontFamily: monoFont,
     fontSize: 10.5,
     fontWeight: "700",
   },
@@ -723,16 +815,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
   },
-  toolErrorCode: {
-    backgroundColor: "#fff0ee",
-    color: "#9b4037",
-  },
 
-  /* 回答主体 */
+  /* 最终回答主体 */
   cardBody: {
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  cardBodyWithProcess: {
+    borderTopColor: "#eceae4",
+    borderTopWidth: 1,
   },
   attachments: {
     gap: 6,

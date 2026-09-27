@@ -3,6 +3,8 @@ package pendinginput
 import (
 	"strings"
 	"testing"
+
+	domaingeneration "myai/core/domain/generation"
 )
 
 func TestQueueEnqueueDrainAndHasPending(t *testing.T) {
@@ -28,6 +30,24 @@ func TestQueueEnqueueDrainAndHasPending(t *testing.T) {
 	}
 }
 
+func TestQueueRequeuesIdentifiedBatchWithoutDuplicatingIDs(t *testing.T) {
+	queue := NewQueue()
+	if err := queue.EnqueueIdentified("session-1", "message-1", "result"); err != nil {
+		t.Fatal(err)
+	}
+	claimed := queue.DrainIdentified("session-1")
+	if err := queue.EnqueueIdentified("session-1", "message-2", "later"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.RequeueIdentified("session-1", append(claimed, domaingeneration.PendingTurnInputItem{ID: "message-1", Content: "result"})); err != nil {
+		t.Fatal(err)
+	}
+	items := queue.DrainIdentified("session-1")
+	if len(items) != 2 || items[0].ID != "message-1" || items[1].ID != "message-2" {
+		t.Fatalf("unexpected requeued items: %#v", items)
+	}
+}
+
 func TestQueueRejectsEmptyFullAndTooLong(t *testing.T) {
 	queue := NewQueue()
 	if err := queue.Enqueue("", "hi"); err == nil {
@@ -46,5 +66,36 @@ func TestQueueRejectsEmptyFullAndTooLong(t *testing.T) {
 	}
 	if err := queue.Enqueue("session-1", "overflow"); err == nil {
 		t.Fatal("expected full queue to fail")
+	}
+}
+
+type recordingAcknowledger struct {
+	ids []string
+}
+
+func (acknowledger *recordingAcknowledger) Acknowledge(messageID string) error {
+	acknowledger.ids = append(acknowledger.ids, messageID)
+	return nil
+}
+
+func TestQueueIdentifiedMessagesAreIdempotentAndAcknowledged(t *testing.T) {
+	queue := NewQueue()
+	acknowledger := &recordingAcknowledger{}
+	queue.SetAcknowledger(acknowledger)
+	if err := queue.EnqueueIdentified("session-1", "message-1", "result"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueIdentified("session-1", "message-1", "result"); err != nil {
+		t.Fatal(err)
+	}
+	items := queue.DrainIdentified("session-1")
+	if len(items) != 1 || items[0].ID != "message-1" || items[0].Content != "result" {
+		t.Fatalf("unexpected identified items: %#v", items)
+	}
+	if err := queue.Acknowledge("message-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledger.ids) != 1 || acknowledger.ids[0] != "message-1" {
+		t.Fatalf("unexpected acknowledgements: %#v", acknowledger.ids)
 	}
 }

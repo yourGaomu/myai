@@ -43,7 +43,7 @@ const webHistoryCachePrefix = "myai:session_history:";
 let dbPromise: Promise<SQLiteDatabase> | null = null;
 let sqlitePromise: Promise<SQLiteModule> | null = null;
 
-// 原生端使用 SQLite，Web 端退化为 AsyncStorage；两端对上层提供相同缓存语义。
+// 原生端优先使用 SQLite，失败或 Web 端自动退化为 AsyncStorage；两端对上层提供相同缓存语义。
 export async function loadCachedSessionHistory(sessionID: string) {
   const id = sessionID.trim();
   if (!id) {
@@ -58,18 +58,30 @@ export async function loadCachedSessionHistory(sessionID: string) {
     };
   }
 
-  const db = await database();
-  const rows = await db.getAllAsync<MessageRow>(
-    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
-     FROM session_messages
-     WHERE session_id = ?
-     ORDER BY created_at ASC, rowid ASC`,
-    id,
-  );
-  const messages = rows.map(rowToMessage);
+  try {
+    const db = await database();
+    const rows = await db.getAllAsync<MessageRow>(
+      `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
+       FROM session_messages
+       WHERE session_id = ?
+       ORDER BY created_at ASC, rowid ASC`,
+      id,
+    );
+    const messages = rows.map(rowToMessage);
+    if (messages.length > 0) {
+      return {
+        messages,
+        meta: metaFromMessages(id, messages),
+      };
+    }
+  } catch {
+    // SQLite 不可用时回退到 AsyncStorage
+  }
+
+  const fallbackMessages = await loadWebCachedMessages(id);
   return {
-    messages,
-    meta: metaFromMessages(id, messages),
+    messages: fallbackMessages,
+    meta: metaFromMessages(id, fallbackMessages),
   };
 }
 
@@ -82,21 +94,30 @@ export async function replaceCachedSessionHistory(
     return;
   }
 
-  if (useWebStorageCache()) {
+  try {
     await AsyncStorage.setItem(
       webHistoryCacheKey(id),
       JSON.stringify(messages),
     );
+  } catch {
+    // 忽略 AsyncStorage 写入失败
+  }
+
+  if (useWebStorageCache()) {
     return;
   }
 
-  const db = await database();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM session_messages WHERE session_id = ?", id);
-    for (const message of messages) {
-      await upsertMessage(db, id, message);
-    }
-  });
+  try {
+    const db = await database();
+    await db.withTransactionAsync(async () => {
+      await db.runAsync("DELETE FROM session_messages WHERE session_id = ?", id);
+      for (const message of messages) {
+        await upsertMessage(db, id, message);
+      }
+    });
+  } catch {
+    // 忽略 SQLite 缓存写入失败，已由 AsyncStorage 兜底
+  }
 }
 
 export async function appendCachedSessionHistory(
@@ -108,21 +129,30 @@ export async function appendCachedSessionHistory(
     return;
   }
 
-  if (useWebStorageCache()) {
+  try {
     const current = await loadWebCachedMessages(id);
     await AsyncStorage.setItem(
       webHistoryCacheKey(id),
       JSON.stringify(mergeHistoryMessages(current, messages)),
     );
+  } catch {
+    // 忽略 AsyncStorage 写入失败
+  }
+
+  if (useWebStorageCache()) {
     return;
   }
 
-  const db = await database();
-  await db.withTransactionAsync(async () => {
-    for (const message of messages) {
-      await upsertMessage(db, id, message);
-    }
-  });
+  try {
+    const db = await database();
+    await db.withTransactionAsync(async () => {
+      for (const message of messages) {
+        await upsertMessage(db, id, message);
+      }
+    });
+  } catch {
+    // 忽略 SQLite 缓存写入失败，已由 AsyncStorage 兜底
+  }
 }
 
 export async function getCachedSessionHistoryMeta(
@@ -137,31 +167,39 @@ export async function getCachedSessionHistoryMeta(
     return metaFromMessages(id, await loadWebCachedMessages(id));
   }
 
-  const db = await database();
-  const countRows = await db.getAllAsync<MetaRow>(
-    "SELECT COUNT(*) as message_count FROM session_messages WHERE session_id = ?",
-    id,
-  );
-  const lastRows = await db.getAllAsync<MessageRow>(
-    `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
-     FROM session_messages
-     WHERE session_id = ?
-     ORDER BY created_at DESC, rowid DESC
-     LIMIT 1`,
-    id,
-  );
-  const messageCount = countRows[0]?.message_count || 0;
-  const last = lastRows[0];
-  const meta: SessionHistoryMetaPayload = {
-    session_id: id,
-    local_message_count: messageCount,
-    local_last_message_id: last?.message_id || "",
-    local_history_version: messageCount,
-  };
-  if (last?.created_at) {
-    meta.local_last_message_created_at = last.created_at;
+  try {
+    const db = await database();
+    const countRows = await db.getAllAsync<MetaRow>(
+      "SELECT COUNT(*) as message_count FROM session_messages WHERE session_id = ?",
+      id,
+    );
+    const lastRows = await db.getAllAsync<MessageRow>(
+      `SELECT message_id, role, content, reasoning, tool_call_id, tool_name, tool_arguments, tool_error, tool_status, tool_error_code, tool_truncated, usage_json, created_at
+       FROM session_messages
+       WHERE session_id = ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT 1`,
+      id,
+    );
+    const messageCount = countRows[0]?.message_count || 0;
+    if (messageCount > 0) {
+      const last = lastRows[0];
+      const meta: SessionHistoryMetaPayload = {
+        session_id: id,
+        local_message_count: messageCount,
+        local_last_message_id: last?.message_id || "",
+        local_history_version: messageCount,
+      };
+      if (last?.created_at) {
+        meta.local_last_message_created_at = last.created_at;
+      }
+      return meta;
+    }
+  } catch {
+    // SQLite 不可用时回退到 AsyncStorage
   }
-  return meta;
+
+  return metaFromMessages(id, await loadWebCachedMessages(id));
 }
 
 async function database() {
@@ -170,33 +208,38 @@ async function database() {
   }
   // 数据库 Promise 单例化，多个会话同时加载时只执行一次建表和 WAL 初始化。
   if (!dbPromise) {
-    dbPromise = loadSQLite().then(async (SQLite) => {
-      const db = await SQLite.openDatabaseAsync("myai_session_history.db");
-      await db.execAsync(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS session_messages (
-          session_id TEXT NOT NULL,
-          message_id TEXT NOT NULL,
-          role TEXT NOT NULL,
-          content TEXT,
-          reasoning TEXT,
-          tool_call_id TEXT,
-          tool_name TEXT,
-          tool_arguments TEXT,
-          tool_error TEXT,
-          tool_status TEXT,
-          tool_error_code TEXT,
-          tool_truncated INTEGER,
-          usage_json TEXT,
-          created_at TEXT,
-          PRIMARY KEY (session_id, message_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_session_messages_order
-          ON session_messages(session_id, created_at, message_id);
-      `);
-      await ensureHistoryColumns(db);
-      return db;
-    });
+    dbPromise = loadSQLite()
+      .then(async (SQLite) => {
+        const db = await SQLite.openDatabaseAsync("myai_session_history.db");
+        await db.execAsync(`
+          PRAGMA journal_mode = WAL;
+          CREATE TABLE IF NOT EXISTS session_messages (
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT,
+            reasoning TEXT,
+            tool_call_id TEXT,
+            tool_name TEXT,
+            tool_arguments TEXT,
+            tool_error TEXT,
+            tool_status TEXT,
+            tool_error_code TEXT,
+            tool_truncated INTEGER,
+            usage_json TEXT,
+            created_at TEXT,
+            PRIMARY KEY (session_id, message_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_session_messages_order
+            ON session_messages(session_id, created_at, message_id);
+        `);
+        await ensureHistoryColumns(db);
+        return db;
+      })
+      .catch((err) => {
+        dbPromise = null;
+        throw err;
+      });
   }
   return dbPromise;
 }
@@ -221,12 +264,10 @@ function loadSQLite(): Promise<SQLiteModule> {
     return Promise.reject(new Error("SQLite is disabled on web"));
   }
   if (!sqlitePromise) {
-    try {
-      const getModule = new Function('return require("expo-sqlite")');
-      sqlitePromise = Promise.resolve(getModule());
-    } catch (err) {
-      sqlitePromise = Promise.reject(err);
-    }
+    sqlitePromise = (import("expo-sqlite") as unknown as Promise<SQLiteModule>).catch((err) => {
+      sqlitePromise = null;
+      throw err;
+    });
   }
   return sqlitePromise;
 }

@@ -18,14 +18,19 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	// Hook 决策在本服务之前处理，任何 Hook 结果都不能提升会话权限。
 	permission := tooldef.NormalizePermission(command.Permission)
 	mode := session.NormalizePermissionMode(command.Mode)
-	if mode == session.PermissionModeReadonly {
-		if permission == tooldef.PermissionRead && !command.RequireConfirmation {
-			return toolresult.PermissionDecision{Allowed: true}
+	switch mode {
+	case session.PermissionModeReadonly:
+		if permission != tooldef.PermissionRead {
+			return deniedByCapability(command, mode, permission)
 		}
-		if permission == tooldef.PermissionRead {
-			return askForPermission(command, permission, mode, "hook requires confirmation")
+	case session.PermissionModeReadWrite:
+		if permission == tooldef.PermissionExecute {
+			return deniedByCapability(command, mode, permission)
 		}
-		return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, command.Name, permission)}
+	case session.PermissionModeExecute:
+		if permission == tooldef.PermissionWrite {
+			return deniedByCapability(command, mode, permission)
+		}
 	}
 	if command.RequireConfirmation {
 		return askForPermission(command, permission, mode, "hook requires confirmation")
@@ -34,7 +39,7 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 		return toolresult.PermissionDecision{Allowed: true}
 	}
 	switch mode {
-	case session.PermissionModeFull:
+	case session.PermissionModeReadWrite, session.PermissionModeExecute, session.PermissionModeFull:
 		return toolresult.PermissionDecision{Allowed: true}
 	default:
 		if assessAskApproval(command) == askApprovalAuto {
@@ -42,6 +47,10 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 		}
 		return askForPermission(command, permission, mode, "")
 	}
+}
+
+func deniedByCapability(command toolcommand.Permission, mode session.PermissionMode, permission tooldef.Permission) toolresult.PermissionDecision {
+	return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: session permission mode is %s and tool %s requires %s", mode, command.Name, permission)}
 }
 
 func askForPermission(command toolcommand.Permission, permission tooldef.Permission, mode session.PermissionMode, reason string) toolresult.PermissionDecision {

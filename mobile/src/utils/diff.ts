@@ -20,12 +20,13 @@ export type DiffRow =
     };
 
 export function parseDiffRows(diff: string): DiffRow[] {
-  const lines = diff.replace(/\r\n/g, "\n").split("\n");
+  const lines = diff.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
   const rows: DiffRow[] = [];
   const pendingRemoves: DiffCell[] = [];
   let lineCounter = 0;
   let oldLineNumber = 0;
   let newLineNumber = 0;
+  let inHunk = false;
 
   const flushPendingRemove = () => {
     while (pendingRemoves.length > 0) {
@@ -41,11 +42,20 @@ export function parseDiffRows(diff: string): DiffRow[] {
   for (const line of lines) {
     if (!line) {
       flushPendingRemove();
+      if (inHunk) {
+        rows.push({
+          id: `ctx-${lineCounter++}`,
+          type: "split",
+          before: { kind: "context", lineNumber: oldLineNumber++, text: "" },
+          after: { kind: "context", lineNumber: newLineNumber++, text: "" },
+        });
+      }
       continue;
     }
 
     if (line.startsWith("@@")) {
       flushPendingRemove();
+      inHunk = true;
       const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (match) {
         oldLineNumber = Number(match[1]);
@@ -61,6 +71,7 @@ export function parseDiffRows(diff: string): DiffRow[] {
 
     if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ")) {
       flushPendingRemove();
+      inHunk = false;
       rows.push({
         id: `m-${lineCounter++}`,
         type: "full",

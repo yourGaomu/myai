@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
 	workspaceport "myai/core/port/workspace"
 )
@@ -14,10 +15,19 @@ type Service struct {
 	Tasks                subagentport.TaskRepository
 	Runs                 subagentport.RunRepository
 	TaskRuns             subagentport.TaskRunRepository
+	ExecutionLease       subagentport.AgentExecutionLeaseStore
+	ExecutionOwnerID     string
+	ExecutionLeaseTTL    time.Duration
+	MessageOwnerID       string
+	AgentMessages        subagentport.AgentMessageRepository
+	AgentPaths           subagentport.AgentPathRegistry
+	Runtime              subagentport.AgentRuntimeManager
+	Models               modelport.Registry
 	Scheduler            subagentport.Scheduler
 	Sessions             subagentport.ChildSessionFactory
 	Runner               subagentport.AgentRunner
 	ParentContinuation   subagentport.ParentContinuation
+	ParentNotifier       subagentport.ParentCompletionNotifier
 	IDs                  subagentport.IDGenerator
 	Events               subagentport.EventPublisher
 	Workspaces           workspaceport.Manager
@@ -28,6 +38,7 @@ type Service struct {
 	mu             sync.Mutex
 	admissionMu    sync.Mutex
 	resumeClaims   map[string]struct{}
+	parentNotified map[string]struct{}
 	activeRuns     map[string]*activeExecution
 	waitingWakeups map[string]map[*childWait]struct{}
 }

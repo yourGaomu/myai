@@ -43,8 +43,7 @@ export function ChatPanel({
   onRegenerate,
 }: Props) {
   const renderItems = useMemo(() => {
-    const visibleMessages = messages.filter((message) => !isCoveredToolActivity(message, runs));
-    return buildChatTurns(visibleMessages);
+    return buildChatTurns(messages, runs);
   }, [messages, runs]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});

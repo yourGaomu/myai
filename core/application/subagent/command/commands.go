@@ -48,6 +48,9 @@ type CheckTask struct {
 type SendMessage struct {
 	TaskID          string
 	ParentSessionID string
+	MessageID       string
+	Kind            domainsubagent.AgentMessageKind
+	Trigger         domainsubagent.AgentMessageTrigger
 	Content         string
 }
 
@@ -87,10 +90,13 @@ type ResumeTask struct {
 	Stream          modelport.ChatStreamHandler
 }
 
-// WaitTask waits for a child task's next terminal state change. The wait is
-// event-driven when the configured publisher supports TaskEventSource.
+// WaitTask waits for the first target child task to reach a terminal state.
+// Targets may contain more than one task ID; the wait completes when any
+// target reaches a terminal state. TaskID is kept as a single-target shortcut
+// for callers that have not migrated to Targets yet.
 type WaitTask struct {
 	TaskID          string
+	Targets         []string
 	ParentSessionID string
 	ParentTaskID    string
 	Timeout         time.Duration

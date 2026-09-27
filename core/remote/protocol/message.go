@@ -241,12 +241,15 @@ type SubagentTaskPayload struct {
 type SubagentTaskMessagePayload struct {
 	TaskID  string `json:"task_id"`
 	Message string `json:"message"`
+	Trigger string `json:"trigger,omitempty"`
 }
 
 type SubagentTaskWaitPayload struct {
-	SessionID string `json:"session_id,omitempty"`
-	TaskID    string `json:"task_id"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+	SessionID    string   `json:"session_id,omitempty"`
+	ParentTaskID string   `json:"parent_task_id,omitempty"`
+	Targets      []string `json:"targets,omitempty"`
+	TaskID       string   `json:"task_id,omitempty"`
+	TimeoutMS    int64    `json:"timeout_ms,omitempty"`
 }
 
 type SubagentTaskSummary struct {
@@ -265,6 +268,7 @@ type SubagentTaskSummary struct {
 	Status            string            `json:"status"`
 	Unread            bool              `json:"unread"`
 	Result            string            `json:"result,omitempty"`
+	Usage             *TokenUsage       `json:"usage,omitempty"`
 	ErrorMessage      string            `json:"error_message,omitempty"`
 	ChangeSet         SubagentChangeSet `json:"change_set"`
 	CanFollowup       bool              `json:"can_followup"`
@@ -317,16 +321,18 @@ type SubagentTaskResultPayload struct {
 }
 
 type SubagentTaskWaitResultPayload struct {
-	SessionID      string              `json:"session_id"`
-	Task           SubagentTaskSummary `json:"task"`
-	TimedOut       bool                `json:"timed_out"`
-	WokenByMailbox bool                `json:"woken_by_mailbox,omitempty"`
-	Sequence       uint64              `json:"sequence,omitempty"`
+	SessionID      string                `json:"session_id"`
+	Task           SubagentTaskSummary   `json:"task"`
+	Tasks          []SubagentTaskSummary `json:"tasks,omitempty"`
+	TimedOut       bool                  `json:"timed_out"`
+	WokenByMailbox bool                  `json:"woken_by_mailbox,omitempty"`
+	Sequence       uint64                `json:"sequence,omitempty"`
 }
 
 type AgentOnlinePayload struct {
-	Status   string `json:"status"`
-	BindCode string `json:"bind_code,omitempty"`
+	Status                string `json:"status"`
+	BindCode              string `json:"bind_code,omitempty"`
+	LastTaskEventSequence uint64 `json:"last_task_event_sequence,omitempty"`
 }
 
 type UserMessagePayload struct {

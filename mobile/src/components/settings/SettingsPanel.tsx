@@ -7,7 +7,25 @@ import { ButtonContent } from "../common/ButtonContent";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
-import type { CompactInfo, ContextInfo, GenerationSettings, ModelSummary, PluginInfo, SessionGenerationPreferences, SessionSummary, SkillSummary, SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
+import { defaultIntentConfig, normalizeIntentStrategy } from "../../hooks/useIntentSettings";
+import type {
+  CompactInfo,
+  ContextInfo,
+  GenerationSettings,
+  IntentConfigPayload,
+  IntentConfigResultPayload,
+  IntentConfigTestResultPayload,
+  IntentStrategy,
+  IntentTracePayload,
+  ModelSummary,
+  PluginInfo,
+  SessionGenerationPreferences,
+  SessionSummary,
+  SkillSummary,
+  SubagentDefinition,
+  SubagentTask,
+  SubagentTaskEvent,
+} from "../../protocol";
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
@@ -28,6 +46,21 @@ type Props = {
   context?: ContextInfo;
   generation?: SessionGenerationPreferences;
   generationStatus?: { error: boolean; message: string };
+  intentConfig: IntentConfigResultPayload | null;
+  intentConfigLoading: boolean;
+  intentConfigSaving: boolean;
+  intentConfigTesting: boolean;
+  intentConfigMessage: string;
+  intentConfigError: boolean;
+  intentTestResult: IntentConfigTestResultPayload | null;
+  intentTraces: IntentTracePayload[];
+  intentTraceDetails: Record<string, IntentTracePayload>;
+  intentTraceDetailErrors: Record<string, string>;
+  intentTraceListLoading: boolean;
+  intentTraceClearing: boolean;
+  intentTraceDetailLoadingID: string;
+  intentTraceMessage: string;
+  intentTraceError: boolean;
   currentModelID: string;
   modelMessage: string;
   modelMessageError: boolean;
@@ -53,6 +86,14 @@ type Props = {
   onSetDefaultModel: (modelID: string) => void;
   onClearModelMessage: () => void;
   onTestModelConfig: (config: ModelConfigDraft) => void;
+  onRequestIntentConfig: () => boolean;
+  onSaveIntentConfig: (payload: IntentConfigPayload) => boolean;
+  onTestIntentConfig: (payload: IntentConfigPayload) => boolean;
+  onRequestIntentTraces: (sessionID?: string, limit?: number) => boolean;
+  onRequestIntentTraceDetail: (traceID: string) => boolean;
+  onClearIntentTraces: (sessionID?: string) => boolean;
+  onClearIntentConfigFeedback: () => void;
+  onClearIntentTraceFeedback: () => void;
   onRequestContextInfo: () => void;
   onRequestGenerationPreferences: () => void;
   onRefreshSessions: () => void;
@@ -109,8 +150,38 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "skill" | "plugin" | "subagent" | "session" | "permission" | "context" | "generation";
+type SettingsSection = "general" | "connection" | "model" | "autoplan" | "skill" | "plugin" | "subagent" | "session" | "permission" | "context" | "generation";
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
+
+const intentStrategies: Array<{
+  strategy: IntentStrategy;
+  icon: string;
+  label: string;
+  badge: string;
+  meta: string;
+}> = [
+  {
+    strategy: "system",
+    icon: "⚙️",
+    label: "内置判断 (system)",
+    badge: "内置规则+聊天模型",
+    meta: "先使用内置关键词规则匹配，必要时调用当前聊天模型做分类（并非纯离线）。",
+  },
+  {
+    strategy: "jev",
+    icon: "🎯",
+    label: "Jev 远程判断 (jev)",
+    badge: "远程意图分类",
+    meta: "发送当前用户消息与最近几条用户历史到 Jev 服务，按置信度阈值决定仅规划或规划后直执。",
+  },
+  {
+    strategy: "off",
+    icon: "⏸️",
+    label: "关闭自动判断 (off)",
+    badge: "仅手动开关",
+    meta: "关闭自动触发规划，仅在你手动把会话切换为 Plan 模式时才进行规划。",
+  },
+];
 
 const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtocol }> = [
   { label: "OpenAI 兼容", meta: "聊天补全协议", protocol: "openai-chat-completions" },
@@ -123,6 +194,7 @@ const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtoc
 const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
   { icon: "💬", key: "session", label: "会话", meta: "新建与切换" },
   { icon: "🧠", key: "model", label: "模型", meta: "选择当前模型" },
+  { icon: "🧭", key: "autoplan", label: "自动规划", meta: "意图判断与记录" },
   { icon: "⚡", key: "connection", label: "连接", meta: "中继服务与配对" },
   { icon: "⚙️", key: "general", label: "常规", meta: "状态总览" },
   { icon: "🛡️", key: "permission", label: "权限", meta: "工具调用策略" },
@@ -145,6 +217,21 @@ export function SettingsPanel({
   context,
   generation,
   generationStatus,
+  intentConfig,
+  intentConfigLoading,
+  intentConfigSaving,
+  intentConfigTesting,
+  intentConfigMessage,
+  intentConfigError,
+  intentTestResult,
+  intentTraces,
+  intentTraceDetails,
+  intentTraceDetailErrors,
+  intentTraceListLoading,
+  intentTraceClearing,
+  intentTraceDetailLoadingID,
+  intentTraceMessage,
+  intentTraceError,
   currentModelID,
   modelMessage,
   modelMessageError,
@@ -170,6 +257,14 @@ export function SettingsPanel({
   onSetDefaultModel,
   onClearModelMessage,
   onTestModelConfig,
+  onRequestIntentConfig,
+  onSaveIntentConfig,
+  onTestIntentConfig,
+  onRequestIntentTraces,
+  onRequestIntentTraceDetail,
+  onClearIntentTraces,
+  onClearIntentConfigFeedback,
+  onClearIntentTraceFeedback,
   onRequestContextInfo,
   onRequestGenerationPreferences,
   onRefreshSessions,
@@ -243,9 +338,31 @@ export function SettingsPanel({
     defaultTopP: "",
     defaultMaxTokens: "",
   });
+  const effectiveIntentConfig = intentConfig || defaultIntentConfig;
+  const [intentStrategy, setIntentStrategy] = useState<IntentStrategy>(effectiveIntentConfig.strategy);
+  const [intentBaseURL, setIntentBaseURL] = useState(effectiveIntentConfig.base_url);
+  const [intentAPIKey, setIntentAPIKey] = useState("");
+  const [intentClearAPIKey, setIntentClearAPIKey] = useState(false);
+  const [intentModel, setIntentModel] = useState(effectiveIntentConfig.model);
+  const [intentPlanConfidence, setIntentPlanConfidence] = useState(String(effectiveIntentConfig.plan_confidence));
+  const [intentExecuteConfidence, setIntentExecuteConfidence] = useState(String(effectiveIntentConfig.execute_confidence));
+  const [intentFormError, setIntentFormError] = useState("");
+  const [traceFilterMode, setTraceFilterMode] = useState<"all" | "current" | "custom">("all");
+  const [traceCustomSessionID, setTraceCustomSessionID] = useState("");
+  const [selectedTraceID, setSelectedTraceID] = useState("");
+
   const [activeSection, setActiveSection] = useState<SettingsSection>("session");
   const requestContextInfoRef = useRef(onRequestContextInfo);
   const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
+  const requestIntentConfigRef = useRef(onRequestIntentConfig);
+  const requestIntentTracesRef = useRef(onRequestIntentTraces);
+
+  const effectiveTraceSessionID =
+    traceFilterMode === "current"
+      ? sessionID.trim()
+      : traceFilterMode === "custom"
+        ? traceCustomSessionID.trim()
+        : "";
 
   useEffect(() => {
     setWindowInput(String(currentWindowK));
@@ -258,6 +375,41 @@ export function SettingsPanel({
   useEffect(() => {
     requestGenerationPreferencesRef.current = onRequestGenerationPreferences;
   }, [onRequestGenerationPreferences]);
+
+  useEffect(() => {
+    requestIntentConfigRef.current = onRequestIntentConfig;
+  }, [onRequestIntentConfig]);
+
+  useEffect(() => {
+    requestIntentTracesRef.current = onRequestIntentTraces;
+  }, [onRequestIntentTraces]);
+
+  useEffect(() => {
+    if (!intentConfig) {
+      return;
+    }
+    setIntentStrategy(normalizeIntentStrategy(intentConfig.strategy));
+    setIntentBaseURL(intentConfig.base_url || defaultIntentConfig.base_url);
+    setIntentAPIKey("");
+    setIntentClearAPIKey(false);
+    setIntentModel(intentConfig.model || defaultIntentConfig.model);
+    setIntentPlanConfidence(String(intentConfig.plan_confidence ?? defaultIntentConfig.plan_confidence));
+    setIntentExecuteConfidence(String(intentConfig.execute_confidence ?? defaultIntentConfig.execute_confidence));
+    setIntentFormError("");
+  }, [intentConfig]);
+
+  useEffect(() => {
+    if (activeSection === "autoplan" && connected && clientToken) {
+      requestIntentConfigRef.current();
+      requestIntentTracesRef.current(effectiveTraceSessionID);
+    }
+  }, [activeSection, clientToken, connected, effectiveTraceSessionID]);
+
+  useEffect(() => {
+    if (activeSection === "autoplan" && intentTestResult && connected && clientToken) {
+      requestIntentTracesRef.current(effectiveTraceSessionID);
+    }
+  }, [activeSection, clientToken, connected, effectiveTraceSessionID, intentTestResult]);
 
   useEffect(() => {
     if (activeSection === "context" && connected && clientToken && sessionID) {
@@ -303,6 +455,74 @@ export function SettingsPanel({
   const updateLabel = Updates.isEnabled
     ? `${Updates.channel || "本地"} · ${Updates.updateId ? shortID(Updates.updateId) : "嵌入包"}`
     : "开发模式 · OTA 未启用";
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatusMessage, setUpdateStatusMessage] = useState("");
+  const [updateStatusError, setUpdateStatusError] = useState(false);
+  const [updateReadyToReload, setUpdateReadyToReload] = useState(false);
+
+  const notifyUpdateUser = (title: string, message: string, onConfirmReload?: () => void) => {
+    if (onConfirmReload) {
+      Alert.alert(title, message, [
+        { text: "稍后重启", style: "cancel" },
+        { text: "立即重启", onPress: onConfirmReload },
+      ]);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
+  const handleCheckUpdate = async () => {
+    if (checkingUpdate) {
+      return;
+    }
+    if (!Updates.isEnabled) {
+      const msg = `当前为开发/网页环境（${versionLabel}），OTA 热更新仅在独立构建的 Android 安装包中生效。`;
+      setUpdateStatusError(false);
+      setUpdateReadyToReload(false);
+      setUpdateStatusMessage(msg);
+      notifyUpdateUser("检查更新", msg);
+      return;
+    }
+
+    setCheckingUpdate(true);
+    setUpdateStatusError(false);
+    setUpdateReadyToReload(false);
+    setUpdateStatusMessage("正在连接服务器检查新版本...");
+
+    try {
+      const checkResult = await Updates.checkForUpdateAsync();
+      if (!checkResult.isAvailable) {
+        const msg = `当前已是最新版本（${versionLabel} · ${updateLabel}）`;
+        setUpdateStatusMessage(msg);
+        notifyUpdateUser("已是最新版本", msg);
+        return;
+      }
+
+      setUpdateStatusMessage("发现新版本，正在下载热更新包...");
+      const fetchResult = await Updates.fetchUpdateAsync();
+      if (fetchResult.isNew) {
+        const msg = "新版本已下载完成！点击“立即重启”即可应用最新界面与功能。";
+        setUpdateReadyToReload(true);
+        setUpdateStatusMessage(msg);
+        notifyUpdateUser("更新准备就绪", msg, () => {
+          void Updates.reloadAsync();
+        });
+      } else {
+        const msg = "更新包校验完成，当前已是最新内容。";
+        setUpdateStatusMessage(msg);
+        notifyUpdateUser("检查更新", msg);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const msg = `检查更新失败：${reason}`;
+      setUpdateStatusError(true);
+      setUpdateStatusMessage(msg);
+      notifyUpdateUser("检查更新失败", reason);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   const submitWindow = () => {
     const nextWindowK = Number.parseInt(windowInput, 10);
     if (Number.isNaN(nextWindowK)) {
@@ -1264,6 +1484,41 @@ export function SettingsPanel({
 
   const generalSection = (
     <View style={styles.sectionStack}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
+        <IconBox label="OTA" />
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
+          <Text style={styles.settingTitle}>版本与热更新</Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>
+            {versionLabel} · {updateLabel}
+          </Text>
+        </View>
+        <View style={styles.rowCompact}>
+          <Pressable
+            disabled={checkingUpdate}
+            onPress={() => void handleCheckUpdate()}
+            style={({ pressed }) =>
+              buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)
+            }
+          >
+            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "🔄 检查更新"} />
+          </Pressable>
+          {updateReadyToReload ? (
+            <Pressable
+              onPress={() => void Updates.reloadAsync()}
+              style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}
+            >
+              <ButtonContent text="立即重启" />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      {updateStatusMessage ? (
+        <Text style={updateStatusError ? styles.generationMessage : styles.generationSuccess}>
+          {updateStatusMessage}
+        </Text>
+      ) : null}
+
       <View style={styles.summaryGrid}>
         <SummaryTile label="连接" value={connected ? "在线" : clientToken ? "未连接" : "未配对"} tone={connected ? "good" : "warn"} />
         <SummaryTile label="模型" value={activeModel ? modelDisplayName(activeModel) : currentModelID || "未加载"} />
@@ -1276,6 +1531,13 @@ export function SettingsPanel({
         <SummaryTile label="更新标识" value={updateLabel} />
       </View>
       <View style={styles.quickActions}>
+        <Pressable
+          disabled={checkingUpdate}
+          onPress={() => void handleCheckUpdate()}
+          style={({ pressed }) => buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)}
+        >
+          <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查更新中" : "检查更新"} />
+        </Pressable>
         <Pressable
           disabled={pendingActions.connect}
           onPress={onConnect}
@@ -1308,6 +1570,952 @@ export function SettingsPanel({
     </View>
   );
 
+  const buildIntentConfigPayload = (forTest = false): IntentConfigPayload | null => {
+    const strategy = normalizeIntentStrategy(intentStrategy);
+    const baseURL = intentBaseURL.trim().replace(/\/+$/, "");
+    const model = intentModel.trim();
+    const apiKey = intentAPIKey.trim();
+    const planConfidence = Number(intentPlanConfidence.trim());
+    const executeConfidence = Number(intentExecuteConfidence.trim());
+
+    if (!baseURL) {
+      setIntentFormError("Base URL 不能为空（例如 https://api.typesafe.ai）。");
+      return null;
+    }
+    const baseValidationError = validateIntentBaseURL(baseURL);
+    if (baseValidationError) {
+      setIntentFormError(baseValidationError);
+      return null;
+    }
+    if (!model) {
+      setIntentFormError("Jev model 不能为空（例如 jev-latest）。");
+      return null;
+    }
+    if (
+      !Number.isFinite(planConfidence) ||
+      !Number.isFinite(executeConfidence) ||
+      planConfidence <= 0 ||
+      planConfidence > 1 ||
+      executeConfidence <= 0 ||
+      executeConfidence > 1
+    ) {
+      setIntentFormError("plan_confidence 与 execute_confidence 必须在 (0, 1] 范围内。");
+      return null;
+    }
+    if (planConfidence > executeConfidence) {
+      setIntentFormError("plan_confidence 不能大于 execute_confidence。");
+      return null;
+    }
+
+    const hasSavedAPIKey = Boolean(intentConfig?.has_api_key);
+    const effectiveHasAPIKey = Boolean(apiKey) || (hasSavedAPIKey && !intentClearAPIKey);
+    if ((forTest || strategy === "jev") && !effectiveHasAPIKey) {
+      setIntentFormError(
+        forTest
+          ? "测试连接需要提供 API Key（请输入密钥，或保留服务端已保存的密钥）。"
+          : "启用 Jev 远程判断策略必须配置 API Key（请输入新密钥或保留已保存密钥）。",
+      );
+      return null;
+    }
+
+    setIntentFormError("");
+    const payload: IntentConfigPayload = {
+      strategy,
+      base_url: baseURL,
+      model,
+      plan_confidence: Number(planConfidence.toFixed(4)),
+      execute_confidence: Number(executeConfidence.toFixed(4)),
+    };
+    if (!forTest && intentClearAPIKey && !apiKey) {
+      payload.clear_api_key = true;
+    } else if (apiKey) {
+      payload.api_key = apiKey;
+    }
+    return payload;
+  };
+
+  const handleSaveIntentConfig = () => {
+    const payload = buildIntentConfigPayload(false);
+    if (!payload) {
+      return;
+    }
+    onClearIntentConfigFeedback();
+    const sent = onSaveIntentConfig(payload);
+    if (sent) {
+      // 提交后立即清空输入态中的明文密钥，严禁在界面中驻留或回显
+      setIntentAPIKey("");
+    }
+  };
+
+  const handleTestIntentConfig = () => {
+    const payload = buildIntentConfigPayload(true);
+    if (!payload) {
+      return;
+    }
+    onClearIntentConfigFeedback();
+    onTestIntentConfig(payload);
+  };
+
+  const confirmClearIntentTraces = () => {
+    const targetSessionID = effectiveTraceSessionID;
+    const title = targetSessionID ? "清理当前筛选会话记录？" : "清理全部判断记录？";
+    const message = targetSessionID
+      ? `确定清理会话 #${shortID(targetSessionID)} 的判断记录吗？此操作不可恢复。`
+      : "确定清理所有会话的 Jev 意图判断记录吗？此操作不可恢复。";
+    const runClear = () => {
+      onClearIntentTraceFeedback();
+      setSelectedTraceID("");
+      onClearIntentTraces(targetSessionID || undefined);
+    };
+
+    if (typeof window !== "undefined" && typeof window.confirm === "function") {
+      if (window.confirm(`${title}\n${message}`)) {
+        runClear();
+      }
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: "取消", style: "cancel" },
+      { text: "确认清理", style: "destructive", onPress: runClear },
+    ]);
+  };
+
+  const intentBusy = intentConfigLoading || intentConfigSaving || intentConfigTesting;
+  const traceBusy = intentTraceListLoading || intentTraceClearing;
+
+  const autoPlanSection = (
+    <View style={styles.sectionStack}>
+      {/* 顶部概览卡片 */}
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
+        <IconBox label="AP" />
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
+          <Text style={styles.settingTitle}>自动规划 (Auto Plan)</Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>
+            当前策略：{intentStrategyLabel(effectiveIntentConfig.strategy)}
+            {intentStrategy === "jev" || effectiveIntentConfig.strategy === "jev"
+              ? ` · 模型：${effectiveIntentConfig.model} · ${
+                  effectiveIntentConfig.has_api_key ? "已保存密钥 (has_api_key=true)" : "未配置密钥 (has_api_key=false)"
+                }`
+              : ""}
+          </Text>
+          {intentStrategy === "jev" || effectiveIntentConfig.strategy === "jev" ? (
+            <Text numberOfLines={1} style={styles.settingMeta}>
+              阈值：plan_confidence {effectiveIntentConfig.plan_confidence} / execute_confidence {effectiveIntentConfig.execute_confidence}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable
+          disabled={!clientToken || intentBusy}
+          onPress={() => {
+            onClearIntentConfigFeedback();
+            onRequestIntentConfig();
+            if (intentStrategy === "jev") {
+              onRequestIntentTraces(effectiveTraceSessionID);
+            }
+          }}
+          style={({ pressed }) =>
+            buttonFeedback(
+              [styles.settingAction, (!clientToken || intentBusy) && styles.disabledButton],
+              pressed,
+            )
+          }
+        >
+          <ButtonContent loading={intentConfigLoading} text={intentConfigLoading ? "读取中" : "刷新配置"} />
+        </Pressable>
+      </View>
+
+      {/* 边界说明提示 */}
+      <View style={styles.contextNote}>
+        <Text style={styles.contextNoteText}>
+          自动判断仅在会话处于「对话 (Chat)」模式时生效；当你手动将会话切为「计划 (Plan)」模式时，直接使用手动 Plan 模式，不会调用自动判断。Jev 是专用意图分类模型，不会加入普通聊天模型列表或会话模型切换器。
+        </Text>
+      </View>
+
+      {/* 三选一策略选择 */}
+      <View style={styles.controlBlock}>
+        <View style={styles.controlHeader}>
+          <View style={styles.flex}>
+            <Text style={styles.controlTitle}>自动规划策略（三选一）</Text>
+            <Text style={styles.settingMeta}>
+              选择在用户发送消息时如何自动判断是否需要先生成结构化计划
+            </Text>
+          </View>
+          {intentConfigSaving ? <ButtonContent loading text="保存中" /> : null}
+        </View>
+
+        <View style={styles.permissionStack}>
+          {intentStrategies.map((item) => {
+            const selected = intentStrategy === item.strategy;
+            const savedActive = effectiveIntentConfig.strategy === item.strategy;
+            return (
+              <Pressable
+                key={item.strategy}
+                disabled={intentBusy}
+                onPress={() => {
+                  setIntentStrategy(item.strategy);
+                  setIntentFormError("");
+                  onClearIntentConfigFeedback();
+                  if (item.strategy !== "jev" && clientToken && effectiveIntentConfig.strategy !== item.strategy) {
+                    onSaveIntentConfig({
+                      strategy: item.strategy,
+                      base_url: intentBaseURL.trim() || effectiveIntentConfig.base_url,
+                      model: intentModel.trim() || effectiveIntentConfig.model,
+                      plan_confidence: Number(intentPlanConfidence) || effectiveIntentConfig.plan_confidence,
+                      execute_confidence: Number(intentExecuteConfidence) || effectiveIntentConfig.execute_confidence,
+                    });
+                  }
+                }}
+                style={({ pressed }) =>
+                  buttonFeedback(
+                    [
+                      styles.permissionCard,
+                      selected && styles.permissionCardActive,
+                      intentBusy && styles.disabledButton,
+                    ],
+                    pressed,
+                  )
+                }
+              >
+                <View style={styles.flex}>
+                  <View style={styles.row}>
+                    <Text style={styles.permissionCardTitle}>
+                      {item.icon} {item.label}
+                    </Text>
+                    <View style={styles.recommendBadge}>
+                      <Text style={styles.recommendBadgeText}>{item.badge}</Text>
+                    </View>
+                    {savedActive ? (
+                      <View style={styles.intentSavedBadge}>
+                        <Text style={styles.intentSavedBadgeText}>当前生效</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.permissionCardMeta}>{item.meta}</Text>
+                </View>
+
+                {selected ? (
+                  <View style={styles.permissionActiveBadge}>
+                    <Text style={styles.permissionActiveBadgeText}>已选中</Text>
+                  </View>
+                ) : (
+                  <View style={styles.permissionSelectBtn}>
+                    <Text style={styles.permissionSelectBtnText}>选择</Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {intentStrategy !== "jev" && effectiveIntentConfig.strategy !== intentStrategy ? (
+          <View style={styles.row}>
+            <Pressable
+              disabled={!clientToken || intentBusy}
+              onPress={handleSaveIntentConfig}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [styles.secondaryButton, (!clientToken || intentBusy) && styles.disabledButton],
+                  pressed,
+                )
+              }
+            >
+              <ButtonContent
+                loading={intentConfigSaving}
+                text={intentConfigSaving ? "保存中..." : "保存当前策略"}
+              />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {intentStrategy !== "jev" && (intentFormError || intentConfigMessage) ? (
+          <Text
+            style={
+              intentFormError || intentConfigError
+                ? styles.generationMessage
+                : styles.generationSuccess
+            }
+          >
+            {intentFormError || intentConfigMessage}
+          </Text>
+        ) : null}
+      </View>
+
+      {/* 仅当选中 Jev 策略时，展开 Jev 远程判断配置表单与判断记录 */}
+      {intentStrategy === "jev" ? (
+        <>
+          <View style={styles.controlBlock}>
+            <View style={styles.controlHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.controlTitle}>Jev 意图分类配置</Text>
+                <Text style={styles.settingMeta}>
+                  配置远程 Jev 服务地址、密钥、模型与置信度阈值；支持直接使用尚未保存的表单值进行“测试连接”。
+                </Text>
+              </View>
+          <View
+            style={[
+              styles.intentKeyStatusPill,
+              intentClearAPIKey
+                ? styles.intentKeyStatusWarn
+                : effectiveIntentConfig.has_api_key
+                  ? styles.intentKeyStatusGood
+                  : styles.intentKeyStatusQuiet,
+            ]}
+          >
+            <Text style={styles.intentKeyStatusText}>
+              {intentClearAPIKey
+                ? "待清除密钥 (clear_api_key=true)"
+                : effectiveIntentConfig.has_api_key
+                  ? "已配置密钥 (has_api_key=true)"
+                  : "无已存密钥 (has_api_key=false)"}
+            </Text>
+          </View>
+        </View>
+
+        {/* Base URL */}
+        <View style={styles.generationField}>
+          <View style={styles.generationFieldHeader}>
+            <Text style={styles.generationLabel}>Base URL (base_url)</Text>
+            <Text style={styles.generationMeta}>默认 https://api.typesafe.ai</Text>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!intentBusy}
+            onChangeText={(value) => {
+              setIntentBaseURL(value);
+              setIntentFormError("");
+            }}
+            placeholder="https://api.typesafe.ai"
+            placeholderTextColor="#776f66"
+            style={styles.input}
+            value={intentBaseURL}
+          />
+          <Text style={styles.generationMeta}>
+            远程请求路径为 {"${BaseURL}/v1/judge"}；非本地地址必须使用 HTTPS。
+          </Text>
+        </View>
+
+        {/* API Key */}
+        <View style={styles.generationField}>
+          <View style={styles.generationFieldHeader}>
+            <Text style={styles.generationLabel}>API Key (api_key)</Text>
+            <Text style={styles.generationEffective}>
+              {intentAPIKey.trim()
+                ? "将保存新密钥"
+                : intentClearAPIKey
+                  ? "保存时发送 clear_api_key=true"
+                  : effectiveIntentConfig.has_api_key
+                    ? "留空保留现有密钥"
+                    : "未设置密钥"}
+            </Text>
+          </View>
+          <View style={styles.generationInputRow}>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!intentBusy}
+              onChangeText={(value) => {
+                setIntentAPIKey(value);
+                if (value.trim()) {
+                  setIntentClearAPIKey(false);
+                }
+                setIntentFormError("");
+              }}
+              placeholder={
+                intentClearAPIKey
+                  ? "已标记清除密钥；如输入新密钥将覆盖"
+                  : effectiveIntentConfig.has_api_key
+                    ? "留空表示保留旧密钥；输入新值则更新"
+                    : "输入 Jev Bearer API Key（不会回显）"
+              }
+              placeholderTextColor="#776f66"
+              secureTextEntry
+              style={[styles.input, styles.generationInput]}
+              value={intentAPIKey}
+            />
+            <Pressable
+              disabled={intentBusy}
+              onPress={() => {
+                const nextClear = !intentClearAPIKey;
+                setIntentClearAPIKey(nextClear);
+                if (nextClear) {
+                  setIntentAPIKey("");
+                }
+                setIntentFormError("");
+              }}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [
+                    styles.inheritButton,
+                    intentClearAPIKey && styles.modelActionDanger,
+                    intentBusy && styles.disabledButton,
+                  ],
+                  pressed,
+                )
+              }
+            >
+              <Text style={styles.inheritButtonText}>
+                {intentClearAPIKey ? "取消清除" : "清除密钥"}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.generationMeta}>
+            安全策略：服务端仅返回 has_api_key，绝不在 UI、本地存储或日志中回显密钥。编辑框留空表示保留旧密钥；点击「清除密钥」并保存会显式发送 clear_api_key=true。
+          </Text>
+        </View>
+
+        {/* Model */}
+        <View style={styles.generationField}>
+          <View style={styles.generationFieldHeader}>
+            <Text style={styles.generationLabel}>模型名称 (model)</Text>
+            <Text style={styles.generationMeta}>默认 jev-latest</Text>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!intentBusy}
+            onChangeText={(value) => {
+              setIntentModel(value);
+              setIntentFormError("");
+            }}
+            placeholder="jev-latest"
+            placeholderTextColor="#776f66"
+            style={styles.input}
+            value={intentModel}
+          />
+        </View>
+
+        {/* Confidence Thresholds */}
+        <View style={[styles.row, styles.generationDefaultsRow]}>
+          <View style={[styles.generationField, styles.flex, styles.generationDefaultsInput]}>
+            <View style={styles.generationFieldHeader}>
+              <Text style={styles.generationLabel}>规划阈值 (plan_confidence)</Text>
+              <Text style={styles.generationMeta}>默认 0.55</Text>
+            </View>
+            <TextInput
+              editable={!intentBusy}
+              keyboardType="decimal-pad"
+              onChangeText={(value) => {
+                setIntentPlanConfidence(value);
+                setIntentFormError("");
+              }}
+              placeholder="0.55"
+              placeholderTextColor="#776f66"
+              style={styles.input}
+              value={intentPlanConfidence}
+            />
+            <Text style={styles.generationMeta}>
+              implementation 置信度 ≥ 该值时先生成计划 (plan_only)
+            </Text>
+          </View>
+
+          <View style={[styles.generationField, styles.flex, styles.generationDefaultsInput]}>
+            <View style={styles.generationFieldHeader}>
+              <Text style={styles.generationLabel}>直执阈值 (execute_confidence)</Text>
+              <Text style={styles.generationMeta}>默认 0.85</Text>
+            </View>
+            <TextInput
+              editable={!intentBusy}
+              keyboardType="decimal-pad"
+              onChangeText={(value) => {
+                setIntentExecuteConfidence(value);
+                setIntentFormError("");
+              }}
+              placeholder="0.85"
+              placeholderTextColor="#776f66"
+              style={styles.input}
+              value={intentExecuteConfidence}
+            />
+            <Text style={styles.generationMeta}>
+              置信度 ≥ 该值时生成计划并自动执行 (plan_execute)
+            </Text>
+          </View>
+        </View>
+
+        {/* 保存与测试连接按钮 */}
+        <View style={styles.row}>
+          <Pressable
+            disabled={!clientToken || intentBusy}
+            onPress={handleSaveIntentConfig}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.secondaryButton, (!clientToken || intentBusy) && styles.disabledButton],
+                pressed,
+              )
+            }
+          >
+            <ButtonContent
+              loading={intentConfigSaving}
+              text={intentConfigSaving ? "保存中..." : "保存配置"}
+            />
+          </Pressable>
+
+          <Pressable
+            disabled={!clientToken || intentBusy}
+            onPress={handleTestIntentConfig}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.primaryActionButton, styles.intentTestButton, (!clientToken || intentBusy) && styles.disabledButton],
+                pressed,
+              )
+            }
+          >
+            <ButtonContent
+              loading={intentConfigTesting}
+              text={intentConfigTesting ? "测试中..." : "⚡ 测试连接"}
+            />
+          </Pressable>
+
+          <Pressable
+            disabled={intentBusy}
+            onPress={() => {
+              setIntentBaseURL(defaultIntentConfig.base_url);
+              setIntentModel(defaultIntentConfig.model);
+              setIntentPlanConfidence(String(defaultIntentConfig.plan_confidence));
+              setIntentExecuteConfidence(String(defaultIntentConfig.execute_confidence));
+              setIntentClearAPIKey(false);
+              setIntentFormError("");
+            }}
+            style={({ pressed }) =>
+              buttonFeedback([styles.settingAction, intentBusy && styles.disabledButton], pressed)
+            }
+          >
+            <ButtonContent text="恢复默认参数" />
+          </Pressable>
+        </View>
+
+        {intentTestResult ? (
+          <View
+            style={[
+              styles.intentTestBanner,
+              intentTestResult.success ? styles.intentTestBannerSuccess : styles.intentTestBannerError,
+            ]}
+          >
+            <Text style={styles.intentTestBannerTitle}>
+              {intentTestResult.success ? "✅ Jev 连接测试通过" : "❌ Jev 连接测试失败"}
+            </Text>
+            <Text style={styles.intentTestBannerMeta}>
+              success={String(intentTestResult.success)} · latency_ms={intentTestResult.latency_ms} ms
+            </Text>
+          </View>
+        ) : null}
+
+        {intentFormError || intentConfigMessage ? (
+          <Text
+            style={
+              intentFormError || intentConfigError
+                ? styles.generationMessage
+                : styles.generationSuccess
+            }
+          >
+            {intentFormError || intentConfigMessage}
+          </Text>
+        ) : null}
+      </View>
+
+      {/* 判断记录列表与详情 (Intent Traces) */}
+      <View style={styles.controlBlock}>
+        <View style={styles.sectionHeaderRow}>
+          <View style={styles.flex}>
+            <Text style={styles.controlTitle}>判断记录 (Intent Traces)</Text>
+            <Text style={styles.settingMeta}>
+              展示每次 Jev 请求的时间、状态、会话/请求 ID、路由决策、置信度与 HTTP 状态；点击记录可请求并查看完整 request_body 与 response_body。
+            </Text>
+          </View>
+          <View style={styles.rowCompact}>
+            <Pressable
+              disabled={!clientToken || traceBusy}
+              onPress={() => {
+                onClearIntentTraceFeedback();
+                onRequestIntentTraces(effectiveTraceSessionID);
+              }}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [styles.secondaryActionButton, (!clientToken || traceBusy) && styles.disabledButton],
+                  pressed,
+                )
+              }
+            >
+              <ButtonContent
+                loading={intentTraceListLoading}
+                text={intentTraceListLoading ? "加载中" : "刷新记录"}
+              />
+            </Pressable>
+            <Pressable
+              disabled={!clientToken || traceBusy}
+              onPress={confirmClearIntentTraces}
+              style={({ pressed }) =>
+                buttonFeedback(
+                  [styles.heroDeleteBtn, styles.intentClearBtn, (!clientToken || traceBusy) && styles.disabledButton],
+                  pressed,
+                )
+              }
+            >
+              <ButtonContent
+                loading={intentTraceClearing}
+                text={
+                  intentTraceClearing
+                    ? "清理中"
+                    : effectiveTraceSessionID
+                      ? "清理该会话记录"
+                      : "清理全部记录"
+                }
+              />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* 会话筛选栏 */}
+        <View style={styles.segmentRow}>
+          <Pressable
+            disabled={traceBusy}
+            onPress={() => {
+              setTraceFilterMode("all");
+              setSelectedTraceID("");
+              onClearIntentTraceFeedback();
+            }}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.presetChip, traceFilterMode === "all" && styles.segmentActive, traceBusy && styles.disabledButton],
+                pressed,
+              )
+            }
+          >
+            <Text style={styles.segmentTitle}>全部会话</Text>
+          </Pressable>
+
+          <Pressable
+            disabled={traceBusy || !sessionID.trim()}
+            onPress={() => {
+              setTraceFilterMode("current");
+              setSelectedTraceID("");
+              onClearIntentTraceFeedback();
+            }}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [
+                  styles.presetChip,
+                  traceFilterMode === "current" && styles.segmentActive,
+                  (traceBusy || !sessionID.trim()) && styles.disabledButton,
+                ],
+                pressed,
+              )
+            }
+          >
+            <Text style={styles.segmentTitle}>
+              当前会话{sessionID ? ` (#${shortID(sessionID)})` : ""}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            disabled={traceBusy}
+            onPress={() => {
+              setTraceFilterMode("custom");
+              if (!traceCustomSessionID && sessionID) {
+                setTraceCustomSessionID(sessionID);
+              }
+              setSelectedTraceID("");
+              onClearIntentTraceFeedback();
+            }}
+            style={({ pressed }) =>
+              buttonFeedback(
+                [styles.presetChip, traceFilterMode === "custom" && styles.segmentActive, traceBusy && styles.disabledButton],
+                pressed,
+              )
+            }
+          >
+            <Text style={styles.segmentTitle}>指定会话筛选</Text>
+          </Pressable>
+        </View>
+
+        {traceFilterMode === "custom" ? (
+          <View style={styles.sectionStack}>
+            <View style={styles.row}>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                onChangeText={setTraceCustomSessionID}
+                placeholder="输入要筛选的 session_id"
+                placeholderTextColor="#776f66"
+                style={[styles.input, styles.flex]}
+                value={traceCustomSessionID}
+              />
+              <Pressable
+                disabled={!clientToken || traceBusy}
+                onPress={() => {
+                  setSelectedTraceID("");
+                  onRequestIntentTraces(traceCustomSessionID.trim());
+                }}
+                style={({ pressed }) =>
+                  buttonFeedback(
+                    [styles.secondaryButton, (!clientToken || traceBusy) && styles.disabledButton],
+                    pressed,
+                  )
+                }
+              >
+                <ButtonContent loading={intentTraceListLoading} text="按会话查询" />
+              </Pressable>
+            </View>
+            {sessions.length > 0 ? (
+              <View style={styles.triggerRow}>
+                {sessions.slice(0, 8).map((sess) => {
+                  const activeChip = traceCustomSessionID.trim() === sess.id;
+                  return (
+                    <Pressable
+                      key={sess.id}
+                      onPress={() => {
+                        setTraceCustomSessionID(sess.id);
+                        setSelectedTraceID("");
+                      }}
+                      style={({ pressed }) =>
+                        buttonFeedback(
+                          [styles.modelAction, activeChip && styles.modelActionActive],
+                          pressed,
+                        )
+                      }
+                    >
+                      <Text style={styles.modelActionText}>
+                        {sess.title ? `${sess.title.slice(0, 10)} ` : ""}#{shortID(sess.id)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {intentTraceMessage ? (
+          <Text style={intentTraceError ? styles.generationMessage : styles.generationSuccess}>
+            {intentTraceMessage}
+          </Text>
+        ) : null}
+
+        {intentTraceListLoading ? (
+          <View style={styles.generationLoading}>
+            <ButtonContent loading text="正在加载判断记录列表 (intent_trace_list)..." />
+          </View>
+        ) : null}
+
+        {!intentTraceListLoading && intentTraces.length === 0 ? (
+          <EmptyBox
+            text={
+              clientToken
+                ? effectiveTraceSessionID
+                  ? `会话 #${shortID(effectiveTraceSessionID)} 暂无 Jev 判断记录。`
+                  : "暂无 Jev 判断记录。点击上方「测试连接」或在启用 Jev 策略后发送消息即可产生记录。"
+                : "先完成配对并连接 Agent，再查看判断记录。"
+            }
+          />
+        ) : null}
+
+        {intentTraces.length > 0 ? (
+          <View style={styles.skillList}>
+            {intentTraces.map((trace) => {
+              const isExpanded = selectedTraceID === trace.trace_id;
+              const detail = intentTraceDetails[trace.trace_id] || trace;
+              const detailLoading = intentTraceDetailLoadingID === trace.trace_id;
+              const detailError = intentTraceDetailErrors[trace.trace_id] || "";
+              const hasFullDetail = Boolean(intentTraceDetails[trace.trace_id]);
+
+              return (
+                <View
+                  key={trace.trace_id}
+                  style={[styles.intentTraceCard, isExpanded && styles.intentTraceCardActive]}
+                >
+                  <Pressable
+                    onPress={() => {
+                      if (isExpanded) {
+                        setSelectedTraceID("");
+                        return;
+                      }
+                      setSelectedTraceID(trace.trace_id);
+                      onRequestIntentTraceDetail(trace.trace_id);
+                    }}
+                    style={({ pressed }) => buttonFeedback(styles.intentTraceHeaderBtn, pressed)}
+                  >
+                    <View style={styles.skillHeader}>
+                      <View style={styles.rowCompact}>
+                        <View style={[styles.intentStatusBadge, traceStatusBadgeStyle(trace.status)]}>
+                          <Text style={styles.intentStatusBadgeText}>
+                            {traceStatusLabel(trace.status)}
+                          </Text>
+                        </View>
+                        <View style={styles.intentRouteBadge}>
+                          <Text style={styles.intentRouteBadgeText}>
+                            route: {traceRouteLabel(trace.route)}
+                          </Text>
+                        </View>
+                        <View style={styles.intentHttpBadge}>
+                          <Text style={styles.intentHttpBadgeText}>
+                            HTTP {trace.http_status || "-"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.sessionTimeText}>
+                        {formatTraceTime(trace.created_at)} · {trace.duration_ms ?? 0} ms
+                      </Text>
+                    </View>
+
+                    <View style={styles.triggerRow}>
+                      <Text style={styles.triggerChip}>
+                        session: {trace.session_id ? `#${shortID(trace.session_id)}` : "无(测试)"}
+                      </Text>
+                      <Text style={styles.triggerChip}>
+                        request: {trace.request_id ? `#${shortID(trace.request_id)}` : "-"}
+                      </Text>
+                      <Text style={styles.triggerChip}>
+                        choice: {trace.choice || "-"}
+                      </Text>
+                      <Text style={styles.triggerChip}>
+                        confidence:{" "}
+                        {typeof trace.confidence === "number"
+                          ? `${trace.confidence.toFixed(2)} (${(trace.confidence * 100).toFixed(0)}%)`
+                          : "-"}
+                      </Text>
+                      {trace.error_code ? (
+                        <Text style={[styles.triggerChip, styles.intentErrorChip]}>
+                          error: {trace.error_code}
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.intentTraceFooterRow}>
+                      <Text numberOfLines={1} style={styles.skillPath}>
+                        trace_id: #{shortID(trace.trace_id)} · model: {trace.response_model || trace.requested_model || "-"}
+                      </Text>
+                      <Text style={styles.checkpointToggle}>
+                        {isExpanded ? "收起详情 ▲" : "查看详情 ▼"}
+                      </Text>
+                    </View>
+                  </Pressable>
+
+                  {isExpanded ? (
+                    <View style={styles.intentTraceDetailBox}>
+                      <View style={styles.contextSummaryHeader}>
+                        <Text style={styles.compactTitle}>
+                          判断记录详情 (#{shortID(trace.trace_id)})
+                        </Text>
+                        <Pressable
+                          disabled={detailLoading}
+                          onPress={() => onRequestIntentTraceDetail(trace.trace_id)}
+                          style={({ pressed }) =>
+                            buttonFeedback(
+                              [styles.modelAction, detailLoading && styles.disabledButton],
+                              pressed,
+                            )
+                          }
+                        >
+                          <Text style={styles.modelActionText}>
+                            {detailLoading ? "请求中..." : "刷新详情"}
+                          </Text>
+                        </Pressable>
+                      </View>
+
+                      {detailLoading ? (
+                        <View style={styles.contextLoadingRow}>
+                          <ButtonContent loading text="正在请求判断详情 (intent_trace_get)..." />
+                        </View>
+                      ) : null}
+
+                      {detailError ? (
+                        <View style={styles.sectionStack}>
+                          <Text style={styles.generationMessage}>{detailError}</Text>
+                          <Pressable
+                            onPress={() => onRequestIntentTraceDetail(trace.trace_id)}
+                            style={({ pressed }) => buttonFeedback(styles.secondaryActionButton, pressed)}
+                          >
+                            <Text style={styles.closeButtonText}>重试获取详情</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+
+                      <View style={styles.hashGrid}>
+                        <HashPill label="Trace ID" value={detail.trace_id} />
+                        <HashPill label="Session ID" value={detail.session_id || "无"} />
+                        <HashPill label="Request ID" value={detail.request_id || "无"} />
+                        <HashPill label="Base URL" value={detail.base_url} />
+                      </View>
+
+                      <View style={styles.triggerRow}>
+                        <Text style={styles.triggerChip}>
+                          请求模型: {detail.requested_model || "-"}
+                        </Text>
+                        <Text style={styles.triggerChip}>
+                          响应模型: {detail.response_model || "-"}
+                        </Text>
+                        <Text style={styles.triggerChip}>
+                          should_plan: {String(Boolean(detail.should_plan))}
+                        </Text>
+                        <Text style={styles.triggerChip}>
+                          should_execute: {String(Boolean(detail.should_execute))}
+                        </Text>
+                      </View>
+
+                      {detail.response_truncated ? (
+                        <Text style={styles.generationMessage}>
+                          响应体超过 64 KiB 上限，已被服务端安全截断 (response_truncated=true)。
+                        </Text>
+                      ) : null}
+
+                      <View style={styles.contextSummaryBox}>
+                        <View style={styles.contextSummaryHeader}>
+                          <Text style={styles.compactTitle}>request_body</Text>
+                          <Text style={styles.compactBadge}>请求内容</Text>
+                        </View>
+                        {detail.request_body ? (
+                          <ScrollView nestedScrollEnabled style={styles.contextSummaryScroll}>
+                            <Text selectable style={styles.intentCodeText}>
+                              {formatTraceBody(detail.request_body)}
+                            </Text>
+                          </ScrollView>
+                        ) : (
+                          <Text style={styles.contextSummaryEmpty}>
+                            {detailLoading
+                              ? "正在加载 request_body..."
+                              : hasFullDetail
+                                ? "该记录无 request_body 内容。"
+                                : "正在等待详情返回..."}
+                          </Text>
+                        )}
+                      </View>
+
+                      <View style={styles.contextSummaryBox}>
+                        <View style={styles.contextSummaryHeader}>
+                          <Text style={styles.compactTitle}>response_body</Text>
+                          <Text style={styles.compactBadge}>
+                            {detail.response_truncated ? "已截断" : "响应内容"}
+                          </Text>
+                        </View>
+                        {detail.response_body ? (
+                          <ScrollView nestedScrollEnabled style={styles.contextSummaryScroll}>
+                            <Text selectable style={styles.intentCodeText}>
+                              {formatTraceBody(detail.response_body)}
+                            </Text>
+                          </ScrollView>
+                        ) : (
+                          <Text style={styles.contextSummaryEmpty}>
+                            {detailLoading
+                              ? "正在加载 response_body..."
+                              : hasFullDetail
+                                ? "该记录无 response_body 内容（例如请求超时或尚未完成）。"
+                                : "正在等待详情返回..."}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+      </View>
+        </>
+      ) : null}
+    </View>
+  );
+
   const subagentSection = (
     <SubagentPanel
       buttonFeedback={buttonFeedback}
@@ -1333,6 +2541,7 @@ export function SettingsPanel({
   );
 
   const sectionContent: Record<SettingsSection, ReactNode> = {
+    autoplan: autoPlanSection,
     connection: relaySection,
     context: contextSection,
     generation: generationSection,
@@ -1350,12 +2559,39 @@ export function SettingsPanel({
       <View style={styles.panelHeader}>
         <View style={styles.flex}>
           <Text style={styles.settingsTitle}>设置中心</Text>
-          <Text style={styles.pathText}>连接、模型、会话和工具权限集中管理</Text>
+          <Text style={styles.pathText}>连接、模型、会话和工具权限集中管理 · {versionLabel}</Text>
         </View>
-        <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
-          <Text style={styles.closeButtonText}>✕ 关闭</Text>
-        </Pressable>
+        <View style={styles.rowCompact}>
+          <Pressable
+            accessibilityLabel="检查更新"
+            disabled={checkingUpdate}
+            onPress={() => void handleCheckUpdate()}
+            style={({ pressed }) =>
+              buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)
+            }
+          >
+            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "🔄 检查更新"} />
+          </Pressable>
+          <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
+            <Text style={styles.closeButtonText}>✕ 关闭</Text>
+          </Pressable>
+        </View>
       </View>
+      {updateStatusMessage && activeSection !== "general" ? (
+        <View style={styles.row}>
+          <Text style={[ styles.flex, updateStatusError ? styles.generationMessage : styles.generationSuccess ]}>
+            {updateStatusMessage}
+          </Text>
+          {updateReadyToReload ? (
+            <Pressable
+              onPress={() => void Updates.reloadAsync()}
+              style={({ pressed }) => buttonFeedback(styles.primaryActionButton, pressed)}
+            >
+              <ButtonContent text="立即重启" />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={[styles.settingsBox, wideLayout && styles.settingsBoxWide]}>
         <View style={[styles.sideRail, wideLayout ? styles.sideRailWide : styles.sideRailCompact]}>
@@ -1704,6 +2940,117 @@ function parseOptionalInteger(input: string, label: string, min: number, max: nu
     return { value: null, error: `${label} 必须是整数。` };
   }
   return parsed;
+}
+
+function validateIntentBaseURL(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return "Jev Base URL 必须使用 https 或本地 http 协议。";
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+      return "Jev Base URL 不能包含认证信息、查询参数或锚点。";
+    }
+    const host = parsed.hostname.trim().toLowerCase();
+    if (!host) {
+      return "Jev Base URL 缺少有效主机名。";
+    }
+    const isLocal =
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host.startsWith("127.");
+    if (parsed.protocol !== "https:" && !isLocal) {
+      return "非本地 Jev Base URL 必须使用 HTTPS。";
+    }
+    return "";
+  } catch {
+    return "Jev Base URL 格式无效（例如 https://api.typesafe.ai）。";
+  }
+}
+
+function intentStrategyLabel(strategy?: IntentStrategy): string {
+  switch (strategy) {
+    case "jev":
+      return "Jev (jev)";
+    case "off":
+      return "关闭 (off)";
+    default:
+      return "系统内置 (system)";
+  }
+}
+
+function traceStatusLabel(status?: string): string {
+  switch (status) {
+    case "succeeded":
+      return "成功 (succeeded)";
+    case "started":
+      return "请求中 (started)";
+    case "http_error":
+      return "HTTP 错误 (http_error)";
+    case "timeout":
+      return "超时 (timeout)";
+    case "invalid_response":
+      return "响应无效 (invalid_response)";
+    default:
+      return status || "未知";
+  }
+}
+
+function traceStatusBadgeStyle(status?: string) {
+  switch (status) {
+    case "succeeded":
+      return styles.intentStatusGood;
+    case "started":
+      return styles.intentStatusWarn;
+    default:
+      return styles.intentStatusError;
+  }
+}
+
+function traceRouteLabel(route?: string): string {
+  switch (route) {
+    case "direct":
+      return "direct (直接回复)";
+    case "plan_only":
+      return "plan_only (生成计划)";
+    case "plan_execute":
+      return "plan_execute (计划并执行)";
+    case "fallback":
+      return "fallback (回退系统规则)";
+    case "test":
+      return "test (测试连接)";
+    default:
+      return route || "-";
+  }
+}
+
+function formatTraceTime(value?: string): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatTraceBody(body?: string): string {
+  if (!body) {
+    return "";
+  }
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return body;
+  }
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return body;
+  }
 }
 
 const styles = StyleSheet.create({
@@ -2891,5 +4238,165 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     paddingHorizontal: 10,
     paddingVertical: 10,
+  },
+  intentSavedBadge: {
+    backgroundColor: "#58d46f",
+    borderColor: "#12100e",
+    borderRadius: 4,
+    borderWidth: 1,
+    marginLeft: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  intentSavedBadgeText: {
+    color: "#12100e",
+    fontSize: 9.5,
+    fontWeight: "900",
+  },
+  intentKeyStatusPill: {
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  intentKeyStatusGood: {
+    backgroundColor: "#d9f6df",
+  },
+  intentKeyStatusWarn: {
+    backgroundColor: "#ffd84f",
+  },
+  intentKeyStatusQuiet: {
+    backgroundColor: "#f5f1e9",
+  },
+  intentKeyStatusText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  intentTestButton: {
+    backgroundColor: "#4fd7ee",
+  },
+  intentTestBanner: {
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  intentTestBannerSuccess: {
+    backgroundColor: "#d9f6df",
+  },
+  intentTestBannerError: {
+    backgroundColor: "#ffd9d4",
+  },
+  intentTestBannerTitle: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  intentTestBannerMeta: {
+    color: "#3f3a34",
+    fontSize: 11.5,
+    fontWeight: "800",
+  },
+  intentClearBtn: {
+    minHeight: 36,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  intentTraceCard: {
+    backgroundColor: "#fffdf7",
+    borderColor: "#12100e",
+    borderRadius: 10,
+    borderWidth: 2,
+    gap: 8,
+    padding: 10,
+  },
+  intentTraceCardActive: {
+    borderLeftColor: "#ffd84f",
+    borderLeftWidth: 6,
+    elevation: 1,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  intentTraceHeaderBtn: {
+    gap: 8,
+  },
+  intentStatusBadge: {
+    borderColor: "#12100e",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  intentStatusBadgeText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  intentStatusGood: {
+    backgroundColor: "#58d46f",
+  },
+  intentStatusWarn: {
+    backgroundColor: "#ffd84f",
+  },
+  intentStatusError: {
+    backgroundColor: "#ff7f68",
+  },
+  intentRouteBadge: {
+    backgroundColor: "#4fd7ee",
+    borderColor: "#12100e",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  intentRouteBadgeText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  intentHttpBadge: {
+    backgroundColor: "#f5f1e9",
+    borderColor: "#12100e",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  intentHttpBadgeText: {
+    color: "#12100e",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  intentErrorChip: {
+    backgroundColor: "#ffd9d4",
+    color: "#8f1f18",
+  },
+  intentTraceFooterRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  intentTraceDetailBox: {
+    backgroundColor: "#f8f4ec",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 2,
+    gap: 8,
+    marginTop: 4,
+    padding: 10,
+  },
+  intentCodeText: {
+    color: "#12100e",
+    fontFamily: "monospace",
+    fontSize: 11.5,
+    fontWeight: "700",
+    lineHeight: 17,
   },
 });

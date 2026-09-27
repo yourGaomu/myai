@@ -120,7 +120,9 @@ func (agent *Agent) handleSubagentTaskMessage(ctx context.Context, conn *websock
 		return fmt.Errorf("decode subagent task message: %w", err)
 	}
 	result, err := agent.subagentService.SendMessage(ctx, subagentcommand.SendMessage{
-		TaskID: payload.TaskID, ParentSessionID: agent.subagentSessionID(message, ""), Content: payload.Message,
+		TaskID: payload.TaskID, ParentSessionID: agent.subagentSessionID(message, ""),
+		MessageID: message.RequestID, Kind: domainsubagent.AgentMessageKindUserInput, Content: payload.Message,
+		Trigger: domainsubagent.AgentMessageTrigger(payload.Trigger),
 	})
 	if err != nil {
 		return err
@@ -153,14 +155,18 @@ func (agent *Agent) handleSubagentTaskWait(ctx context.Context, conn *websocket.
 	if payload.TimeoutMS > 0 {
 		timeout = time.Duration(payload.TimeoutMS) * time.Millisecond
 	}
+	targets := append([]string(nil), payload.Targets...)
+	if len(targets) == 0 && payload.TaskID != "" {
+		targets = []string{payload.TaskID}
+	}
 	result, err := agent.subagentService.Wait(ctx, subagentcommand.WaitTask{
-		TaskID: payload.TaskID, ParentSessionID: sessionID, Timeout: timeout,
+		Targets: targets, ParentSessionID: sessionID, ParentTaskID: payload.ParentTaskID, Timeout: timeout,
 	})
 	if err != nil {
 		return err
 	}
 	return agent.writeRemoteMessage(conn, protocol.TypeSubagentTaskWaitResult, message.RequestID, sessionID, protocol.SubagentTaskWaitResultPayload{
-		SessionID: sessionID, Task: subagentTaskPayload(result.Task), TimedOut: result.TimedOut, WokenByMailbox: result.WokenByMailbox, Sequence: result.Sequence,
+		SessionID: sessionID, Task: subagentTaskPayload(result.Task), Tasks: subagentTaskPayloads(result.Tasks), TimedOut: result.TimedOut, WokenByMailbox: result.WokenByMailbox, Sequence: result.Sequence,
 	})
 }
 

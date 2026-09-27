@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	domainworkspace "myai/core/domain/workspace"
+	modelport "myai/core/port/model"
 )
 
 const MaxInstructionRunes = 20000
@@ -59,6 +60,7 @@ type Task struct {
 	ChangeSet         domainworkspace.ChangeSet
 	Result            string
 	Reasoning         string
+	Usage             modelport.TokenUsage
 	ErrorMessage      string
 	Unread            bool
 	// Mailbox contains durable follow-up input sent by the parent. A runner
@@ -73,6 +75,7 @@ type Task struct {
 type Message struct {
 	ID               string
 	Content          string
+	Trigger          AgentMessageTrigger
 	Status           MessageStatus
 	DeliveryAttempts int
 	LastError        string
@@ -101,6 +104,22 @@ func (task *Task) EnqueueMessage(message Message) error {
 	if message.Content == "" {
 		return errors.New("subagent mailbox message is empty")
 	}
+	if message.Trigger == "" {
+		message.Trigger = AgentMessageTriggerQueue
+	}
+	for _, existing := range task.Mailbox {
+		if existing.ID != message.ID || strings.TrimSpace(message.ID) == "" {
+			continue
+		}
+		existingTrigger := existing.Trigger
+		if existingTrigger == "" {
+			existingTrigger = AgentMessageTriggerQueue
+		}
+		if strings.TrimSpace(existing.Content) != message.Content || existingTrigger != message.Trigger {
+			return errors.New("subagent mailbox message id was already used with different request")
+		}
+		return nil
+	}
 	if utf8.RuneCountInString(message.Content) > MaxMailboxMessageRunes {
 		return fmt.Errorf("subagent mailbox message must not exceed %d characters", MaxMailboxMessageRunes)
 	}
@@ -109,6 +128,11 @@ func (task *Task) EnqueueMessage(message Message) error {
 	}
 	if task.mailboxRunes()+utf8.RuneCountInString(message.Content) > MaxMailboxRunes {
 		return fmt.Errorf("subagent mailbox must not exceed %d total characters", MaxMailboxRunes)
+	}
+	switch message.Trigger {
+	case AgentMessageTriggerQueue, AgentMessageTriggerTurn, AgentMessageTriggerSteer:
+	default:
+		return fmt.Errorf("unsupported subagent mailbox trigger %q", message.Trigger)
 	}
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
@@ -220,6 +244,7 @@ type Run struct {
 	Instruction        string
 	Status             RunStatus
 	Result             string
+	Usage              modelport.TokenUsage
 	ErrorMessage       string
 	CreatedAt          time.Time
 	StartedAt          *time.Time

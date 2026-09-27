@@ -85,6 +85,7 @@ type TaskDocument struct {
 	ChangeSet         ChangeSetDocument          `bson:"change_set,omitempty"`
 	Result            string                     `bson:"result,omitempty"`
 	Reasoning         string                     `bson:"reasoning,omitempty"`
+	Usage             TokenUsageDocument         `bson:"usage,omitempty"`
 	ErrorMessage      string                     `bson:"error_message,omitempty"`
 	Unread            bool                       `bson:"unread"`
 	Mailbox           []MailboxMessageDocument   `bson:"mailbox,omitempty"`
@@ -97,6 +98,7 @@ type TaskDocument struct {
 type MailboxMessageDocument struct {
 	ID               string     `bson:"id"`
 	Content          string     `bson:"content"`
+	Trigger          string     `bson:"trigger,omitempty"`
 	Status           string     `bson:"status,omitempty"`
 	DeliveryAttempts int        `bson:"delivery_attempts,omitempty"`
 	LastError        string     `bson:"last_error,omitempty"`
@@ -105,18 +107,28 @@ type MailboxMessageDocument struct {
 }
 
 type RunDocument struct {
-	ID                 string     `bson:"_id"`
-	TaskID             string     `bson:"task_id"`
-	Sequence           int        `bson:"sequence"`
-	RequestID          string     `bson:"request_id,omitempty"`
-	RequestContentHash string     `bson:"request_content_hash,omitempty"`
-	Instruction        string     `bson:"instruction"`
-	Status             string     `bson:"status"`
-	Result             string     `bson:"result,omitempty"`
-	ErrorMessage       string     `bson:"error_message,omitempty"`
-	CreatedAt          time.Time  `bson:"created_at"`
-	StartedAt          *time.Time `bson:"started_at,omitempty"`
-	CompletedAt        *time.Time `bson:"completed_at,omitempty"`
+	ID                 string             `bson:"_id"`
+	TaskID             string             `bson:"task_id"`
+	Sequence           int                `bson:"sequence"`
+	RequestID          string             `bson:"request_id,omitempty"`
+	RequestContentHash string             `bson:"request_content_hash,omitempty"`
+	Instruction        string             `bson:"instruction"`
+	Status             string             `bson:"status"`
+	Result             string             `bson:"result,omitempty"`
+	Usage              TokenUsageDocument `bson:"usage,omitempty"`
+	ErrorMessage       string             `bson:"error_message,omitempty"`
+	CreatedAt          time.Time          `bson:"created_at"`
+	StartedAt          *time.Time         `bson:"started_at,omitempty"`
+	CompletedAt        *time.Time         `bson:"completed_at,omitempty"`
+}
+
+type TokenUsageDocument struct {
+	PromptTokens       int  `bson:"prompt_tokens"`
+	CompletionTokens   int  `bson:"completion_tokens"`
+	TotalTokens        int  `bson:"total_tokens"`
+	ReasoningTokens    int  `bson:"reasoning_tokens"`
+	PromptCachedTokens int  `bson:"prompt_cached_tokens"`
+	Available          bool `bson:"available"`
 }
 
 // TaskEventDocument is an append-only replay record. The task snapshot keeps
@@ -137,4 +149,32 @@ type TaskEventDocument struct {
 	Truncated    bool         `bson:"truncated,omitempty"`
 	Delta        bool         `bson:"delta,omitempty"`
 	EmittedAt    time.Time    `bson:"emitted_at"`
+}
+
+type AgentMessageDocument struct {
+	ID               string     `bson:"_id"`
+	SourceTaskID     string     `bson:"source_task_id,omitempty"`
+	AuthorAgentID    string     `bson:"author_agent_id,omitempty"`
+	RecipientAgentID string     `bson:"recipient_agent_id"`
+	ParentTurnID     string     `bson:"parent_turn_id,omitempty"`
+	RootAgentID      string     `bson:"root_agent_id,omitempty"`
+	Kind             string     `bson:"kind"`
+	Content          string     `bson:"content"`
+	Trigger          string     `bson:"trigger"`
+	Sequence         uint64     `bson:"sequence,omitempty"`
+	Status           string     `bson:"status"`
+	DeliveryAttempts int        `bson:"delivery_attempts,omitempty"`
+	LastError        string     `bson:"last_error,omitempty"`
+	CreatedAt        time.Time  `bson:"created_at"`
+	DeliveredAt      *time.Time `bson:"delivered_at,omitempty"`
+	ClaimOwnerID     string     `bson:"claim_owner_id,omitempty"`
+	ClaimExpiresAt   *time.Time `bson:"claim_expires_at,omitempty"`
+}
+
+// TaskEventSequenceDocument stores the process-wide monotonic event counter.
+// It belongs to the persistence object layer so repositories only assemble
+// filters and updates, rather than declaring BSON-backed documents.
+type TaskEventSequenceDocument struct {
+	ID    string `bson:"_id"`
+	Value int64  `bson:"value"`
 }

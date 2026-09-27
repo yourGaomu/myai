@@ -29,9 +29,9 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 		ctx = context.Background()
 	}
 
-	taskID := strings.TrimSpace(command.TaskID)
-	if taskID == "" {
-		return subagentresult.Wait{}, errors.New("subagent task id is required")
+	targetIDs, err := waitTargetIDs(command)
+	if err != nil {
+		return subagentresult.Wait{}, err
 	}
 	parentID := strings.TrimSpace(command.ParentSessionID)
 	timeout := command.Timeout
@@ -45,12 +45,12 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 		timeout = maxTaskWaitTimeout
 	}
 
-	if task, err := service.Tasks.GetTask(ctx, taskID); err != nil {
+	tasks, err := service.loadWaitTasks(ctx, targetIDs, parentID)
+	if err != nil {
 		return subagentresult.Wait{}, err
-	} else if err := validateWaitParent(task, parentID); err != nil {
-		return subagentresult.Wait{}, err
-	} else if task.Terminal() {
-		return subagentresult.Wait{Task: domainsubagent.CloneTask(task)}, nil
+	}
+	if terminalTasks := terminalWaitTasks(tasks); len(terminalTasks) > 0 {
+		return newWaitResult(terminalTasks, false, false, 0), nil
 	}
 	waiter, err := service.markWaitingForChildren(command)
 	if err != nil {
@@ -81,36 +81,111 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 		case <-ctx.Done():
 			return subagentresult.Wait{}, ctx.Err()
 		case <-timer.C:
-			task, err := service.Tasks.GetTask(context.Background(), taskID)
+			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
-			return subagentresult.Wait{Task: task, TimedOut: !task.Terminal()}, nil
+			terminal := terminalWaitTasks(current)
+			if len(terminal) > 0 {
+				return newWaitResult(terminal, false, false, 0), nil
+			}
+			return newWaitResult(current, true, false, 0), nil
 		case <-wakeup:
-			task, err := service.Tasks.GetTask(context.Background(), taskID)
+			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
-			return subagentresult.Wait{Task: task, WokenByMailbox: true}, nil
+			return newWaitResult(current, false, true, 0), nil
 		case event, open := <-events:
 			if !open {
 				return subagentresult.Wait{}, errors.New("subagent task event stream closed; reconnect and retry")
 			}
-			if event.Task.ID != taskID {
+			if !containsWaitTarget(targetIDs, event.Task.ID) {
 				continue
 			}
-			current, err := service.Tasks.GetTask(context.Background(), taskID)
+			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
-			if err := validateWaitParent(current, parentID); err != nil {
-				return subagentresult.Wait{}, err
-			}
-			if current.Terminal() {
-				return subagentresult.Wait{Task: current, Sequence: event.Sequence}, nil
+			if terminal := terminalWaitTasks(current); len(terminal) > 0 {
+				return newWaitResult(terminal, false, false, event.Sequence), nil
 			}
 		}
 	}
+}
+
+func waitTargetIDs(command subagentcommand.WaitTask) ([]string, error) {
+	ids := make([]string, 0, len(command.Targets)+1)
+	seen := make(map[string]struct{}, len(command.Targets)+1)
+	appendID := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		ids = append(ids, value)
+	}
+	for _, id := range command.Targets {
+		appendID(id)
+	}
+	appendID(command.TaskID)
+	if len(ids) == 0 {
+		return nil, errors.New("subagent task id is required")
+	}
+	return ids, nil
+}
+
+func containsWaitTarget(targetIDs []string, taskID string) bool {
+	for _, targetID := range targetIDs {
+		if targetID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+func (service *Service) loadWaitTasks(ctx context.Context, targetIDs []string, parentID string) ([]domainsubagent.Task, error) {
+	tasks := make([]domainsubagent.Task, 0, len(targetIDs))
+	for _, taskID := range targetIDs {
+		task, err := service.Tasks.GetTask(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateWaitParent(task, parentID); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, domainsubagent.CloneTask(task))
+	}
+	return tasks, nil
+}
+
+func terminalWaitTasks(tasks []domainsubagent.Task) []domainsubagent.Task {
+	terminal := make([]domainsubagent.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Terminal() {
+			terminal = append(terminal, domainsubagent.CloneTask(task))
+		}
+	}
+	return terminal
+}
+
+func newWaitResult(tasks []domainsubagent.Task, timedOut, wokenByMailbox bool, sequence uint64) subagentresult.Wait {
+	result := subagentresult.Wait{TimedOut: timedOut, WokenByMailbox: wokenByMailbox, Sequence: sequence}
+	if len(tasks) == 0 {
+		return result
+	}
+	result.Tasks = make([]domainsubagent.Task, 0, len(tasks))
+	for _, task := range tasks {
+		cloned := domainsubagent.CloneTask(task)
+		result.Tasks = append(result.Tasks, cloned)
+		if result.Task.ID == "" {
+			result.Task = cloned
+		}
+	}
+	return result
 }
 
 func (service *Service) markWaitingForChildren(command subagentcommand.WaitTask) (*childWait, error) {
@@ -130,12 +205,17 @@ func (service *Service) markWaitingForChildren(command subagentcommand.WaitTask)
 	if parent.Status != domainsubagent.TaskStatusRunning && parent.Status != domainsubagent.TaskStatusWaitingSubagents {
 		return nil, nil
 	}
+	expectedRunID := parent.CurrentRunID
+	expectedUpdatedAt := parent.UpdatedAt
 	changed := parent.Status == domainsubagent.TaskStatusRunning
 	if changed {
 		parent.Status = domainsubagent.TaskStatusWaitingSubagents
 		parent.UpdatedAt = service.now()
-		if err := service.Tasks.SaveTask(context.Background(), parent); err != nil {
+		if err := service.saveTaskMutationDuringRun(context.Background(), parent, expectedRunID, expectedUpdatedAt); err != nil {
 			return nil, err
+		}
+		if service.Runtime != nil {
+			_ = service.Runtime.SetStatus(parent.ID, domainsubagent.AgentStatusWaiting)
 		}
 		service.publish(context.Background(), parent)
 	}
@@ -184,8 +264,13 @@ func (service *Service) restoreRunningAfterChildren(parentTaskID string, waiter 
 		return
 	}
 	parent.Status = domainsubagent.TaskStatusRunning
+	expectedRunID := parent.CurrentRunID
+	expectedUpdatedAt := parent.UpdatedAt
 	parent.UpdatedAt = service.now()
-	if err := service.Tasks.SaveTask(context.Background(), parent); err == nil {
+	if err := service.saveTaskMutationDuringRun(context.Background(), parent, expectedRunID, expectedUpdatedAt); err == nil {
+		if service.Runtime != nil {
+			_ = service.Runtime.SetStatus(parent.ID, domainsubagent.AgentStatusRunning)
+		}
 		service.publish(context.Background(), parent)
 	}
 }

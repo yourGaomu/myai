@@ -61,7 +61,7 @@ func TestTaskUsesPreparedSnapshotAndCollectsChanges(t *testing.T) {
 	}
 }
 
-func TestInjectMailboxBetweenToolRoundsClaimsAndAcks(t *testing.T) {
+func TestInjectMailboxBetweenToolRoundsClaimsUntilModelSucceeds(t *testing.T) {
 	repository := memory.NewRepository()
 	task := domainsubagent.Task{
 		ID: "child", Status: domainsubagent.TaskStatusRunning,
@@ -75,8 +75,12 @@ func TestInjectMailboxBetweenToolRoundsClaimsAndAcks(t *testing.T) {
 	}
 	service := &Service{Tasks: repository, IDs: &sequenceIDs{}}
 	current := &session.Session{}
-	if err := service.injectMailboxBetweenToolRounds(context.Background(), task.ID, current); err != nil {
+	claimed, err := service.injectMailboxBetweenToolRounds(context.Background(), task.ID, current)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("expected both injected messages to remain claimed, got %#v", claimed)
 	}
 	if len(current.Messages) != 2 || current.Messages[0].Text() != "first" || current.Messages[1].Text() != "second" {
 		t.Fatalf("mailbox was not injected into the live session: %#v", current.Messages)
@@ -85,8 +89,19 @@ func TestInjectMailboxBetweenToolRoundsClaimsAndAcks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stored.Mailbox) != 0 {
-		t.Fatalf("injected mailbox messages were not acknowledged: %#v", stored.Mailbox)
+	if len(stored.Mailbox) != 2 || stored.Mailbox[0].Status != domainsubagent.MessageStatusDelivering || stored.Mailbox[1].Status != domainsubagent.MessageStatusDelivering {
+		t.Fatalf("injected mailbox messages were acknowledged before model success: %#v", stored.Mailbox)
+	}
+	for _, message := range claimed {
+		if err := service.releaseMailboxMessage(task.ID, message.ID, errors.New("model failed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.injectMailboxBetweenToolRounds(context.Background(), task.ID, current); err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Messages) != 2 {
+		t.Fatalf("retry duplicated already persisted session input: %#v", current.Messages)
 	}
 }
 
@@ -111,9 +126,17 @@ func TestSendMessageDeliversMailboxBetweenChildTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
-		TaskID: started.Value.ID, ParentSessionID: "parent-1", Content: "also check the tests",
+		TaskID: started.Value.ID, ParentSessionID: "parent-1", MessageID: "mailbox-turn-1", Content: "also check the tests",
+		Trigger: domainsubagent.AgentMessageTriggerTurn,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	queued, err := repository.GetTask(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued.Mailbox) != 1 || queued.Mailbox[0].Trigger != domainsubagent.AgentMessageTriggerTurn {
+		t.Fatalf("mailbox trigger was not persisted: %#v", queued.Mailbox)
 	}
 	scheduler.task(context.Background())
 	if len(runner.instructions) != 2 || runner.instructions[1] != "also check the tests" {
@@ -184,6 +207,111 @@ func TestFollowupStartsNewRunAndReusesChildSession(t *testing.T) {
 	}
 	if sessions.creates != 2 {
 		t.Fatalf("expected child session factory to be called for each run, got %d", sessions.creates)
+	}
+}
+
+func TestSendMessageTriggerTurnStartsIdempotentFollowup(t *testing.T) {
+	repository := memory.NewRepository()
+	registry := memory.NewRegistry()
+	definition := writableDefinition()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &fakeScheduler{}
+	runner := &recordingRunner{}
+	service := &Service{
+		Definitions: repository, Registry: registry, Tasks: repository, Runs: repository,
+		Scheduler: scheduler, Sessions: &fakeChildSessions{}, Runner: runner, IDs: &sequenceIDs{},
+		Workspaces: &fakeWorkspaceManager{}, DefaultWorkspaceRoot: "C:/workspace",
+	}
+	started, err := service.Start(context.Background(), subagentcommand.StartTask{
+		ParentSessionID: "parent-1", DefinitionID: definition.ID, Instruction: "inspect", FallbackModelID: "model-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSessionID := started.Value.ChildSessionID
+	scheduler.task(context.Background())
+
+	command := subagentcommand.SendMessage{
+		TaskID: started.Value.ID, ParentSessionID: "parent-1", MessageID: "message-1",
+		Content: "inspect the tests too", Trigger: domainsubagent.AgentMessageTriggerTurn,
+	}
+	followup, err := service.SendMessage(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if followup.Value.ChildSessionID != firstSessionID || followup.Value.Status != domainsubagent.TaskStatusQueued {
+		t.Fatalf("trigger_turn did not preserve child session or queue a run: %#v", followup.Value)
+	}
+	runs, err := repository.ListRuns(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[1].RequestID != "message-1" || runs[1].Instruction != command.Content {
+		t.Fatalf("unexpected trigger_turn runs: %#v", runs)
+	}
+	if _, err := service.SendMessage(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	runs, err = repository.ListRuns(context.Background(), started.Value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("retry created a duplicate follow-up run: %#v", runs)
+	}
+	scheduler.task(context.Background())
+	if len(runner.instructions) != 2 || runner.instructions[1] != command.Content {
+		t.Fatalf("trigger_turn was not executed: submissions=%d instructions=%#v", scheduler.submissions, runner.instructions)
+	}
+}
+
+func TestSendMessageRejectsLiveSteering(t *testing.T) {
+	service := &Service{Tasks: memory.NewRepository(), IDs: &sequenceIDs{}}
+	if _, err := service.SendMessage(context.Background(), subagentcommand.SendMessage{
+		TaskID: "task-1", Content: "interrupt", Trigger: domainsubagent.AgentMessageTriggerSteer,
+	}); err == nil || !strings.Contains(err.Error(), "live model-input steering") {
+		t.Fatalf("expected explicit steering rejection, got %v", err)
+	}
+}
+
+func TestSendMessageWithoutEnvelopeRepositoryIsIdempotent(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{ID: "task-1", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusRunning}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, IDs: &sequenceIDs{}}
+	command := subagentcommand.SendMessage{TaskID: task.ID, ParentSessionID: task.ParentSessionID, MessageID: "message-1", Content: "continue"}
+	if _, err := service.SendMessage(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendMessage(context.Background(), command); err != nil {
+		t.Fatalf("same mailbox request should be idempotent: %v", err)
+	}
+	command.Content = "different"
+	if _, err := service.SendMessage(context.Background(), command); err == nil {
+		t.Fatal("same mailbox message ID accepted different content")
+	}
+	stored, err := repository.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mailbox) != 1 || stored.Mailbox[0].Content != "continue" {
+		t.Fatalf("mailbox retry duplicated or changed input: %#v", stored.Mailbox)
+	}
+}
+
+func TestMailboxDefaultsLegacyTriggerBeforeIdempotencyCheck(t *testing.T) {
+	task := domainsubagent.Task{ID: "task-1", Status: domainsubagent.TaskStatusRunning, Mailbox: []domainsubagent.Message{{
+		ID: "message-1", Content: "continue", Status: domainsubagent.MessageStatusPending,
+	}}}
+	if err := task.EnqueueMessage(domainsubagent.Message{ID: "message-1", Content: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(task.Mailbox) != 1 || task.Mailbox[0].Trigger != "" {
+		t.Fatalf("legacy duplicate should not append a second mailbox item: %#v", task.Mailbox)
 	}
 }
 
@@ -945,6 +1073,19 @@ func (failingScheduler) Unpark(string) error { return nil }
 type fakeChildSessions struct {
 	request subagentport.ChildSessionRequest
 	creates int
+}
+
+type recordingChildSessions struct {
+	unloads int
+}
+
+func (sessions *recordingChildSessions) Create(_ context.Context, request subagentport.ChildSessionRequest) (*session.Session, error) {
+	return session.NewFromState(session.InitialState{ID: request.SessionID, Model: request.FallbackModelID}), nil
+}
+
+func (sessions *recordingChildSessions) Unload(context.Context, string) error {
+	sessions.unloads++
+	return nil
 }
 
 func (sessions *fakeChildSessions) Create(_ context.Context, request subagentport.ChildSessionRequest) (*session.Session, error) {

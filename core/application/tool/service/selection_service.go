@@ -58,6 +58,10 @@ func allowsPermissionMode(permission tooldef.Permission, mode session.Permission
 	switch mode {
 	case session.PermissionModeReadonly:
 		return permission == tooldef.PermissionRead
+	case session.PermissionModeReadWrite:
+		return permission == tooldef.PermissionRead || permission == tooldef.PermissionWrite
+	case session.PermissionModeExecute:
+		return permission == tooldef.PermissionRead || permission == tooldef.PermissionExecute
 	case session.PermissionModeFull:
 		return true
 	default:

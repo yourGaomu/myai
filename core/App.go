@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -43,6 +44,8 @@ import (
 	subagentevents "myai/core/adapter/subagent/events"
 	subagentlocal "myai/core/adapter/subagent/local"
 	subagentmemory "myai/core/adapter/subagent/memory"
+	subagentregistry "myai/core/adapter/subagent/registry"
+	subagentruntime "myai/core/adapter/subagent/runtime"
 	subagentsession "myai/core/adapter/subagent/session"
 	milvusadapter "myai/core/adapter/vectorstore/milvus"
 	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
@@ -162,6 +165,8 @@ type Application struct {
 	subagentScheduler           *subagentlocal.Scheduler
 	subagentRegistry            *subagentmemory.Registry
 	subagentEvents              *subagentevents.Bus
+	subagentRecoveryCancel      context.CancelFunc
+	subagentRecoveryDone        <-chan struct{}
 	workspaceIsolationManager   workspaceport.Manager
 	workspaceCommandRunner      workspaceport.CommandRunner
 	workspaceCloser             interface{ Close() error }
@@ -780,6 +785,7 @@ func (app *Application) InitChatService() {
 
 func (app *Application) InitSubagents() {
 	registry := subagentmemory.NewRegistry()
+	pathRegistry := subagentregistry.New()
 	scheduler := subagentlocal.NewScheduler(
 		app.properties.Subagent.WorkerCount,
 		app.properties.Subagent.QueueSize,
@@ -808,19 +814,28 @@ func (app *Application) InitSubagents() {
 		Memory:       app.sessionMemory,
 		DefaultModel: app.defaultModelID,
 	}
+	parentContinuation := subagentchat.Continuation{Chat: app.chatService}
 	applicationService := &subagentservice.Service{
-		Definitions: definitions,
-		Registry:    registry,
-		Tasks:       tasks,
-		Runs:        runs,
-		TaskRuns:    tasks.(subagentport.TaskRunRepository),
-		Scheduler:   scheduler,
+		Definitions:      definitions,
+		Registry:         registry,
+		Tasks:            tasks,
+		Runs:             runs,
+		TaskRuns:         tasks.(subagentport.TaskRunRepository),
+		ExecutionLease:   tasks.(subagentport.AgentExecutionLeaseStore),
+		ExecutionOwnerID: uuidadapter.Generator{}.NewID(),
+		MessageOwnerID:   uuidadapter.Generator{}.NewID(),
+		AgentMessages:    tasks.(subagentport.AgentMessageRepository),
+		AgentPaths:       pathRegistry,
+		Runtime:          subagentruntime.New(),
+		Models:           app.client,
+		Scheduler:        scheduler,
 		Sessions: subagentsession.Factory{
 			Memory: app.sessionMemory, Persistence: sessionPersistence,
 			Loader: sessionloadservice.LoadService{Memory: app.sessionMemory, Sessions: app.store, Messages: app.store},
 		},
 		Runner:               subagentchat.Runner{Chat: app.chatService},
-		ParentContinuation:   subagentchat.Continuation{Chat: app.chatService},
+		ParentContinuation:   parentContinuation,
+		ParentNotifier:       parentContinuation,
 		IDs:                  uuidadapter.Generator{},
 		DefaultWorkspaceRoot: app.workspace,
 		OnError: func(err error) {
@@ -830,13 +845,42 @@ func (app *Application) InitSubagents() {
 	eventBus := subagentevents.NewBus(taskEvents)
 	applicationService.Events = eventBus
 	applicationService.Workspaces = app.workspaceIsolationManager
+	if err := app.chatService.SetPendingInputAcknowledger(subagentservice.AgentMessageAcknowledger{Repository: applicationService.AgentMessages}); err != nil {
+		scheduler.Close()
+		panic(fmt.Errorf("configure subagent message acknowledgements failed: %w", err))
+	}
 	if _, err := applicationService.Bootstrap(context.Background(), subagentcommand.BootstrapDefinitions{}); err != nil {
 		scheduler.Close()
 		panic(fmt.Errorf("init subagents failed: %w", err))
 	}
+	if err := applicationService.RecoverPendingAgentMessages(context.Background()); err != nil {
+		scheduler.Close()
+		panic(fmt.Errorf("recover pending subagent messages failed: %w", err))
+	}
 	if err := applicationService.RecoverInterruptedTasks(context.Background()); err != nil {
 		scheduler.Close()
 		panic(fmt.Errorf("recover interrupted subagent tasks failed: %w", err))
+	}
+	if app.mongoDb != nil {
+		recoveryCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		app.subagentRecoveryCancel = cancel
+		app.subagentRecoveryDone = done
+		go func() {
+			defer close(done)
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-recoveryCtx.Done():
+					return
+				case <-ticker.C:
+					if err := applicationService.RecoverInterruptedTasks(recoveryCtx); err != nil && recoveryCtx.Err() == nil {
+						log.Printf("recover interrupted subagent tasks failed: %v", err)
+					}
+				}
+			}
+		}()
 	}
 
 	app.toolRegister.RegisterSource("subagent", local.NewSubagentTools(applicationService))
@@ -851,6 +895,10 @@ func (app *Application) Close() error {
 		return nil
 	}
 	var errs []error
+	if app.subagentRecoveryCancel != nil {
+		app.subagentRecoveryCancel()
+		<-app.subagentRecoveryDone
+	}
 	// Stop task producers and drain workers before closing the resources used
 	// by subagent, chat persistence, and knowledge indexing jobs.
 	if app.subagentScheduler != nil {
@@ -885,6 +933,40 @@ func (app *Application) Close() error {
 
 func (app *Application) GetChatService() *service.ChatService {
 	return app.chatService
+}
+
+// GetToolRegister 暴露工具注册表供外部远程模块（如 onebot）动态挂载专属工具源。
+// 1.1 检查 Application 实例是否为空，防止空指针异常；
+// 1.2 返回内部持有的 RegisterTools 实例，调用方可通过 RegisterSource("onebot", ...) 注册工具。
+func (app *Application) GetToolRegister() *tool.RegisterTools {
+	if app == nil {
+		return nil
+	}
+	return app.toolRegister
+}
+
+// GetMongoDatabase 暴露当前已连接的 MongoDB 数据库句柄供外部扩展模块（如 onebot_users/onebot_groups）复用。
+// 1.1 若未配置 MongoDB（内存模式启动）或数据库名称为空，则返回 nil；
+// 1.2 若 MongoDB 已就绪，则返回绑定的 *mongo.Database 实例。
+func (app *Application) GetMongoDatabase() *mongo.Database {
+	if app == nil || app.mongoDb == nil {
+		return nil
+	}
+	dbName := strings.TrimSpace(app.properties.Mongo.Database)
+	if dbName == "" {
+		return nil
+	}
+	return app.mongoDb.Database(dbName)
+}
+
+// GetLLMClient 暴露底层 LLM 客户端供扩展组件按模型 ID 获取 ChatModelPort。
+// 1.1 校验 Application 是否已初始化；
+// 1.2 返回内部持有的 *llm.Client 实例。
+func (app *Application) GetLLMClient() *llm.Client {
+	if app == nil {
+		return nil
+	}
+	return app.client
 }
 
 func (app *Application) GetSandboxManager() sandboxport.Manager {

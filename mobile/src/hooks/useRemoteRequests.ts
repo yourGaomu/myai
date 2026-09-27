@@ -85,16 +85,11 @@ export function useRemoteRequests({
     if (!clientToken) {
       return false;
     }
-    startPending("sessions");
-    if (!sendEnvelope("session_list", {
+    return sendEnvelope("session_list", {
       request_id: newRequestID(),
       payload: { include_deleted: true },
-    })) {
-      stopPending("sessions");
-      return false;
-    }
-    return true;
-  }, [clientToken, sendEnvelope, startPending, stopPending]);
+    });
+  }, [clientToken, sendEnvelope]);
 
   const requestModels = useCallback(() => {
     if (!clientToken) {
@@ -275,21 +270,20 @@ export function useRemoteRequests({
         .then(({ messages, meta }) => {
           if (messages.length > 0) {
             replaceHistoryMessages(targetSessionID, messages);
+            if (!sendHistoryMeta(targetSessionID, meta)) {
+              pendingHistorySessionIDRef.current = "";
+              stopPending("sessions");
+            }
+            return;
           }
-          if (!sendHistoryMeta(targetSessionID, meta)) {
-            pendingHistorySessionIDRef.current = "";
-            stopPending("sessions");
-          }
+          requestSessionHistoryFull(targetSessionID);
         })
         .catch(() => {
-          if (!sendHistoryMeta(targetSessionID, emptyHistoryMeta(targetSessionID))) {
-            pendingHistorySessionIDRef.current = "";
-            stopPending("sessions");
-          }
+          requestSessionHistoryFull(targetSessionID);
         });
       return true;
     },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, sendHistoryMeta, startPending, stopPending],
+    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, requestSessionHistoryFull, sendHistoryMeta, startPending, stopPending],
   );
 
   const requestAssets = useCallback(
@@ -397,14 +391,5 @@ export function useRemoteRequests({
     requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,
-  };
-}
-
-function emptyHistoryMeta(sessionID: string): SessionHistoryMetaPayload {
-  return {
-    session_id: sessionID,
-    local_message_count: 0,
-    local_last_message_id: "",
-    local_history_version: 0,
   };
 }

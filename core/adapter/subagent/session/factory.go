@@ -30,6 +30,7 @@ type Factory struct {
 }
 
 var _ subagentport.ChildSessionFactory = Factory{}
+var _ subagentport.ChildSessionLifecycle = Factory{}
 
 func (factory Factory) Create(ctx context.Context, request subagentport.ChildSessionRequest) (*domainsession.Session, error) {
 	if factory.Memory == nil {
@@ -54,10 +55,7 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 	if modelID == "" {
 		return nil, errors.New("subagent model id is required")
 	}
-	permissionMode := domainsession.PermissionModeReadonly
-	if request.Definition.CapabilityMode != domainsubagent.CapabilityModeReadOnly {
-		permissionMode = domainsession.PermissionModeFull
-	}
+	permissionMode := capabilityPermissionMode(request.Definition.CapabilityMode)
 	allowedTools := append([]string{}, request.Definition.AllowedTools...)
 	state := domainsession.InitialState{
 		ID: request.SessionID, Kind: domainsession.KindSubagent,
@@ -93,6 +91,44 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 		}
 	}
 	return factory.Memory.GetSession(state.ID)
+}
+
+// Unload persists the current child session and removes only its live memory
+// object. The durable session record remains available for a later follow-up
+// or resume operation through Create.
+func (factory Factory) Unload(ctx context.Context, sessionID string) error {
+	if factory.Memory == nil {
+		return errors.New("subagent session memory is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("subagent session id is empty")
+	}
+	current, err := factory.Memory.GetSession(sessionID)
+	if err != nil {
+		// RemoveSession is idempotent for the concrete store, so an already
+		// unloaded session is not an error for lifecycle callers.
+		return nil
+	}
+	if factory.Persistence != nil {
+		if err := factory.Persistence.Save(ctx, sessioncommand.SaveSession{SessionID: sessionID, Model: current.Model}); err != nil {
+			return err
+		}
+	}
+	return factory.Memory.RemoveSession(sessionID)
+}
+
+func capabilityPermissionMode(mode domainsubagent.CapabilityMode) domainsession.PermissionMode {
+	switch mode {
+	case domainsubagent.CapabilityModeReadWrite:
+		return domainsession.PermissionModeReadWrite
+	case domainsubagent.CapabilityModeExecute:
+		return domainsession.PermissionModeExecute
+	case domainsubagent.CapabilityModeAll:
+		return domainsession.PermissionModeFull
+	default:
+		return domainsession.PermissionModeReadonly
+	}
 }
 
 func (factory Factory) syncWorkspace(ctx context.Context, current *domainsession.Session, request subagentport.ChildSessionRequest) (*domainsession.Session, error) {

@@ -51,7 +51,7 @@ function historyMessageText(message: SessionHistoryMessage) {
     case "tool":
       return message.content || "";
     case "assistant":
-      return message.content || "(empty assistant message)";
+      return message.content || (message.reasoning ? "" : "(empty assistant message)");
     case "user":
       return displayMessageText(message.content || "") || (parseAttachedFiles(message.content || "").length > 0 ? "" : "(empty user message)");
     default:

@@ -65,6 +65,18 @@ export type MessageType =
   | "model_config_enabled_set"
   | "model_config_default_set"
   | "model_config_mutation_result"
+  | "intent_config_query"
+  | "intent_config_query_result"
+  | "intent_config_set"
+  | "intent_config_set_result"
+  | "intent_config_test"
+  | "intent_config_test_result"
+  | "intent_trace_list"
+  | "intent_trace_list_result"
+  | "intent_trace_get"
+  | "intent_trace_get_result"
+  | "intent_trace_clear"
+  | "intent_trace_clear_result"
   | "skill_list"
   | "skill_list_result"
   | "skill_reload"
@@ -231,6 +243,7 @@ export type SubagentTask = {
   status: "queued" | "running" | "waiting_subagents" | "waiting_permission" | "succeeded" | "failed" | "canceled";
   unread: boolean;
   result?: string;
+  usage?: TokenUsage;
   error_message?: string;
   change_set: SubagentChangeSet;
   can_followup?: boolean;
@@ -265,6 +278,12 @@ export type SubagentTaskResultPayload = {
   delta?: boolean;
 };
 
+export type SubagentTaskMessagePayload = {
+  task_id: string;
+  message: string;
+  trigger?: "queue" | "trigger_turn" | "steer_current_turn";
+};
+
 export type SubagentTaskEvent = {
   task_id: string;
   sequence: number;
@@ -284,6 +303,7 @@ export type SubagentTaskEvent = {
 export type SubagentTaskWaitResultPayload = {
   session_id: string;
   task: SubagentTask;
+  tasks?: SubagentTask[];
   timed_out: boolean;
   woken_by_mailbox?: boolean;
   sequence?: number;
@@ -780,6 +800,94 @@ export type ModelConfigMutationResultPayload = {
   deleted_id?: string;
   models?: ModelSummary[];
   message?: string;
+};
+
+export type IntentStrategy = "system" | "jev" | "off";
+
+export type IntentConfigPayload = {
+  strategy: IntentStrategy;
+  base_url: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+  model: string;
+  plan_confidence: number;
+  execute_confidence: number;
+};
+
+export type IntentConfigResultPayload = {
+  strategy: IntentStrategy;
+  base_url: string;
+  has_api_key: boolean;
+  model: string;
+  plan_confidence: number;
+  execute_confidence: number;
+};
+
+export type IntentConfigTestResultPayload = {
+  success: boolean;
+  latency_ms: number;
+};
+
+export type IntentTraceListPayload = {
+  session_id?: string;
+  limit?: number;
+};
+
+export type IntentTraceGetPayload = {
+  trace_id: string;
+};
+
+export type IntentTraceClearPayload = {
+  session_id?: string;
+};
+
+export type IntentTraceStatus =
+  | "started"
+  | "succeeded"
+  | "http_error"
+  | "timeout"
+  | "invalid_response"
+  | string;
+
+export type IntentTraceRoute =
+  | "chat"
+  | "plan_only"
+  | "plan_execute"
+  | "test"
+  | string;
+
+export type IntentTracePayload = {
+  trace_id: string;
+  session_id?: string;
+  request_id?: string;
+  created_at: string;
+  duration_ms: number;
+  base_url: string;
+  requested_model: string;
+  response_model?: string;
+  request_body?: string;
+  response_body?: string;
+  response_truncated?: boolean;
+  http_status?: number;
+  status: IntentTraceStatus;
+  error_code?: string;
+  choice?: "conversation" | "explanation" | "implementation" | string;
+  confidence?: number;
+  should_plan: boolean;
+  should_execute: boolean;
+  route?: IntentTraceRoute;
+};
+
+export type IntentTraceListResultPayload = {
+  traces?: IntentTracePayload[];
+};
+
+export type IntentTraceGetResultPayload = {
+  trace?: IntentTracePayload;
+};
+
+export type IntentTraceClearResultPayload = {
+  session_id?: string;
 };
 
 export type SkillSummary = {

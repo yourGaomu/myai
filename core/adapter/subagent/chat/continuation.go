@@ -7,7 +7,9 @@ import (
 	"fmt"
 
 	domainmessage "myai/core/domain/message"
+	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
+	"myai/core/llm"
 	subagentport "myai/core/port/subagent"
 	"myai/core/service"
 )
@@ -17,6 +19,8 @@ type Continuation struct {
 }
 
 var _ subagentport.ParentContinuation = Continuation{}
+var _ subagentport.ParentCompletionNotifier = Continuation{}
+var _ subagentport.PendingParentContinuation = Continuation{}
 
 type continuationReport struct {
 	TaskID                   string   `json:"task_id"`
@@ -54,6 +58,30 @@ func (continuation Continuation) Continue(ctx context.Context, request subagentp
 		domainmessage.SyntheticReasonSubagentResult,
 		request.Stream,
 	)
+	if err != nil {
+		return subagentport.ParentContinuationResult{}, err
+	}
+	return subagentport.ParentContinuationResult{
+		Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: response.Result.Usage,
+	}, nil
+}
+
+func (continuation Continuation) Notify(ctx context.Context, task domainsubagent.Task) error {
+	if continuation.Chat == nil {
+		return errors.New("subagent parent chat continuation is nil")
+	}
+	prompt, err := continuationPrompt(subagentport.ParentContinuationRequest{Task: task})
+	if err != nil {
+		return err
+	}
+	return continuation.Chat.EnqueueTurnInputMessage(task.ParentSessionID, domainsubagent.AgentResultMessageID(task.ID), prompt)
+}
+
+func (continuation Continuation) ContinuePending(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (subagentport.ParentContinuationResult, error) {
+	if continuation.Chat == nil {
+		return subagentport.ParentContinuationResult{}, errors.New("subagent parent chat continuation is nil")
+	}
+	response, err := continuation.Chat.ContinuePendingStreamForSession(ctx, sessionID, stream)
 	if err != nil {
 		return subagentport.ParentContinuationResult{}, err
 	}

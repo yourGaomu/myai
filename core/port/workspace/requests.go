@@ -41,6 +41,7 @@ type AppliedChanges struct {
 type DiscardRequest struct {
 	Reference   domainworkspace.Reference
 	DiscardedAt time.Time
+	RequestID   string
 }
 
 type DiscardedChanges struct {

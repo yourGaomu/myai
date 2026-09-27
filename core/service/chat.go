@@ -12,6 +12,7 @@ import (
 	compactioncommand "myai/core/application/chat/compaction/command"
 	compactionresult "myai/core/application/chat/compaction/result"
 	generationcommand "myai/core/application/chat/generation/command"
+	generationport "myai/core/application/chat/generation/port"
 	plancommand "myai/core/application/chat/plan/command"
 	planport "myai/core/application/chat/plan/port"
 	chatretrievalcommand "myai/core/application/chat/retrieval/command"
@@ -28,6 +29,7 @@ import (
 	skillquery "myai/core/application/skill/query"
 	"myai/core/contextmgr"
 	compaction "myai/core/domain/compaction"
+	domaingeneration "myai/core/domain/generation"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -109,6 +111,28 @@ func (s *ChatService) EnqueueTurnInput(sessionID, input string) error {
 		sessionID = s.CurrentSessionID()
 	}
 	return s.dependencies.TurnInputQueue.Enqueue(sessionID, input)
+}
+
+func (s *ChatService) EnqueueTurnInputMessage(sessionID, messageID, input string) error {
+	if s == nil || s.dependencies.TurnInputQueue == nil {
+		return errors.New("turn input queue is not configured")
+	}
+	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		return identified.EnqueueIdentified(sessionID, messageID, input)
+	}
+	return s.dependencies.TurnInputQueue.Enqueue(sessionID, input)
+}
+
+func (s *ChatService) SetPendingInputAcknowledger(acknowledger generationport.PendingInputAcknowledger) error {
+	if s == nil || s.dependencies.TurnInputQueue == nil {
+		return errors.New("turn input queue is not configured")
+	}
+	configurer, ok := s.dependencies.TurnInputQueue.(generationport.PendingInputConfigurer)
+	if !ok {
+		return errors.New("turn input queue does not support acknowledgements")
+	}
+	configurer.SetAcknowledger(acknowledger)
+	return nil
 }
 
 func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler) (ChatResponse, error) {
@@ -440,6 +464,108 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 	)
 }
 
+// ContinuePendingStreamForSession consumes messages queued for a session and
+// starts one continuation turn. The queue is drained only after the session
+// operation lock is acquired, so a normal user turn cannot race the delivery.
+func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	if s == nil || s.dependencies.Models == nil {
+		return ChatResponse{}, errors.New("llm client is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ChatResponse{}, errors.New("session id is empty")
+	}
+	if s.dependencies.TurnInputQueue == nil {
+		return ChatResponse{}, errors.New("turn input queue is not configured")
+	}
+	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer unlock()
+
+	var pendingItems []domaingeneration.PendingTurnInputItem
+	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		pendingItems = identified.DrainIdentified(sessionID)
+	} else {
+		for _, input := range s.dependencies.TurnInputQueue.Drain(sessionID) {
+			pendingItems = append(pendingItems, domaingeneration.PendingTurnInputItem{Content: input})
+		}
+	}
+	if len(pendingItems) == 0 {
+		return ChatResponse{}, errors.New("no pending parent input")
+	}
+	requeue := func(items []domaingeneration.PendingTurnInputItem) error {
+		if len(items) == 0 {
+			return nil
+		}
+		if releaser, ok := s.dependencies.TurnInputQueue.(generationport.PendingInputReleaser); ok {
+			return releaser.RequeueIdentified(sessionID, items)
+		}
+		for _, item := range items {
+			if err := s.dependencies.TurnInputQueue.Enqueue(sessionID, item.Content); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var current *session.Session
+	latestInput := ""
+	for _, item := range pendingItems {
+		input := strings.TrimSpace(item.Content)
+		if input == "" {
+			continue
+		}
+		prepared, appendErr := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
+			SessionID: sessionID, Input: input, ForceChatMode: true,
+			SyntheticReason: domainmessage.SyntheticReasonSubagentResult, DeduplicateSynthetic: true,
+		})
+		if appendErr != nil {
+			return ChatResponse{}, errors.Join(appendErr, requeue(pendingItems))
+		}
+		current = prepared.Session
+		latestInput = prepared.Input
+		if prepared.Appended && s.dependencies.UserMessages != nil {
+			s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+				SessionID: current.ID, Model: current.Model, Input: prepared.Input,
+				RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
+				SyntheticReason:  domainmessage.SyntheticReasonSubagentResult,
+				AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(current),
+			})
+		}
+	}
+	if current == nil || latestInput == "" {
+		return ChatResponse{}, errors.Join(errors.New("pending parent input is empty"), requeue(pendingItems))
+	}
+	response, err := s.generateAssistantForSession(
+		ctx, current, latestInput, "", "resume parent session from background subagent",
+		chatretrievalresult.Context{}, stream, false, true,
+	)
+	if err != nil {
+		return ChatResponse{}, errors.Join(err, requeue(pendingItems))
+	}
+	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		var ackErrors []error
+		var unacknowledged []domaingeneration.PendingTurnInputItem
+		for _, item := range pendingItems {
+			if item.ID == "" {
+				continue
+			}
+			if ackErr := identified.Acknowledge(item.ID); ackErr != nil {
+				ackErrors = append(ackErrors, ackErr)
+				unacknowledged = append(unacknowledged, item)
+			}
+		}
+		if len(unacknowledged) > 0 {
+			if requeueErr := requeue(unacknowledged); requeueErr != nil {
+				ackErrors = append(ackErrors, requeueErr)
+			}
+			return ChatResponse{}, errors.Join(ackErrors...)
+		}
+	}
+	return response, nil
+}
+
 func userMessageCount(messages []domainmessage.Message) int {
 	count := 0
 	for _, message := range messages {
@@ -544,13 +670,28 @@ func (s *ChatService) contextInfo(ctx context.Context, current *session.Session)
 }
 
 func (s *ChatService) NewSession(ctx context.Context) error {
+	_, err := s.CreateSession(ctx, "New chat")
+	return err
+}
+
+// CreateSession 原子创建一个指定标题的新会话并返回其 SessionID。
+// 1.1 加会话操作锁，保证并发创建会话时的线程安全；
+// 1.2 委托 SessionLifecycle.Create 创建内存与持久化会话记录；
+// 1.3 返回生成的唯一 SessionID，供私聊或群聊绑定专属会话。
+func (s *ChatService) CreateSession(ctx context.Context, title string) (string, error) {
 	unlock, err := s.lockSessionOperation(ctx, "")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer unlock()
-	_, err = s.dependencies.SessionLifecycle.Create(ctx, lifecyclecommand.CreateSession{Title: "New chat"})
-	return err
+	if strings.TrimSpace(title) == "" {
+		title = "New chat"
+	}
+	created, err := s.dependencies.SessionLifecycle.Create(ctx, lifecyclecommand.CreateSession{Title: title})
+	if err != nil {
+		return "", err
+	}
+	return created.SessionID, nil
 }
 
 func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {

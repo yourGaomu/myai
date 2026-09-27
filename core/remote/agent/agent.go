@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	subagentcommand "myai/core/application/subagent/command"
 	domainsubagent "myai/core/domain/subagent"
 	subagentport "myai/core/port/subagent"
 	"myai/core/remote/protocol"
@@ -22,22 +24,23 @@ import (
 
 type Agent struct {
 	// Agent 是手机请求在电脑端的传输适配器，业务能力通过窄 Facade 接口注入。
-	config            Config
-	chatService       ChatFacade
-	fileService       WorkspaceFileFacade
-	changeService     WorkspaceChangeFacade
-	knowledgeService  KnowledgeFacade
-	memoryService     MemoryFacade
-	memoryExtraction  MemoryExtractionFacade
-	memoryDream       MemoryDreamFacade
-	subagentService   SubagentFacade
-	subagentEvents    SubagentEventSource
-	pluginManager     PluginManagerFacade
-	runtimes          *sessionRuntimeManager
-	writeMu           sync.Mutex
-	requestMu         sync.Mutex
-	permissionWaiters *permissionWaiterRegistry
-	permissionTimeout time.Duration
+	config                Config
+	chatService           ChatFacade
+	fileService           WorkspaceFileFacade
+	changeService         WorkspaceChangeFacade
+	knowledgeService      KnowledgeFacade
+	memoryService         MemoryFacade
+	memoryExtraction      MemoryExtractionFacade
+	memoryDream           MemoryDreamFacade
+	subagentService       SubagentFacade
+	subagentEvents        SubagentEventSource
+	pluginManager         PluginManagerFacade
+	runtimes              *sessionRuntimeManager
+	writeMu               sync.Mutex
+	requestMu             sync.Mutex
+	lastTaskEventSequence atomic.Uint64
+	permissionWaiters     *permissionWaiterRegistry
+	permissionTimeout     time.Duration
 }
 
 func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource, pluginManager PluginManagerFacade) *Agent {
@@ -151,20 +154,20 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	fmt.Println("agent connected.")
 	if err := a.writeMessage(conn, protocol.TypeAgentOnline, protocol.AgentOnlinePayload{
 		Status: "online", BindCode: a.config.BindingCode,
+		LastTaskEventSequence: a.lastTaskEventSequence.Load(),
 	}); err != nil {
 		return true, err
 	}
+	eventCtx, cancelEvents := context.WithCancel(ctx)
+	defer cancelEvents()
 	//是否存在子智能体调用能力
 	if a.subagentEvents != nil {
 		if source, ok := a.subagentEvents.(SubagentTaskEventSource); ok {
-			//如果有高级功能
-			events, unsubscribe := source.SubscribeTaskEvents("", 0, 32)
-			defer unsubscribe()
-			go a.forwardSubagentTaskEvents(ctx, conn, events)
+			go a.forwardSubagentTaskEvents(eventCtx, conn, source)
 		} else {
 			events, unsubscribe := a.subagentEvents.Subscribe(32)
 			defer unsubscribe()
-			go a.forwardSubagentEvents(ctx, conn, events)
+			go a.forwardSubagentEvents(eventCtx, conn, events)
 		}
 	}
 
@@ -214,14 +217,29 @@ func (a *Agent) forwardSubagentEvents(ctx context.Context, conn *websocket.Conn,
 	}
 }
 
-func (a *Agent) forwardSubagentTaskEvents(ctx context.Context, conn *websocket.Conn, events <-chan subagentport.TaskEvent) {
+func (a *Agent) forwardSubagentTaskEvents(ctx context.Context, conn *websocket.Conn, source SubagentTaskEventSource) {
+	for {
+		events, unsubscribe := source.SubscribeTaskEvents("", a.lastTaskEventSequence.Load(), 32)
+		closed := a.forwardSubagentTaskEventBatch(ctx, conn, events)
+		unsubscribe()
+		if !closed || ctx.Err() != nil {
+			return
+		}
+		if err := a.forwardSubagentTaskSnapshot(ctx, conn, source); err != nil {
+			log.Printf("send subagent task snapshot failed: %v", err)
+			return
+		}
+	}
+}
+
+func (a *Agent) forwardSubagentTaskEventBatch(ctx context.Context, conn *websocket.Conn, events <-chan subagentport.TaskEvent) bool {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case event, ok := <-events:
 			if !ok {
-				return
+				return true
 			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), event.Task.ParentSessionID, protocol.SubagentTaskResultPayload{
 				Task: subagentTaskPayload(event.Task), Sequence: event.Sequence, Kind: event.Kind, EmittedAt: event.EmittedAt,
@@ -230,8 +248,47 @@ func (a *Agent) forwardSubagentTaskEvents(ctx context.Context, conn *websocket.C
 				Truncated: event.Truncated, Delta: event.Delta,
 			}); err != nil {
 				log.Printf("send subagent task event failed: %v", err)
-				return
+				return false
 			}
+			a.advanceTaskEventSequence(event.Sequence)
+		}
+	}
+}
+
+func (a *Agent) forwardSubagentTaskSnapshot(ctx context.Context, conn *websocket.Conn, source SubagentTaskEventSource) error {
+	if a.subagentService == nil {
+		return errors.New("subagent service is unavailable")
+	}
+	tail, ok := source.(SubagentTaskEventTailSource)
+	if !ok {
+		return errors.New("subagent event source cannot provide a snapshot cursor")
+	}
+	// Capture the cursor before loading tasks. Events published after this
+	// point remain eligible for the next subscription instead of being skipped.
+	latest := tail.LatestTaskEventSequence()
+	result, err := a.subagentService.List(ctx, subagentcommand.ListTasks{Limit: 500})
+	if err != nil {
+		return err
+	}
+	for _, task := range result.Items {
+		if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), task.ParentSessionID, protocol.SubagentTaskResultPayload{
+			Task: subagentTaskPayload(task), Kind: "task.snapshot", Message: "subagent task snapshot",
+		}); err != nil {
+			return err
+		}
+	}
+	a.advanceTaskEventSequence(latest)
+	return nil
+}
+
+func (a *Agent) advanceTaskEventSequence(sequence uint64) {
+	if sequence == 0 {
+		return
+	}
+	for {
+		current := a.lastTaskEventSequence.Load()
+		if sequence <= current || a.lastTaskEventSequence.CompareAndSwap(current, sequence) {
+			return
 		}
 	}
 }

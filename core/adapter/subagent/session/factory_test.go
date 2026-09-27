@@ -102,6 +102,48 @@ func TestFactoryCreatesChildSessionWhenPersistenceDoesNotContainIt(t *testing.T)
 	}
 }
 
+func TestFactoryUnloadsChildSessionFromMemory(t *testing.T) {
+	memory := &factoryMemory{sessions: make(map[string]*domainsession.Session)}
+	factory := Factory{Memory: memory}
+	request := childSessionRequest("child-unload")
+	if _, err := factory.Create(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := factory.Unload(context.Background(), request.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := memory.GetSession(request.SessionID); err == nil {
+		t.Fatal("expected unloaded child session to be removed from memory")
+	}
+}
+
+func TestFactoryMapsCapabilityModesToSessionPermissions(t *testing.T) {
+	cases := []struct {
+		name       string
+		capability domainsubagent.CapabilityMode
+		permission domainsession.PermissionMode
+	}{
+		{name: "read only", capability: domainsubagent.CapabilityModeReadOnly, permission: domainsession.PermissionModeReadonly},
+		{name: "read write", capability: domainsubagent.CapabilityModeReadWrite, permission: domainsession.PermissionModeReadWrite},
+		{name: "execute", capability: domainsubagent.CapabilityModeExecute, permission: domainsession.PermissionModeExecute},
+		{name: "all", capability: domainsubagent.CapabilityModeAll, permission: domainsession.PermissionModeFull},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			memory := &factoryMemory{sessions: map[string]*domainsession.Session{}}
+			request := childSessionRequest("child-" + testCase.name)
+			request.Definition.CapabilityMode = testCase.capability
+			current, err := (Factory{Memory: memory}).Create(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.PermissionMode != testCase.permission {
+				t.Fatalf("permission mode = %q, want %q", current.PermissionMode, testCase.permission)
+			}
+		})
+	}
+}
+
 func childSessionRequest(sessionID string) subagentport.ChildSessionRequest {
 	return subagentport.ChildSessionRequest{
 		SessionID: sessionID,

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	domainsubagent "myai/core/domain/subagent"
+	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
 )
 
@@ -31,7 +33,88 @@ func (service *Service) saveTaskAndRun(ctx context.Context, task domainsubagent.
 	if repository == nil {
 		return errors.New("atomic subagent task/run repository is not configured")
 	}
+	if service.ExecutionLease != nil {
+		guarded, ok := repository.(subagentport.LeaseGuardedTaskRunRepository)
+		if !ok {
+			return errors.New("lease-guarded subagent task/run repository is not configured")
+		}
+		return guarded.SaveOwnedTaskAndRun(ctx, domainsubagent.CloneTask(task), domainsubagent.CloneRun(run), service.ExecutionOwnerID, service.leaseTTL())
+	}
 	return repository.SaveTaskAndRun(ctx, domainsubagent.CloneTask(task), domainsubagent.CloneRun(run))
+}
+
+func (service *Service) saveCanceledTaskAndRun(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
+	if service == nil {
+		return errors.New("subagent task service is nil")
+	}
+	if repository, ok := service.Tasks.(subagentport.TaskCancellationRepository); ok {
+		return repository.SaveCanceledTaskAndRun(ctx, domainsubagent.CloneTask(task), domainsubagent.CloneRun(run))
+	}
+	if service.ExecutionLease != nil {
+		return errors.New("lease-aware subagent cancellation repository is not configured")
+	}
+	return service.saveTaskAndRun(ctx, task, run)
+}
+
+func (service *Service) taskMutationLease(ctx context.Context, taskID, operationID string) (func(), error) {
+	if service == nil || service.ExecutionLease == nil {
+		return func() {}, nil
+	}
+	if strings.TrimSpace(service.ExecutionOwnerID) == "" {
+		return nil, errors.New("subagent execution lease owner id is not configured")
+	}
+	if strings.TrimSpace(operationID) == "" {
+		return nil, errors.New("subagent task mutation operation id is empty")
+	}
+	if err := service.ExecutionLease.Acquire(ctx, taskID, operationID, service.ExecutionOwnerID, service.leaseTTL()); err != nil {
+		return nil, err
+	}
+	return func() { service.releaseExecutionLease(taskID, operationID) }, nil
+}
+
+func (service *Service) taskOperationID(prefix, taskID string) string {
+	if service != nil && service.IDs != nil {
+		return strings.TrimSpace(prefix) + ":" + service.IDs.NewID()
+	}
+	return fmt.Sprintf("%s:%s:%d", strings.TrimSpace(prefix), strings.TrimSpace(taskID), time.Now().UnixNano())
+}
+
+func (service *Service) saveTaskMutation(ctx context.Context, task domainsubagent.Task, expectedRunID string, expectedUpdatedAt time.Time, operationID string) error {
+	if service == nil || service.Tasks == nil {
+		return errors.New("subagent task service is not configured")
+	}
+	if service.ExecutionLease != nil {
+		repository, ok := service.Tasks.(subagentport.LeaseGuardedTaskRepository)
+		if !ok {
+			return errors.New("lease-guarded subagent task repository is not configured")
+		}
+		return repository.SaveOwnedTask(ctx, domainsubagent.CloneTask(task), operationID, expectedRunID, service.ExecutionOwnerID, expectedUpdatedAt, service.leaseTTL())
+	}
+	if repository, ok := service.Tasks.(subagentport.TaskVersionRepository); ok {
+		return repository.SaveTaskIfVersion(ctx, domainsubagent.CloneTask(task), expectedUpdatedAt)
+	}
+	return service.Tasks.SaveTask(ctx, domainsubagent.CloneTask(task))
+}
+
+// saveTaskMutationDuringRun commits a Task-only transition from inside the
+// currently executing Run. The Run already owns the durable execution lease;
+// acquiring a second operation lease for the same task would self-deadlock in
+// Mongo and would incorrectly reject wait_agent transitions.
+func (service *Service) saveTaskMutationDuringRun(ctx context.Context, task domainsubagent.Task, expectedRunID string, expectedUpdatedAt time.Time) error {
+	if service == nil || service.Tasks == nil {
+		return errors.New("subagent task service is not configured")
+	}
+	if service.ExecutionLease != nil && strings.TrimSpace(expectedRunID) != "" {
+		repository, ok := service.Tasks.(subagentport.LeaseGuardedTaskRepository)
+		if !ok {
+			return errors.New("lease-guarded subagent task repository is not configured")
+		}
+		return repository.SaveOwnedTask(ctx, domainsubagent.CloneTask(task), expectedRunID, expectedRunID, service.ExecutionOwnerID, expectedUpdatedAt, service.leaseTTL())
+	}
+	if repository, ok := service.Tasks.(subagentport.TaskVersionRepository); ok {
+		return repository.SaveTaskIfVersion(ctx, domainsubagent.CloneTask(task), expectedUpdatedAt)
+	}
+	return service.Tasks.SaveTask(ctx, domainsubagent.CloneTask(task))
 }
 
 func (service *Service) currentRun(ctx context.Context, task domainsubagent.Task) (domainsubagent.Run, error) {
@@ -68,7 +151,7 @@ func (service *Service) finishPanic(taskID string, runID string, panicErr error)
 	if runID != "" && run.ID != runID {
 		return fmt.Errorf("subagent panic run mismatch: expected %s, got %s", runID, run.ID)
 	}
-	return service.finishError(task, run, context.Background(), panicErr)
+	return service.finishError(task, run, context.Background(), panicErr, modelport.TokenUsage{})
 }
 
 // RecoverInterruptedTasks reconciles tasks that could not reach a terminal
@@ -81,6 +164,8 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 	if !ok {
 		return errors.New("subagent interrupted-task repository is not configured")
 	}
+	service.admissionMu.Lock()
+	defer service.admissionMu.Unlock()
 	tasks, err := repository.ListNonTerminalTasks(ctx)
 	if err != nil {
 		return err
@@ -95,15 +180,41 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 			recoveryErrors = append(recoveryErrors, fmt.Errorf("load interrupted subagent task %s run: %w", task.ID, runErr))
 			continue
 		}
+		if leaseErr := service.acquireExecutionLease(ctx, task.ID, run.ID); leaseErr != nil {
+			if errors.Is(leaseErr, subagentport.ErrExecutionLeaseNotAcquired) {
+				continue
+			}
+			recoveryErrors = append(recoveryErrors, fmt.Errorf("claim interrupted subagent task %s: %w", task.ID, leaseErr))
+			continue
+		}
+		current, loadErr := service.Tasks.GetTask(ctx, task.ID)
+		if loadErr != nil || current.Terminal() || (current.CurrentRunID != "" && current.CurrentRunID != task.CurrentRunID) {
+			service.releaseExecutionLease(task.ID, run.ID)
+			if loadErr != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("reload interrupted subagent task %s: %w", task.ID, loadErr))
+			}
+			continue
+		}
+		task = current
+		task.CurrentRunID = run.ID
 		if service.canRequeueAfterRestart(task) {
+			// A waiting parent is no longer blocked by an in-memory waiter after
+			// restart. Requeue it so the child mailbox/event state is evaluated by
+			// the normal runner instead of leaving it permanently parked.
 			if err := service.requeueInterruptedTask(ctx, task, run); err == nil {
 				continue
 			} else {
 				recoveryErrors = append(recoveryErrors, fmt.Errorf("requeue interrupted subagent task %s: %w", task.ID, err))
+				// Keep the durable task retryable when admission failed. Do not
+				// convert a transient queue-full/closed error into a false task
+				// failure; the periodic recovery loop will retry it.
+				service.releaseExecutionLease(task.ID, run.ID)
+				continue
 			}
 		}
 		now := service.now()
 		if err := task.MarkFailed(interruptedTaskMessage, now); err != nil {
+			service.releaseExecutionLease(task.ID, run.ID)
 			recoveryErrors = append(recoveryErrors, fmt.Errorf("fail interrupted subagent task %s: %w", task.ID, err))
 			continue
 		}
@@ -111,11 +222,16 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 		run.ErrorMessage = interruptedTaskMessage
 		run.CompletedAt = timePtr(now)
 		if err := service.saveTaskAndRun(ctx, task, run); err != nil {
+			service.releaseExecutionLease(task.ID, run.ID)
 			recoveryErrors = append(recoveryErrors, fmt.Errorf("save interrupted subagent task %s: %w", task.ID, err))
 			continue
 		}
 		service.discardFailedWorkspace(task)
 		service.publish(ctx, task)
+		service.mu.Lock()
+		service.notifyParentCompletionLocked(task)
+		service.mu.Unlock()
+		service.releaseExecutionLease(task.ID, run.ID)
 	}
 	return errors.Join(recoveryErrors...)
 }
@@ -138,7 +254,15 @@ func (service *Service) canRequeueAfterRestart(task domainsubagent.Task) bool {
 // clean queued transition and admitted to the new scheduler. If admission
 // fails, the caller falls back to the existing terminal failure path.
 func (service *Service) requeueInterruptedTask(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
+	if service.Runtime != nil {
+		if err := service.Runtime.Register(task); err != nil {
+			return err
+		}
+	}
 	if !service.registerActiveRun(task.ID, run.ID) {
+		// A local execution won admission between the recovery scan and this
+		// point. The recovery lease is no longer needed by this attempt.
+		service.releaseExecutionLease(task.ID, run.ID)
 		return nil
 	}
 	registered := true
@@ -170,6 +294,10 @@ func (service *Service) requeueInterruptedTask(ctx context.Context, task domains
 	if err := service.Scheduler.Submit(run.ID, func(runContext context.Context) {
 		service.execute(runContext, task.ID, run.ID, task.Definition.ModelID)
 	}); err != nil {
+		// The scheduler did not accept the recovered turn. Persist a queued
+		// task with no active lease so a later recovery pass can retry it.
+		service.completeActiveRun(task.ID, run.ID)
+		service.releaseExecutionLease(task.ID, run.ID)
 		return err
 	}
 	registered = false

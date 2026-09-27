@@ -23,7 +23,10 @@ export type ModelConfigDraft = {
 type Args = {
   activeRequestIDRef: RefObject<string>;
   currentModelID: string;
+  historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
+  requestAssets: (sessionID?: string) => boolean;
+  requestSessionHistory: (sessionID?: string) => boolean;
   resetActiveAssistant: (sessionID: string) => void;
   sendEnvelope: SendEnvelope;
   sessionIDRef: RefObject<string>;
@@ -39,7 +42,10 @@ type Args = {
 export function useSessionModelActions({
   activeRequestIDRef,
   currentModelID,
+  historySessionIDRef,
   pendingHistorySessionIDRef,
+  requestAssets,
+  requestSessionHistory,
   resetActiveAssistant,
   sendEnvelope,
   sessionIDRef,
@@ -59,29 +65,36 @@ export function useSessionModelActions({
 
   const loadSession = useCallback(
     (nextSessionID: string) => {
-      if (!nextSessionID) {
+      const targetSessionID = nextSessionID.trim();
+      if (!targetSessionID) {
         return;
       }
-      setSessionID(nextSessionID);
-      sessionIDRef.current = nextSessionID;
-      resetActiveAssistant(nextSessionID);
+      setSessionID(targetSessionID);
+      sessionIDRef.current = targetSessionID;
+      historySessionIDRef.current = "";
+      resetActiveAssistant(targetSessionID);
       activeRequestIDRef.current = "";
-      pendingHistorySessionIDRef.current = nextSessionID;
-      setSessionPendingPermission(nextSessionID, null);
-      setSessionLastUsage(nextSessionID, findSessionUsage(sessions, nextSessionID));
+      setSessionPendingPermission(targetSessionID, null);
+      setSessionLastUsage(targetSessionID, findSessionUsage(sessions, targetSessionID));
       startPending("sessions");
-      if (!sendEnvelope("session_load", {
+      const loadSent = sendEnvelope("session_load", {
         request_id: newRequestID(),
-        session_id: nextSessionID,
-        payload: { session_id: nextSessionID },
-      })) {
+        session_id: targetSessionID,
+        payload: { session_id: targetSessionID },
+      });
+      const historySent = requestSessionHistory(targetSessionID);
+      requestAssets(targetSessionID);
+      if (!loadSent && !historySent) {
         pendingHistorySessionIDRef.current = "";
         stopPending("sessions");
       }
     },
     [
       activeRequestIDRef,
+      historySessionIDRef,
       pendingHistorySessionIDRef,
+      requestAssets,
+      requestSessionHistory,
       resetActiveAssistant,
       sendEnvelope,
       sessionIDRef,

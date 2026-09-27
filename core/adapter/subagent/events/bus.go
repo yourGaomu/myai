@@ -36,6 +36,17 @@ type Bus struct {
 var _ subagentport.EventPublisher = (*Bus)(nil)
 var _ subagentport.TaskEventSource = (*Bus)(nil)
 
+// LatestTaskEventSequence returns the latest sequence assigned by this bus.
+// It is used by remote agents to resume after a full task snapshot.
+func (bus *Bus) LatestTaskEventSequence() uint64 {
+	if bus == nil {
+		return 0
+	}
+	bus.mu.RLock()
+	defer bus.mu.RUnlock()
+	return bus.nextSequence
+}
+
 func NewBus(repositories ...subagentport.TaskEventRepository) *Bus {
 	var repository subagentport.TaskEventRepository
 	if len(repositories) > 0 {
@@ -65,6 +76,9 @@ func NewBus(repositories ...subagentport.TaskEventRepository) *Bus {
 				bus.history = append(bus.history, cloneTaskEvent(event))
 			}
 		}
+		if initializer, ok := repository.(subagentport.TaskEventSequenceInitializer); ok {
+			_ = initializer.EnsureTaskEventSequence(context.Background(), bus.nextSequence)
+		}
 	}
 	return bus
 }
@@ -87,8 +101,23 @@ func (bus *Bus) PublishTaskEvent(ctx context.Context, event subagentport.TaskEve
 
 	bus.mu.Lock()
 	defer bus.mu.Unlock()
-	bus.nextSequence++
-	event.Sequence = bus.nextSequence
+	if sequencer, ok := bus.eventRepository.(subagentport.TaskEventSequenceRepository); ok {
+		if sequence, err := sequencer.NextTaskEventSequence(contextWithoutCancel(ctx)); err == nil {
+			event.Sequence = sequence
+			if sequence > bus.nextSequence {
+				bus.nextSequence = sequence
+			}
+		} else {
+			// A local fallback could collide with another process' sequence and
+			// corrupt replay ordering. The task state itself is already durable;
+			// skip this notification and let the next state event or snapshot
+			// repair the remote view.
+			return
+		}
+	} else {
+		bus.nextSequence++
+		event.Sequence = bus.nextSequence
+	}
 	bus.history = append(bus.history, cloneTaskEvent(event))
 	if len(bus.history) > bus.historyLimit {
 		bus.history = bus.history[len(bus.history)-bus.historyLimit:]
@@ -160,18 +189,57 @@ func (bus *Bus) SubscribeTaskEvents(parentSessionID string, afterSequence uint64
 	bus.mu.Lock()
 	bus.nextID++
 	id := bus.nextID
-	if afterSequence > 0 && len(bus.history) > 0 && afterSequence+1 < bus.history[0].Sequence {
-		// The requested cursor is older than the in-memory replay window. A
-		// partial replay is unsafe because callers cannot distinguish it from a
-		// complete stream, so force an explicit reconnect/full resync.
-		channel := make(chan subagentport.TaskEvent)
-		close(channel)
-		bus.mu.Unlock()
-		return channel, func() {}
-	}
 	replay := make([]subagentport.TaskEvent, 0)
+	if afterSequence > 0 && len(bus.history) > 0 && afterSequence+1 < bus.history[0].Sequence {
+		// The requested cursor is older than the in-memory replay window. Use
+		// the durable event log when one is configured; otherwise a partial
+		// replay would be indistinguishable from a complete stream.
+		if bus.eventRepository != nil {
+			maxReplay := bus.historyLimit * 8
+			if maxReplay < 1024 {
+				maxReplay = 1024
+			}
+			persisted, err := bus.eventRepository.ListTaskEvents(context.Background(), parentSessionID, afterSequence, maxReplay+1)
+			if err == nil && len(persisted) <= maxReplay {
+				for _, event := range persisted {
+					if event.Sequence <= afterSequence {
+						continue
+					}
+					replay = append(replay, cloneTaskEvent(event))
+				}
+				// Events published while the durable query was running are
+				// already in memory. Append only the tail not returned above.
+				var lastPersisted uint64
+				if len(replay) > 0 {
+					lastPersisted = replay[len(replay)-1].Sequence
+				}
+				for _, event := range bus.history {
+					if event.Sequence <= afterSequence || event.Sequence <= lastPersisted {
+						continue
+					}
+					if parentSessionID != "" && event.Task.ParentSessionID != parentSessionID {
+						continue
+					}
+					replay = append(replay, cloneTaskEvent(event))
+				}
+			} else {
+				channel := make(chan subagentport.TaskEvent)
+				close(channel)
+				bus.mu.Unlock()
+				return channel, func() {}
+			}
+		} else {
+			channel := make(chan subagentport.TaskEvent)
+			close(channel)
+			bus.mu.Unlock()
+			return channel, func() {}
+		}
+	}
 	for _, event := range bus.history {
 		if event.Sequence <= afterSequence {
+			continue
+		}
+		if len(replay) > 0 && event.Sequence <= replay[len(replay)-1].Sequence {
 			continue
 		}
 		if parentSessionID != "" && event.Task.ParentSessionID != parentSessionID {

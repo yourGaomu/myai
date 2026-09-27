@@ -24,6 +24,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
 	knowledge: false,
 	memory: false,
 	subagents: false,
+	intent: false,
 };
 
 // 各功能独立维护 pending，避免一个慢请求错误地锁住所有无关页面操作。

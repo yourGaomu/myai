@@ -109,3 +109,49 @@ func TestBusRestoresPersistedSequenceAndHistory(t *testing.T) {
 		t.Fatal("timed out waiting for post-restore event")
 	}
 }
+
+func TestBusesSharingRepositoryUseOneEventSequence(t *testing.T) {
+	repository := memory.NewRepository()
+	first := NewBus(repository)
+	second := NewBus(repository)
+	first.TaskUpdated(context.Background(), domainsubagent.Task{ID: "task-1", Status: domainsubagent.TaskStatusRunning})
+	second.TaskUpdated(context.Background(), domainsubagent.Task{ID: "task-2", Status: domainsubagent.TaskStatusRunning})
+	first.TaskUpdated(context.Background(), domainsubagent.Task{ID: "task-3", Status: domainsubagent.TaskStatusRunning})
+
+	events, err := repository.ListTaskEvents(context.Background(), "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0].Sequence != 1 || events[1].Sequence != 2 || events[2].Sequence != 3 {
+		t.Fatalf("expected shared sequences 1,2,3, got %#v", events)
+	}
+}
+
+func TestBusReplaysPersistedEventsWhenMemoryWindowExpired(t *testing.T) {
+	repository := memory.NewRepository()
+	first := NewBus(repository)
+	for index := 0; index < 520; index++ {
+		first.TaskUpdated(context.Background(), domainsubagent.Task{
+			ID: "task-1", ParentSessionID: "parent-1", Status: domainsubagent.TaskStatusRunning,
+		})
+	}
+
+	// NewBus keeps only the latest in-memory window. The durable repository
+	// must fill the gap when a reconnecting cursor predates that window.
+	second := NewBus(repository)
+	events, cancel := second.SubscribeTaskEvents("parent-1", 1, 1)
+	defer cancel()
+	for expected := uint64(2); expected <= 520; expected++ {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				t.Fatalf("event stream closed at sequence %d", expected)
+			}
+			if event.Sequence != expected {
+				t.Fatalf("expected sequence %d, got %d", expected, event.Sequence)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for sequence %d", expected)
+		}
+	}
+}

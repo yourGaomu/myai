@@ -14,6 +14,10 @@ import type {
   FileReadResultPayload,
   HistoryCheckpoint,
   HistoryDiffResultPayload,
+  IntentConfigPayload,
+  IntentConfigResultPayload,
+  IntentConfigTestResultPayload,
+  IntentTracePayload,
   ModelSummary,
   PluginInfo,
   SkillSummary,
@@ -56,6 +60,21 @@ export type SettingsContentProps = {
   context?: ContextInfo;
   generation?: SessionGenerationPreferences;
   generationStatus?: { error: boolean; message: string };
+  intentConfig: IntentConfigResultPayload | null;
+  intentConfigLoading: boolean;
+  intentConfigSaving: boolean;
+  intentConfigTesting: boolean;
+  intentConfigMessage: string;
+  intentConfigError: boolean;
+  intentTestResult: IntentConfigTestResultPayload | null;
+  intentTraces: IntentTracePayload[];
+  intentTraceDetails: Record<string, IntentTracePayload>;
+  intentTraceDetailErrors: Record<string, string>;
+  intentTraceListLoading: boolean;
+  intentTraceClearing: boolean;
+  intentTraceDetailLoadingID: string;
+  intentTraceMessage: string;
+  intentTraceError: boolean;
   bindCode: string;
   connected: boolean;
   currentModelID: string;
@@ -83,6 +102,14 @@ export type SettingsContentProps = {
   onSetDefaultModel: (modelID: string) => void;
   onClearModelMessage: () => void;
   onTestModelConfig: (config: ModelConfigDraft) => void;
+  onRequestIntentConfig: () => boolean;
+  onSaveIntentConfig: (payload: IntentConfigPayload) => boolean;
+  onTestIntentConfig: (payload: IntentConfigPayload) => boolean;
+  onRequestIntentTraces: (sessionID?: string, limit?: number) => boolean;
+  onRequestIntentTraceDetail: (traceID: string) => boolean;
+  onClearIntentTraces: (sessionID?: string) => boolean;
+  onClearIntentConfigFeedback: () => void;
+  onClearIntentTraceFeedback: () => void;
   onRequestContextInfo: () => void;
   onRequestGenerationPreferences: () => void;
   onRefreshSessions: () => void;

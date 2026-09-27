@@ -19,6 +19,7 @@ import (
 	subagentresult "myai/core/application/subagent/result"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
+	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
 	workspaceport "myai/core/port/workspace"
 )
@@ -59,6 +60,33 @@ func TestWaitRegistrationRetainsWakeAndOtherWaiters(t *testing.T) {
 	current, _ = repository.GetTask(context.Background(), parent.ID)
 	if current.Status != domainsubagent.TaskStatusRunning || len(service.waitingWakeups) != 0 {
 		t.Fatalf("last waiter did not restore/clean up: %#v", current)
+	}
+}
+
+func TestWaitTaskTransitionReusesCurrentExecutionLease(t *testing.T) {
+	repository := memory.NewRepository()
+	parent := domainsubagent.Task{ID: "parent", ChildSessionID: "child-session", CurrentRunID: "run-1", Status: domainsubagent.TaskStatusRunning}
+	run := domainsubagent.Run{ID: "run-1", TaskID: parent.ID, Status: domainsubagent.RunStatusRunning}
+	if err := repository.SaveTaskAndRun(context.Background(), parent, run); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Tasks: repository, ExecutionLease: repository, ExecutionOwnerID: "instance-a", IDs: &sequenceIDs{}}
+	if err := service.acquireExecutionLease(context.Background(), parent.ID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	command := subagentcommand.WaitTask{ParentTaskID: parent.ID, ParentSessionID: parent.ChildSessionID}
+	waiter, err := service.markWaitingForChildren(command)
+	if err != nil {
+		t.Fatalf("wait transition tried to acquire a conflicting operation lease: %v", err)
+	}
+	current, err := repository.GetTask(context.Background(), parent.ID)
+	if err != nil || current.Status != domainsubagent.TaskStatusWaitingSubagents {
+		t.Fatalf("parent did not enter durable waiting state: %#v, %v", current, err)
+	}
+	service.restoreRunningAfterChildren(parent.ID, waiter)
+	current, err = repository.GetTask(context.Background(), parent.ID)
+	if err != nil || current.Status != domainsubagent.TaskStatusRunning {
+		t.Fatalf("parent did not restore running state under its run lease: %#v, %v", current, err)
 	}
 }
 
@@ -238,6 +266,29 @@ func TestFollowupWaitsForPreviousExecutionCleanup(t *testing.T) {
 	}
 }
 
+func TestStaleRunCleanupDoesNotUnloadSessionOwnedByNewRun(t *testing.T) {
+	service, repository, task := completedFollowupService(t)
+	lifecycle := &recordingChildSessions{}
+	service.Sessions = lifecycle
+	if !service.registerActiveRun(task.ID, "old-run") {
+		t.Fatal("failed to register old run")
+	}
+	service.mu.Lock()
+	service.completeActiveRunLocked(task.ID, "old-run")
+	service.mu.Unlock()
+	if !service.registerActiveRun(task.ID, "new-run") {
+		t.Fatal("failed to register new run")
+	}
+
+	service.completeActiveRun(task.ID, "old-run")
+	if lifecycle.unloads != 0 {
+		t.Fatalf("stale cleanup unloaded a session owned by the new run: %d", lifecycle.unloads)
+	}
+	if current, err := repository.GetTask(context.Background(), task.ID); err != nil || current.ID != task.ID {
+		t.Fatalf("task disappeared during stale cleanup: %#v, %v", current, err)
+	}
+}
+
 type observedDoneContext struct {
 	context.Context
 	once     sync.Once
@@ -314,7 +365,7 @@ func TestStaleRunCannotStartOrFinishCurrentTask(t *testing.T) {
 	if err := service.finishSuccess(task, oldRun, subagentport.AgentRunResult{Content: "stale"}, domainworkspace.ChangeSet{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.finishError(task, oldRun, context.Background(), errors.New("stale error")); err != nil {
+	if err := service.finishError(task, oldRun, context.Background(), errors.New("stale error"), modelport.TokenUsage{}); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := repository.GetTask(context.Background(), task.ID)

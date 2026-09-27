@@ -87,8 +87,8 @@ export function ChangeDetailPanel({
         <View style={styles.diffDetailContent}>
           <View style={styles.diffStatsBar}>
             <Text numberOfLines={1} style={styles.diffStatsPath}>
-              {changeDiff.path}
-              {changeDiff.truncated ? " / 已截断" : ""}
+              📁 {changeDiff.path}
+              {changeDiff.truncated ? " · 已截断" : ""}
             </Text>
           </View>
           {changeDiff.binary ? (
@@ -103,27 +103,36 @@ export function ChangeDetailPanel({
         <View style={styles.diffDetailContent}>
           <View style={styles.diffStatsBar}>
             <Text style={styles.diffStatsPath}>
-              快照 ID: {historyDiff.checkpoint_id} ({(historyDiff.files || []).length} 个文件变动)
+              🏷️ 快照 ID: {shortID(historyDiff.checkpoint_id)} ({(historyDiff.files || []).length} 个文件变动)
             </Text>
           </View>
           {historyDiff.message && (historyDiff.files || []).length > 0 ? <Text style={styles.emptyText}>{historyDiff.message}</Text> : null}
           {(historyDiff.files || []).length === 0 ? (
             <Text style={styles.emptyText}>{historyDiff.message || "没有可显示的差异。"}</Text>
           ) : (
-            (historyDiff.files || []).map((file) => (
-              <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.historyDiffFile}>
-                <Text style={styles.fileName}>
-                  {file.path}
-                  {file.truncated ? " / 已截断" : ""}
-                </Text>
-                <Text style={styles.fileMeta}>{file.change_type || "已变更"}</Text>
-                {file.binary ? (
-                  <Text style={styles.emptyText}>{file.message || "二进制文件暂不支持差异查看。"}</Text>
-                ) : (
-                  <DiffViewer diff={file.diff || ""} emptyText={file.message || "No diff is available."} />
-                )}
-              </View>
-            ))
+            (historyDiff.files || []).map((file) => {
+              const lastSlash = file.path.lastIndexOf("/");
+              const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : "";
+              const baseName = lastSlash >= 0 ? file.path.slice(lastSlash + 1) : file.path;
+
+              return (
+                <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.historyDiffFile}>
+                  <View style={styles.historyHeader}>
+                    <Text numberOfLines={1} style={[styles.fileName, styles.flex]}>
+                      {dir ? <Text style={styles.fileDir}>{dir}</Text> : null}
+                      {baseName}
+                      {file.truncated ? " · 已截断" : ""}
+                    </Text>
+                    <Text style={styles.fileMeta}>{file.change_type || "已变更"}</Text>
+                  </View>
+                  {file.binary ? (
+                    <Text style={styles.emptyText}>{file.message || "二进制文件暂不支持差异查看。"}</Text>
+                  ) : (
+                    <DiffViewer diff={file.diff || ""} emptyText={file.message || "No diff is available."} />
+                  )}
+                </View>
+              );
+            })
           )}
         </View>
       ) : null}

@@ -7,6 +7,7 @@ import (
 	"myai/core/adapter/persistence/mongo/subagent/po"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
+	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
 )
 
@@ -26,6 +27,33 @@ func TaskEventDomainFromDocument(document po.TaskEventDocument) subagentport.Tas
 		Content: document.Content, ToolName: document.ToolName, Arguments: document.Arguments, Status: document.Status,
 		ErrorCode: document.ErrorCode, ErrorMessage: document.ErrorMessage, Truncated: document.Truncated,
 		Delta: document.Delta, EmittedAt: document.EmittedAt,
+	}
+}
+
+func AgentMessageDocumentFromDomain(message domainsubagent.AgentMessage) po.AgentMessageDocument {
+	return po.AgentMessageDocument{
+		ID: message.ID, SourceTaskID: message.SourceTaskID, AuthorAgentID: message.AuthorAgentID,
+		RecipientAgentID: message.RecipientAgentID, ParentTurnID: message.ParentTurnID,
+		RootAgentID: message.RootAgentID, Kind: string(message.Kind), Content: message.Content,
+		Trigger: string(message.Trigger), Sequence: message.Sequence, Status: string(message.Status),
+		DeliveryAttempts: message.DeliveryAttempts, LastError: message.LastError,
+		CreatedAt: message.CreatedAt, DeliveredAt: cloneTime(message.DeliveredAt), ClaimOwnerID: message.ClaimOwnerID, ClaimExpiresAt: cloneTime(message.ClaimExpiresAt),
+	}
+}
+
+func AgentMessageDomainFromDocument(document po.AgentMessageDocument) domainsubagent.AgentMessage {
+	trigger := domainsubagent.AgentMessageTrigger(document.Trigger)
+	if trigger == "" {
+		trigger = domainsubagent.AgentMessageTriggerQueue
+	}
+	return domainsubagent.AgentMessage{
+		ID: document.ID, SourceTaskID: document.SourceTaskID, AuthorAgentID: document.AuthorAgentID,
+		RecipientAgentID: document.RecipientAgentID, ParentTurnID: document.ParentTurnID,
+		RootAgentID: document.RootAgentID, Kind: domainsubagent.AgentMessageKind(document.Kind),
+		Content: document.Content, Trigger: trigger,
+		Sequence: document.Sequence, Status: domainsubagent.AgentMessageDeliveryStatus(document.Status),
+		DeliveryAttempts: document.DeliveryAttempts, LastError: document.LastError,
+		CreatedAt: document.CreatedAt, DeliveredAt: cloneTime(document.DeliveredAt), ClaimOwnerID: document.ClaimOwnerID, ClaimExpiresAt: cloneTime(document.ClaimExpiresAt),
 	}
 }
 
@@ -60,7 +88,7 @@ func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
 	mailbox := make([]po.MailboxMessageDocument, 0, len(task.Mailbox))
 	for _, message := range task.Mailbox {
 		mailbox = append(mailbox, po.MailboxMessageDocument{
-			ID: message.ID, Content: message.Content, Status: string(message.Status), DeliveryAttempts: message.DeliveryAttempts,
+			ID: message.ID, Content: message.Content, Trigger: string(message.Trigger), Status: string(message.Status), DeliveryAttempts: message.DeliveryAttempts,
 			LastError: message.LastError, CreatedAt: message.CreatedAt, ClaimedAt: cloneTime(message.ClaimedAt),
 		})
 	}
@@ -70,7 +98,7 @@ func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
 		CreatedRequestID: task.CreatedRequestID, DefinitionID: task.DefinitionID,
 		DefinitionVersion: task.DefinitionVersion, Definition: snapshotDocument(task.Definition),
 		Instruction: task.Instruction, Title: task.Title, Status: string(task.Status), CurrentRunID: task.CurrentRunID,
-		Workspace: workspaceDocument(task.Workspace), Result: task.Result, Reasoning: task.Reasoning,
+		Workspace: workspaceDocument(task.Workspace), Result: task.Result, Reasoning: task.Reasoning, Usage: usageDocument(task.Usage),
 		ChangeSet:    changeSetDocument(task.ChangeSet),
 		ErrorMessage: task.ErrorMessage, Unread: task.Unread, Mailbox: mailbox, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 		StartedAt: cloneTime(task.StartedAt), CompletedAt: cloneTime(task.CompletedAt),
@@ -88,8 +116,12 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 		if status == "" {
 			status = domainsubagent.MessageStatusPending
 		}
+		trigger := domainsubagent.AgentMessageTrigger(message.Trigger)
+		if trigger == "" {
+			trigger = domainsubagent.AgentMessageTriggerQueue
+		}
 		mailbox = append(mailbox, domainsubagent.Message{
-			ID: message.ID, Content: message.Content, Status: status, DeliveryAttempts: message.DeliveryAttempts,
+			ID: message.ID, Content: message.Content, Trigger: trigger, Status: status, DeliveryAttempts: message.DeliveryAttempts,
 			LastError: message.LastError, CreatedAt: message.CreatedAt, ClaimedAt: cloneTime(message.ClaimedAt),
 		})
 	}
@@ -101,7 +133,7 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 		Instruction: document.Instruction, Title: document.Title, Status: domainsubagent.TaskStatus(document.Status),
 		CurrentRunID: document.CurrentRunID, Workspace: workspaceDomain(document.Workspace),
 		ChangeSet: changeSetDomain(document.ChangeSet),
-		Result:    document.Result, Reasoning: document.Reasoning, ErrorMessage: document.ErrorMessage,
+		Result:    document.Result, Reasoning: document.Reasoning, Usage: usageDomain(document.Usage), ErrorMessage: document.ErrorMessage,
 		Unread: unread, Mailbox: mailbox, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt,
 		StartedAt: cloneTime(document.StartedAt), CompletedAt: cloneTime(document.CompletedAt),
 	}
@@ -111,7 +143,7 @@ func RunDocumentFromDomain(run domainsubagent.Run) po.RunDocument {
 	return po.RunDocument{
 		ID: run.ID, TaskID: run.TaskID, Sequence: run.Sequence, RequestID: run.RequestID, Instruction: run.Instruction,
 		RequestContentHash: run.RequestContentHash,
-		Status:             string(run.Status), Result: run.Result, ErrorMessage: run.ErrorMessage,
+		Status:             string(run.Status), Result: run.Result, Usage: usageDocument(run.Usage), ErrorMessage: run.ErrorMessage,
 		CreatedAt: run.CreatedAt, StartedAt: cloneTime(run.StartedAt), CompletedAt: cloneTime(run.CompletedAt),
 	}
 }
@@ -120,8 +152,24 @@ func RunDomainFromDocument(document po.RunDocument) domainsubagent.Run {
 	return domainsubagent.Run{
 		ID: document.ID, TaskID: document.TaskID, Sequence: document.Sequence, RequestID: document.RequestID, Instruction: document.Instruction,
 		RequestContentHash: document.RequestContentHash,
-		Status:             domainsubagent.RunStatus(document.Status), Result: document.Result, ErrorMessage: document.ErrorMessage,
+		Status:             domainsubagent.RunStatus(document.Status), Result: document.Result, Usage: usageDomain(document.Usage), ErrorMessage: document.ErrorMessage,
 		CreatedAt: document.CreatedAt, StartedAt: cloneTime(document.StartedAt), CompletedAt: cloneTime(document.CompletedAt),
+	}
+}
+
+func usageDocument(usage modelport.TokenUsage) po.TokenUsageDocument {
+	return po.TokenUsageDocument{
+		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+		TotalTokens: usage.TotalTokens, ReasoningTokens: usage.ReasoningTokens,
+		PromptCachedTokens: usage.PromptCachedTokens, Available: usage.Available,
+	}
+}
+
+func usageDomain(document po.TokenUsageDocument) modelport.TokenUsage {
+	return modelport.TokenUsage{
+		PromptTokens: document.PromptTokens, CompletionTokens: document.CompletionTokens,
+		TotalTokens: document.TotalTokens, ReasoningTokens: document.ReasoningTokens,
+		PromptCachedTokens: document.PromptCachedTokens, Available: document.Available,
 	}
 }
 

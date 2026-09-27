@@ -44,6 +44,10 @@ func subagentDefinitionPayloads(definitions []domainsubagent.Definition) []proto
 }
 
 func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary {
+	var usage *protocol.TokenUsage
+	if payload := tokenUsagePayload(task.Usage); !tokenUsagePayloadIsZero(payload) {
+		usage = &payload
+	}
 	files := make([]protocol.SubagentFileChange, 0, len(task.ChangeSet.Files))
 	for _, file := range task.ChangeSet.Files {
 		files = append(files, protocol.SubagentFileChange{
@@ -55,7 +59,7 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 		ID: task.ID, ParentSessionID: task.ParentSessionID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID,
 		AgentPath: task.AgentPath, AgentNickname: task.AgentNickname, DefinitionID: task.DefinitionID,
 		DefinitionVersion: task.DefinitionVersion, Title: task.Title, Instruction: task.Instruction,
-		Status: string(task.Status), Unread: task.Unread, Result: task.Result, ErrorMessage: task.ErrorMessage,
+		Status: string(task.Status), Unread: task.Unread, Result: task.Result, Usage: usage, ErrorMessage: task.ErrorMessage,
 		CanFollowup: task.CanFollowup(),
 		ChangeSet: protocol.SubagentChangeSet{
 			WorkspaceID: task.ChangeSet.WorkspaceID, Status: string(task.ChangeSet.Status), Files: files,

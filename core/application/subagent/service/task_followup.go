@@ -100,6 +100,20 @@ func (service *Service) admitFollowup(ctx context.Context, command subagentcomma
 		err = fmt.Errorf("subagent task cannot be followed up in status %s", task.Status)
 		return
 	}
+	if service.Models != nil {
+		modelID := strings.TrimSpace(task.Definition.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(command.FallbackModelID)
+		}
+		if modelID == "" {
+			err = errors.New("subagent model id is required")
+			return
+		}
+		if !service.Models.HasModel(modelID) {
+			err = fmt.Errorf("subagent model %q is not registered", modelID)
+			return
+		}
+	}
 	if _, claimed := service.resumeClaims[task.ID]; claimed {
 		err = errors.New("subagent task result is being consumed by parent continuation")
 		return
@@ -118,7 +132,29 @@ func (service *Service) admitFollowup(ctx context.Context, command subagentcomma
 		RequestContentHash: contentHash,
 		Status:             domainsubagent.RunStatusQueued, CreatedAt: now,
 	}
+	if err = service.acquireExecutionLease(ctx, task.ID, run.ID); err != nil {
+		return
+	}
+	// Another instance may have admitted a run while this one inspected the
+	// old terminal task. Re-read after claiming the lease before any mutation.
+	current, loadErr := service.Tasks.GetTask(ctx, task.ID)
+	if loadErr != nil || current.CurrentRunID != task.CurrentRunID || current.Status != task.Status {
+		service.releaseExecutionLease(task.ID, run.ID)
+		if loadErr != nil {
+			err = loadErr
+		} else {
+			err = subagentport.ErrExecutionLeaseNotAcquired
+		}
+		return
+	}
+	if service.Runtime != nil {
+		if err = service.Runtime.Register(task); err != nil {
+			service.releaseExecutionLease(task.ID, run.ID)
+			return
+		}
+	}
 	if !service.registerActiveRunLocked(task.ID, run.ID) {
+		service.releaseExecutionLease(task.ID, run.ID)
 		err = errors.New("subagent task already has an active execution")
 		return
 	}
@@ -133,6 +169,7 @@ func (service *Service) admitFollowup(ctx context.Context, command subagentcomma
 	task.UpdatedAt = now
 	if err = service.saveTaskAndRun(ctx, task, run); err != nil {
 		service.completeActiveRunLocked(task.ID, run.ID)
+		service.releaseExecutionLease(task.ID, run.ID)
 		return
 	}
 	service.publish(ctx, task)

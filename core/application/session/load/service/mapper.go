@@ -19,6 +19,7 @@ func TokenUsageFromRecord(record *repository.TokenUsageRecord) llm.TokenUsage {
 	}
 }
 
+// 组装消息对象
 func MessagesFromRecords(records []repository.MessageRecord, systemInstruction ...string) []domainmessage.Message {
 	messages := make([]domainmessage.Message, 0, len(records)+1)
 	instruction := ""

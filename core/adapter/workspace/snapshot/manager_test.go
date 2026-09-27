@@ -56,6 +56,65 @@ func TestSnapshotWorkspaceCollectsAndAppliesChanges(t *testing.T) {
 	}
 }
 
+func TestSnapshotWorkspaceApplyRetryReturnsTerminalChangeSet(t *testing.T) {
+	source := t.TempDir()
+	writeTestFile(t, source, "main.go", "before\n")
+	manager, err := New(t.TempDir(), fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-apply-retry", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, prepared.Reference.Root, "main.go", "after\n")
+	request := workspaceport.ApplyRequest{Reference: prepared.Reference, RequestID: "apply-operation-1"}
+	first, err := manager.Apply(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.Apply(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ChangeSet.Status != domainworkspace.ChangeSetStatusApplied || second.ChangeSet.AppliedAt == nil ||
+		second.ChangeSet.CheckpointID != first.ChangeSet.CheckpointID {
+		t.Fatalf("retry did not return the committed apply result: first=%#v second=%#v", first.ChangeSet, second.ChangeSet)
+	}
+}
+
+func TestSnapshotWorkspaceFollowupDoesNotReusePriorApplyReceipt(t *testing.T) {
+	source := t.TempDir()
+	writeTestFile(t, source, "main.go", "baseline\n")
+	manager, err := New(t.TempDir(), fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepare := workspaceport.PrepareRequest{WorkspaceID: "workspace-followup-receipt", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source}
+	prepared, err := manager.Prepare(context.Background(), prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, prepared.Reference.Root, "main.go", "first turn\n")
+	apply := workspaceport.ApplyRequest{Reference: prepared.Reference, RequestID: "same-operation-key", Title: "apply first turn"}
+	if _, err := manager.Apply(context.Background(), apply); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := manager.Prepare(context.Background(), prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, reopened.Reference.Root, "main.go", "second turn\n")
+	apply.Reference = reopened.Reference
+	apply.Title = "apply second turn"
+	if _, err := manager.Apply(context.Background(), apply); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(source, "main.go"), "second turn\n")
+}
+
 func TestSnapshotWorkspaceRejectsSourceConflict(t *testing.T) {
 	source := t.TempDir()
 	writeTestFile(t, source, "main.go", "before\n")
@@ -129,6 +188,44 @@ func TestSnapshotWorkspaceDiscardRemovesIsolatedFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(prepared.Reference.Root); !os.IsNotExist(err) {
 		t.Fatalf("expected snapshot root to be removed, err=%v", err)
+	}
+}
+
+func TestSnapshotWorkspaceDiscardRetrySurvivesProcessReopen(t *testing.T) {
+	root := t.TempDir()
+	source := t.TempDir()
+	writeTestFile(t, source, "main.go", "before\n")
+	manager, err := New(root, fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := manager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-discard-retry", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := workspaceport.DiscardRequest{Reference: prepared.Reference, RequestID: "discard-operation-1"}
+	first, err := manager.Discard(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedManager, err := New(root, fakeHistoryFactory{store: &fakeHistoryStore{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := reopenedManager.Discard(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ChangeSet.Status != domainworkspace.ChangeSetStatusDiscarded || second.ChangeSet.DiscardedAt == nil ||
+		!second.ChangeSet.DiscardedAt.Equal(*first.ChangeSet.DiscardedAt) {
+		t.Fatalf("retry did not return the committed discard result: first=%#v second=%#v", first.ChangeSet, second.ChangeSet)
+	}
+	if _, err := reopenedManager.Prepare(context.Background(), workspaceport.PrepareRequest{
+		WorkspaceID: "workspace-discard-retry", Mode: domainworkspace.IsolationModeSnapshot, SourceRoot: source,
+	}); err != nil {
+		t.Fatalf("discard receipt prevented legitimate follow-up recreation: %v", err)
 	}
 }
 

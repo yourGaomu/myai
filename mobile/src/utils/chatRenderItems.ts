@@ -1,5 +1,5 @@
 import type { ChatAttachment, ChatItem } from "../types/chat";
-import type { TokenUsage } from "../protocol";
+import type { AgentRunSnapshot, TokenUsage } from "../protocol";
 import { parseSharedAsset } from "./toolAssets";
 
 export type ToolCallStep = {
@@ -14,6 +14,18 @@ export type ToolCallStep = {
   completedAt?: string;
 };
 
+export type AgentTurnTimelineStep =
+  | {
+      type: "thought";
+      id: string;
+      text: string;
+    }
+  | {
+      type: "tool_group";
+      id: string;
+      tools: ToolCallStep[];
+    };
+
 export type AgentTurnItem = {
   type: "agent_turn";
   id: string;
@@ -23,6 +35,7 @@ export type AgentTurnItem = {
   status: "running" | "completed" | "error" | "paused";
   reasoning?: string;
   tools: ToolCallStep[];
+  timeline: AgentTurnTimelineStep[];
   text: string;
   attachments?: ChatAttachment[];
   usage?: TokenUsage;
@@ -75,59 +88,428 @@ export type ChatRenderItem =
   | LegacyMessageItem
   | LegacyToolGroupItem;
 
-/**
- * 将平铺的 ChatItem 消息序列聚合为结构化的 Agent Turn 与 User Turn 列表
- */
-export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
-  const items: ChatRenderItem[] = [];
-  let currentAgentTurn: AgentTurnItem | null = null;
+function formatTurnDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 86400) {
+    return "";
+  }
+  if (seconds < 1) {
+    return "1秒";
+  }
+  if (seconds < 60) {
+    return `${Math.max(1, Math.round(seconds))}秒`;
+  }
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return secs > 0 ? `${mins}分钟 ${secs}秒` : `${mins}分钟`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return mins > 0 ? `${hours}小时 ${mins}分钟` : `${hours}小时`;
+}
 
-  const flushAgentTurn = () => {
-    if (currentAgentTurn) {
-      // 耗时计算：区分实时运行与历史消息，严禁对已完成历史消息使用 Date.now() 导致出现数万秒
-      if (currentAgentTurn.status === "running") {
-        if (currentAgentTurn.startedAt) {
-          const start = Date.parse(currentAgentTurn.startedAt);
-          if (Number.isFinite(start)) {
-            const seconds = Math.max(0.1, (Date.now() - start) / 1000);
-            if (seconds < 300) {
-              currentAgentTurn.elapsed = seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
-            }
+function findMatchingRun(
+  turn: AgentTurnItem,
+  runs: AgentRunSnapshot[],
+  precedingUserAt?: string,
+  nextUserAt?: string,
+): AgentRunSnapshot | undefined {
+  if (!runs || runs.length === 0) {
+    return undefined;
+  }
+  if (turn.requestID) {
+    const byReq = runs.find((r) => r.run.request_id === turn.requestID);
+    if (byReq) {
+      return byReq;
+    }
+  }
+  const userStart = precedingUserAt ? Date.parse(precedingUserAt) : Number.NaN;
+  const userEnd = nextUserAt ? Date.parse(nextUserAt) : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(userStart)) {
+    const byWindow = runs.find(({ run }) => {
+      const runStart = Date.parse(run.started_at);
+      return Number.isFinite(runStart) && runStart >= userStart - 2000 && runStart < userEnd;
+    });
+    if (byWindow) {
+      return byWindow;
+    }
+  }
+  return undefined;
+}
+
+function pushThoughtStep(timeline: AgentTurnTimelineStep[], id: string, rawText?: string) {
+  const cleaned = (rawText || "").trim();
+  if (!cleaned || cleaned === "(empty assistant message)") {
+    return;
+  }
+  const last = timeline[timeline.length - 1];
+  if (last && last.type === "thought") {
+    if (!last.text.includes(cleaned)) {
+      last.text = `${last.text}\n\n${cleaned}`;
+    }
+    return;
+  }
+  timeline.push({
+    type: "thought",
+    id,
+    text: cleaned,
+  });
+}
+
+function pushToolStep(timeline: AgentTurnTimelineStep[], tool: ToolCallStep) {
+  const last = timeline[timeline.length - 1];
+  if (last && last.type === "tool_group") {
+    last.tools.push(tool);
+    return;
+  }
+  timeline.push({
+    type: "tool_group",
+    id: `tool-group-${tool.id}`,
+    tools: [tool],
+  });
+}
+
+function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
+  timeline: AgentTurnTimelineStep[];
+  tools: ToolCallStep[];
+} {
+  const timeline: AgentTurnTimelineStep[] = [];
+  const tools: ToolCallStep[] = [];
+  const sorted = [...snapshot.events].sort((a, b) => a.sequence - b.sequence);
+
+  for (const ev of sorted) {
+    if (ev.type === "reasoning") {
+      pushThoughtStep(timeline, `run-thought-${ev.id}`, ev.content);
+    } else if (ev.type === "tool_call") {
+      const step: ToolCallStep = {
+        id: ev.id,
+        name: ev.tool_name || ev.title || "tool",
+        arguments: ev.arguments,
+        status: "running",
+        createdAt: ev.created_at,
+      };
+      tools.push(step);
+      pushToolStep(timeline, step);
+    } else if (ev.type === "tool_result") {
+      const toolName = ev.tool_name || ev.title || "tool";
+      const failed =
+        Boolean(ev.error_message || ev.error_code) ||
+        Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded");
+      const existing = [...tools].reverse().find((t) => t.name === toolName && t.status === "running");
+      if (existing) {
+        existing.result = ev.content || ev.error_message || "";
+        existing.error = failed ? ev.error_message || ev.content || ev.error_code : undefined;
+        existing.status = failed ? "error" : "completed";
+        existing.completedAt = ev.created_at;
+        if (existing.createdAt && existing.completedAt) {
+          const diff = (Date.parse(existing.completedAt) - Date.parse(existing.createdAt)) / 1000;
+          if (Number.isFinite(diff) && diff >= 0) {
+            existing.duration = diff < 10 ? `${diff.toFixed(1)}s` : `${Math.round(diff)}s`;
           }
         }
-      } else if (currentAgentTurn.status === "completed") {
-        if (currentAgentTurn.startedAt && currentAgentTurn.completedAt) {
-          const start = Date.parse(currentAgentTurn.startedAt);
-          const end = Date.parse(currentAgentTurn.completedAt);
-          if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
-            const seconds = (end - start) / 1000;
-            // 只有处于合理 AI 生成区间（如 0.1s ~ 120s）才展示具体秒数，避免跨夜或无效时间差
-            if (seconds >= 0.1 && seconds <= 120) {
-              currentAgentTurn.elapsed = seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+      } else {
+        const step: ToolCallStep = {
+          id: ev.id,
+          name: toolName,
+          arguments: ev.arguments,
+          result: ev.content || ev.error_message || "",
+          error: failed ? ev.error_message || ev.content || ev.error_code : undefined,
+          status: failed ? "error" : "completed",
+          createdAt: ev.created_at,
+          completedAt: ev.created_at,
+        };
+        tools.push(step);
+        pushToolStep(timeline, step);
+      }
+    }
+  }
+
+  return { timeline, tools };
+}
+
+/**
+ * 将平铺的 ChatItem 消息序列聚合为结构化的 Agent Turn 与 User Turn 列表，
+ * 并生成「思考段落 ↔ 工具调用」按时间顺序交错的 timeline。
+ */
+export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = []): ChatRenderItem[] {
+  const items: ChatRenderItem[] = [];
+  let currentAgentTurn: AgentTurnItem | null = null;
+  let lastUserCreatedAt: string | undefined;
+
+  const flushAgentTurn = (nextUserCreatedAt?: string) => {
+    if (!currentAgentTurn) {
+      return;
+    }
+
+    const turn = currentAgentTurn;
+    const matchingRun = findMatchingRun(turn, runs, lastUserCreatedAt, nextUserCreatedAt);
+
+    // 1. 识别本轮所有消息中的工具调用和助手消息分布
+    const assistantIndices: number[] = [];
+    let firstToolIndex = -1;
+    let lastToolIndex = -1;
+    turn.messages.forEach((msg, idx) => {
+      if (msg.role === "assistant") {
+        assistantIndices.push(idx);
+      } else if (msg.role === "tool_call" || msg.role === "tool" || isPermissionEvent(msg)) {
+        if (firstToolIndex === -1) firstToolIndex = idx;
+        lastToolIndex = idx;
+      }
+    });
+
+    // 判断是否属于 SQLite 历史加载模式（所有 tool_call/tool 在前，唯一一条携带全量多段 reasoning 的 assistant 在末尾）
+    const isSingleTrailingAssistantAfterTools =
+      assistantIndices.length === 1 &&
+      firstToolIndex !== -1 &&
+      assistantIndices[0] > firstToolIndex;
+
+    const timeline: AgentTurnTimelineStep[] = [];
+    const tools: ToolCallStep[] = [];
+    const answerParts: string[] = [];
+
+    // 找到最后一条位于所有工具之后的 assistant 消息索引，其正文作为最终回复，其余中间 assistant 正文视作过程说明
+    const finalAssistantIdx =
+      assistantIndices.length > 0
+        ? assistantIndices[assistantIndices.length - 1]
+        : -1;
+    const hasToolsAfterFinalAssistant =
+      finalAssistantIdx !== -1 && lastToolIndex > finalAssistantIdx;
+
+    for (let idx = 0; idx < turn.messages.length; idx += 1) {
+      const msg = turn.messages[idx];
+      if (msg.role === "assistant") {
+        const cleanText =
+          msg.text && msg.text !== "(empty assistant message)" ? msg.text.trim() : "";
+        const isFinalAnswerMessage = idx === finalAssistantIdx && !hasToolsAfterFinalAssistant;
+
+        if (!isSingleTrailingAssistantAfterTools && msg.reasoning?.trim()) {
+          pushThoughtStep(timeline, `thought-reasoning-${msg.id}`, msg.reasoning);
+        }
+
+        if (cleanText) {
+          if (isFinalAnswerMessage) {
+            answerParts.push(cleanText);
+          } else {
+            pushThoughtStep(timeline, `thought-text-${msg.id}`, cleanText);
+          }
+        }
+      } else if (msg.role === "tool_call") {
+        const step: ToolCallStep = {
+          id: msg.id,
+          name: msg.toolName || "tool",
+          arguments: msg.toolArguments,
+          status: "running",
+          createdAt: msg.createdAt,
+        };
+        tools.push(step);
+        pushToolStep(timeline, step);
+      } else if (msg.role === "tool") {
+        const toolName = msg.toolName || "tool";
+        const existing = [...tools].reverse().find(
+          (t) => t.name === toolName && t.result === undefined,
+        );
+        if (existing) {
+          existing.result = msg.text;
+          existing.error = msg.toolError;
+          if (!existing.arguments && msg.toolArguments) {
+            existing.arguments = msg.toolArguments;
+          }
+          existing.status = msg.toolError ? "error" : "completed";
+          existing.completedAt = msg.completedAt || msg.createdAt;
+          if (existing.createdAt && existing.completedAt) {
+            const diff = (Date.parse(existing.completedAt) - Date.parse(existing.createdAt)) / 1000;
+            if (Number.isFinite(diff) && diff >= 0) {
+              existing.duration = diff < 10 ? `${diff.toFixed(1)}s` : `${Math.round(diff)}s`;
             }
           }
-        } else if (currentAgentTurn.tools && currentAgentTurn.tools.length > 0) {
-          // 若无整轮完成时间但有工具步骤耗时，累加工具耗时
-          const validToolSecs = currentAgentTurn.tools
-            .map((t) => (t.duration ? parseFloat(t.duration) : 0))
-            .filter((d) => !Number.isNaN(d) && d > 0);
-          if (validToolSecs.length > 0) {
-            const total = validToolSecs.reduce((a, b) => a + b, 0);
-            if (total > 0 && total <= 120) {
-              currentAgentTurn.elapsed = total < 10 ? `${total.toFixed(1)}s` : `${Math.round(total)}s`;
-            }
-          }
+        } else {
+          const step: ToolCallStep = {
+            id: msg.id,
+            name: toolName,
+            arguments: msg.toolArguments,
+            result: msg.text,
+            error: msg.toolError,
+            status: msg.toolError ? "error" : "completed",
+            createdAt: msg.createdAt,
+            completedAt: msg.completedAt || msg.createdAt,
+          };
+          tools.push(step);
+          pushToolStep(timeline, step);
+        }
+      } else if (isPermissionEvent(msg)) {
+        const step: ToolCallStep = {
+          id: msg.id,
+          name: "权限验证",
+          result: msg.text,
+          status: msg.text.startsWith("Denied") ? "error" : "completed",
+          createdAt: msg.createdAt,
+        };
+        tools.push(step);
+        pushToolStep(timeline, step);
+      }
+    }
+
+    // 2. 如果是 SQLite 历史加载模式（所有 tool 在前，单条 assistant 在后且含多段 reasoning），
+    //    优先使用 matchingRun.events 的精确序列；若无 matchingRun，则将 reasoning 段落与工具步骤按顺序交错编排
+    if (isSingleTrailingAssistantAfterTools) {
+      const trailingAssistant = turn.messages[assistantIndices[0]];
+      const rawReasoning = trailingAssistant.reasoning?.trim() || "";
+      const runHasInterleaved =
+        matchingRun &&
+        matchingRun.events.some((e) => e.type === "reasoning") &&
+        matchingRun.events.some((e) => e.type === "tool_call" || e.type === "tool_result");
+
+      if (runHasInterleaved && matchingRun) {
+        const fromRun = buildTimelineFromRunEvents(matchingRun);
+        if (fromRun.tools.length > 0) {
+          turn.timeline = fromRun.timeline;
+          turn.tools = fromRun.tools;
         }
       }
 
-      items.push(currentAgentTurn);
-      currentAgentTurn = null;
+      if (turn.timeline.length === 0) {
+        const paragraphs = rawReasoning
+          ? rawReasoning
+              .split(/\n\s*\n/)
+              .map((p) => p.trim())
+              .filter(Boolean)
+          : [];
+
+        if (paragraphs.length > 0 && tools.length > 0) {
+          const interleaved: AgentTurnTimelineStep[] = [];
+          const P = paragraphs.length;
+          const T = tools.length;
+
+          if (P >= T) {
+            // 每个工具前分配至少一段思考，剩余思考放在最后一个工具之后
+            const perTool = Math.max(1, Math.floor(P / (T + 1)));
+            let pCursor = 0;
+            for (let tIdx = 0; tIdx < T; tIdx += 1) {
+              const take = tIdx === 0 ? Math.max(1, perTool) : perTool;
+              const chunk = paragraphs.slice(pCursor, Math.min(P, pCursor + take));
+              pCursor += chunk.length;
+              if (chunk.length > 0) {
+                pushThoughtStep(
+                  interleaved,
+                  `hist-thought-${turn.id}-${tIdx}`,
+                  chunk.join("\n\n"),
+                );
+              }
+              pushToolStep(interleaved, tools[tIdx]);
+            }
+            if (pCursor < P) {
+              pushThoughtStep(
+                interleaved,
+                `hist-thought-${turn.id}-tail`,
+                paragraphs.slice(pCursor).join("\n\n"),
+              );
+            }
+          } else {
+            // 思考段落少于工具数量：每段思考后跟随若干个工具调用
+            const toolsPerPara = Math.ceil(T / P);
+            let tCursor = 0;
+            for (let pIdx = 0; pIdx < P; pIdx += 1) {
+              pushThoughtStep(
+                interleaved,
+                `hist-thought-${turn.id}-${pIdx}`,
+                paragraphs[pIdx],
+              );
+              const sliceEnd = pIdx === P - 1 ? T : Math.min(T, tCursor + toolsPerPara);
+              while (tCursor < sliceEnd) {
+                pushToolStep(interleaved, tools[tCursor]);
+                tCursor += 1;
+              }
+            }
+            while (tCursor < T) {
+              pushToolStep(interleaved, tools[tCursor]);
+              tCursor += 1;
+            }
+          }
+
+          turn.timeline = interleaved;
+          turn.tools = tools;
+        } else {
+          if (rawReasoning) {
+            pushThoughtStep(timeline, `thought-single-${trailingAssistant.id}`, rawReasoning);
+          }
+          turn.timeline = timeline;
+          turn.tools = tools;
+        }
+      }
+    } else if (tools.length === 0 && matchingRun && matchingRun.events.length > 0) {
+      // 3. 如果 messages 中尚无工具记录，但 matchingRun.events 中有工具事件，从 run 事件回填
+      const fromRun = buildTimelineFromRunEvents(matchingRun);
+      if (fromRun.timeline.length > 0) {
+        turn.timeline = fromRun.timeline;
+        turn.tools = fromRun.tools;
+      } else {
+        turn.timeline = timeline;
+        turn.tools = tools;
+      }
+    } else {
+      turn.timeline = timeline;
+      turn.tools = tools;
     }
+
+    turn.text = answerParts.join("\n\n");
+
+    // 4. 计算整轮耗时（优先使用 AgentRun 的 started_at/finished_at，其次使用消息时间戳区间）
+    const startCandidates: number[] = [];
+    const endCandidates: number[] = [];
+
+    if (matchingRun?.run.started_at) {
+      const t = Date.parse(matchingRun.run.started_at);
+      if (Number.isFinite(t)) startCandidates.push(t);
+    }
+    if (matchingRun?.run.finished_at) {
+      const t = Date.parse(matchingRun.run.finished_at);
+      if (Number.isFinite(t)) endCandidates.push(t);
+    }
+    if (lastUserCreatedAt) {
+      const t = Date.parse(lastUserCreatedAt);
+      if (Number.isFinite(t)) startCandidates.push(t);
+    }
+    for (const msg of turn.messages) {
+      if (msg.createdAt) {
+        const t = Date.parse(msg.createdAt);
+        if (Number.isFinite(t)) {
+          startCandidates.push(t);
+          endCandidates.push(t);
+        }
+      }
+      if (msg.completedAt) {
+        const t = Date.parse(msg.completedAt);
+        if (Number.isFinite(t)) {
+          endCandidates.push(t);
+        }
+      }
+    }
+
+    if (turn.status === "running") {
+      const startMs = startCandidates.length > 0 ? Math.min(...startCandidates) : Number.NaN;
+      if (Number.isFinite(startMs)) {
+        const seconds = Math.max(1, (Date.now() - startMs) / 1000);
+        if (seconds < 7200) {
+          turn.elapsed = formatTurnDuration(seconds);
+        }
+      }
+    } else if (startCandidates.length > 0 && endCandidates.length > 0) {
+      const startMs = Math.min(...startCandidates);
+      const endMs = Math.max(...endCandidates);
+      const seconds = (endMs - startMs) / 1000;
+      if (seconds >= 0.5 && seconds <= 7200) {
+        turn.elapsed = formatTurnDuration(seconds);
+      }
+    }
+
+    items.push(turn);
+    currentAgentTurn = null;
   };
 
   for (const message of messages) {
     if (message.role === "user") {
-      flushAgentTurn();
+      flushAgentTurn(message.createdAt);
+      lastUserCreatedAt = message.createdAt;
       items.push({
         type: "user_turn",
         id: message.id,
@@ -137,7 +519,7 @@ export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
     }
 
     if (message.role === "event" && !isPermissionEvent(message)) {
-      flushAgentTurn();
+      flushAgentTurn(message.createdAt);
       items.push({
         type: "event",
         id: message.id,
@@ -157,6 +539,7 @@ export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
         status: "completed",
         reasoning: "",
         tools: [],
+        timeline: [],
         text: "",
         attachments: [],
         startedAt: message.createdAt,
@@ -166,6 +549,9 @@ export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
     }
 
     currentAgentTurn.messages.push(message);
+    if (!currentAgentTurn.requestID && message.requestID) {
+      currentAgentTurn.requestID = message.requestID;
+    }
     if (message.createdAt && (!currentAgentTurn.startedAt || message.createdAt < currentAgentTurn.startedAt)) {
       currentAgentTurn.startedAt = message.createdAt;
     }
@@ -178,11 +564,6 @@ export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
         currentAgentTurn.reasoning = currentAgentTurn.reasoning
           ? `${currentAgentTurn.reasoning}\n\n${message.reasoning}`
           : message.reasoning;
-      }
-      if (message.text) {
-        currentAgentTurn.text = currentAgentTurn.text
-          ? `${currentAgentTurn.text}\n\n${message.text}`
-          : message.text;
       }
       if (message.usage) {
         currentAgentTurn.usage = message.usage;
@@ -199,51 +580,8 @@ export function buildChatTurns(messages: ChatItem[]): ChatRenderItem[] {
         currentAgentTurn.status = message.status;
         currentAgentTurn.canRegenerate = true;
       }
-    } else if (message.role === "tool_call") {
-      const toolStep: ToolCallStep = {
-        id: message.id,
-        name: message.toolName || "tool",
-        arguments: message.toolArguments,
-        status: "running",
-        createdAt: message.createdAt,
-      };
-      currentAgentTurn.tools.push(toolStep);
-      if (message.status === "tool_running") {
-        currentAgentTurn.status = "running";
-      }
-    } else if (message.role === "tool") {
-      const existing = [...currentAgentTurn.tools].reverse().find(
-        (t) => t.name === (message.toolName || "tool") && !t.result,
-      );
-      if (existing) {
-        existing.result = message.text;
-        existing.error = message.toolError;
-        existing.status = message.toolError ? "error" : "completed";
-        existing.completedAt = message.completedAt || message.createdAt;
-        if (existing.createdAt && existing.completedAt) {
-          const diff = (Date.parse(existing.completedAt) - Date.parse(existing.createdAt)) / 1000;
-          if (Number.isFinite(diff) && diff >= 0) {
-            existing.duration = `${diff.toFixed(1)}s`;
-          }
-        }
-      } else {
-        currentAgentTurn.tools.push({
-          id: message.id,
-          name: message.toolName || "tool",
-          result: message.text,
-          error: message.toolError,
-          status: message.toolError ? "error" : "completed",
-          createdAt: message.createdAt,
-          completedAt: message.completedAt,
-        });
-      }
-    } else if (isPermissionEvent(message)) {
-      currentAgentTurn.tools.push({
-        id: message.id,
-        name: "权限验证",
-        result: message.text,
-        status: message.text.startsWith("Denied") ? "error" : "completed",
-      });
+    } else if (message.role === "tool_call" && message.status === "tool_running") {
+      currentAgentTurn.status = "running";
     }
   }
 

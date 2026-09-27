@@ -10,6 +10,7 @@ import (
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
 	"myai/core/contextmgr"
+	domaingeneration "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -20,20 +21,21 @@ const maxStopHookContinuations = 3
 
 type AgentLoopService struct {
 	// AgentLoopService 实现“模型 -> 工具 -> 模型”的循环，直到模型不再请求工具。
-	Contexts       generationport.ContextProvider
-	Tools          generationport.ToolCatalog
-	ToolExecutor   generationport.ToolExecutor
-	ToolRecords    generationport.ToolExecutionRecordSink
-	Compactor      generationport.AutoCompactor
-	TurnHooks      generationport.TurnLifecycleHooks
-	PendingInput   generationport.PendingTurnInput
-	MaxToolRounds  int
-	OnCompactError func(error)
+	Contexts            generationport.ContextProvider
+	Tools               generationport.ToolCatalog
+	ToolExecutor        generationport.ToolExecutor
+	ToolRecords         generationport.ToolExecutionRecordSink
+	Compactor           generationport.AutoCompactor
+	TurnHooks           generationport.TurnLifecycleHooks
+	PendingInput        generationport.PendingTurnInput
+	OnPendingInputError func(error)
+	MaxToolRounds       int
+	OnCompactError      func(error)
 }
 
 var _ generationapi.AgentRunner = AgentLoopService{}
 
-func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run) (modelport.ChatResult, error) {
+func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run) (response modelport.ChatResult, runErr error) {
 	if command.Model == nil {
 		return modelport.ChatResult{}, errors.New("model is nil")
 	}
@@ -44,6 +46,18 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		return modelport.ChatResult{}, errors.New("context provider is nil")
 	}
 
+	var consumedPending []domaingeneration.PendingTurnInputItem
+	defer func() {
+		if len(consumedPending) == 0 || command.Session == nil {
+			return
+		}
+		if runErr != nil {
+			s.releasePendingInput(command.Session.ID, consumedPending)
+			return
+		}
+		s.acknowledgePendingInput(command.Session.ID, consumedPending)
+	}()
+
 	totalUsage := modelport.TokenUsage{}
 	maxToolRounds := s.maxToolRounds(command.Session)
 	reasoningParts := make([]string, 0, maxToolRounds)
@@ -51,7 +65,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	canDrainPending := false
 	for round := 0; round < maxToolRounds; round++ {
 		if canDrainPending {
-			s.drainPendingInput(command.Session)
+			consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
 		}
 		if err := s.compactIfNeeded(ctx, command); err != nil {
 			return modelport.ChatResult{}, err
@@ -113,7 +127,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 	}
 
-	s.drainPendingInput(command.Session)
+	consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
 	if err := s.compactIfNeeded(ctx, command); err != nil {
 		return modelport.ChatResult{}, err
 	}
@@ -188,12 +202,57 @@ func (s AgentLoopService) toolsForSession(current *session.Session, forceChatMod
 	return s.Tools.ToolsForSession(current, forceChatMode)
 }
 
-func (s AgentLoopService) drainPendingInput(current *session.Session) {
+func (s AgentLoopService) drainPendingInput(current *session.Session) []domaingeneration.PendingTurnInputItem {
 	if s.PendingInput == nil || current == nil || strings.TrimSpace(current.ID) == "" {
-		return
+		return nil
+	}
+	items := make([]domaingeneration.PendingTurnInputItem, 0)
+	if identified, ok := s.PendingInput.(generationport.IdentifiedPendingTurnInput); ok {
+		items = identified.DrainIdentified(current.ID)
+		for _, item := range items {
+			current.AppendMessage(domainmessage.Text(domainmessage.RoleUser, item.Content))
+		}
+		return items
 	}
 	for _, content := range s.PendingInput.Drain(current.ID) {
 		current.AppendMessage(domainmessage.Text(domainmessage.RoleUser, content))
+		items = append(items, domaingeneration.PendingTurnInputItem{Content: content})
+	}
+	return items
+}
+
+func (s AgentLoopService) acknowledgePendingInput(sessionID string, items []domaingeneration.PendingTurnInputItem) {
+	identified, ok := s.PendingInput.(generationport.IdentifiedPendingTurnInput)
+	if !ok {
+		return
+	}
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if err := identified.Acknowledge(item.ID); err != nil {
+			s.releasePendingInput(sessionID, []domaingeneration.PendingTurnInputItem{item})
+			if s.OnPendingInputError != nil {
+				s.OnPendingInputError(err)
+			}
+		}
+	}
+}
+
+func (s AgentLoopService) releasePendingInput(sessionID string, items []domaingeneration.PendingTurnInputItem) {
+	if len(items) == 0 || s.PendingInput == nil {
+		return
+	}
+	if releaser, ok := s.PendingInput.(generationport.PendingInputReleaser); ok {
+		if err := releaser.RequeueIdentified(sessionID, items); err != nil && s.OnPendingInputError != nil {
+			s.OnPendingInputError(err)
+		}
+		return
+	}
+	for _, item := range items {
+		if err := s.PendingInput.Enqueue(sessionID, item.Content); err != nil && s.OnPendingInputError != nil {
+			s.OnPendingInputError(err)
+		}
 	}
 }
 

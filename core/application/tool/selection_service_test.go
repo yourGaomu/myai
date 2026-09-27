@@ -27,6 +27,24 @@ func TestSelectionServiceFiltersReadonlyPermissionMode(t *testing.T) {
 	}
 }
 
+func TestSelectionServiceFiltersReadWriteAndExecuteModes(t *testing.T) {
+	catalog := recordingCatalog{permissions: []tooldef.Permission{
+		tooldef.PermissionRead, tooldef.PermissionWrite, tooldef.PermissionExecute,
+	}}
+	readWrite := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+		PermissionMode: session.PermissionModeReadWrite,
+	}, false)
+	if len(readWrite) != 2 || readWrite[0].Function.Name != "read" || readWrite[1].Function.Name != "write" {
+		t.Fatalf("unexpected read-write tools: %#v", readWrite)
+	}
+	execute := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+		PermissionMode: session.PermissionModeExecute,
+	}, false)
+	if len(execute) != 2 || execute[0].Function.Name != "read" || execute[1].Function.Name != "execute" {
+		t.Fatalf("unexpected execute tools: %#v", execute)
+	}
+}
+
 func TestSelectionServiceUsesModePolicyForPlanMode(t *testing.T) {
 	catalog := recordingCatalog{
 		permissions: []tooldef.Permission{

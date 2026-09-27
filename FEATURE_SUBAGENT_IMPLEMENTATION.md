@@ -43,6 +43,7 @@
 | 子智能体领域对象 | core/domain/subagent/definition.go、core/domain/subagent/task.go |
 | 子智能体应用服务 | core/application/subagent/service/task_service.go、task_wait.go |
 | 调度器 | core/adapter/subagent/local/scheduler.go |
+| 跨进程执行租约 | core/application/subagent/service/task_lease.go、core/adapter/persistence/mongo/subagent/repository/repository.go |
 | 子 Session 工厂 | core/adapter/subagent/session/factory.go |
 | 事件总线 | core/adapter/subagent/events/bus.go |
 | 远程协议 | core/remote/protocol/message.go、core/remote/agent/subagent_handlers.go |
@@ -264,12 +265,12 @@ ready = pending steps whose dependencies are done/skipped
 | list_subagent_definitions | 查看可用子智能体定义和能力 | 否 |
 | start_async_task | 使用指定 Definition 创建后台任务 | 否，立即返回 |
 | spawn_agent | Codex 兼容的子智能体创建入口 | 否，立即返回 |
-| send_message | 将消息持久化到排队、运行或等待子任务的 mailbox | 不等待模型消费 |
+| send_message | 原子写入 AgentMessage 和子任务 mailbox 投影 | 不等待模型消费 |
 | followup_task | 在原 ChildSession 中创建新的 Run，保留旧 Run | 等待上一 Run 收尾，不等待新 Run 完成 |
 | check_async_task | 查询单个任务状态/结果 | 否 |
 | list_async_tasks | 列出当前父会话任务树 | 否 |
 | list_agents | 以 agent 视图列出当前父会话子任务 | 否 |
-| wait_agent | 等待子任务进入终态或超时 | 是，显式等待 |
+| wait_agent | 等待 `targets` 中任一子任务进入终态，或等待超时 | 是，显式等待 |
 | cancel_async_task | 取消排队或运行中的任务 | 调用方不等待模型完成 |
 | interrupt_agent | 中断运行中的子智能体 | 调用方不等待模型完成 |
 | apply_task_changes | 应用隔离 Workspace 的 ChangeSet | 否 |
@@ -308,6 +309,16 @@ start_async_task 是底层显式 Definition 入口；spawn_agent 是对齐 Codex
 - 子任务有机会在独立 Scheduler worker 中运行。
 
 如果父模型确实需要等待结果，应在后续请求中调用 wait_agent，或由用户在移动端点击等待/继续。
+
+### 5.4 send_message 投递语义
+
+- 非终态任务的消息以 `AgentMessage.ID` 为稳定身份，记录发送者、接收 ChildSession、父 Turn、根 Agent、Kind 和 Trigger。远程入口使用请求 ID；未显式提供 ID 的本地调用生成新 ID。终态 `trigger_turn` 不再额外创建 mailbox envelope，而是把消息 ID作为 follow-up Run 的 RequestID，由 Run 的请求哈希提供同等幂等保证。
+- `queue` Trigger 只把消息放入 durable mailbox，在子智能体当前执行边界后消费，不会抢占正在进行的模型调用。
+- `trigger_turn` 在非终态任务上沿用 mailbox 投递，并保留触发语义；在成功或失败的终态任务上复用同一 Child Session 创建 follow-up Run。消息 ID作为 Run 的 RequestID，重试时按 RequestID 和内容幂等，不会重复创建 Run。
+- `steer_current_turn` 仍未接入运行中模型的实时输入通道，因此会明确拒绝，不会伪装成已经完成实时转向。
+- 仓储在同一事务中创建 AgentMessage 并将同 ID 输入放入 Task mailbox；同 ID 同请求重试不会重复入队，元数据或内容不同则拒绝。
+- 领取时两处状态同步为 Delivering；模型成功且有非空结果后，在同一事务中移除 mailbox 项并把 AgentMessage 标记 Delivered。模型失败或 panic 时恢复 Pending，保留投递次数及错误。
+- 注入 Child Session 的用户消息沿用 AgentMessage ID；如果失败重试时该消息已存在于会话中，不再追加同 ID 的第二份输入。启动时只有 task_result/task_error 会被重新投递到父会话，普通子代理输入由 Task mailbox 恢复。
 
 ## 6. Task、Run 与 Child Session
 
@@ -451,6 +462,9 @@ Service.Start
 - wait_agent 会 Park 当前 Run：释放执行额度，让排队中的后代获得 worker；等待结束后 Unpark 再继续父任务。同一 Run 上的多次等待按引用计数处理。
 - active-run 的登记、释放和终态写入均核对 Run 身份，旧 Run 不能结束或移除新 Run。
 - queued 事件在调度前发布；调度失败重新读取当前 Task，在保留并发 mailbox/取消状态的基础上提交失败结果。
+- Mongo 模式通过以 task_id 为唯一键的执行租约限制同一 Task 只有一个活动 Run owner；租约默认 30 秒，执行期间每约 10 秒续租。内存模式使用相同接口但只在单进程内有效。
+- Task/Run 状态转移在 Mongo 事务中检查未过期的 owner/run 租约；失去租约的旧实例不能提交终态。续租失败会取消本地模型/工具执行。
+- 启动时和之后每 10 秒扫描未完成任务。仍被其他实例持有的任务跳过；租约释放或过期后重新入队。Scheduler 本身仍是进程内队列。
 
 ### 8.2 子任务执行步骤
 
@@ -462,10 +476,12 @@ TaskService.execute 的实际流程：
 4. 创建或恢复并复用 Child Session；已有 OpenSandbox 引用直接复用，命令执行时按需重连。
 5. 调用 chat.Runner.Run，进入普通 Chat 生成/工具调用循环。
 6. 通过任务流把推理、答案、工具调用和工具结果转换成 TaskEvent。
-7. 每个工具批次完成后、下一轮模型调用前 claim mailbox，把待处理父输入追加为 Child Session 的 user 消息并 ack；不取消正在执行的工具。Runner.Run 返回后仍会消费剩余 mailbox（模型已给出最终回答、本轮没有工具边界的情况），成功 ack，失败或 panic release。检查最终结果非空。
+7. 每个工具批次完成后、下一轮模型调用前 claim mailbox，把待处理父输入追加为 Child Session 的 user 消息；此时仍是 Delivering，不取消正在执行的工具。下一次模型成功返回非空结果后才 ack；失败或 panic release。Runner.Run 返回后仍会消费剩余 mailbox（本轮没有工具边界的情况），同样成功 ack、失败 release。
 8. 收集隔离 Workspace 的 ChangeSet。
 9. 成功则保存结果并标记 succeeded。
 10. 超时、取消、模型错误或 panic 则标记 failed 或 canceled。
+
+终态后 Child Session 会先持久化再从内存卸载；后续 follow-up 使用同一个 ChildSessionID 重新加载。Run 的 token usage 单独持久化，Task 摘要中的 usage 是该子任务历次 Run 的累计值，不并入父会话的 usage。
 
 每个任务有 Definition 配置的超时；当前内置实现器默认最多 900 秒，研究/审查任务默认 300 秒。
 
@@ -524,6 +540,10 @@ core/adapter/subagent/events/bus.go 的 Bus 负责：
 
 Agent 启动后会订阅子智能体事件，并将事件包装为 subagent_task_event 发往 Relay。终态任务还会通过 subagent_task_result 形式携带完整任务摘要，包含结果、错误、未读状态和 ChangeSet。
 
+Agent 会在进程内记录最后一个成功写入 WebSocket 的 TaskEvent 序列号。连接重建时，使用该序列号调用 `SubscribeTaskEvents("", afterSequence, 32)`，由事件总线先回放断线期间的历史事件，再继续接收实时事件。序列号只有在对应消息成功写入连接后才推进，因此连接写失败不会造成游标跳过。
+
+如果游标已经早于内存窗口，事件总线会从 `TaskEventRepository` 读取持久化日志；如果持久化日志也超出可回放上限，Agent 会发送 `task.snapshot` 快照事件，携带当前任务树摘要，然后从快照期间捕获的最新游标重新订阅，避免全量同步期间跳过新事件。
+
 事件流不是模型请求的阻塞返回值：即使根请求已经结束，后台子任务仍可以继续产生事件并经 Relay 推送到手机端。
 
 ## 10. 等待、阻塞、取消与恢复
@@ -545,10 +565,11 @@ spawn_agent/start_async_task
 
 wait_agent 是唯一明确的等待入口：
 
+- 参数使用 `targets: string[]`，一次可以等待多个子任务；服务在任一目标进入终态时返回。现有单目标调用仍可使用 `task_id` 作为兼容别名。
 - 订阅 TaskEventSource，而不是高频轮询数据库。
-- 子任务已处于终态时立即返回。
-- 收到目标任务的终态事件时返回。
-- 超时返回当前任务快照，并设置 timed_out=true；这不等于任务失败，任务可能仍在后台运行。
+- 目标子任务已处于终态时立即返回；如果初始快照中有多个终态目标，会一并返回。
+- 收到任一目标任务的终态事件时返回，结果的 `tasks` 包含已观察到的终态目标，`task` 是第一个目标的快捷字段。
+- 超时返回所有目标的当前任务快照，并设置 `timed_out=true`；这不等于任务失败，任务可能仍在后台运行。
 - 父子任务等待时，父任务暂时变为 waiting_subagents，并让出 Scheduler 执行额度。同一 Run 的最后一个等待者退出后才恢复 running，旧 Run 的等待者不能更改新 Run 状态。
 - 每次等待在同一锁内注册并取得独立唤醒 channel；消息会唤醒所有已注册等待者。注册前已存在的 pending 消息也立即唤醒，正在 delivering 的消息不会唤醒自己的等待。
 - `waiting_subagents` 状态下可以接收 mailbox 消息，等待结果返回 `woken_by_mailbox=true`。等待结束后，当前工具批次完成、下一轮模型调用前会把 mailbox 内容注入 Child Session。`waiting_permission` 拒绝 mailbox 消息，移动端不显示发送入口。
@@ -590,7 +611,7 @@ canceled
 - 非空 `request_id` 与原始输入的 SHA-256 摘要一起持久化到 Run；相同 task/request/content 的重试返回当前 Task，不重复创建或调度 Run；同 ID 不同内容报错。重启恢复改写执行指令不会影响原请求身份。空 request_id 不保证幂等，使用新 ID 才表示新一轮请求。
 - 输入上限为 20000 个 Unicode 字符。调度失败返回已经持久化的 failed Task。
 - 工具摘要和远程摘要包含 `can_followup`，移动端据此显示入口。这是持久化状态的资格判断，实际工作区可用性仍在接纳时检查。
-- 当前锁和执行所有权是单 Service 进程内机制，尚不保证多个进程同时接管同一 Task 时的唯一执行。
+- 本地 Runtime Manager 防止同一进程重复执行；跨进程的活动 Run 由执行租约与带租约校验的 Task/Run 事务约束。取消使用不抢执行租约的条件提交，Apply/Discard/Resume 使用短时操作租约和 `UpdatedAt`/`CurrentRunID` 版本校验；等待状态和部分恢复路径仍保留专用 CAS/调度语义，不能把所有 Task 写入都视为同一种操作。
 
 ## 11. Workspace ChangeSet
 
@@ -643,6 +664,8 @@ subagent_task_event
 subagent_task_result
 ~~~
 
+`subagent_task_wait` 请求的后端载荷支持 `session_id`、`parent_task_id`、`targets`、`timeout_ms`；返回载荷除了单任务快捷字段 `task` 外，还包含多目标结果数组 `tasks`。Relay 只负责转发，不参与等待判断。
+
 ### 12.1 移动端调用
 
 mobile/src/hooks/useSubagentActions.ts 将 UI 操作映射为 Relay 请求：
@@ -653,7 +676,7 @@ mobile/src/hooks/useSubagentActions.ts 将 UI 操作映射为 Relay 请求：
 查看任务       -> subagent_task_check
 发送 follow-up -> subagent_task_message
 继续已结束任务 -> subagent_task_followup
-等待任务       -> subagent_task_wait (默认 30 秒窗口)
+等待任务       -> subagent_task_wait (默认 30 秒窗口；后端支持多个 targets)
 取消任务       -> subagent_task_cancel
 应用变更       -> subagent_task_apply
 丢弃变更       -> subagent_task_discard
@@ -722,7 +745,9 @@ mobile/src/components/subagents/SubagentPanel.tsx 提供：
 - 子任务超时、取消、失败和 panic 保护。
 - TaskEvent 实时推送、序列号、回放和可选持久化。
 - 等待、状态查询、结果恢复父会话。
-- 持久化 mailbox、并行等待唤醒、原子续接接纳，以及以 request_id 去重的独立 follow-up Run。
+- AgentMessage 与 Task mailbox 的原子入队/领取/确认/释放、并行等待唤醒、原子续接接纳，以及以 request_id 去重的独立 follow-up Run。
+- Mongo 模式的跨进程执行租约、续租、失租取消和事务化 Task/Run 状态提交；失效租约由周期扫描恢复。
+- 终态 Child Session 卸载、后续 follow-up 重载，以及子任务累计/每 Run 的 token usage 持久化。
 - wait_agent 等待期间让出 Scheduler worker，避免父任务阻塞导致后代无法运行。
 - mailbox 在工具批次完成后、下一轮模型调用前注入 Child Session，保留 claim/ack/release。
 - 隔离 Workspace 支持 Apply 后换基线、Discard/失败后重建，以及同一 ChildSession 的多轮修改。
@@ -735,16 +760,37 @@ mobile/src/components/subagents/SubagentPanel.tsx 提供：
 - spawn_agent 创建后不会在同一模型请求中立即轮询，必须后续请求或显式等待。
 - 子智能体成功后不会自动把文件变更写回源目录，必须明确 Apply。
 - 内存事件历史有窗口限制；需要跨进程可靠恢复时必须配置 TaskEventRepository。
+- 远程 Agent 已按最后成功发送的序列号恢复事件订阅；如果断线时间超过事件总线的内存/持久化回放窗口，会自动推送当前任务树快照并从快照游标继续订阅。
+- 配置 TaskEventRepository 时，TaskEvent 序列号由持久化仓库的原子序列分配器统一分配；如果序列分配器暂时不可用，Bus 会跳过该通知，等待后续事件或任务快照修复远程视图。
 - Android 后台服务只能尽力保持 Relay 长连接；强行停止应用、厂商电池策略或系统资源回收仍可能终止服务。
-- Scheduler 是进程内调度器，进程退出时任务不能依赖它继续执行；需要跨进程任务恢复时应增加持久化队列/外部调度器。
+- Scheduler 是进程内调度器；进程退出后旧 worker 不会继续运行，Mongo 模式由周期扫描在租约到期后重排任务。没有持久化队列/外部调度器，重排延迟至少受租约和扫描周期影响。
+- 恢复扫描遇到 scheduler 队列满或已关闭时会保留任务为 queued、释放恢复租约并等待下一轮重试，不会把暂时的调度器背压错误误记为终态失败。
+- `waiting_subagents` 只在进程内保存 waiter；进程重启后的恢复会把它重新排为 running，由新的 Run 重新读取持久化 Task/mailbox/event 状态，避免父任务永久停留在等待状态。
+- 跨实例取消已使用不抢执行租约的条件 Task/Run 原子提交，并由 lease owner 周期观察持久化取消状态；Apply/Discard、父会话结果消费等其它 Task-only 写入仍需要更细粒度的 CAS/操作租约，不能把执行租约理解为所有子代理操作都已跨进程安全。
+- Apply/Discard/Resume 在获取短时操作租约后会重新读取并校验 Task 版本、CurrentRunID 和终态，避免等待租约期间使用过期快照；工作区适配器仍必须保证同一 Workspace 操作的重试幂等，真实 Mongo/多实例恢复需集成压测。
 - 已实现等待让出执行额度；父任务配额、优先级和公平调度仍待补充。
 - mailbox 会在工具批次之间注入；不会打断正在执行的工具，也不会在模型生成 token 的过程中插入。
+- 父会话完成消息采用 `Pending -> Delivering -> Pending -> Delivered`：恢复器只负责幂等入队，父会话生成循环在成功消费并确认输入后才 ACK，避免进程在入队和实际消费之间崩溃导致结果丢失。
+
+### 14.1 设计检查记录（2026-09-18）
+
+下面保留当时的检查记录；其中调度恢复和父会话输入队列的状态已随后续实现改变，应以本节上方的当前边界为准。
+
+1. 调度器是进程内的。`Scheduler.Submit` 使用自己的 `context.Background()`，默认 2 个 worker、队列 32。Mongo 模式现在能在租约过期后扫描重排，但调度队列本身仍不可恢复。
+2. 父任务取消不会自动取消仍在跑的子任务。子任务生命周期不跟着父 Turn。
+3. 父会话中途插话和子任务 mailbox 是两套执行队列，但现均有 AgentMessage 持久化身份；子任务 mailbox 是消息的 Task 投影，并在工具批次之间注入。
+4. `spawn_agent` 立即返回 `task_id`。父模型必须再调 `wait_agent`，否则主回复里只有任务编号。
+5. 只读角色 `researcher` 的工具列表包含 `spawn_agent`。有深度 4、扇出 8 的限制，但仍可能套出一串只读子任务。
+6. 多数 Task 操作共用 `service.mu`。子任务变多时，创建、等待和 Apply 会互相等待。
+7. 子任务成功不会自动 Apply。这是刻意的，不要改成成功即写回源目录。
 
 ## 15. 相关测试与验证
 
 2026-09-13：工具批次间 mailbox 注入后，`go test -p 1 ./...`、`go vet ./...`、移动端 `npm run typecheck`、`git diff --check` 均通过。本轮未执行 race 检查或真实 OpenSandbox 服务集成测试。
 
 `core/application/subagent/service/task_concurrency_test.go` 覆盖等待唤醒、等待让出 worker、Run 身份隔离、续接去重、调度失败、工作区准备并发更新，以及 Apply/Discard/失败后的真实磁盘快照续接。
+
+2026-09-27：子代理相关包的定向测试、全量 `go test -p 1 ./...`、`go vet` 和 `git diff --check` 通过；新增 `task_lease_test.go` 覆盖跨实例租约冲突、旧 owner 写入拒绝、失租取消及任务恢复重试，新增 mailbox/envelope 测试覆盖幂等入队和模型失败重投。全量测试使用 D 盘 Go 临时目录以规避 Windows 默认 C 盘构建目录空间不足；Mongo 原子租约和消息事务尚未在真实多实例 Mongo 环境做集成压测。
 
 修改子智能体机制后，建议在 D:\Go_All\myai 执行：
 

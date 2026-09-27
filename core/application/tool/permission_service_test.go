@@ -30,6 +30,24 @@ func TestPermissionServiceDeniesWriteInReadonlyMode(t *testing.T) {
 	}
 }
 
+func TestPermissionServiceEnforcesReadWriteAndExecuteBoundaries(t *testing.T) {
+	if decision := (PermissionService{}).Allow(PermissionCommand{
+		Name: "shell", Permission: tooldef.PermissionExecute, Mode: session.PermissionModeReadWrite,
+	}); decision.Allowed {
+		t.Fatalf("read-write mode must deny execute: %#v", decision)
+	}
+	if decision := (PermissionService{}).Allow(PermissionCommand{
+		Name: "write_file", Permission: tooldef.PermissionWrite, Mode: session.PermissionModeExecute,
+	}); decision.Allowed {
+		t.Fatalf("execute mode must deny write: %#v", decision)
+	}
+	if decision := (PermissionService{}).Allow(PermissionCommand{
+		Name: "shell", Permission: tooldef.PermissionExecute, Mode: session.PermissionModeExecute,
+	}); !decision.Allowed {
+		t.Fatalf("execute mode must allow execute: %#v", decision)
+	}
+}
+
 func TestPermissionServiceAsksInAskMode(t *testing.T) {
 	var request PermissionRequest
 	decision := PermissionService{}.Allow(PermissionCommand{

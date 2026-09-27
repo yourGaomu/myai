@@ -43,6 +43,7 @@ import { useSessionGenerationState } from "../hooks/useSessionGenerationState";
 import { useSkillState } from "../hooks/useSkillState";
 import { useSubagentActions } from "../hooks/useSubagentActions";
 import { useSubagentState } from "../hooks/useSubagentState";
+import { useIntentSettings } from "../hooks/useIntentSettings";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -337,6 +338,56 @@ export function MobileAppScreen() {
   });
 
   const {
+    intentConfig,
+    intentConfigLoading,
+    intentConfigSaving,
+    intentConfigTesting,
+    intentConfigMessage,
+    intentConfigError,
+    intentTestResult,
+    intentTraces,
+    intentTraceDetails,
+    intentTraceDetailErrors,
+    intentTraceListLoading,
+    intentTraceClearing,
+    intentTraceDetailLoadingID,
+    intentTraceMessage,
+    intentTraceError,
+    clearIntentConfigFeedback,
+    clearIntentTraceFeedback,
+    requestIntentConfig,
+    saveIntentConfig,
+    testIntentConfig,
+    requestIntentTraces,
+    requestIntentTraceDetail,
+    clearIntentTraces,
+    applyIntentConfigQuery,
+    applyIntentConfigSet,
+    applyIntentConfigTest,
+    applyIntentTraceList,
+    applyIntentTraceGet,
+    applyIntentTraceClear,
+    applyIntentError,
+  } = useIntentSettings({
+    clientToken,
+    sendEnvelope,
+    sessionID,
+    startPending,
+    stopPending,
+  });
+
+  const replaceHistoryMessages = useCallback(
+    (targetSessionID: string, messages: Parameters<typeof historyMessageToChatItem>[0][]) => {
+      replaceMessages(targetSessionID, messages.map(historyMessageToChatItem));
+    },
+    [replaceMessages],
+  );
+  const hasSessionMessages = useCallback(
+    (targetSessionID: string) => getSessionChat(targetSessionID).messages.length > 0,
+    [getSessionChat],
+  );
+
+  const {
     refreshRemoteState,
     requestAssets,
     requestChanges,
@@ -365,7 +416,7 @@ export function MobileAppScreen() {
     currentFilePath: filePath,
     currentSessionID: sessionID,
     pendingHistorySessionIDRef,
-    replaceHistoryMessages: (targetSessionID, messages) => replaceMessages(targetSessionID, messages.map(historyMessageToChatItem)),
+    replaceHistoryMessages,
     sendEnvelope,
     startPending,
     stopPending,
@@ -373,7 +424,10 @@ export function MobileAppScreen() {
   const { addModelConfig, deleteModelConfig, deleteSession, loadSession, newSession, restoreSession, setDefaultModel, setModelEnabled, switchModel, testModelConfig, updateModelConfig } = useSessionModelActions({
     activeRequestIDRef,
     currentModelID,
+    historySessionIDRef,
     pendingHistorySessionIDRef,
+    requestAssets,
+    requestSessionHistory,
     resetActiveAssistant,
     sendEnvelope,
     sessionIDRef,
@@ -559,6 +613,7 @@ export function MobileAppScreen() {
     appendMessages,
     filePath,
     hasPendingRequest,
+    hasSessionMessages,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
@@ -624,6 +679,13 @@ export function MobileAppScreen() {
     applyHistoryDiff,
     applyHistoryList,
     applyHistoryRevert,
+    applyIntentConfigQuery,
+    applyIntentConfigSet,
+    applyIntentConfigTest,
+    applyIntentTraceList,
+    applyIntentTraceGet,
+    applyIntentTraceClear,
+    applyIntentError,
     applyKnowledgeCatalog,
     applyKnowledgeDocuments,
     applyKnowledgeProfiles,
@@ -661,6 +723,7 @@ export function MobileAppScreen() {
     currentFilePath: filePath,
     getSessionChat,
     historySessionIDRef,
+    pendingHistorySessionIDRef,
     hasRunForRequest,
     isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
     isGenerationOperationPending: pendingActions.generation,
@@ -689,6 +752,7 @@ export function MobileAppScreen() {
 
   const refreshAllRemoteState = useCallback(() => {
     refreshRemoteState();
+    requestIntentConfig();
     requestCatalog();
     requestProfiles();
     requestAIMemories();
@@ -697,7 +761,7 @@ export function MobileAppScreen() {
     requestAIMemoryDreamRuns();
     requestSubagentDefinitions();
     requestSubagentTasks();
-  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestCatalog, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
+  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestCatalog, requestIntentConfig, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
 
   const scheduleReconnect = useCallback(() => {
     if (!clientToken) {
@@ -1023,6 +1087,21 @@ export function MobileAppScreen() {
           context: sessionContexts[sessionID],
           generation: generationPreferences,
           generationStatus,
+          intentConfig,
+          intentConfigLoading,
+          intentConfigSaving,
+          intentConfigTesting,
+          intentConfigMessage,
+          intentConfigError,
+          intentTestResult,
+          intentTraces,
+          intentTraceDetails,
+          intentTraceDetailErrors,
+          intentTraceListLoading,
+          intentTraceClearing,
+          intentTraceDetailLoadingID,
+          intentTraceMessage,
+          intentTraceError,
           currentModelID,
           modelMessage,
           modelMessageError,
@@ -1034,7 +1113,7 @@ export function MobileAppScreen() {
           onConnect: connect,
           onDeleteSession: deleteSession,
           onDeviceIDChange: setDeviceID,
-          onLoadSession: loadSession,
+          onLoadSession: selectSession,
           onNewSession: newSession,
           onPair: pairDevice,
           onCompactSession: compactSession,
@@ -1051,6 +1130,14 @@ export function MobileAppScreen() {
             setModelMessageError(false);
           },
           onTestModelConfig: testModelConfig,
+          onRequestIntentConfig: requestIntentConfig,
+          onSaveIntentConfig: saveIntentConfig,
+          onTestIntentConfig: testIntentConfig,
+          onRequestIntentTraces: requestIntentTraces,
+          onRequestIntentTraceDetail: requestIntentTraceDetail,
+          onClearIntentTraces: clearIntentTraces,
+          onClearIntentConfigFeedback: clearIntentConfigFeedback,
+          onClearIntentTraceFeedback: clearIntentTraceFeedback,
           onRequestContextInfo: requestContextInfo,
           onRequestGenerationPreferences: requestGenerationPreferences,
           onRefreshSessions: requestSessions,

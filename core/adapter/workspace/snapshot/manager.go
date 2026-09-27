@@ -62,7 +62,13 @@ func (manager *Manager) Prepare(ctx context.Context, request workspaceport.Prepa
 		return workspaceport.PreparedWorkspace{}, err
 	}
 	if stored, err := loadManifest(jobRoot); err == nil {
-		return manager.reopenExisting(ctx, jobRoot, stored)
+		if stored.Status == domainworkspace.ChangeSetStatusDiscarded {
+			if err := manager.removeJobRoot(jobRoot); err != nil {
+				return workspaceport.PreparedWorkspace{}, err
+			}
+		} else {
+			return manager.reopenExisting(ctx, jobRoot, stored)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return workspaceport.PreparedWorkspace{}, err
 	}
@@ -108,11 +114,17 @@ func (manager *Manager) reopenExisting(ctx context.Context, jobRoot string, stor
 		stored.BaselineFiles = baseline
 		stored.Status = domainworkspace.ChangeSetStatusPending
 		stored.AppliedAt = nil
+		stored.DiscardedAt = nil
 		stored.CheckpointID = ""
+		stored.OperationID = ""
+		stored.OperationKind = ""
 		stored.CreatedAt = manager.currentTime()
 		if err := manager.saveManifest(jobRoot, stored); err != nil {
 			return workspaceport.PreparedWorkspace{}, err
 		}
+	}
+	if stored.Status == domainworkspace.ChangeSetStatusDiscarded {
+		return workspaceport.PreparedWorkspace{}, errors.New("snapshot workspace was discarded")
 	}
 	return workspaceport.PreparedWorkspace{Reference: snapshotReference(stored)}, nil
 }
@@ -130,6 +142,11 @@ func (manager *Manager) Collect(ctx context.Context, request workspaceport.Colle
 	value, err := manager.load(request.Reference)
 	if err != nil {
 		return workspaceport.CollectedChanges{}, err
+	}
+	if value.Status == domainworkspace.ChangeSetStatusDiscarded {
+		return workspaceport.CollectedChanges{ChangeSet: domainworkspace.ChangeSet{
+			WorkspaceID: value.WorkspaceID, Status: value.Status, DiscardedAt: value.DiscardedAt,
+		}}, nil
 	}
 	changeSet, err := manager.collect(ctx, value)
 	return workspaceport.CollectedChanges{ChangeSet: changeSet}, err
@@ -196,6 +213,16 @@ func (manager *Manager) Apply(ctx context.Context, request workspaceport.ApplyRe
 	if err != nil {
 		return workspaceport.AppliedChanges{}, err
 	}
+	if value.Status == domainworkspace.ChangeSetStatusApplied && value.OperationKind == "apply" && value.OperationID != "" && value.OperationID == strings.TrimSpace(request.RequestID) {
+		changeSet, err := manager.collect(ctx, value)
+		if err != nil {
+			return workspaceport.AppliedChanges{}, err
+		}
+		changeSet.Status = domainworkspace.ChangeSetStatusApplied
+		changeSet.AppliedAt = value.AppliedAt
+		changeSet.CheckpointID = value.CheckpointID
+		return workspaceport.AppliedChanges{ChangeSet: changeSet}, nil
+	}
 	changeSet, err := manager.collect(ctx, value)
 	if err != nil {
 		return workspaceport.AppliedChanges{}, err
@@ -221,6 +248,8 @@ func (manager *Manager) Apply(ctx context.Context, request workspaceport.ApplyRe
 	}
 	now := manager.currentTime()
 	value.Status = domainworkspace.ChangeSetStatusApplied
+	value.OperationID = strings.TrimSpace(request.RequestID)
+	value.OperationKind = "apply"
 	value.AppliedAt = &now
 	value.CheckpointID = checkpointID
 	jobRoot, _ := manager.jobRoot(value.WorkspaceID)
@@ -247,26 +276,71 @@ func (manager *Manager) Discard(ctx context.Context, request workspaceport.Disca
 	defer manager.mu.Unlock()
 	value, err := manager.load(request.Reference)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			jobRoot, rootErr := manager.jobRoot(request.Reference.ID)
+			if rootErr == nil {
+				if stored, manifestErr := loadManifest(jobRoot); manifestErr == nil && stored.Status == domainworkspace.ChangeSetStatusDiscarded {
+					now := stored.DiscardedAt
+					if now == nil {
+						now = stored.AppliedAt
+					}
+					return workspaceport.DiscardedChanges{ChangeSet: domainworkspace.ChangeSet{
+						WorkspaceID: stored.WorkspaceID, Status: domainworkspace.ChangeSetStatusDiscarded, DiscardedAt: now,
+					}}, nil
+				}
+			}
+		}
 		return workspaceport.DiscardedChanges{}, err
+	}
+	if value.Status == domainworkspace.ChangeSetStatusDiscarded {
+		jobRoot, rootErr := manager.jobRoot(value.WorkspaceID)
+		if rootErr != nil {
+			return workspaceport.DiscardedChanges{}, rootErr
+		}
+		if err := manager.removeSnapshotRoot(jobRoot, value.SnapshotRoot); err != nil {
+			return workspaceport.DiscardedChanges{}, err
+		}
+		return workspaceport.DiscardedChanges{ChangeSet: domainworkspace.ChangeSet{
+			WorkspaceID: value.WorkspaceID, Status: domainworkspace.ChangeSetStatusDiscarded, DiscardedAt: value.DiscardedAt,
+		}}, nil
+	}
+	if value.Status == domainworkspace.ChangeSetStatusApplied {
+		return workspaceport.DiscardedChanges{}, errors.New("applied snapshot workspace cannot be discarded")
 	}
 	changeSet, err := manager.collect(ctx, value)
 	if err != nil {
 		return workspaceport.DiscardedChanges{}, err
-	}
-	if value.Status == domainworkspace.ChangeSetStatusApplied {
-		return workspaceport.DiscardedChanges{}, errors.New("applied snapshot workspace cannot be discarded")
 	}
 	discardedAt := request.DiscardedAt
 	if discardedAt.IsZero() {
 		discardedAt = manager.currentTime()
 	}
 	jobRoot, _ := manager.jobRoot(value.WorkspaceID)
-	if err := manager.removeJobRoot(jobRoot); err != nil {
+	// A retry after process recovery should not depend on the deleted snapshot.
+	// Keep a compact terminal manifest as the durable operation receipt.
+	value.Status = domainworkspace.ChangeSetStatusDiscarded
+	value.OperationID = strings.TrimSpace(request.RequestID)
+	value.OperationKind = "discard"
+	value.BaselineFiles = nil
+	value.AppliedAt = &discardedAt
+	value.DiscardedAt = &discardedAt
+	if err := manager.saveManifest(jobRoot, value); err != nil {
+		return workspaceport.DiscardedChanges{}, err
+	}
+	if err := manager.removeSnapshotRoot(jobRoot, value.SnapshotRoot); err != nil {
 		return workspaceport.DiscardedChanges{}, err
 	}
 	changeSet.Status = domainworkspace.ChangeSetStatusDiscarded
 	changeSet.DiscardedAt = &discardedAt
 	return workspaceport.DiscardedChanges{ChangeSet: changeSet}, nil
+}
+
+func (manager *Manager) removeSnapshotRoot(jobRoot, snapshotRoot string) error {
+	expectedRoot := filepath.Join(jobRoot, "workspace")
+	if filepath.Clean(snapshotRoot) != filepath.Clean(expectedRoot) {
+		return errors.New("refusing to remove snapshot workspace outside its job directory")
+	}
+	return os.RemoveAll(expectedRoot)
 }
 
 func (manager *Manager) load(reference domainworkspace.Reference) (manifest, error) {

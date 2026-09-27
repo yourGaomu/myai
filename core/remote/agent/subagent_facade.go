@@ -32,3 +32,9 @@ type SubagentEventSource interface {
 type SubagentTaskEventSource interface {
 	SubscribeTaskEvents(parentSessionID string, afterSequence uint64, buffer int) (<-chan subagentport.TaskEvent, func())
 }
+
+// SubagentTaskEventTailSource is implemented by event buses that can expose
+// their current cursor after a full task snapshot has been sent.
+type SubagentTaskEventTailSource interface {
+	LatestTaskEventSequence() uint64
+}

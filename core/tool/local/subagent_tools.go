@@ -203,6 +203,7 @@ func (tool *SendMessageTool) Schema() any {
 	return map[string]any{"type": "object", "properties": map[string]any{
 		"task_id": map[string]any{"type": "string"},
 		"message": map[string]any{"type": "string"},
+		"trigger": map[string]any{"type": "string", "enum": []string{"queue", "trigger_turn", "steer_current_turn"}, "description": "queue delivers between turns; trigger_turn starts a follow-up when the child is terminal"},
 	}, "required": []string{"task_id", "message"}}
 }
 func (tool *SendMessageTool) Permission() tooldef.Permission { return tooldef.PermissionExecute }
@@ -213,6 +214,7 @@ func (tool *SendMessageTool) Call(ctx context.Context, args json.RawMessage) (to
 	var input struct {
 		TaskID  string `json:"task_id"`
 		Message string `json:"message"`
+		Trigger string `json:"trigger"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return tooldef.ToolOutput{}, err
@@ -228,6 +230,7 @@ func (tool *SendMessageTool) Call(ctx context.Context, args json.RawMessage) (to
 	}
 	result, err := tool.service.SendMessage(ctx, subagentcommand.SendMessage{
 		TaskID: input.TaskID, ParentSessionID: execution.SessionID, Content: input.Message,
+		Trigger: domainsubagent.AgentMessageTrigger(input.Trigger),
 	})
 	if err != nil {
 		return tooldef.ToolOutput{}, err
@@ -376,13 +379,14 @@ func (tool *ListAgentsTool) Call(ctx context.Context, args json.RawMessage) (too
 
 func (tool *WaitAgentTool) Name() string { return "wait_agent" }
 func (tool *WaitAgentTool) Description() string {
-	return "Wait asynchronously for a child agent to reach a terminal state or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it (woken_by_mailbox=true) and is injected before the next model turn."
+	return "Wait asynchronously for whichever child agent in targets reaches a terminal state first, or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it (woken_by_mailbox=true) and is injected before the next model turn."
 }
 func (tool *WaitAgentTool) Schema() any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"task_id":    map[string]any{"type": "string"},
+		"targets":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Agent task IDs to wait on. The call returns when any target reaches a terminal state."},
+		"task_id":    map[string]any{"type": "string", "description": "Deprecated single-target alias for targets."},
 		"timeout_ms": map[string]any{"type": "integer", "minimum": 100, "maximum": 600000},
-	}, "required": []string{"task_id"}}
+	}, "required": []string{"targets"}}
 }
 func (tool *WaitAgentTool) Permission() tooldef.Permission { return tooldef.PermissionRead }
 func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
@@ -390,14 +394,18 @@ func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tool
 		return tooldef.ToolOutput{}, errors.New("subagent service is not configured")
 	}
 	var input struct {
-		TaskID    string `json:"task_id"`
-		TimeoutMS int64  `json:"timeout_ms"`
+		Targets   []string `json:"targets"`
+		TaskID    string   `json:"task_id"`
+		TimeoutMS int64    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return tooldef.ToolOutput{}, err
 	}
-	if strings.TrimSpace(input.TaskID) == "" {
-		return tooldef.ToolOutput{}, errors.New("wait_agent requires task_id")
+	if len(input.Targets) == 0 && strings.TrimSpace(input.TaskID) != "" {
+		input.Targets = []string{input.TaskID}
+	}
+	if len(input.Targets) == 0 {
+		return tooldef.ToolOutput{}, errors.New("wait_agent requires targets")
 	}
 	execution, ok := toolruntime.CurrentExecution(ctx)
 	if !ok || strings.TrimSpace(execution.SessionID) == "" {
@@ -408,13 +416,20 @@ func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tool
 		timeout = time.Duration(input.TimeoutMS) * time.Millisecond
 	}
 	result, err := tool.service.Wait(ctx, subagentcommand.WaitTask{
-		TaskID: input.TaskID, ParentSessionID: execution.SessionID, ParentTaskID: execution.TaskID, Timeout: timeout,
+		Targets: input.Targets, ParentSessionID: execution.SessionID, ParentTaskID: execution.TaskID, Timeout: timeout,
 	})
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
+	tasks := make([]taskToolView, 0, len(result.Tasks))
+	for _, task := range result.Tasks {
+		tasks = append(tasks, taskView(task, true))
+	}
+	if len(tasks) == 0 && result.Task.ID != "" {
+		tasks = append(tasks, taskView(result.Task, true))
+	}
 	return jsonToolOutput(map[string]any{
-		"task": taskView(result.Task, true), "timed_out": result.TimedOut, "woken_by_mailbox": result.WokenByMailbox, "sequence": result.Sequence,
+		"task": taskView(result.Task, true), "tasks": tasks, "timed_out": result.TimedOut, "woken_by_mailbox": result.WokenByMailbox, "sequence": result.Sequence,
 	})
 }
 

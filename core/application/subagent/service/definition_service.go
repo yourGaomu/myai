@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -43,6 +44,28 @@ func (service *Service) Bootstrap(ctx context.Context, _ subagentcommand.Bootstr
 			}
 			if err := service.Registry.Register(definition); err != nil {
 				return subagentresult.Definitions{}, err
+			}
+		}
+	}
+	if (service.AgentPaths != nil || service.Runtime != nil) && service.Tasks != nil {
+		// Rebuild the in-memory path index before accepting new child agents.
+		// The repository limit is bounded by the current task API; a durable
+		// registry will replace this bootstrap scan in the runtime refactor.
+		tasks, err := service.Tasks.ListTasks(ctx, "", 500)
+		if err != nil {
+			return subagentresult.Definitions{}, fmt.Errorf("load persisted subagent paths: %w", err)
+		}
+		for _, task := range tasks {
+			if service.Runtime != nil {
+				if err := service.Runtime.Register(task); err != nil {
+					return subagentresult.Definitions{}, fmt.Errorf("register persisted subagent runtime %q: %w", task.ID, err)
+				}
+			}
+			if service.AgentPaths == nil || strings.TrimSpace(task.AgentPath) == "" {
+				continue
+			}
+			if err := service.AgentPaths.Reserve(task.AgentPath); err != nil {
+				return subagentresult.Definitions{}, fmt.Errorf("reserve persisted subagent path %q: %w", task.AgentPath, err)
 			}
 		}
 	}

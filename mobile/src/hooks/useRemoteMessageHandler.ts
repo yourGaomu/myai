@@ -22,6 +22,11 @@ import type {
   HistoryDiffResultPayload,
   HistoryListResultPayload,
   HistoryRevertResultPayload,
+  IntentConfigResultPayload,
+  IntentConfigTestResultPayload,
+  IntentTraceClearResultPayload,
+  IntentTraceGetResultPayload,
+  IntentTraceListResultPayload,
   KnowledgeCatalogResultPayload,
   KnowledgeDocumentListResultPayload,
   KnowledgeProfileListResultPayload,
@@ -99,6 +104,13 @@ type Args = {
   applyHistoryDiff: (payload?: HistoryDiffResultPayload) => void;
   applyHistoryList: (payload?: HistoryListResultPayload) => void;
   applyHistoryRevert: (payload?: HistoryRevertResultPayload) => void;
+  applyIntentConfigQuery: (payload?: IntentConfigResultPayload, requestID?: string) => void;
+  applyIntentConfigSet: (payload?: IntentConfigResultPayload, requestID?: string) => void;
+  applyIntentConfigTest: (payload?: IntentConfigTestResultPayload, requestID?: string) => void;
+  applyIntentTraceList: (payload?: IntentTraceListResultPayload, requestID?: string) => void;
+  applyIntentTraceGet: (payload?: IntentTraceGetResultPayload, requestID?: string) => void;
+  applyIntentTraceClear: (payload?: IntentTraceClearResultPayload, requestID?: string) => void;
+  applyIntentError: (message: string, requestID?: string) => boolean;
   applyKnowledgeCatalog: (payload?: KnowledgeCatalogResultPayload) => void;
   applyKnowledgeDocuments: (payload?: KnowledgeDocumentListResultPayload) => void;
   applyKnowledgeProfiles: (payload?: KnowledgeProfileListResultPayload) => void;
@@ -148,6 +160,7 @@ type Args = {
     pendingRequestID: string;
   };
   historySessionIDRef: RefObject<string>;
+  pendingHistorySessionIDRef: RefObject<string>;
   hasRunForRequest: (sessionID: string, requestID?: string) => boolean;
   isGenerationOperationPending: boolean;
   isKnowledgeOperationPending: boolean;
@@ -209,6 +222,13 @@ export function useRemoteMessageHandler({
   applyHistoryDiff,
   applyHistoryList,
   applyHistoryRevert,
+  applyIntentConfigQuery,
+  applyIntentConfigSet,
+  applyIntentConfigTest,
+  applyIntentTraceList,
+  applyIntentTraceGet,
+  applyIntentTraceClear,
+  applyIntentError,
   applyKnowledgeCatalog,
   applyKnowledgeDocuments,
   applyKnowledgeProfiles,
@@ -246,6 +266,7 @@ export function useRemoteMessageHandler({
   currentFilePath,
   getSessionChat,
   historySessionIDRef,
+  pendingHistorySessionIDRef,
   hasRunForRequest,
   isGenerationOperationPending,
   isKnowledgeOperationPending,
@@ -290,7 +311,7 @@ export function useRemoteMessageHandler({
               targetSessionID,
               message.request_id,
               payload.content || "",
-              hasRunForRequest(targetSessionID, message.request_id) ? "" : payload.reasoning || "",
+              payload.reasoning || "",
             );
           }
           break;
@@ -378,9 +399,6 @@ export function useRemoteMessageHandler({
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
           const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          if (hasRunForRequest(targetSessionID, message.request_id)) {
-            break;
-          }
           addToolCall(
             targetSessionID,
             payload.name || "tool",
@@ -392,9 +410,6 @@ export function useRemoteMessageHandler({
         case "tool_result": {
           const payload = (message.payload || {}) as ToolResultPayload;
           const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          if (hasRunForRequest(targetSessionID, message.request_id)) {
-            break;
-          }
           addToolResult(
             targetSessionID,
             payload.name || "tool",
@@ -423,43 +438,49 @@ export function useRemoteMessageHandler({
           });
           break;
         }
-        case "session_list_result":
-          stopPending("sessions");
-          applySessionList(
-            message.payload as SessionListResultPayload | undefined,
-          );
+        case "session_list_result": {
+          const payload = message.payload as SessionListResultPayload | undefined;
+          applySessionList(payload);
+          if (!payload?.include_deleted && !pendingHistorySessionIDRef.current) {
+            stopPending("sessions");
+          }
           break;
+        }
         case "session_changed":
         case "session_delete_result":
         case "session_restore_result":
-          stopPending("sessions");
           applySessionChanged(
             message.payload as SessionChangedPayload | undefined,
           );
+          if (!pendingHistorySessionIDRef.current) {
+            stopPending("sessions");
+          }
           requestDeletedSessions();
           break;
         case "session_history_result":
-          stopPending("sessions");
           applySessionHistory(
             message.payload as SessionHistoryResultPayload | undefined,
           );
+          if (!pendingHistorySessionIDRef.current) {
+            stopPending("sessions");
+          }
           break;
         case "session_history_meta_result": {
           const payload = message.payload as
             SessionHistoryMetaResultPayload | undefined;
-          if (payload?.up_to_date) {
+          applySessionHistoryMeta(payload);
+          if (!pendingHistorySessionIDRef.current) {
             stopPending("sessions");
           }
-          applySessionHistoryMeta(payload);
           break;
         }
         case "session_history_delta_result": {
           const payload = message.payload as
             SessionHistoryDeltaResultPayload | undefined;
-          if (!payload?.full_sync_required) {
+          applySessionHistoryDelta(payload);
+          if (!pendingHistorySessionIDRef.current) {
             stopPending("sessions");
           }
-          applySessionHistoryDelta(payload);
           break;
         }
         case "session_mode_set_result":
@@ -571,6 +592,24 @@ export function useRemoteMessageHandler({
         case "model_config_mutation_result":
           stopPending("models");
           applyModelConfigMutation(message.payload as ModelConfigMutationResultPayload | undefined);
+          break;
+        case "intent_config_query_result":
+          applyIntentConfigQuery(message.payload as IntentConfigResultPayload | undefined, message.request_id);
+          break;
+        case "intent_config_set_result":
+          applyIntentConfigSet(message.payload as IntentConfigResultPayload | undefined, message.request_id);
+          break;
+        case "intent_config_test_result":
+          applyIntentConfigTest(message.payload as IntentConfigTestResultPayload | undefined, message.request_id);
+          break;
+        case "intent_trace_list_result":
+          applyIntentTraceList(message.payload as IntentTraceListResultPayload | undefined, message.request_id);
+          break;
+        case "intent_trace_get_result":
+          applyIntentTraceGet(message.payload as IntentTraceGetResultPayload | undefined, message.request_id);
+          break;
+        case "intent_trace_clear_result":
+          applyIntentTraceClear(message.payload as IntentTraceClearResultPayload | undefined, message.request_id);
           break;
         case "skill_list_result":
         case "skill_reload_result":
@@ -700,6 +739,7 @@ export function useRemoteMessageHandler({
           break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
+          applyIntentError(payload.message || "自动规划操作失败", message.request_id);
           if (isModelOperationPending) {
             stopPending("models");
             applyModelConfigError(payload.message || "模型操作失败");
@@ -733,6 +773,7 @@ export function useRemoteMessageHandler({
           addErrorMessage(targetSessionID, payload.message || "Remote error");
           setSessionPendingPermission(targetSessionID, null);
           clearSessionPendingRequest(targetSessionID, message.request_id);
+          pendingHistorySessionIDRef.current = "";
           stopPending("sessions");
           stopPending("models");
           stopPending("skills");
@@ -751,6 +792,7 @@ export function useRemoteMessageHandler({
           stopPending("knowledge");
           stopPending("memory");
           stopPending("subagents");
+          stopPending("intent");
           if (
             !message.request_id ||
             activeRequestIDRef.current === message.request_id
@@ -787,6 +829,13 @@ export function useRemoteMessageHandler({
       applyHistoryDiff,
       applyHistoryList,
       applyHistoryRevert,
+      applyIntentConfigQuery,
+      applyIntentConfigSet,
+      applyIntentConfigTest,
+      applyIntentTraceList,
+      applyIntentTraceGet,
+      applyIntentTraceClear,
+      applyIntentError,
       applyKnowledgeCatalog,
       applyKnowledgeDocuments,
       applyKnowledgeProfiles,
@@ -824,6 +873,7 @@ export function useRemoteMessageHandler({
       currentFilePath,
       getSessionChat,
       historySessionIDRef,
+      pendingHistorySessionIDRef,
       hasRunForRequest,
       isGenerationOperationPending,
       isKnowledgeOperationPending,

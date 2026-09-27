@@ -32,4 +32,5 @@ export type PendingAction =
 	| "pause"
 	| "knowledge"
 	| "memory"
-	| "subagents";
+	| "subagents"
+	| "intent";

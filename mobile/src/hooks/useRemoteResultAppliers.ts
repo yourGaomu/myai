@@ -46,6 +46,7 @@ type Args = {
   appendMessages: (sessionID: string, messages: ChatItem[]) => void;
   filePath: string;
   hasPendingRequest: (sessionID: string) => boolean;
+  hasSessionMessages: (sessionID: string) => boolean;
   historyDiff: HistoryDiffResultPayload | null;
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
@@ -96,6 +97,7 @@ export function useRemoteResultAppliers({
   appendMessages,
   filePath,
   hasPendingRequest,
+  hasSessionMessages,
   historyDiff,
   historySessionIDRef,
   pendingHistorySessionIDRef,
@@ -187,23 +189,24 @@ export function useRemoteResultAppliers({
     const applySessionChanged = (payload?: SessionChangedPayload) => {
       const nextSessions = payload?.sessions || [];
       setSessions((current) => mergeSessionList(current, nextSessions));
-      if (payload?.current_session_id) {
-        setSessionID(payload.current_session_id);
-        sessionIDRef.current = payload.current_session_id;
-        setSessionLastUsage(payload.current_session_id, findSessionUsage(nextSessions, payload.current_session_id));
-        setSessionPendingPermission(payload.current_session_id, null);
-        historySessionIDRef.current = "";
-        requestSessionHistory(payload.current_session_id);
-        requestAssets(payload.current_session_id);
-      } else if (payload?.session?.id) {
-        setSessionID(payload.session.id);
-        sessionIDRef.current = payload.session.id;
-        setSessionLastUsage(payload.session.id, payload.session.last_usage || null);
-        setSessionPendingPermission(payload.session.id, null);
-        historySessionIDRef.current = "";
-        requestSessionHistory(payload.session.id);
-        requestAssets(payload.session.id);
+      const targetSessionID = (payload?.current_session_id || payload?.session?.id || "").trim();
+      if (!targetSessionID) {
+        return;
       }
+      setSessionID(targetSessionID);
+      sessionIDRef.current = targetSessionID;
+      const usage = payload?.current_session_id
+        ? findSessionUsage(nextSessions, targetSessionID)
+        : payload?.session?.last_usage || null;
+      setSessionLastUsage(targetSessionID, usage);
+      setSessionPendingPermission(targetSessionID, null);
+      if (
+        historySessionIDRef.current !== targetSessionID &&
+        pendingHistorySessionIDRef.current !== targetSessionID
+      ) {
+        requestSessionHistory(targetSessionID);
+      }
+      requestAssets(targetSessionID);
     };
 
     const applySessionSettings = (payload?: SessionSettingsResultPayload) => {
@@ -240,64 +243,76 @@ export function useRemoteResultAppliers({
       if (!payload) {
         return;
       }
-      const targetSessionID = pendingHistorySessionIDRef.current || sessionIDRef.current;
-      if (payload.session_id && targetSessionID && payload.session_id !== targetSessionID) {
-        return;
-      }
-      if (payload.session_id && hasPendingRequest(payload.session_id)) {
+      const responseSessionID = (payload.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
+      if (!responseSessionID || hasPendingRequest(responseSessionID)) {
         return;
       }
 
-      resetActiveAssistant(payload.session_id);
-      pendingHistorySessionIDRef.current = "";
-      historySessionIDRef.current = payload.session_id;
-      if (payload.session_id) {
-        setSessionID(payload.session_id);
-        sessionIDRef.current = payload.session_id;
-        requestAssets(payload.session_id);
-      }
       const messages = payload.messages || [];
-      void replaceCachedSessionHistory(payload.session_id, messages);
-      replaceMessages(payload.session_id, messages.map(historyMessageToChatItem));
+      void replaceCachedSessionHistory(responseSessionID, messages);
+      replaceMessages(responseSessionID, messages.map(historyMessageToChatItem));
+      resetActiveAssistant(responseSessionID);
+
+      if (pendingHistorySessionIDRef.current === responseSessionID) {
+        pendingHistorySessionIDRef.current = "";
+      }
+      if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
+        historySessionIDRef.current = responseSessionID;
+        setSessionID(responseSessionID);
+        sessionIDRef.current = responseSessionID;
+        requestAssets(responseSessionID);
+      }
     };
 
     const applySessionHistoryMeta = (payload?: SessionHistoryMetaResultPayload) => {
-      if (!payload?.session_id) {
+      const responseSessionID = (payload?.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
+      if (!responseSessionID) {
         return;
       }
-      if (payload.up_to_date) {
-        pendingHistorySessionIDRef.current = "";
-        historySessionIDRef.current = payload.session_id;
-        setSessionID(payload.session_id);
-        sessionIDRef.current = payload.session_id;
-        requestAssets(payload.session_id);
+      const hasLocalMessages = hasSessionMessages(responseSessionID);
+      const remoteHasMessages = (payload?.message_count ?? 0) > 0;
+      if (payload?.up_to_date && (hasLocalMessages || !remoteHasMessages)) {
+        if (pendingHistorySessionIDRef.current === responseSessionID) {
+          pendingHistorySessionIDRef.current = "";
+        }
+        if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
+          historySessionIDRef.current = responseSessionID;
+          setSessionID(responseSessionID);
+          sessionIDRef.current = responseSessionID;
+          requestAssets(responseSessionID);
+        }
         return;
       }
-      if (payload.can_delta) {
-        requestSessionHistoryDelta(payload.session_id);
+      if (payload?.can_delta && hasLocalMessages) {
+        requestSessionHistoryDelta(responseSessionID);
         return;
       }
-      requestSessionHistoryFull(payload.session_id);
+      requestSessionHistoryFull(responseSessionID);
     };
 
     const applySessionHistoryDelta = (payload?: SessionHistoryDeltaResultPayload) => {
-      if (!payload?.session_id) {
+      const responseSessionID = (payload?.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
+      if (!responseSessionID) {
         return;
       }
-      if (payload.full_sync_required) {
-        requestSessionHistoryFull(payload.session_id);
+      if (payload?.full_sync_required) {
+        requestSessionHistoryFull(responseSessionID);
         return;
       }
 
-      const messages = payload.messages || [];
-      pendingHistorySessionIDRef.current = "";
-      historySessionIDRef.current = payload.session_id;
-      setSessionID(payload.session_id);
-      sessionIDRef.current = payload.session_id;
-      requestAssets(payload.session_id);
+      const messages = payload?.messages || [];
+      if (pendingHistorySessionIDRef.current === responseSessionID) {
+        pendingHistorySessionIDRef.current = "";
+      }
+      if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
+        historySessionIDRef.current = responseSessionID;
+        setSessionID(responseSessionID);
+        sessionIDRef.current = responseSessionID;
+        requestAssets(responseSessionID);
+      }
       if (messages.length > 0) {
-        void appendCachedSessionHistory(payload.session_id, messages);
-        appendMessages(payload.session_id, messages.map(historyMessageToChatItem));
+        void appendCachedSessionHistory(responseSessionID, messages);
+        appendMessages(responseSessionID, messages.map(historyMessageToChatItem));
       }
     };
 
@@ -476,6 +491,7 @@ export function useRemoteResultAppliers({
     appendMessages,
     filePath,
     hasPendingRequest,
+    hasSessionMessages,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
