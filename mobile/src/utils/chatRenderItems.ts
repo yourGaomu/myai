@@ -4,10 +4,13 @@ import { parseSharedAsset } from "./toolAssets";
 
 export type ToolCallStep = {
   id: string;
+  toolCallID?: string;
   name: string;
   arguments?: string;
   result?: string;
   error?: string;
+  errorCode?: string;
+  truncated?: boolean;
   status: "running" | "completed" | "error";
   duration?: string;
   createdAt?: string;
@@ -169,6 +172,35 @@ function pushToolStep(timeline: AgentTurnTimelineStep[], tool: ToolCallStep) {
   });
 }
 
+function findMatchingPendingToolStep(
+  tools: ToolCallStep[],
+  toolName: string,
+  toolCallID?: string,
+  toolArguments?: string,
+): ToolCallStep | undefined {
+  if (toolCallID) {
+    const byCallID = tools.find(
+      (t) => t.result === undefined && t.toolCallID && t.toolCallID === toolCallID,
+    );
+    if (byCallID) {
+      return byCallID;
+    }
+  }
+  const normalizedArgs = (toolArguments || "").trim();
+  if (normalizedArgs) {
+    const byNameAndArgs = tools.find(
+      (t) =>
+        t.result === undefined &&
+        t.name === toolName &&
+        (t.arguments || "").trim() === normalizedArgs,
+    );
+    if (byNameAndArgs) {
+      return byNameAndArgs;
+    }
+  }
+  return tools.find((t) => t.result === undefined && t.name === toolName);
+}
+
 function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
   timeline: AgentTurnTimelineStep[];
   tools: ToolCallStep[];
@@ -195,10 +227,15 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
       const failed =
         Boolean(ev.error_message || ev.error_code) ||
         Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded");
-      const existing = [...tools].reverse().find((t) => t.name === toolName && t.status === "running");
+      const existing = findMatchingPendingToolStep(tools, toolName, undefined, ev.arguments);
       if (existing) {
         existing.result = ev.content || ev.error_message || "";
         existing.error = failed ? ev.error_message || ev.content || ev.error_code : undefined;
+        existing.errorCode = ev.error_code;
+        existing.truncated = ev.truncated;
+        if (!existing.arguments && ev.arguments) {
+          existing.arguments = ev.arguments;
+        }
         existing.status = failed ? "error" : "completed";
         existing.completedAt = ev.created_at;
         if (existing.createdAt && existing.completedAt) {
@@ -214,6 +251,8 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
           arguments: ev.arguments,
           result: ev.content || ev.error_message || "",
           error: failed ? ev.error_message || ev.content || ev.error_code : undefined,
+          errorCode: ev.error_code,
+          truncated: ev.truncated,
           status: failed ? "error" : "completed",
           createdAt: ev.created_at,
           completedAt: ev.created_at,
@@ -296,6 +335,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
       } else if (msg.role === "tool_call") {
         const step: ToolCallStep = {
           id: msg.id,
+          toolCallID: msg.toolCallID,
           name: msg.toolName || "tool",
           arguments: msg.toolArguments,
           status: "running",
@@ -305,12 +345,17 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
         pushToolStep(timeline, step);
       } else if (msg.role === "tool") {
         const toolName = msg.toolName || "tool";
-        const existing = [...tools].reverse().find(
-          (t) => t.name === toolName && t.result === undefined,
+        const existing = findMatchingPendingToolStep(
+          tools,
+          toolName,
+          msg.toolCallID,
+          msg.toolArguments,
         );
         if (existing) {
           existing.result = msg.text;
           existing.error = msg.toolError;
+          existing.errorCode = msg.toolErrorCode;
+          existing.truncated = msg.toolTruncated;
           if (!existing.arguments && msg.toolArguments) {
             existing.arguments = msg.toolArguments;
           }
@@ -325,10 +370,13 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
         } else {
           const step: ToolCallStep = {
             id: msg.id,
+            toolCallID: msg.toolCallID,
             name: toolName,
             arguments: msg.toolArguments,
             result: msg.text,
             error: msg.toolError,
+            errorCode: msg.toolErrorCode,
+            truncated: msg.toolTruncated,
             status: msg.toolError ? "error" : "completed",
             createdAt: msg.createdAt,
             completedAt: msg.completedAt || msg.createdAt,
@@ -449,6 +497,15 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
     } else {
       turn.timeline = timeline;
       turn.tools = tools;
+    }
+
+    const hasFinishedAssistant = turn.messages.some(
+      (m) =>
+        m.role === "assistant" &&
+        (m.status === "done" || m.status === "paused" || m.status === "error"),
+    );
+    if (!hasFinishedAssistant && turn.tools.some((t) => t.status === "running")) {
+      turn.status = "running";
     }
 
     turn.text = answerParts.join("\n\n");

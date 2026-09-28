@@ -15,6 +15,7 @@ export function historyMessageToChatItem(
     status: role === "assistant" ? "done" : undefined,
     text: historyMessageText(message),
     reasoning: message.reasoning,
+    toolCallID: message.tool_call_id,
     toolName: message.tool_name,
     toolArguments: message.tool_arguments,
     toolError:

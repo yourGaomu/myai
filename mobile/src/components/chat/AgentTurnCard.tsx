@@ -28,7 +28,7 @@ function isShellLikeTool(name: string): boolean {
   );
 }
 
-function extractToolCommand(tool: ToolCallStep): string {
+function extractToolSummary(tool: ToolCallStep): string {
   if (!tool.arguments) return "";
   const raw = String(tool.arguments).trim();
   if (!raw) return "";
@@ -37,7 +37,7 @@ function extractToolCommand(tool: ToolCallStep): string {
     if (typeof parsed === "string") {
       return parsed.trim();
     }
-    if (parsed && typeof parsed === "object") {
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const candidate =
         parsed.command ??
         parsed.cmd ??
@@ -54,13 +54,58 @@ function extractToolCommand(tool: ToolCallStep): string {
         parsed.Pattern ??
         parsed.url ??
         parsed.Url ??
+        parsed.skill_name ??
+        parsed.task_id ??
+        parsed.title ??
+        parsed.name ??
         parsed.toolSummary;
       if (candidate !== undefined && candidate !== null && String(candidate).trim() !== "") {
         return String(candidate).trim();
       }
+      const pairs = Object.entries(parsed)
+        .filter(([, v]) => v !== undefined && v !== null && typeof v !== "object")
+        .slice(0, 2)
+        .map(([k, v]) => `${k}=${String(v).trim()}`);
+      if (pairs.length > 0) {
+        return pairs.join(", ");
+      }
+      return "";
     }
   } catch {
-    return raw;
+    return raw.startsWith("{") || raw.startsWith("[") ? "" : raw;
+  }
+  return "";
+}
+
+function formatToolRequestText(tool: ToolCallStep): string {
+  if (!tool.arguments) return "";
+  const raw = String(tool.arguments).trim();
+  if (!raw) return "";
+  try {
+    const parsed = typeof tool.arguments === "string" ? JSON.parse(raw) : tool.arguments;
+    if (typeof parsed === "string") {
+      return isShellLikeTool(tool.name) ? `$ ${parsed.trim()}` : parsed.trim();
+    }
+    if (parsed && typeof parsed === "object") {
+      const keys = Object.keys(parsed);
+      const cmdValue =
+        parsed.command ?? parsed.cmd ?? parsed.CommandLine ?? parsed.command_line ?? parsed.script;
+      if (isShellLikeTool(tool.name) && typeof cmdValue === "string" && cmdValue.trim()) {
+        if (keys.length === 1) {
+          return `$ ${cmdValue.trim()}`;
+        }
+        const rest = { ...parsed };
+        delete rest.command;
+        delete rest.cmd;
+        delete rest.CommandLine;
+        delete rest.command_line;
+        delete rest.script;
+        return `$ ${cmdValue.trim()}\n\n${JSON.stringify(rest, null, 2)}`;
+      }
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    return isShellLikeTool(tool.name) && !raw.startsWith("{") ? `$ ${raw}` : raw;
   }
   return raw;
 }
@@ -70,29 +115,29 @@ function formatSingleLineCommand(cmd: string): string {
 }
 
 function formatToolActionRowTitle(tool: ToolCallStep): string {
-  const cmd = formatSingleLineCommand(extractToolCommand(tool));
+  const summary = formatSingleLineCommand(extractToolSummary(tool));
   const lower = tool.name.toLowerCase();
 
   if (tool.status === "running") {
-    return cmd ? `正在运行 ${cmd}` : `正在运行 ${tool.name}`;
+    return summary ? `正在运行 ${tool.name} · ${summary}` : `正在运行 ${tool.name}`;
   }
   if (tool.status === "error" || tool.error) {
-    return cmd ? `运行失败 ${cmd}` : `运行失败 ${tool.name}`;
+    return summary ? `运行失败 ${tool.name} · ${summary}` : `运行失败 ${tool.name}`;
   }
 
   if (isShellLikeTool(tool.name)) {
-    return cmd ? `已运行 ${cmd}` : "运行了命令";
+    return summary ? `已运行 ${summary}` : `已运行 ${tool.name}`;
   }
   if (lower.includes("read") || lower.includes("view")) {
-    return cmd ? `已读取 ${cmd}` : `已调用 ${tool.name}`;
+    return summary ? `已读取 ${summary}` : `已调用 ${tool.name}`;
   }
   if (lower.includes("write") || lower.includes("edit") || lower.includes("replace") || lower.includes("patch")) {
-    return cmd ? `已修改 ${cmd}` : `已调用 ${tool.name}`;
+    return summary ? `已修改 ${summary}` : `已调用 ${tool.name}`;
   }
   if (lower.includes("search") || lower.includes("grep") || lower.includes("find") || lower.includes("glob")) {
-    return cmd ? `已搜索 ${cmd}` : `已调用 ${tool.name}`;
+    return summary ? `已搜索 ${summary}` : `已调用 ${tool.name}`;
   }
-  return cmd ? `已运行 ${ cmd }` : `运行了 ${tool.name}`;
+  return summary ? `已调用 ${tool.name} · ${summary}` : `已调用 ${tool.name}`;
 }
 
 function extractFileChanges(tools: ToolCallStep[] | undefined): FileChangeTag[] {
@@ -178,6 +223,15 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
   }, [isRunning, toolCount, turn.elapsed]);
 
   const handleCopy = () => {
+    const copyContent = (turn.text || turn.reasoning || "").trim();
+    if (
+      copyContent &&
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    ) {
+      void navigator.clipboard.writeText(copyContent).catch(() => {});
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -202,7 +256,9 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
               ? styles.statusRunning
               : turn.status === "error"
                 ? styles.statusError
-                : styles.statusCompleted,
+                : turn.status === "paused"
+                  ? styles.statusPaused
+                  : styles.statusCompleted,
           ]}
         >
           {isRunning ? (
@@ -212,6 +268,8 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
             </>
           ) : turn.status === "error" ? (
             <Text style={styles.statusErrorText}>执行异常</Text>
+          ) : turn.status === "paused" ? (
+            <Text style={styles.statusPausedText}>⏸ 已暂停{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
           ) : (
             <Text style={styles.statusCompletedText}>✓ 完成{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
           )}
@@ -357,17 +415,26 @@ function InterleavedToolGroup({
     return <InterleavedToolRow buttonFeedback={buttonFeedback} tool={tools[0]} />;
   }
 
+  const runningCount = tools.filter((t) => t.status === "running").length;
+  const failedCount = tools.filter((t) => Boolean(t.error || t.status === "error")).length;
+  const groupTitle =
+    runningCount > 0
+      ? `正在调用 ${tools.length} 个工具 (${runningCount} 个执行中)`
+      : failedCount > 0
+        ? `已调用 ${tools.length} 个工具 (${failedCount} 个失败)`
+        : `已调用 ${tools.length} 个工具`;
+
   return (
     <View style={styles.toolGroupBlock}>
       <Pressable
         onPress={() => setGroupOpen((prev) => !prev)}
         style={({ pressed }) => buttonFeedback(styles.toolInlineRow, pressed)}
       >
-        <View style={styles.termIconBadge}>
-          <Text style={styles.termIconText}>{">_"}</Text>
+        <View style={[styles.termIconBadge, failedCount > 0 && styles.termIconBadgeError]}>
+          <Text style={[styles.termIconText, failedCount > 0 && styles.termIconTextError]}>{">_"}</Text>
         </View>
         <Text numberOfLines={1} style={styles.toolInlineGroupTitle}>
-          运行了命令
+          {groupTitle}
         </Text>
         <Text style={styles.toolInlineChevron}>{groupOpen ? "⌄" : "›"}</Text>
       </Pressable>
@@ -395,11 +462,11 @@ function InterleavedToolRow({
   tool: ToolCallStep;
 }) {
   const isFailed = Boolean(tool.error || tool.status === "error");
+  const isRunning = tool.status === "running";
   const [expanded, setExpanded] = useState(isFailed);
   const sharedAsset = parseSharedAsset(tool.name, tool.result || "");
-  const commandText = extractToolCommand(tool);
-  const rowTitle = formatToolActionRowTitle(tool);
-  const shellHeaderLabel = isShellLikeTool(tool.name) ? "Shell" : tool.name;
+  const requestText = useMemo(() => formatToolRequestText(tool), [tool]);
+  const rowTitle = useMemo(() => formatToolActionRowTitle(tool), [tool]);
   const outputText = tool.error || tool.result || "";
 
   return (
@@ -408,8 +475,22 @@ function InterleavedToolRow({
         onPress={() => setExpanded((prev) => !prev)}
         style={({ pressed }) => buttonFeedback(styles.toolInlineRow, pressed)}
       >
-        <View style={[styles.termIconBadge, isFailed && styles.termIconBadgeError]}>
-          <Text style={[styles.termIconText, isFailed && styles.termIconTextError]}>{">_"}</Text>
+        <View
+          style={[
+            styles.termIconBadge,
+            isFailed && styles.termIconBadgeError,
+            isRunning && styles.termIconBadgeRunning,
+          ]}
+        >
+          <Text
+            style={[
+              styles.termIconText,
+              isFailed && styles.termIconTextError,
+              isRunning && styles.termIconTextRunning,
+            ]}
+          >
+            {">_"}
+          </Text>
         </View>
         <Text
           numberOfLines={1}
@@ -423,39 +504,95 @@ function InterleavedToolRow({
 
       {expanded ? (
         <View style={styles.shellBox}>
-          <View style={styles.shellHeaderBar}>
-            <Text style={styles.shellHeaderTitle}>{shellHeaderLabel}</Text>
-            {tool.duration ? <Text style={styles.shellHeaderMeta}>{tool.duration}</Text> : null}
+          {/* 上半栏：工具调用请求 (Arguments) */}
+          <View style={styles.toolSectionBlock}>
+            <View style={styles.shellHeaderBar}>
+              <View style={styles.toolSectionHeaderLeft}>
+                <View style={styles.toolReqBadge}>
+                  <Text style={styles.toolReqBadgeText}>调用请求</Text>
+                </View>
+                <Text numberOfLines={1} style={styles.shellHeaderTitle}>
+                  {tool.name}
+                </Text>
+              </View>
+            </View>
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.toolRequestScroll}
+            >
+              {requestText ? (
+                <Text selectable style={styles.shellCommandText}>
+                  {requestText}
+                </Text>
+              ) : (
+                <Text style={styles.shellEmptyText}>(无请求参数)</Text>
+              )}
+            </ScrollView>
           </View>
 
-          <ScrollView
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-            style={styles.shellScroll}
-          >
-            {commandText ? (
-              <Text selectable style={styles.shellCommandText}>
-                {`$ ${commandText}`}
-              </Text>
-            ) : null}
+          <View style={styles.toolSectionDivider} />
 
-            {sharedAsset && !isFailed ? (
-              <View style={styles.shellAssetWrap}>
-                <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+          {/* 下半栏：工具执行返回 (Result / Error) */}
+          <View style={styles.toolSectionBlock}>
+            <View style={styles.shellHeaderBar}>
+              <View style={styles.toolSectionHeaderLeft}>
+                <View
+                  style={[
+                    styles.toolResBadge,
+                    isFailed
+                      ? styles.toolResBadgeError
+                      : isRunning
+                        ? styles.toolResBadgeRunning
+                        : styles.toolResBadgeSuccess,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.toolResBadgeText,
+                      isFailed
+                        ? styles.toolResBadgeTextError
+                        : isRunning
+                          ? styles.toolResBadgeTextRunning
+                          : styles.toolResBadgeTextSuccess,
+                    ]}
+                  >
+                    {isFailed ? "执行异常" : isRunning ? "执行中" : "执行返回"}
+                  </Text>
+                </View>
+                {tool.errorCode ? (
+                  <Text style={styles.toolErrorCodeText}>{tool.errorCode}</Text>
+                ) : null}
+                {tool.truncated ? (
+                  <Text style={styles.toolTruncatedTag}>已截断</Text>
+                ) : null}
               </View>
-            ) : outputText ? (
-              <Text
-                selectable
-                style={[styles.shellOutputText, isFailed && styles.shellOutputTextError]}
-              >
-                {outputText}
-              </Text>
-            ) : (
-              <Text style={styles.shellEmptyText}>
-                {tool.status === "running" ? "正在执行命令..." : "(无输出内容)"}
-              </Text>
-            )}
-          </ScrollView>
+              {tool.duration ? <Text style={styles.shellHeaderMeta}>{tool.duration}</Text> : null}
+            </View>
+
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.shellScroll}
+            >
+              {sharedAsset && !isFailed ? (
+                <View style={styles.shellAssetWrap}>
+                  <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+                </View>
+              ) : outputText ? (
+                <Text
+                  selectable
+                  style={[styles.shellOutputText, isFailed && styles.shellOutputTextError]}
+                >
+                  {outputText}
+                </Text>
+              ) : (
+                <Text style={styles.shellEmptyText}>
+                  {isRunning ? "正在等待工具执行返回..." : "(无返回内容)"}
+                </Text>
+              )}
+            </ScrollView>
+          </View>
         </View>
       ) : null}
     </View>
@@ -536,6 +673,15 @@ const styles = StyleSheet.create({
   },
   statusRunningText: {
     color: "#684d00",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  statusPaused: {
+    backgroundColor: "#ede7da",
+    borderColor: "#7a7267",
+  },
+  statusPausedText: {
+    color: "#4a453e",
     fontSize: 10,
     fontWeight: "800",
   },
@@ -635,6 +781,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff0ee",
     borderColor: "#c94a3f",
   },
+  termIconBadgeRunning: {
+    backgroundColor: "#fff8db",
+    borderColor: "#b58c00",
+  },
   termIconText: {
     color: "#5e5a53",
     fontFamily: monoFont,
@@ -645,8 +795,12 @@ const styles = StyleSheet.create({
   termIconTextError: {
     color: "#c94a3f",
   },
+  termIconTextRunning: {
+    color: "#8a6800",
+  },
   toolInlineGroupTitle: {
     color: "#6b665e",
+    flex: 1,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -671,45 +825,120 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
 
-  /* Shell 灰底展开面板 */
+  /* 工具详情上下分栏面板 (方案 A：调用请求 + 执行返回) */
   shellBox: {
     backgroundColor: "#f4f3ef",
-    borderColor: "#e2dfd7",
+    borderColor: "#dbd6ca",
     borderRadius: 10,
     borderWidth: 1,
     marginTop: 2,
     overflow: "hidden",
   },
+  toolSectionBlock: {
+    paddingBottom: 2,
+  },
+  toolSectionDivider: {
+    backgroundColor: "#e2dfd7",
+    height: 1,
+  },
   shellHeaderBar: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingHorizontal: 10,
+    paddingTop: 7,
     paddingBottom: 4,
   },
+  toolSectionHeaderLeft: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    marginRight: 8,
+  },
+  toolReqBadge: {
+    backgroundColor: "#e6e1d6",
+    borderColor: "#b8b0a2",
+    borderRadius: 4,
+    borderWidth: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  toolReqBadgeText: {
+    color: "#4a453e",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  toolResBadge: {
+    borderRadius: 4,
+    borderWidth: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  toolResBadgeSuccess: {
+    backgroundColor: "#dcf5d6",
+    borderColor: "#6ab85e",
+  },
+  toolResBadgeRunning: {
+    backgroundColor: "#fff3bf",
+    borderColor: "#d4a91e",
+  },
+  toolResBadgeError: {
+    backgroundColor: "#ffe3de",
+    borderColor: "#d96b5c",
+  },
+  toolResBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  toolResBadgeTextSuccess: {
+    color: "#1b5e20",
+  },
+  toolResBadgeTextRunning: {
+    color: "#7a5900",
+  },
+  toolResBadgeTextError: {
+    color: "#9c2418",
+  },
+  toolErrorCodeText: {
+    color: "#b83b30",
+    fontFamily: monoFont,
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  toolTruncatedTag: {
+    color: "#8c6d1f",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   shellHeaderTitle: {
-    color: "#6e6a63",
-    fontSize: 12,
-    fontWeight: "600",
+    color: "#4a463f",
+    flex: 1,
+    fontFamily: monoFont,
+    fontSize: 11.5,
+    fontWeight: "700",
   },
   shellHeaderMeta: {
     color: "#8c867c",
     fontFamily: monoFont,
     fontSize: 11,
   },
+  toolRequestScroll: {
+    maxHeight: 150,
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+  },
   shellScroll: {
     maxHeight: 240,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingBottom: 10,
   },
   shellCommandText: {
     color: "#2c2a26",
     fontFamily: monoFont,
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "600",
-    lineHeight: 18,
-    marginBottom: 6,
+    lineHeight: 17,
   },
   shellOutputText: {
     color: "#57534c",

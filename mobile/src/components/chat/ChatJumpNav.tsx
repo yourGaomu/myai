@@ -16,7 +16,7 @@ type Props = {
   open: boolean;
 };
 
-const maxRailMarkers = 24;
+const maxRailMarkers = 12;
 
 export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }: Props) {
   if (anchors.length < 8) {
@@ -28,14 +28,25 @@ export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }:
   return (
     <View pointerEvents="box-none" style={styles.container}>
       {open ? (
-        <View style={styles.panel}>
+        <View
+          onStartShouldSetResponder={() => true}
+          style={styles.panel}
+        >
           <View style={styles.panelHeader}>
             <Text style={styles.panelTitle}>跳转消息</Text>
             <Pressable onPress={onToggle} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
               <Text style={styles.closeText}>隐藏</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.anchorList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+          <ScrollView
+            bounces={false}
+            contentContainerStyle={styles.anchorList}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            overScrollMode="never"
+            showsVerticalScrollIndicator
+            style={styles.anchorScroll}
+          >
             {anchors.map((anchor) => (
               <Pressable
                 key={anchor.id}
@@ -79,6 +90,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: "flex-end",
     bottom: 12,
+    justifyContent: "flex-start",
     position: "absolute",
     right: 8,
     top: 52,
@@ -90,19 +102,20 @@ const styles = StyleSheet.create({
     borderColor: "#12100e",
     borderRadius: 8,
     borderWidth: 2,
-    gap: 6,
+    gap: 5,
     justifyContent: "center",
-    minHeight: 126,
+    maxHeight: 128,
+    overflow: "hidden",
     paddingHorizontal: 5,
-    paddingVertical: 8,
+    paddingVertical: 7,
     width: 28,
   },
   railTrack: {
     alignItems: "center",
-    flex: 1,
     gap: 3,
     justifyContent: "center",
-    minHeight: 76,
+    maxHeight: 88,
+    overflow: "hidden",
   },
   railMarker: {
     backgroundColor: "#6c665f",
@@ -120,9 +133,10 @@ const styles = StyleSheet.create({
     borderColor: "#12100e",
     borderRadius: 8,
     borderWidth: 3,
-    elevation: 4,
+    elevation: 6,
     gap: 8,
-    maxHeight: 260,
+    maxHeight: 256,
+    overflow: "hidden",
     padding: 8,
     position: "absolute",
     right: 34,
@@ -132,6 +146,7 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
     top: 0,
     width: 236,
+    zIndex: 30,
   },
   panelHeader: {
     alignItems: "center",
@@ -157,9 +172,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "900",
   },
+  anchorScroll: {
+    flexGrow: 0,
+    maxHeight: 196,
+  },
   anchorList: {
     gap: 6,
-    paddingBottom: 2,
+    paddingBottom: 4,
   },
   anchorItem: {
     alignItems: "flex-start",

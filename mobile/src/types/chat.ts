@@ -28,6 +28,7 @@ export type ChatItem = {
   status?: ChatMessageStatus;
   text: string;
   reasoning?: string;
+  toolCallID?: string;
   toolName?: string;
   toolArguments?: string;
   toolError?: string;

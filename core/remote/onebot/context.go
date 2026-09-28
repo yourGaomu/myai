@@ -81,7 +81,7 @@ type CallerInfo struct {
 	Nickname    string `json:"nickname"`     // 发送者 QQ 昵称或群名片
 	GroupID     int64  `json:"group_id"`     // 所在群号（私聊时为 0）
 	MessageType string `json:"message_type"` // "private" 或 "group"
-	MessageID   int32  `json:"message_id"`   // 原消息 ID，用于群聊引用回复
+	MessageID   int64  `json:"message_id"`   // 原消息 ID，用于群聊引用回复
 	SessionID   string `json:"session_id"`   // 当前对话绑定的 MyAI SessionID
 }
 

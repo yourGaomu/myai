@@ -365,12 +365,19 @@ export function useRemoteMessageHandler({
               (payload.paused ? "Session task paused." : ""),
             payload.reasoning || "",
           );
-          if (
-            message.session_id &&
-            (!sessionIDRef.current || sessionIDRef.current === requestSessionID)
-          ) {
-            setSessionID(message.session_id);
-            historySessionIDRef.current = message.session_id;
+          if (targetSessionID) {
+            if (pendingHistorySessionIDRef.current === targetSessionID) {
+              pendingHistorySessionIDRef.current = "";
+            }
+            if (
+              !sessionIDRef.current ||
+              sessionIDRef.current === targetSessionID ||
+              sessionIDRef.current === requestSessionID
+            ) {
+              setSessionID(targetSessionID);
+              sessionIDRef.current = targetSessionID;
+              historySessionIDRef.current = targetSessionID;
+            }
           }
           setStatus(payload.paused ? "Paused" : "Done");
           setSessionPendingPermission(targetSessionID, null);

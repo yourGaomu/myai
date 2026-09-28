@@ -107,7 +107,7 @@ function TimelineEvent({ event, last }: { event: AgentRunEvent; last: boolean })
 
         {expandable && expanded ? (
           <View style={styles.details}>
-            {event.arguments ? (
+            {event.type !== "tool_result" && event.arguments ? (
               <View style={styles.detailSection}>
                 <Text style={styles.detailLabel}>参数</Text>
                 <Text style={styles.codeText}>{event.arguments}</Text>

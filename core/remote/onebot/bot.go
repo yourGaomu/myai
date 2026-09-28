@@ -2,6 +2,7 @@ package onebot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -148,14 +149,19 @@ func (b *Bot) runSingleConnection(ctx context.Context) (bool, error) {
 
 	log.Printf("[onebot] connected to NapCatQQ at %s", b.config.WSURL)
 
-	// 3.2 监听 Context 取消信号以主动关闭底层连接
+	// 3.2 监听 Context 取消信号并循环读取 WebSocket 帧（将 JSON 解析错误与底层断线解耦，防止异常包导致断连）
 	readDone := make(chan error, 1)
 	go func() {
 		for {
-			var event Event
-			if err := conn.ReadJSON(&event); err != nil {
+			_, rawPacket, err := conn.ReadMessage()
+			if err != nil {
 				readDone <- err
 				return
+			}
+			var event Event
+			if err := json.Unmarshal(rawPacket, &event); err != nil {
+				log.Printf("[onebot] ignore unrecognized packet: %v", err)
+				continue
 			}
 			b.dispatchRawEvent(ctx, event)
 		}
@@ -289,6 +295,9 @@ func (b *Bot) HandleEvent(ctx context.Context, event Event) {
 	user.UpdatedAt = now
 	_ = b.store.UpsertUser(ctx, user)
 
+	log.Printf("[onebot] recv %s message from %s(%d, role=%s): %s",
+		event.MessageType, nickname, event.UserID, user.Role, parsed.CleanText)
+
 	// 5.6 计算并发锁键并交由 SessionGuard 调度
 	guardKey := b.sessionGuardKey(event)
 	guardResult := b.guard.Submit(ctx, guardKey, parsed.CleanText, func(runCtx context.Context) {
@@ -376,7 +385,9 @@ func (b *Bot) executeTurn(ctx context.Context, event Event, cleanText string) {
 	}
 	if err := b.replyToEvent(ctx, event, replyText); err != nil {
 		log.Printf("[onebot] send reply failed: %v", err)
+		return
 	}
+	log.Printf("[onebot] sent reply to %s(%d) (session=%s)", caller.Nickname, event.UserID, sessionID)
 }
 
 // ensureSessionForEvent 根据私聊或群聊（共享模式 vs 群内独立模式）解析或创建对应的 MyAI SessionID。

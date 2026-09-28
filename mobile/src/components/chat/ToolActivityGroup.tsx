@@ -67,7 +67,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
         </Text>
         <Text style={styles.toolGroupStepMeta}>#{index}</Text>
       </View>
-      {message.toolArguments ? (
+      {message.role === "tool_call" && message.toolArguments ? (
         <View style={styles.toolGroupStepSection}>
           <Text style={styles.toolGroupStepLabel}>参数</Text>
           <Text numberOfLines={6} selectable style={styles.toolGroupCode}>

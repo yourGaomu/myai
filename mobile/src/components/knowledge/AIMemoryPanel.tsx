@@ -145,7 +145,7 @@ export function AIMemoryPanel({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.content}>
         {/* 顶部标题行: 已沉淀用户记忆 + [+ 添加记忆] 按钮 */}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>已沉淀用户记忆</Text>
@@ -309,7 +309,7 @@ export function AIMemoryPanel({
             <ButtonContent loading={pending} text="立即运行 Dream 整合" />
           </Pressable>
         </View>
-      </ScrollView>
+      </View>
 
       {/* 编辑/新建记忆弹窗 */}
       <MemoryEditor
@@ -610,8 +610,8 @@ const styles = StyleSheet.create({
   content: {
     backgroundColor: "#f4f5f7",
     gap: 10,
-    padding: 14,
-    paddingBottom: 120,
+    paddingTop: 10,
+    paddingBottom: 40,
   },
   flex: {
     flex: 1,

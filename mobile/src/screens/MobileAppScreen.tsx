@@ -912,6 +912,7 @@ export function MobileAppScreen() {
     requestAssets,
     requestChanges,
     requestFiles,
+    requestHistory,
     requestKnowledge: requestCatalog,
     requestSessions,
     setViewMode,

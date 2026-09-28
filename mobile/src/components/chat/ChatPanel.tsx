@@ -57,6 +57,7 @@ export function ChatPanel({
   useEffect(() => {
     followTailRef.current = true;
     itemOffsetsRef.current = {};
+    setJumpOpen(false);
   }, [sessionID]);
 
   const rememberItemOffset = useCallback((id: string, event: LayoutChangeEvent) => {
@@ -66,8 +67,11 @@ export function ChatPanel({
   const jumpToMessage = useCallback(
     (id: string) => {
       const y = itemOffsetsRef.current[id] ?? 0;
-      chatScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+      followTailRef.current = false;
       setJumpOpen(false);
+      requestAnimationFrame(() => {
+        chatScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+      });
     },
     [chatScrollRef],
   );
@@ -87,18 +91,21 @@ export function ChatPanel({
           const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
           followTailRef.current = distanceFromBottom <= 36;
         }}
+        scrollEnabled={!jumpOpen}
         scrollEventThrottle={100}
         ref={chatScrollRef}
         showsVerticalScrollIndicator={false}
         style={styles.messagesScroll}
       >
-        {loadingHistory ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#12100e" size="small" />
-            <Text style={styles.inlineLoadingText}>正在加载会话历史...</Text>
-          </View>
-        ) : messages.length === 0 && runs.length === 0 ? (
-          <Text style={styles.emptyText}>消息会显示在这里。</Text>
+        {messages.length === 0 && runs.length === 0 ? (
+          loadingHistory ? (
+            <View style={styles.inlineLoading}>
+              <ActivityIndicator color="#12100e" size="small" />
+              <Text style={styles.inlineLoadingText}>正在加载会话历史...</Text>
+            </View>
+          ) : (
+            <Text style={styles.emptyText}>消息会显示在这里。</Text>
+          )
         ) : (
           renderItems.map((item) => {
             if (item.type === "agent_turn") {

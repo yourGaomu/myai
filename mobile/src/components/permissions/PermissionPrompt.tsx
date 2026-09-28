@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { PermissionState } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
@@ -16,7 +16,11 @@ export function PermissionPrompt({ buttonFeedback, onAllow, onDeny, permission }
       <Text style={styles.permissionTitle}>
         {permission.name} 需要权限：{permission.permission}
       </Text>
-      <Text style={styles.permissionArgs}>{permission.arguments}</Text>
+      {permission.arguments ? (
+        <ScrollView nestedScrollEnabled style={styles.argsScroll}>
+          <Text selectable style={styles.permissionArgs}>{permission.arguments}</Text>
+        </ScrollView>
+      ) : null}
       <View style={styles.row}>
         <Pressable onPress={onDeny} style={({ pressed }) => buttonFeedback([styles.secondaryButton, styles.flex], pressed)}>
           <Text style={styles.secondaryButtonText}>拒绝</Text>
@@ -41,6 +45,15 @@ const styles = StyleSheet.create({
   permissionTitle: {
     color: "#12100e",
     fontWeight: "900",
+  },
+  argsScroll: {
+    backgroundColor: "#fff8db",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    maxHeight: 160,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   permissionArgs: {
     color: "#12100e",

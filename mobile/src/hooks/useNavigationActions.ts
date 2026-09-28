@@ -9,6 +9,7 @@ type Args = {
   requestAssets: () => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
+  requestHistory: () => boolean;
   requestKnowledge: () => boolean;
   requestSessions: () => boolean;
   setViewMode: (updater: ViewMode | ((current: ViewMode) => ViewMode)) => void;
@@ -22,6 +23,7 @@ export function useNavigationActions({
   requestAssets,
   requestChanges,
   requestFiles,
+  requestHistory,
   requestKnowledge,
   requestSessions,
   setViewMode,
@@ -30,7 +32,8 @@ export function useNavigationActions({
   const openChanges = useCallback(() => {
     setViewMode("changes");
     requestChanges();
-  }, [requestChanges, setViewMode]);
+    requestHistory();
+  }, [requestChanges, requestHistory, setViewMode]);
   const openFiles = useCallback(() => {
     setViewMode("files");
     requestAssets();

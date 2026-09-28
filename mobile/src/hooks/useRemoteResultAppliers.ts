@@ -166,7 +166,13 @@ export function useRemoteResultAppliers({
       }
 
       setSessions((current) => mergeSessionList(current, nextSessions));
-      const currentSessionID = (payload?.current_session_id || sessionIDRef.current || "").trim();
+      const localSessionID = sessionIDRef.current.trim();
+      const hasLocalSessionInList = Boolean(
+        localSessionID && nextSessions.some((item) => item.id === localSessionID),
+      );
+      const currentSessionID = (
+        (hasLocalSessionInList ? localSessionID : payload?.current_session_id || localSessionID) || ""
+      ).trim();
       if (!currentSessionID) {
         return;
       }
@@ -177,6 +183,10 @@ export function useRemoteResultAppliers({
         requestAssets(currentSessionID);
       }
       setSessionLastUsage(currentSessionID, findSessionUsage(nextSessions, currentSessionID));
+      if (hasSessionMessages(currentSessionID)) {
+        historySessionIDRef.current = currentSessionID;
+        return;
+      }
       if (
         historySessionIDRef.current !== currentSessionID &&
         pendingHistorySessionIDRef.current !== currentSessionID &&

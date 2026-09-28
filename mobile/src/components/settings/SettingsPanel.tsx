@@ -860,7 +860,7 @@ export function SettingsPanel({
             <Pressable
               disabled={pendingActions.models}
               onPress={() => {
-                const config = buildModelConfig();
+                const config = buildModelConfig(Boolean(editingModelID));
                 if (!config) {
                   return;
                 }
@@ -1298,7 +1298,10 @@ export function SettingsPanel({
                   </Text>
                   <Pressable
                     disabled={pendingActions.sessions}
-                    onPress={() => onDeleteSession(session.id)}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      onDeleteSession(session.id);
+                    }}
                     style={({ pressed }) =>
                       buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
                     }
@@ -1572,50 +1575,77 @@ export function SettingsPanel({
 
   const buildIntentConfigPayload = (forTest = false): IntentConfigPayload | null => {
     const strategy = normalizeIntentStrategy(intentStrategy);
-    const baseURL = intentBaseURL.trim().replace(/\/+$/, "");
-    const model = intentModel.trim();
+    const rawBaseURL = intentBaseURL.trim().replace(/\/+$/, "");
+    const rawModel = intentModel.trim();
     const apiKey = intentAPIKey.trim();
-    const planConfidence = Number(intentPlanConfidence.trim());
-    const executeConfidence = Number(intentExecuteConfidence.trim());
+    const rawPlanConfidence = Number(intentPlanConfidence.trim());
+    const rawExecuteConfidence = Number(intentExecuteConfidence.trim());
+    const requireJevValidation = forTest || strategy === "jev";
 
-    if (!baseURL) {
-      setIntentFormError("Base URL 不能为空（例如 https://api.typesafe.ai）。");
-      return null;
-    }
-    const baseValidationError = validateIntentBaseURL(baseURL);
-    if (baseValidationError) {
-      setIntentFormError(baseValidationError);
-      return null;
-    }
-    if (!model) {
-      setIntentFormError("Jev model 不能为空（例如 jev-latest）。");
-      return null;
-    }
-    if (
-      !Number.isFinite(planConfidence) ||
-      !Number.isFinite(executeConfidence) ||
-      planConfidence <= 0 ||
-      planConfidence > 1 ||
-      executeConfidence <= 0 ||
-      executeConfidence > 1
-    ) {
-      setIntentFormError("plan_confidence 与 execute_confidence 必须在 (0, 1] 范围内。");
-      return null;
-    }
-    if (planConfidence > executeConfidence) {
-      setIntentFormError("plan_confidence 不能大于 execute_confidence。");
-      return null;
-    }
+    const fallbackBaseURL = (intentConfig?.base_url || defaultIntentConfig.base_url).trim().replace(/\/+$/, "");
+    const fallbackModel = (intentConfig?.model || defaultIntentConfig.model).trim();
+    const fallbackPlan = intentConfig?.plan_confidence ?? defaultIntentConfig.plan_confidence;
+    const fallbackExecute = intentConfig?.execute_confidence ?? defaultIntentConfig.execute_confidence;
 
-    const hasSavedAPIKey = Boolean(intentConfig?.has_api_key);
-    const effectiveHasAPIKey = Boolean(apiKey) || (hasSavedAPIKey && !intentClearAPIKey);
-    if ((forTest || strategy === "jev") && !effectiveHasAPIKey) {
-      setIntentFormError(
-        forTest
-          ? "测试连接需要提供 API Key（请输入密钥，或保留服务端已保存的密钥）。"
-          : "启用 Jev 远程判断策略必须配置 API Key（请输入新密钥或保留已保存密钥）。",
-      );
-      return null;
+    const baseURL = requireJevValidation
+      ? rawBaseURL
+      : rawBaseURL && !validateIntentBaseURL(rawBaseURL)
+        ? rawBaseURL
+        : fallbackBaseURL;
+    const model = requireJevValidation ? rawModel : rawModel || fallbackModel;
+
+    const isConfidencePairValid =
+      Number.isFinite(rawPlanConfidence) &&
+      Number.isFinite(rawExecuteConfidence) &&
+      rawPlanConfidence > 0 &&
+      rawPlanConfidence <= 1 &&
+      rawExecuteConfidence > 0 &&
+      rawExecuteConfidence <= 1 &&
+      rawPlanConfidence <= rawExecuteConfidence;
+
+    const planConfidence = requireJevValidation || isConfidencePairValid ? rawPlanConfidence : fallbackPlan;
+    const executeConfidence = requireJevValidation || isConfidencePairValid ? rawExecuteConfidence : fallbackExecute;
+
+    if (requireJevValidation) {
+      if (!baseURL) {
+        setIntentFormError("Base URL 不能为空（例如 https://api.typesafe.ai）。");
+        return null;
+      }
+      const baseValidationError = validateIntentBaseURL(baseURL);
+      if (baseValidationError) {
+        setIntentFormError(baseValidationError);
+        return null;
+      }
+      if (!model) {
+        setIntentFormError("Jev model 不能为空（例如 jev-latest）。");
+        return null;
+      }
+      if (
+        !Number.isFinite(planConfidence) ||
+        !Number.isFinite(executeConfidence) ||
+        planConfidence <= 0 ||
+        planConfidence > 1 ||
+        executeConfidence <= 0 ||
+        executeConfidence > 1
+      ) {
+        setIntentFormError("plan_confidence 与 execute_confidence 必须在 (0, 1] 范围内。");
+        return null;
+      }
+      if (planConfidence > executeConfidence) {
+        setIntentFormError("plan_confidence 不能大于 execute_confidence。");
+        return null;
+      }
+
+      const hasSavedAPIKey = Boolean(intentConfig?.has_api_key);
+      const effectiveHasAPIKey = Boolean(apiKey) || (hasSavedAPIKey && !intentClearAPIKey);
+      if (!effectiveHasAPIKey) {
+        setIntentFormError(
+          forTest
+            ? "测试连接需要提供 API Key（请输入密钥，或保留服务端已保存的密钥）。"
+            : "启用 Jev 远程判断策略必须配置 API Key（请输入新密钥或保留已保存密钥）。",
+        );
+        return null;
+      }
     }
 
     setIntentFormError("");

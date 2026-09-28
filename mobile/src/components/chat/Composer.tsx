@@ -34,6 +34,7 @@ export function Composer({
   pendingUpload,
 }: Props) {
   const isBusy = pendingSend || canPause || pendingPause;
+  const showPauseButton = canPause || pendingPause;
 
   return (
     <View style={styles.composerWrapper}>
@@ -114,7 +115,7 @@ export function Composer({
               !e.nativeEvent.shiftKey
             ) {
               e.preventDefault();
-              if (!isBusy && messageInput.trim()) {
+              if (!isBusy && (messageInput.trim() || attachedFiles.length > 0)) {
                 onSend();
               }
             }
@@ -126,7 +127,7 @@ export function Composer({
         />
 
         {/* 右侧动作按钮：空闲为 ▶ 发送，执行中为 ■ 暂停 */}
-        {isBusy ? (
+        {showPauseButton ? (
           <Pressable
             accessibilityLabel="暂停任务"
             disabled={pendingPause}
@@ -147,10 +148,11 @@ export function Composer({
         ) : (
           <Pressable
             accessibilityLabel="发送需求"
+            disabled={isBusy}
             onPress={onSend}
             style={({ pressed }) =>
               buttonFeedback(
-                [styles.actionBtn, styles.sendBtn],
+                [styles.actionBtn, styles.sendBtn, isBusy && styles.disabledBtn],
                 pressed,
               )
             }

@@ -55,11 +55,11 @@ func TextSegment(text string) Segment {
 }
 
 // ReplySegment 构造一个引用回复指定 message_id 的消息段。
-// 2.1 设置 Type = "reply"，Data["id"] = strconv.FormatInt(int64(messageID), 10)。
-func ReplySegment(messageID int32) Segment {
+// 2.1 设置 Type = "reply"，Data["id"] = strconv.FormatInt(messageID, 10)。
+func ReplySegment(messageID int64) Segment {
 	return Segment{
 		Type: "reply",
-		Data: map[string]any{"id": strconv.FormatInt(int64(messageID), 10)},
+		Data: map[string]any{"id": strconv.FormatInt(messageID, 10)},
 	}
 }
 
@@ -79,7 +79,7 @@ func AtSegment(userID int64) Segment {
 // 3.4 SelfID：机器人自身的 QQ 号；
 // 3.5 UserID / GroupID / MessageID：发送者 QQ 号、群号与消息 ID；
 // 3.6 Message：原始 JSON 消息内容（支持数组格式 []Segment，同时兼容字符串格式回退）；
-// 3.7 Status / RetCode / Echo：当数据包为 API 调用响应（如 send_msg 回包）时的状态字段。
+// 3.7 Status / RetCode / Echo：兼容动作回包（status 为字符串）与心跳事件（status 为对象）。
 type Event struct {
 	Time          int64           `json:"time"`
 	SelfID        int64           `json:"self_id"`
@@ -87,17 +87,17 @@ type Event struct {
 	MetaEventType string          `json:"meta_event_type"`
 	MessageType   string          `json:"message_type"`
 	SubType       string          `json:"sub_type"`
-	MessageID     int32           `json:"message_id"`
+	MessageID     int64           `json:"message_id"`
 	UserID        int64           `json:"user_id"`
 	GroupID       int64           `json:"group_id"`
 	RawMessage    string          `json:"raw_message"`
 	Sender        Sender          `json:"sender"`
 	Message       json.RawMessage `json:"message"`
 
-	// API 动作响应字段（当 PostType 为空且 Echo 非空时表示是动作回包）
-	Status  string `json:"status,omitempty"`
-	RetCode int    `json:"retcode,omitempty"`
-	Echo    string `json:"echo,omitempty"`
+	// API 动作响应或心跳状态字段（heartbeat 中 status 为对象，API 响应中为字符串，故用 RawMessage 兼容）
+	Status  json.RawMessage `json:"status,omitempty"`
+	RetCode int             `json:"retcode,omitempty"`
+	Echo    any             `json:"echo,omitempty"`
 }
 
 // ParseSegments 将 Event.Message 解析为标准的消息段切片 []Segment。
@@ -149,6 +149,7 @@ type ParsedMessage struct {
 //     若为其他 QQ 号，则转换为 ` [提及用户 QQ: <qq>] ` 拼入正文，让大模型直接获知被提及人 QQ 号；
 //   - "image"：转换为 `[图片]` 占位标记（如有 url 则附带简短说明），过滤无意义表情刷屏；
 //   - "reply"：记录被引用回复的消息 ID；
+//
 // 5.2 对最终拼接的字符串进行首尾空白清理并返回。
 func ExtractMessageContent(segments []Segment, selfID int64) ParsedMessage {
 	var builder strings.Builder
@@ -262,7 +263,7 @@ func BuildPrivateMsgAction(userID int64, text string, echo string) ActionRequest
 // BuildGroupMsgAction 构造向指定 QQ 群发送消息（可选带 reply 引用原消息）的 send_msg 动作包。
 // 8.1 若 replyMessageID > 0，则在消息段数组头部插入 ReplySegment；
 // 8.2 追加正文 TextSegment 并返回 ActionRequest。
-func BuildGroupMsgAction(groupID int64, replyMessageID int32, text string, echo string) ActionRequest {
+func BuildGroupMsgAction(groupID int64, replyMessageID int64, text string, echo string) ActionRequest {
 	segments := make([]Segment, 0, 2)
 	if replyMessageID != 0 {
 		segments = append(segments, ReplySegment(replyMessageID))

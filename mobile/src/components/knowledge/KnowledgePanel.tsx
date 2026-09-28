@@ -156,7 +156,7 @@ export function KnowledgePanel({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.content}>
         {/* 1. 向量知识库区域 */}
         <View style={styles.protoSectionHeader}>
           <Text style={styles.protoSectionTitle}>向量知识库</Text>
@@ -451,7 +451,7 @@ export function KnowledgePanel({
           </View>
         ) : null}
         </View>
-      </ScrollView>
+      </View>
 
       <ResponsiveFormModal
         buttonFeedback={buttonFeedback}
@@ -1111,7 +1111,7 @@ function formatDate(value: string) {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: 12, padding: 14, paddingBottom: 28 },
+  content: { gap: 12, paddingTop: 10, paddingBottom: 28 },
   headerRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10 },
   toolbarRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 
 import type { ChangeDiffResultPayload, ChangeEntry, HistoryCheckpoint, RelayMessage } from "../protocol";
 import type { PendingAction } from "../types/app";
@@ -56,20 +56,29 @@ export function useChangeHistoryActions({
       return;
     }
 
+    const doRevert = () => {
+      startPending("revert");
+      if (!sendEnvelope("change_revert", {
+        request_id: newRequestID(),
+        payload: { path },
+      })) {
+        stopPending("revert");
+      }
+    };
+
+    if (Platform.OS === "web") {
+      if (typeof window === "undefined" || window.confirm(`确认将 ${path} 回退到基线版本吗？`)) {
+        doRevert();
+      }
+      return;
+    }
+
     Alert.alert("Revert file change?", `Restore ${path} to the saved baseline.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Revert",
         style: "destructive",
-        onPress: () => {
-          startPending("revert");
-          if (!sendEnvelope("change_revert", {
-            request_id: newRequestID(),
-            payload: { path },
-          })) {
-            stopPending("revert");
-          }
-        },
+        onPress: doRevert,
       },
     ]);
   }, [canRevertSelectedChange, changeDiff?.path, selectedChange, sendEnvelope, startPending, stopPending]);
@@ -86,20 +95,29 @@ export function useChangeHistoryActions({
         ? `${checkpoint.change_count} file(s) from ${formatDateTime(checkpoint.created_at)} will be restored.`
         : "This checkpoint will be restored.";
 
+      const doRevert = () => {
+        startPending("revert");
+        if (!sendEnvelope("history_revert", {
+          request_id: newRequestID(),
+          payload: { checkpoint_id: checkpointID },
+        })) {
+          stopPending("revert");
+        }
+      };
+
+      if (Platform.OS === "web") {
+        if (typeof window === "undefined" || window.confirm(`确认还原到此快照版本？\n${title}\n${detail}`)) {
+          doRevert();
+        }
+        return;
+      }
+
       Alert.alert("Revert checkpoint?", `${title}\n${detail}`, [
         { text: "Cancel", style: "cancel" },
         {
           text: "Revert",
           style: "destructive",
-          onPress: () => {
-            startPending("revert");
-            if (!sendEnvelope("history_revert", {
-              request_id: newRequestID(),
-              payload: { checkpoint_id: checkpointID },
-            })) {
-              stopPending("revert");
-            }
-          },
+          onPress: doRevert,
         },
       ]);
     },

@@ -98,6 +98,7 @@ export function useChatMessages() {
             requestID,
             createdAt: new Date().toISOString(),
             role: "tool_call",
+            status: "tool_running",
             text: "",
             toolName: name,
             toolArguments: argumentsText,
@@ -118,32 +119,61 @@ export function useChatMessages() {
       requestID?: string,
       details?: ToolResultPayload,
     ) => {
-      updateSessionChat(sessionID, (current) => ({
-        ...current,
-        activeAssistantID: "",
-        messages: [
-          ...current.messages.map((item) =>
-            item.role === "assistant" &&
-            (item.requestID === requestID ||
-              item.id === current.activeAssistantID)
-              ? { ...item, status: "streaming" as ChatMessageStatus }
-              : item,
-          ),
-          {
-            id: newRequestID(),
-            requestID,
-            createdAt: new Date().toISOString(),
-            role: "tool",
-            text: result,
-            toolName: name,
-            toolArguments: argumentsText,
-            toolError: failed ? details?.error_message || result : "",
-            toolStatus: details?.status,
-            toolErrorCode: details?.error_code,
-            toolTruncated: details?.truncated,
-          },
-        ],
-      }));
+      updateSessionChat(sessionID, (current) => {
+        let matchedToolCallID = "";
+        for (const item of current.messages) {
+          if (
+            item.role === "tool_call" &&
+            item.status === "tool_running" &&
+            item.toolName === name &&
+            (!argumentsText || (item.toolArguments || "").trim() === argumentsText.trim())
+          ) {
+            matchedToolCallID = item.id;
+            break;
+          }
+        }
+        if (!matchedToolCallID) {
+          for (const item of current.messages) {
+            if (item.role === "tool_call" && item.status === "tool_running" && item.toolName === name) {
+              matchedToolCallID = item.id;
+              break;
+            }
+          }
+        }
+
+        return {
+          ...current,
+          activeAssistantID: "",
+          messages: [
+            ...current.messages.map((item) => {
+              if (item.id === matchedToolCallID) {
+                return { ...item, status: "done" as ChatMessageStatus };
+              }
+              if (
+                item.role === "assistant" &&
+                (item.requestID === requestID ||
+                  item.id === current.activeAssistantID)
+              ) {
+                return { ...item, status: "streaming" as ChatMessageStatus };
+              }
+              return item;
+            }),
+            {
+              id: newRequestID(),
+              requestID,
+              createdAt: new Date().toISOString(),
+              role: "tool",
+              text: result,
+              toolName: name,
+              toolArguments: argumentsText,
+              toolError: failed ? details?.error_message || result : "",
+              toolStatus: details?.status,
+              toolErrorCode: details?.error_code,
+              toolTruncated: details?.truncated,
+            },
+          ],
+        };
+      });
     },
     [updateSessionChat],
   );
@@ -217,28 +247,46 @@ export function useChatMessages() {
     ) => {
       const completedAt = new Date().toISOString();
       updateSessionChat(sessionID, (current) => {
+        const lastUserIndex = current.messages.reduce(
+          (acc, msg, idx) => (msg.role === "user" ? idx : acc),
+          -1,
+        );
+        const isInLatestTurn = (idx: number, item: ChatItem) =>
+          (requestID && item.requestID === requestID) || idx > lastUserIndex;
+
         const hasAnyReasoning = Boolean(
-          requestID &&
-            current.messages.some(
-              (item) =>
-                item.role === "assistant" &&
-                item.requestID === requestID &&
-                Boolean(item.reasoning?.trim()),
-            ),
+          current.messages.some(
+            (item, idx) =>
+              item.role === "assistant" &&
+              isInLatestTurn(idx, item) &&
+              Boolean(item.reasoning?.trim()),
+          ),
         );
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {
-          const updatedExisting = current.messages.map((item) =>
-            item.role === "assistant" && requestID && item.requestID === requestID
-              ? {
-                  ...item,
-                  completedAt: item.completedAt || completedAt,
-                  status,
-                  usage: usage || item.usage,
-                }
-              : item,
-          );
+          const updatedExisting = current.messages.map((item, idx) => {
+            if (!isInLatestTurn(idx, item)) {
+              return item;
+            }
+            if (item.role === "tool_call" && item.status === "tool_running") {
+              return { ...item, status: "done" as ChatMessageStatus };
+            }
+            if (
+              item.role === "assistant" &&
+              (item.requestID === requestID ||
+                item.status === "streaming" ||
+                item.status === "tool_running")
+            ) {
+              return {
+                ...item,
+                completedAt: item.completedAt || completedAt,
+                status,
+                usage: usage || item.usage,
+              };
+            }
+            return item;
+          });
           const fallbackReasoning = hasAnyReasoning ? undefined : reasoning || undefined;
           if (!content && !fallbackReasoning && status === "done") {
             return {
@@ -274,7 +322,7 @@ export function useChatMessages() {
             current.activeAssistantID === assistantID
               ? ""
               : current.activeAssistantID,
-          messages: current.messages.map((item) => {
+          messages: current.messages.map((item, idx) => {
             if (item.id === assistantID) {
               return {
                 ...item,
@@ -288,12 +336,22 @@ export function useChatMessages() {
                 usage: usage || item.usage,
               };
             }
-            if (item.role === "assistant" && requestID && item.requestID === requestID) {
-              return {
-                ...item,
-                completedAt: item.completedAt || completedAt,
-                status,
-              };
+            if (isInLatestTurn(idx, item)) {
+              if (item.role === "tool_call" && item.status === "tool_running") {
+                return { ...item, status: "done" as ChatMessageStatus };
+              }
+              if (
+                item.role === "assistant" &&
+                (item.requestID === requestID ||
+                  item.status === "streaming" ||
+                  item.status === "tool_running")
+              ) {
+                return {
+                  ...item,
+                  completedAt: item.completedAt || completedAt,
+                  status,
+                };
+              }
             }
             return item;
           }),
@@ -307,15 +365,37 @@ export function useChatMessages() {
     (sessionID: string, requestID: string | undefined, message?: string) => {
       const completedAt = new Date().toISOString();
       updateSessionChat(sessionID, (current) => {
+        const lastUserIndex = current.messages.reduce(
+          (acc, msg, idx) => (msg.role === "user" ? idx : acc),
+          -1,
+        );
+        const isInLatestTurn = (idx: number, item: ChatItem) =>
+          (requestID && item.requestID === requestID) || idx > lastUserIndex;
+
         const assistantID =
           findAssistantID(current, requestID) || current.activeAssistantID;
         if (!assistantID) {
+          const cleanedMessages = current.messages.map((item, idx) => {
+            if (!isInLatestTurn(idx, item)) {
+              return item;
+            }
+            if (item.role === "tool_call" && item.status === "tool_running") {
+              return { ...item, status: "done" as ChatMessageStatus };
+            }
+            if (
+              item.role === "assistant" &&
+              (item.status === "streaming" || item.status === "tool_running")
+            ) {
+              return { ...item, completedAt: item.completedAt || completedAt, status: "done" as ChatMessageStatus };
+            }
+            return item;
+          });
           const id = newRequestID();
           return {
             ...current,
             activeAssistantID: "",
             messages: [
-              ...current.messages,
+              ...cleanedMessages,
               {
                 completedAt,
                 id,
@@ -335,17 +415,29 @@ export function useChatMessages() {
             current.activeAssistantID === assistantID
               ? ""
               : current.activeAssistantID,
-          messages: current.messages.map((item) =>
-            item.id === assistantID
-              ? {
-                  ...item,
-                  completedAt,
-                  requestID: item.requestID || requestID,
-                  status: "error",
-                  text: item.text || message || "Request failed.",
-                }
-              : item,
-          ),
+          messages: current.messages.map((item, idx) => {
+            if (item.id === assistantID) {
+              return {
+                ...item,
+                completedAt,
+                requestID: item.requestID || requestID,
+                status: "error",
+                text: item.text || message || "Request failed.",
+              };
+            }
+            if (isInLatestTurn(idx, item)) {
+              if (item.role === "tool_call" && item.status === "tool_running") {
+                return { ...item, status: "done" as ChatMessageStatus };
+              }
+              if (
+                item.role === "assistant" &&
+                (item.status === "streaming" || item.status === "tool_running")
+              ) {
+                return { ...item, completedAt: item.completedAt || completedAt, status: "done" as ChatMessageStatus };
+              }
+            }
+            return item;
+          }),
         };
       });
     },

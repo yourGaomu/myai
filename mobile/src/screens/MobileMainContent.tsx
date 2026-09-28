@@ -135,7 +135,11 @@ export function MobileMainContent({
           activeAssistantID={chat.activeAssistantID}
           buttonFeedback={common.buttonFeedback}
           chatScrollRef={chat.chatScrollRef}
-          loadingHistory={common.pendingActions.sessions && Boolean(chat.pendingHistorySessionID)}
+          loadingHistory={
+            common.pendingActions.sessions &&
+            Boolean(chat.pendingHistorySessionID) &&
+            (!chat.sessionID || chat.pendingHistorySessionID === chat.sessionID)
+          }
           messages={chat.messages}
           onRegenerate={chat.onRegenerate}
           pendingRequestID={chat.pendingRequestID}

@@ -47,8 +47,7 @@ const styles = StyleSheet.create({
   },
   tabBarWrapper: {
     backgroundColor: "#f4f5f7",
-    paddingHorizontal: 14,
-    paddingTop: 10,
+    paddingTop: 6,
     paddingBottom: 4,
   },
   tabs: {
