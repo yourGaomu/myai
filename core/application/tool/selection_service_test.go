@@ -27,6 +27,36 @@ func TestSelectionServiceFiltersReadonlyPermissionMode(t *testing.T) {
 	}
 }
 
+func TestSelectionServiceExposesKnowledgeSearchOnlyInAutoRetrievalMode(t *testing.T) {
+	catalog := namedCatalog{names: []string{"knowledge_search", "read_file"}}
+	for _, test := range []struct {
+		name string
+		mode session.RetrievalMode
+		want bool
+	}{
+		{name: "auto", mode: session.RetrievalModeAuto, want: true},
+		{name: "off", mode: session.RetrievalModeOff},
+		{name: "manual", mode: session.RetrievalModeManual},
+		{name: "always", mode: session.RetrievalModeAlways},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tools := SelectionService{Catalog: catalog}.ToolsForSession(&session.Session{
+				RAGSettings:    session.RAGSettings{Mode: test.mode},
+				PermissionMode: session.PermissionModeFull,
+			}, false)
+			found := false
+			for _, tool := range tools {
+				if tool.Function != nil && tool.Function.Name == "knowledge_search" {
+					found = true
+				}
+			}
+			if found != test.want {
+				t.Fatalf("knowledge_search availability = %v, want %v; tools=%#v", found, test.want, tools)
+			}
+		})
+	}
+}
+
 func TestSelectionServiceFiltersReadWriteAndExecuteModes(t *testing.T) {
 	catalog := recordingCatalog{permissions: []tooldef.Permission{
 		tooldef.PermissionRead, tooldef.PermissionWrite, tooldef.PermissionExecute,
@@ -148,6 +178,24 @@ func TestSelectionServiceFiltersToolsUsingEnforcedAllowlist(t *testing.T) {
 
 type recordingCatalog struct {
 	permissions []tooldef.Permission
+}
+
+type namedCatalog struct {
+	names []string
+}
+
+func (c namedCatalog) LLMToolsByPermission(allow func(tooldef.Permission) bool) []modelport.Tool {
+	tools := make([]modelport.Tool, 0, len(c.names))
+	for _, name := range c.names {
+		if allow != nil && !allow(tooldef.PermissionRead) {
+			continue
+		}
+		tools = append(tools, modelport.Tool{
+			Type:     "function",
+			Function: &modelport.FunctionDefinition{Name: name},
+		})
+	}
+	return tools
 }
 
 func (c recordingCatalog) LLMToolsByPermission(allow func(tooldef.Permission) bool) []modelport.Tool {

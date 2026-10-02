@@ -158,11 +158,12 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	defer unlock()
 
 	var currentBefore *session.Session
-	autoPlan := false
-	resumePlan := false
+	autoPlanAction := AutoPlanActionChat
 	var autoPlanDecision AutoPlanDecision
-	// Explicit continuation bypasses intent classification, including when Jev is disabled.
-	if s.dependencies.AutoPlanEnabled {
+	// Load one stable pre-turn snapshot for both plan classification and
+	// deterministic (always-mode) retrieval. AppendUserMessage deliberately
+	// reloads the session after adding the new message.
+	if s.dependencies.AutoPlanEnabled || s.dependencies.RetrievalContext != nil {
 		if s.dependencies.SessionLoader == nil {
 			return ChatResponse{}, errors.New("session loader is nil")
 		}
@@ -170,32 +171,37 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		if err != nil {
 			return ChatResponse{}, err
 		}
-		resumePlan = shouldResumePlanRequest(currentBefore, input)
-		if !resumePlan {
-			autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
-			autoPlan = autoPlanDecision.ShouldPlan
+	}
+	if s.dependencies.AutoPlanEnabled {
+		// The selected intent strategy classifies both new implementation work and
+		// requests to resume an existing plan. The final plan-state check remains
+		// local so a classifier can never execute a nonexistent or completed plan.
+		autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
+		autoPlanAction = autoPlanDecision.Action
+		if autoPlanAction == AutoPlanActionResumePlan && !hasExecutablePlan(currentBefore) {
+			// A classifier is advisory. Never execute a missing, completed, or
+			// otherwise non-executable plan based only on its response.
+			autoPlanAction = AutoPlanActionChat
 		}
 	}
 
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
 	var retrievalInfo chatretrievalresult.Context
 	if s.dependencies.RetrievalContext != nil {
-		current, loadErr := s.dependencies.SessionLoader.Load(ctx, sessionID)
-		if loadErr != nil {
-			return ChatResponse{}, loadErr
-		}
 		var retrievalErr error
-		retrievalInfo, retrievalErr = s.dependencies.RetrievalContext.Prepare(ctx, chatretrievalcommand.Prepare{Session: current, Input: input})
+		// Auto mode defers retrieval to the model's knowledge_search tool;
+		// always mode is the only mode that performs a pre-generation search.
+		retrievalInfo, retrievalErr = s.dependencies.RetrievalContext.Prepare(ctx, chatretrievalcommand.Prepare{Session: currentBefore, Input: input})
 		if retrievalErr != nil {
-			// 自动检索失败不阻断聊天；错误随终态响应返回客户端。
+			// 前置检索失败不阻断聊天；错误随终态响应返回客户端。
 			retrievalInfo.Error = retrievalErr.Error()
 		}
 	}
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
-		SessionID:     sessionID,
-		Input:         input,
-		ForcePlanMode: autoPlan,
-		RAGContext:    retrievalInfo.Prompt,
+		SessionID:               sessionID,
+		Input:                   input,
+		ForceAutonomousPlanning: autoPlanAction == AutoPlanActionPlanOnly || autoPlanAction == AutoPlanActionPlanExecute,
+		RAGContext:              retrievalInfo.Prompt,
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -220,21 +226,22 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		})
 	}
 
-	if autoPlan {
-		if autoPlanDecision.ShouldExecute {
-			return s.generateAndExecutePlan(ctx, current, input, title, retrievalInfo, stream)
-		}
+	switch autoPlanAction {
+	case AutoPlanActionPlanExecute:
+		return s.generateAndExecutePlan(ctx, current, input, title, retrievalInfo, stream)
+	case AutoPlanActionPlanOnly:
 		return s.generatePlanOnly(ctx, current, input, title, retrievalInfo, stream)
-	}
-	if resumePlan {
+	case AutoPlanActionResumePlan:
 		return s.executeExistingPlan(ctx, current.ID, stream, retrievalInfo)
+	default:
+		return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream, true, false)
 	}
-	return s.generateAssistantForSession(ctx, current, input, title, "user request", retrievalInfo, stream, true, false)
 }
 
 func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *session.Session, input string) AutoPlanDecision {
 	classifier := s.dependencies.AutoPlanClassifier
 	if classifier == nil {
+		//使用兜底识别
 		classifier = RuleBasedAutoPlanClassifier{}
 	}
 	decision, err := classifier.Classify(ctx, current, input)
@@ -243,6 +250,7 @@ func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *sess
 		// than unexpectedly entering a workflow that can modify the workspace.
 		return AutoPlanDecision{
 			Intent: AutoPlanIntentConversation,
+			Action: AutoPlanActionChat,
 			Reason: "auto-plan classification failed: " + err.Error(),
 		}
 	}
@@ -405,6 +413,7 @@ func hasImplementationContext(current *session.Session) bool {
 	return false
 }
 
+// 判断用户这次输入是不是在要求恢复并执行当前会话里已有的计划。
 func shouldResumePlanRequest(current *session.Session, input string) bool {
 	if current == nil || current.Kind == session.KindSubagent || current.CurrentPlan == nil {
 		return false

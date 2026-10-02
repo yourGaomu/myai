@@ -31,10 +31,11 @@ func (service ContextService) Prepare(ctx context.Context, command retrievalcomm
 	if input == "" || settings.Mode == session.RetrievalModeOff || settings.Mode == session.RetrievalModeManual {
 		return retrievalresult.Context{Query: input}, nil
 	}
+	// Auto mode is model-driven: knowledge_search is exposed as a read-only
+	// tool and the Agent Loop lets the model decide whether retrieval is needed.
+	// Always mode remains the deterministic pre-generation retrieval path.
 	if settings.Mode == session.RetrievalModeAuto {
-		if service.Policy == nil || !service.Policy.ShouldRetrieve(input) {
-			return retrievalresult.Context{Query: input}, nil
-		}
+		return retrievalresult.Context{Query: input}, nil
 	}
 	if service.Search == nil {
 		return retrievalresult.Context{Triggered: true, Query: input}, errors.New("knowledge search service is not configured")

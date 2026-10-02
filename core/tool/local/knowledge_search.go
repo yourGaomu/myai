@@ -26,7 +26,7 @@ func (tool *KnowledgeSearchTool) Name() string {
 }
 
 func (tool *KnowledgeSearchTool) Description() string {
-	return "Search indexed project knowledge bases and return relevant text chunks, source references, and retrieval diagnostics."
+	return "Search indexed project knowledge bases when the answer depends on internal project documents or stored knowledge. Do not call for casual conversation or questions answerable from general knowledge. Return relevant text chunks, source references, and retrieval diagnostics."
 }
 
 func (tool *KnowledgeSearchTool) Schema() any {
@@ -87,6 +87,11 @@ func (tool *KnowledgeSearchTool) Call(ctx context.Context, args json.RawMessage)
 		if len(settings.KnowledgeBaseIDs) > 0 || len(settings.CategoryIDs) > 0 {
 			command.KnowledgeBaseIDs = append([]string(nil), settings.KnowledgeBaseIDs...)
 			command.CategoryIDs = append([]string(nil), settings.CategoryIDs...)
+		}
+	}
+	if budget, ok := toolruntime.KnowledgeSearchBudgetFrom(ctx); ok {
+		if err := budget.Reserve(command.Text); err != nil {
+			return tooldef.ToolOutput{}, err
 		}
 	}
 	command.Strict = true

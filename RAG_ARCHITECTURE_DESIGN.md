@@ -854,18 +854,18 @@ status
 
 ### 15.2 自动触发策略
 
-`RetrievalTriggerPolicy` 第一版使用低成本规则，不额外调用模型：
+`auto` 模式使用模型驱动的工具检索，不在生成前执行固定搜索：
 
 ```text
-   (Session.RAGSettings.Mode == always
-OR  (Session.RAGSettings.Mode == auto AND DefaultTriggerPolicy 命中))
-AND 存在未删除且启用 RAG 的 KnowledgeBase
-AND UserMessage 非空
+   Session.RAGSettings.Mode == auto
+       -> 向模型暴露只读 knowledge_search 工具
+       -> 模型返回 tool_call 时执行检索
+       -> 工具结果追加到上下文后继续生成
 ```
 
-`off` 和 `manual` 不触发 Chat 自动检索；`manual` 只保留给显式搜索入口。Session 的 `KnowledgeBaseIDs` 和 `CategoryIDs` 由 SearchFacade 解析，空范围表示全部启用 KnowledgeBase。
+`always` 仍在生成前执行确定性检索；`off` 不检索且不暴露工具；`manual` 只保留给显式搜索入口，不向普通聊天模型暴露工具。Session 的 `KnowledgeBaseIDs` 和 `CategoryIDs` 由 SearchFacade 解析，空范围表示全部启用 KnowledgeBase。
 
-以下消息默认跳过：
+模型工具描述应明确以下消息通常不需要检索：
 
 ```text
 你好
@@ -876,7 +876,7 @@ AND UserMessage 非空
 /exit
 ```
 
-后续可以增加模型意图分类实现，但必须作为新的 Policy Adapter，不修改 ChatService 主流程。
+如果模型不支持 Tool Calling，可选用 `DefaultTriggerPolicy` 作为兼容回退，但不作为支持 Tool Calling 模型的默认路径。
 
 ### 15.3 Chat 主链路接入位置
 
@@ -886,9 +886,9 @@ AND UserMessage 非空
 ChatService.SendMessageStreamForSession
 -> SessionLoader.Load
 -> chat/retrieval ContextService.Prepare
--> RetrievalTriggerPolicy.ShouldRetrieve
--> knowledge/search SearchFacade.Search
--> RAGContextFormatter.Build
+-> auto: 模型决定是否调用 knowledge_search
+-> always: KnowledgeSearchFacade.Search
+-> RAGContextFormatter.Build（仅 always）
 -> MessageCommandService.AppendUserMessage
    -> Synthetic RAG Context
    -> Runtime Instruction

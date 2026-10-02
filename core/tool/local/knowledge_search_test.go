@@ -210,3 +210,26 @@ func TestKnowledgeSearchToolRejectsDisabledSession(t *testing.T) {
 		t.Fatalf("disabled session must not search, got %d calls", retrieval.calls)
 	}
 }
+
+func TestKnowledgeSearchToolHonorsTurnBudgetAndDeduplicatesQueries(t *testing.T) {
+	retrieval := &fakeKnowledgeRetrievalService{}
+	searchTool := NewKnowledgeSearchTool(retrieval)
+	budget := toolruntime.NewKnowledgeSearchBudget(2)
+	ctx := toolruntime.WithKnowledgeSearchBudget(context.Background(), budget)
+
+	if _, err := searchTool.Call(ctx, mustJSON(t, map[string]any{"query": "project architecture"})); err != nil {
+		t.Fatalf("first search failed: %v", err)
+	}
+	if _, err := searchTool.Call(ctx, mustJSON(t, map[string]any{"query": "  PROJECT   ARCHITECTURE  "})); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("expected duplicate query rejection, got %v", err)
+	}
+	if _, err := searchTool.Call(ctx, mustJSON(t, map[string]any{"query": "deployment configuration"})); err != nil {
+		t.Fatalf("second distinct search failed: %v", err)
+	}
+	if _, err := searchTool.Call(ctx, mustJSON(t, map[string]any{"query": "database schema"})); err == nil || !strings.Contains(err.Error(), "call limit") {
+		t.Fatalf("expected turn budget rejection, got %v", err)
+	}
+	if retrieval.calls != 2 {
+		t.Fatalf("Search() calls = %d, want 2", retrieval.calls)
+	}
+}

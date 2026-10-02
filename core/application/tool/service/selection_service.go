@@ -33,6 +33,13 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		}
 		return allowsPermissionMode(permission, permissionMode)
 	})
+	// Retrieval in auto mode is model-driven through knowledge_search. In all
+	// other modes the chat pipeline either does not retrieve or performs the
+	// deterministic always-mode search before generation, so exposing the tool
+	// would be redundant or violate the session setting.
+	if !knowledgeSearchToolAvailable(current) {
+		tools = withoutKnowledgeSearch(tools)
+	}
 	if current == nil || !current.EnforceToolAllowlist && current.AllowedTools == nil {
 		return tools
 	}
@@ -48,6 +55,24 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		if _, ok := allowed[candidate.Function.Name]; ok {
 			filtered = append(filtered, candidate)
 		}
+	}
+	return filtered
+}
+
+func knowledgeSearchToolAvailable(current *session.Session) bool {
+	if current == nil {
+		return false
+	}
+	return session.NormalizeRAGSettings(current.RAGSettings).Mode == session.RetrievalModeAuto
+}
+
+func withoutKnowledgeSearch(tools []modelport.Tool) []modelport.Tool {
+	filtered := make([]modelport.Tool, 0, len(tools))
+	for _, candidate := range tools {
+		if candidate.Function != nil && candidate.Function.Name == "knowledge_search" {
+			continue
+		}
+		filtered = append(filtered, candidate)
 	}
 	return filtered
 }

@@ -14,23 +14,26 @@ import (
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	toolruntime "myai/core/tool/runtimecontext"
 )
 
 const DefaultMaxToolRounds = 32
+const DefaultMaxKnowledgeSearchCalls = 2
 const maxStopHookContinuations = 3
 
 type AgentLoopService struct {
 	// AgentLoopService 实现“模型 -> 工具 -> 模型”的循环，直到模型不再请求工具。
-	Contexts            generationport.ContextProvider
-	Tools               generationport.ToolCatalog
-	ToolExecutor        generationport.ToolExecutor
-	ToolRecords         generationport.ToolExecutionRecordSink
-	Compactor           generationport.AutoCompactor
-	TurnHooks           generationport.TurnLifecycleHooks
-	PendingInput        generationport.PendingTurnInput
-	OnPendingInputError func(error)
-	MaxToolRounds       int
-	OnCompactError      func(error)
+	Contexts                generationport.ContextProvider
+	Tools                   generationport.ToolCatalog
+	ToolExecutor            generationport.ToolExecutor
+	ToolRecords             generationport.ToolExecutionRecordSink
+	Compactor               generationport.AutoCompactor
+	TurnHooks               generationport.TurnLifecycleHooks
+	PendingInput            generationport.PendingTurnInput
+	OnPendingInputError     func(error)
+	MaxToolRounds           int
+	MaxKnowledgeSearchCalls int
+	OnCompactError          func(error)
 }
 
 var _ generationapi.AgentRunner = AgentLoopService{}
@@ -60,6 +63,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 	totalUsage := modelport.TokenUsage{}
 	maxToolRounds := s.maxToolRounds(command.Session)
+	runCtx := toolruntime.WithKnowledgeSearchBudget(ctx, toolruntime.NewKnowledgeSearchBudget(s.maxKnowledgeSearchCalls()))
 	reasoningParts := make([]string, 0, maxToolRounds)
 	stopContinuations := 0
 	canDrainPending := false
@@ -67,7 +71,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		if canDrainPending {
 			consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
 		}
-		if err := s.compactIfNeeded(ctx, command); err != nil {
+		if err := s.compactIfNeeded(runCtx, command); err != nil {
 			return modelport.ChatResult{}, err
 		}
 		snapshot := s.Contexts.Snapshot(command.Session)
@@ -75,7 +79,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			return modelport.ChatResult{}, err
 		}
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
-		result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
+		result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
 			Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext, command.MemoryContext),
 			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
 			Stream:   command.Stream,
@@ -89,7 +93,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		totalUsage = totalUsage.Add(result.Usage)
 		reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 		if len(result.ToolCalls) == 0 {
-			continued, hookErr := s.continueAfterStopHook(ctx, command, result.Content, &stopContinuations)
+			continued, hookErr := s.continueAfterStopHook(runCtx, command, result.Content, &stopContinuations)
 			if hookErr != nil {
 				return modelport.ChatResult{}, hookErr
 			}
@@ -100,7 +104,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			return finalizeResult(result, totalUsage, reasoningParts), nil
 		}
 
-		toolResult, err := s.executeTools(ctx, generationcommand.ToolExecution{
+		toolResult, err := s.executeTools(runCtx, generationcommand.ToolExecution{
 			Session: command.Session, Calls: result.ToolCalls, Stream: command.Stream, RequestID: command.RequestID,
 			ForceChatMode: command.ForceChatMode,
 		})
@@ -120,15 +124,15 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
 			return modelport.ChatResult{}, err
 		}
-		if hook := generationcommand.AfterToolRoundFrom(ctx); hook != nil {
-			if hookErr := hook(ctx, command.Session); hookErr != nil {
+		if hook := generationcommand.AfterToolRoundFrom(runCtx); hook != nil {
+			if hookErr := hook(runCtx, command.Session); hookErr != nil {
 				return modelport.ChatResult{}, hookErr
 			}
 		}
 	}
 
 	consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
-	if err := s.compactIfNeeded(ctx, command); err != nil {
+	if err := s.compactIfNeeded(runCtx, command); err != nil {
 		return modelport.ChatResult{}, err
 	}
 	snapshot := s.Contexts.Snapshot(command.Session)
@@ -137,7 +141,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	}
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
-	result, err := command.Model.Generate(ctx, modelport.GenerateRequest{
+	result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
 		Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext, command.MemoryContext),
 		Stream:   command.Stream,
 		Settings: command.Settings,
@@ -193,6 +197,13 @@ func (s AgentLoopService) maxToolRounds(current *session.Session) int {
 		return s.MaxToolRounds
 	}
 	return DefaultMaxToolRounds
+}
+
+func (s AgentLoopService) maxKnowledgeSearchCalls() int {
+	if s.MaxKnowledgeSearchCalls > 0 {
+		return s.MaxKnowledgeSearchCalls
+	}
+	return DefaultMaxKnowledgeSearchCalls
 }
 
 func (s AgentLoopService) toolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool {

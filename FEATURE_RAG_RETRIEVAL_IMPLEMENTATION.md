@@ -476,15 +476,16 @@ ChatService.SendMessageStreamForSession
 -> ContextService.Prepare
 -> Session.RAGSettings 归一化
 -> off/manual: 跳过
--> auto: DefaultTriggerPolicy 判断是否像知识问题
+-> auto: 向模型暴露 knowledge_search，由模型决定是否调用
 -> always: 每条非空用户消息都检索
--> KnowledgeSearchFacade.Search
--> ContextFormatter.Format
--> MessageCommandService.AppendUserMessage
+-> always -> KnowledgeSearchFacade.Search
+-> always -> ContextFormatter.Format
+-> always -> MessageCommandService.AppendUserMessage
    -> SyntheticReasonRAGContext
    -> SyntheticReasonRuntimeInstruction
    -> User Message
 -> AgentLoopService.Generate
+   -> auto 模式下：模型 tool_call -> KnowledgeSearchTool -> ToolResult -> 下一轮模型
 ```
 
 Session RAG 配置保存在 Session 聚合和 Mongo Session Record 中：
@@ -524,7 +525,7 @@ RAG Context 被保存为合成消息，方便历史重放和调试；它不改�
 - RetrievalService 未装配时不注册 Tool。
 - Session 只配置 Category 或只配置 KnowledgeBase 时，模型提供的另一类范围不会绕过 Session 硬边界；
 - 分类后代解析、空范围和跨 Profile RRF；
-- Session `off/manual/auto/always` 的自动检索触发规则；
+- Session `off/manual/auto/always` 的检索模式和模型工具可见性；
 - Session 范围和 TopK 进入 Search command，检索片段进入 RAG Prompt。
 
 验证：

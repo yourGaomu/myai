@@ -25,7 +25,7 @@ func TestContextServiceHonorsSessionRetrievalModes(t *testing.T) {
 		{name: "off", mode: session.RetrievalModeOff, input: "项目架构如何实现？"},
 		{name: "manual", mode: session.RetrievalModeManual, input: "项目架构如何实现？"},
 		{name: "auto skips greeting", mode: session.RetrievalModeAuto, input: "你好"},
-		{name: "auto retrieves question", mode: session.RetrievalModeAuto, input: "项目架构如何实现？", triggered: true, calls: 1},
+		{name: "auto defers retrieval to model tool", mode: session.RetrievalModeAuto, input: "项目架构如何实现？"},
 		{name: "always retrieves greeting", mode: session.RetrievalModeAlways, input: "你好", triggered: true, calls: 1},
 	}
 
