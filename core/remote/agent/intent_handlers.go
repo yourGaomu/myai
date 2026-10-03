@@ -49,8 +49,7 @@ func intentTraceResult(trace intentport.Trace) protocol.IntentTracePayload {
 		ResponseModel: trace.ResponseModel, RequestBody: trace.RequestBody, ResponseBody: trace.ResponseBody,
 		ResponseTruncated: trace.ResponseTruncated, HTTPStatus: trace.HTTPStatus,
 		Status: trace.Status, ErrorCode: trace.ErrorCode, Choice: trace.Choice,
-		Confidence: trace.Confidence, ShouldPlan: trace.ShouldPlan,
-		ShouldExecute: trace.ShouldExecute, Route: trace.Route,
+		Confidence: trace.Confidence, Action: trace.Action, Route: trace.Route,
 	}
 }
 

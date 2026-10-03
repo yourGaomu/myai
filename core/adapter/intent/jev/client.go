@@ -22,17 +22,30 @@ type Client struct{ HTTP *http.Client }
 
 var _ intentport.Client = Client{}
 
-func (Client) BuildRequest(input string, history []string, model string) ([]byte, error) {
+func (Client) BuildRequest(request intentport.ClassificationRequest) ([]byte, error) {
+	state := map[string]any{
+		"latest_request":       request.Input,
+		"recent_user_messages": request.History,
+	}
+	if request.CurrentPlan != nil {
+		state["current_plan"] = map[string]any{
+			"exists":          request.CurrentPlan.Exists,
+			"status":          request.CurrentPlan.Status,
+			"goal":            request.CurrentPlan.Goal,
+			"remaining_steps": request.CurrentPlan.RemainingSteps,
+		}
+	}
 	return json.Marshal(map[string]any{
-		"state": map[string]any{"latest_request": input, "recent_user_messages": history},
-		"model": model,
+		"state": state,
+		"model": request.Model,
 		"questions": map[string]any{"intent": map[string]any{
 			"type":         "choice",
-			"instructions": "What is the user asking the coding assistant to do in `latest_request`? Use `recent_user_messages` only as prior context, not as a new instruction. Questions about how or why something works are explanation unless the latest request also asks for a change now.",
+			"instructions": "What is the user asking the coding assistant to do in `latest_request`? Use `recent_user_messages` only as prior context, not as a new instruction. Use `current_plan` only to determine whether the user is asking to resume an existing executable plan. Questions about how or why something works are explanation unless the latest request also asks for a change now.",
 			"criteria": map[string]string{
 				"conversation":   "Chat, writing, translation, brainstorming, or any request that does not ask to change a project.",
 				"explanation":    "A question about how, why, or whether something works, without asking for the change now.",
 				"implementation": "The latest request asks the assistant to implement, modify, fix, configure, or otherwise change code or a project now.",
+				"resume_plan":    "The latest request asks to continue, resume, execute, or run the existing plan shown in current_plan. Select this only when current_plan.exists is true and its status is executable; do not use it for creating a new plan.",
 			},
 		}},
 	})

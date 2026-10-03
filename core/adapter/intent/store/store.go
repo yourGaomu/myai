@@ -143,8 +143,7 @@ type traceDocument struct {
 	ErrorCode         string    `bson:"error_code"`
 	Choice            string    `bson:"choice"`
 	Confidence        float64   `bson:"confidence"`
-	ShouldPlan        bool      `bson:"should_plan"`
-	ShouldExecute     bool      `bson:"should_execute"`
+	Action            string    `bson:"action"`
 	Route             string    `bson:"route"`
 }
 
@@ -152,7 +151,7 @@ func traceDocumentFromDomain(trace intentport.Trace) traceDocument {
 	return traceDocument{trace.ID, trace.SessionID, trace.RequestID, trace.CreatedAt, trace.ExpiresAt,
 		trace.DurationMS, trace.BaseURL, trace.RequestedModel, trace.ResponseModel, trace.RequestBody,
 		trace.ResponseBody, trace.ResponseTruncated, trace.HTTPStatus, trace.Status, trace.ErrorCode,
-		trace.Choice, trace.Confidence, trace.ShouldPlan, trace.ShouldExecute, trace.Route}
+		trace.Choice, trace.Confidence, trace.Action, trace.Route}
 }
 
 func (document traceDocument) domain() intentport.Trace {
@@ -161,8 +160,7 @@ func (document traceDocument) domain() intentport.Trace {
 		BaseURL: document.BaseURL, RequestedModel: document.RequestedModel, ResponseModel: document.ResponseModel,
 		RequestBody: document.RequestBody, ResponseBody: document.ResponseBody, ResponseTruncated: document.ResponseTruncated,
 		HTTPStatus: document.HTTPStatus, Status: document.Status, ErrorCode: document.ErrorCode,
-		Choice: document.Choice, Confidence: document.Confidence, ShouldPlan: document.ShouldPlan,
-		ShouldExecute: document.ShouldExecute, Route: document.Route}
+		Choice: document.Choice, Confidence: document.Confidence, Action: document.Action, Route: document.Route}
 }
 
 func NewMongo(ctx context.Context, client *mongo.Client, database string) (*Mongo, error) {

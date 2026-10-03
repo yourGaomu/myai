@@ -12,6 +12,6 @@ type Store interface {
 }
 
 type Client interface {
-	BuildRequest(string, []string, string) ([]byte, error)
+	BuildRequest(ClassificationRequest) ([]byte, error)
 	Send(context.Context, Config, []byte) ([]byte, int, error)
 }

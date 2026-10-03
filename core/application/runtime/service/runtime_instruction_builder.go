@@ -70,7 +70,7 @@ func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecom
 	parts := make([]string, 0, 4)
 	parts = append(parts, RuntimeTurnBoundaryPrompt)
 	// 执行已批准计划时 ForceChatMode=true，此时跳过 Plan 指令，防止再次生成计划。
-	if request.ForcePlanMode {
+	if request.ForceAutonomousPlanning {
 		parts = append(parts, AutonomousPlanPrompt)
 	} else if b.modePolicy.IsPlanMode(request.AgentMode, request.ForceChatMode) {
 		parts = append(parts, PlanModePrompt)

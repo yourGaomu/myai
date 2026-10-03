@@ -71,9 +71,11 @@ func (t *SetUserRoleTool) Permission() tooldef.Permission {
 // 1.2 根据目标角色决定所需最低调用者权限：
 //   - 若目标 role == "admin"，要求调用者必须是 super_admin；
 //   - 若目标 role == "user" 或 "banned"，要求调用者至少是 admin；
+//
 // 1.3 查询目标用户当前在 `onebot_users` 表中的既有身份：
 //   - 若目标用户当前是 super_admin，禁止任何人通过工具修改其角色；
 //   - 若目标用户当前是 admin（即准备罢免或封禁管理员），要求调用者必须是 super_admin；
+//
 // 1.4 写入 `onebot_users` 表，记录 granted_by = caller.UserID 并返回结果。
 func (t *SetUserRoleTool) Call(ctx context.Context, rawArgs json.RawMessage) (tooldef.ToolOutput, error) {
 	// 1.1 解析并校验参数
@@ -454,7 +456,7 @@ func (t *SetPersonaTool) Call(ctx context.Context, rawArgs json.RawMessage) (too
 		}
 	}
 
-	// 1.4 若为群聊作用域，同步写入 onebot_groups.persona 持久化保存
+	// 1.4 若为群聊作用域，同步写入 onebot_groups.persona 持久化保存；若为私聊作用域，同步写入 onebot_users.persona
 	if resolvedScope == "group" && resolvedID > 0 {
 		group, found, getErr := t.store.GetGroup(ctx, resolvedID)
 		if getErr != nil {
@@ -472,6 +474,13 @@ func (t *SetPersonaTool) Call(ctx context.Context, rawArgs json.RawMessage) (too
 		group.UpdatedAt = time.Now().UTC()
 		if upErr := t.store.UpsertGroup(ctx, group); upErr != nil {
 			return executionFailedOutput("db_error", upErr), nil
+		}
+	} else if (resolvedScope == "private" || resolvedScope == "current") && resolvedID > 0 {
+		user, found, getErr := t.store.GetUser(ctx, resolvedID)
+		if getErr == nil && found {
+			user.Persona = instruction
+			user.UpdatedAt = time.Now().UTC()
+			_ = t.store.UpsertUser(ctx, user)
 		}
 	}
 

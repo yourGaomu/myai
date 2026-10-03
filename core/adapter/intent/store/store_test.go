@@ -29,7 +29,7 @@ func TestIntentConfigBSONRoundTrip(t *testing.T) {
 }
 
 func TestIntentTraceBSONRoundTrip(t *testing.T) {
-	original := intentport.Trace{ID: "trace-1", SessionID: "session-1", RequestID: "request-1", CreatedAt: time.Now().UTC().Truncate(time.Millisecond), ExpiresAt: time.Now().UTC().Truncate(time.Millisecond).Add(time.Hour), RequestBody: `{"state":"input"}`, ResponseBody: `{"choice":"implementation"}`, Status: "succeeded", Choice: "implementation", Confidence: 0.9, ShouldPlan: true, ShouldExecute: true}
+	original := intentport.Trace{ID: "trace-1", SessionID: "session-1", RequestID: "request-1", CreatedAt: time.Now().UTC().Truncate(time.Millisecond), ExpiresAt: time.Now().UTC().Truncate(time.Millisecond).Add(time.Hour), RequestBody: `{"state":"input"}`, ResponseBody: `{"choice":"resume_plan"}`, Status: "succeeded", Choice: "resume_plan", Confidence: 0.9, Action: "plan_resume", Route: "plan_resume"}
 	encoded, err := bson.Marshal(traceDocumentFromDomain(original))
 	if err != nil {
 		t.Fatal(err)

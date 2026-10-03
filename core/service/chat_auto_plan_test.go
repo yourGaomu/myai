@@ -77,7 +77,7 @@ func TestRuleBasedAutoPlanClassifierReturnsStructuredIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if decision.Intent != AutoPlanIntentImplementation || !decision.ShouldPlan || decision.Confidence <= 0 {
+	if decision.Intent != AutoPlanIntentImplementation || decision.Action != AutoPlanActionPlanExecute || decision.Confidence <= 0 {
 		t.Fatalf("unexpected implementation decision: %#v", decision)
 	}
 
@@ -85,7 +85,7 @@ func TestRuleBasedAutoPlanClassifierReturnsStructuredIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if decision.Intent != AutoPlanIntentExplanation || decision.ShouldPlan {
+	if decision.Intent != AutoPlanIntentExplanation || decision.Action != AutoPlanActionChat {
 		t.Fatalf("unexpected explanation decision: %#v", decision)
 	}
 }
@@ -104,14 +104,14 @@ func TestChatServiceFailsClosedWhenAutoPlanClassificationFails(t *testing.T) {
 	if _, err := service.SendMessageStreamForSession(context.Background(), current.ID, "请修改这个项目", modelport.ChatStreamHandler{}); err != nil {
 		t.Fatalf("SendMessageStreamForSession() error = %v", err)
 	}
-	if messages.forcePlanMode {
+	if messages.forceAutonomousPlanning {
 		t.Fatal("classifier errors must not enter autonomous planning")
 	}
 }
 
 func TestModelAutoPlanClassifierParsesSemanticDecisionWithoutTools(t *testing.T) {
 	model := &semanticClassifierModel{result: modelport.ChatResult{
-		Content: `{"intent":"implementation","should_plan":true,"confidence":0.94,"reason":"user requests a code change"}`,
+		Content: `{"intent":"implementation","confidence":0.94,"reason":"user requests a code change"}`,
 	}}
 	classifier := ModelAutoPlanClassifier{
 		Models:  semanticModelRegistry{model: model},
@@ -123,7 +123,7 @@ func TestModelAutoPlanClassifierParsesSemanticDecisionWithoutTools(t *testing.T)
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if !decision.ShouldPlan || decision.Intent != AutoPlanIntentImplementation || decision.Confidence != 0.94 {
+	if decision.Action != AutoPlanActionPlanExecute || decision.Intent != AutoPlanIntentImplementation || decision.Confidence != 0.94 {
 		t.Fatalf("unexpected semantic decision: %#v", decision)
 	}
 	if len(model.requests) != 1 || len(model.requests[0].Tools) != 0 {
@@ -133,7 +133,7 @@ func TestModelAutoPlanClassifierParsesSemanticDecisionWithoutTools(t *testing.T)
 
 func TestModelAutoPlanClassifierRejectsLowConfidenceImplementation(t *testing.T) {
 	model := &semanticClassifierModel{result: modelport.ChatResult{
-		Content: `{"intent":"implementation","should_plan":true,"confidence":0.4,"reason":"uncertain"}`,
+		Content: `{"intent":"implementation","confidence":0.4,"reason":"uncertain"}`,
 	}}
 	classifier := ModelAutoPlanClassifier{Models: semanticModelRegistry{model: model}}
 	decision, err := classifier.Classify(context.Background(), &session.Session{
@@ -143,14 +143,14 @@ func TestModelAutoPlanClassifierRejectsLowConfidenceImplementation(t *testing.T)
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if decision.ShouldPlan {
+	if decision.Action != AutoPlanActionChat {
 		t.Fatal("low-confidence implementation decisions must not auto-plan")
 	}
 }
 
 func TestModelAutoPlanClassifierSkipsObviousTurns(t *testing.T) {
 	model := &semanticClassifierModel{result: modelport.ChatResult{
-		Content: `{"intent":"implementation","should_plan":true,"confidence":1,"reason":"unexpected"}`,
+		Content: `{"intent":"implementation","confidence":1,"reason":"unexpected"}`,
 	}}
 	classifier := ModelAutoPlanClassifier{Models: semanticModelRegistry{model: model}}
 	current := &session.Session{Kind: session.KindUser, Model: "model-1"}
@@ -158,14 +158,14 @@ func TestModelAutoPlanClassifierSkipsObviousTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if decision.ShouldPlan || len(model.requests) != 0 {
+	if decision.Action != AutoPlanActionChat || len(model.requests) != 0 {
 		t.Fatalf("obvious conversation should not call the classifier model: decision=%#v requests=%d", decision, len(model.requests))
 	}
 }
 
 func TestModelAutoPlanClassifierUsesSemanticModelForAmbiguousContext(t *testing.T) {
 	model := &semanticClassifierModel{result: modelport.ChatResult{
-		Content: `{"intent":"implementation","should_plan":true,"confidence":0.88,"reason":"follow-up asks to complete the project change"}`,
+		Content: `{"intent":"implementation","confidence":0.88,"reason":"follow-up asks to complete the project change"}`,
 	}}
 	classifier := ModelAutoPlanClassifier{Models: semanticModelRegistry{model: model}}
 	current := &session.Session{
@@ -176,7 +176,7 @@ func TestModelAutoPlanClassifierUsesSemanticModelForAmbiguousContext(t *testing.
 	if err != nil {
 		t.Fatalf("Classify() error = %v", err)
 	}
-	if !decision.ShouldPlan || len(model.requests) != 1 {
+	if decision.Action != AutoPlanActionPlanExecute || len(model.requests) != 1 {
 		t.Fatalf("ambiguous project follow-up should use semantic classification: decision=%#v requests=%d", decision, len(model.requests))
 	}
 }
@@ -211,7 +211,7 @@ func TestSendMessageAutomaticallyPlansAndExecutesDevelopmentRequest(t *testing.T
 	if err != nil {
 		t.Fatalf("SendMessageStreamForSession() error = %v", err)
 	}
-	if !messages.forcePlanMode {
+	if !messages.forceAutonomousPlanning {
 		t.Fatal("expected the user turn to carry autonomous planning mode")
 	}
 	if len(planner.commands) != 1 || !planner.commands[0].CapturePlan || planner.commands[0].Session.AgentMode != session.AgentModePlan {
@@ -248,7 +248,7 @@ func TestSendMessagePlansWithoutExecutingWhenDecisionRequiresConfirmation(t *tes
 type planOnlyClassifier struct{}
 
 func (planOnlyClassifier) Classify(context.Context, *session.Session, string) (AutoPlanDecision, error) {
-	return AutoPlanDecision{Intent: AutoPlanIntentImplementation, ShouldPlan: true}, nil
+	return AutoPlanDecision{Intent: AutoPlanIntentImplementation, Action: AutoPlanActionPlanOnly}, nil
 }
 
 func TestSendMessageResumesExistingPlanOnContinuationCommand(t *testing.T) {
@@ -277,7 +277,7 @@ func TestSendMessageResumesExistingPlanOnContinuationCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendMessageStreamForSession() error = %v", err)
 	}
-	if messages.forcePlanMode {
+	if messages.forceAutonomousPlanning {
 		t.Fatal("continuation commands must not start a new planning turn")
 	}
 	if len(executor.commands) != 1 || executor.commands[0].SessionID != current.ID {
@@ -288,13 +288,44 @@ func TestSendMessageResumesExistingPlanOnContinuationCommand(t *testing.T) {
 	}
 }
 
+func TestSendMessageDoesNotResumeMissingPlan(t *testing.T) {
+	current := &session.Session{ID: "session-1", Kind: session.KindUser, Model: "model-1", AgentMode: session.AgentModeChat}
+	messages := &recordingAutoPlanMessages{current: current}
+	chatGeneration := &recordingAutoPlanGeneration{response: generationresult.GenerationResponse{
+		SessionID: current.ID,
+		Result:    modelport.ChatResult{Content: "normal answer"},
+	}}
+	executor := &recordingAutoPlanExecution{}
+	service := NewChatService(ChatDependencies{
+		AutoPlanEnabled: true, AutoPlanClassifier: resumeClassifier{},
+		Models: autoPlanModelRegistry{}, SessionLoader: autoPlanSessionLoader{current: current},
+		MessageCommands: messages, GenerationTasks: chatGeneration, PlanExecution: executor,
+	})
+	response, err := service.SendMessageStreamForSession(context.Background(), current.ID, "继续执行", modelport.ChatStreamHandler{})
+	if err != nil {
+		t.Fatalf("SendMessageStreamForSession() error = %v", err)
+	}
+	if len(executor.commands) != 0 || len(chatGeneration.commands) != 1 || messages.forceAutonomousPlanning {
+		t.Fatalf("missing plan must fall back to chat: executor=%d generation=%d autonomous=%v", len(executor.commands), len(chatGeneration.commands), messages.forceAutonomousPlanning)
+	}
+	if response.Result.Content != "normal answer" {
+		t.Fatalf("unexpected fallback response: %#v", response)
+	}
+}
+
+type resumeClassifier struct{}
+
+func (resumeClassifier) Classify(context.Context, *session.Session, string) (AutoPlanDecision, error) {
+	return AutoPlanDecision{Intent: AutoPlanIntentResumePlan, Action: AutoPlanActionResumePlan}, nil
+}
+
 type recordingAutoPlanMessages struct {
-	current       *session.Session
-	forcePlanMode bool
+	current                 *session.Session
+	forceAutonomousPlanning bool
 }
 
 func (m *recordingAutoPlanMessages) AppendUserMessage(_ context.Context, command messagecommand.AppendUserMessage) (messageresult.Command, error) {
-	m.forcePlanMode = command.ForcePlanMode
+	m.forceAutonomousPlanning = command.ForceAutonomousPlanning
 	return messageresult.Command{Session: m.current, Input: command.Input, Appended: true}, nil
 }
 

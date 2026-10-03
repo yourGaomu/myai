@@ -25,13 +25,23 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   const showStatusText = statusText && message.status !== "streaming" && message.status !== "tool_running";
 
   if (message.role === "tool_call" || message.role === "tool") {
+    const isKnowledgeSearch = message.toolName === "knowledge_search";
+    const displayName = isKnowledgeSearch ? "知识库检索" : message.toolName || "工具";
     return (
       <View style={[styles.message, styles.toolMessage]}>
         <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolHeader, pressed)}>
           <Text style={styles.toolBadge}>{message.role === "tool_call" ? "调用" : message.toolError ? "错误" : "完成"}</Text>
           <View style={styles.flex}>
-            <Text style={styles.toolTitle}>{message.toolName || "工具"}</Text>
-            <Text style={styles.toolSubtitle}>{message.role === "tool_call" ? "工具请求" : "工具结果"}</Text>
+            <Text style={styles.toolTitle}>{displayName}</Text>
+            <Text style={styles.toolSubtitle}>
+              {isKnowledgeSearch
+                ? message.role === "tool_call"
+                  ? "知识库检索"
+                  : "知识库结果"
+                : message.role === "tool_call"
+                  ? "工具请求"
+                  : "工具结果"}
+            </Text>
           </View>
           <Text style={styles.toolToggle}>{expanded ? "收起" : "展开"}</Text>
         </Pressable>

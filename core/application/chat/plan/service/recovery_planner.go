@@ -36,7 +36,7 @@ func (p GenerationRecoveryPlanner) Recover(ctx context.Context, request plancomm
 	}
 	input := fmt.Sprintf("A plan execution step failed and needs recovery.\n\nFailed step: %s\nError: %s\nAttempt: %d\n\nInspect the workspace with read-only tools if needed, then return a concise Plan section containing only replacement or follow-up steps. Do not make changes in this recovery turn.", request.Step.Title, strings.TrimSpace(request.Error), request.Attempt)
 	prepared, err := p.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
-		SessionID: request.Plan.SessionID, Input: input, ForcePlanMode: true,
+		SessionID: request.Plan.SessionID, Input: input, ForceAutonomousPlanning: true,
 		SyntheticReason:      domainmessage.SyntheticReasonAutonomousPlanning,
 		DeduplicateSynthetic: true,
 	})

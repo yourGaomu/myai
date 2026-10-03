@@ -386,6 +386,35 @@ export function KnowledgePanel({
                 </Pressable>
               ))}
             </View>
+            <View style={styles.modeExplainBox}>
+              {(["off", "manual", "auto", "always"] as const).map((mode) => {
+                const isSelected = settings.mode === mode;
+                return (
+                  <Pressable
+                    disabled={!canUpdateRAG || pendingSettings || isSelected}
+                    key={mode}
+                    onPress={() => updateRAG({ mode })}
+                    style={({ pressed }) =>
+                      buttonFeedback(
+                        [
+                          styles.modeExplainItem,
+                          isSelected && styles.modeExplainItemActive,
+                        ],
+                        pressed,
+                      )
+                    }
+                  >
+                    <Text style={[styles.modeExplainText, isSelected && styles.modeExplainTextActive]}>
+                      <Text style={[styles.modeExplainLabel, isSelected && styles.modeExplainLabelActive]}>
+                        {isSelected ? "● " : "○ "}
+                        {modeLabel(mode)}：
+                      </Text>
+                      {modeDescription(mode)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             <View style={styles.rowBetween}>
               <Text style={styles.meta}>Top K</Text>
               <TextInput
@@ -1081,7 +1110,29 @@ function normalizeRAG(value?: RAGSettings): RAGSettings {
 }
 
 function modeLabel(mode: string) {
-  return ({ off: "关闭", manual: "手动", auto: "自动", always: "每轮" } as Record<string, string>)[mode] || mode;
+  return (
+    ({
+      off: "关闭",
+      manual: "手动搜索",
+      auto: "智能按需检索",
+      always: "每轮强制检索",
+    } as Record<string, string>)[mode] || mode
+  );
+}
+
+function modeDescription(mode: string): string {
+  switch (mode) {
+    case "off":
+      return "聊天不会使用知识库。";
+    case "manual":
+      return "只通过知识库搜索按钮查询，不自动参与聊天。";
+    case "auto":
+      return "模型判断当前问题需要内部资料时，才调用 knowledge_search。";
+    case "always":
+      return "每条非空消息生成前都执行知识库检索。";
+    default:
+      return "";
+  }
 }
 
 function categoryPathLabel(category: KnowledgeCategory, categories: KnowledgeCategory[]) {
@@ -1209,11 +1260,18 @@ const styles = StyleSheet.create({
   hitTitle: { color: "#12100e", fontSize: 12, fontWeight: "900" },
   hitText: { color: "#3d3833", fontSize: 12, lineHeight: 18 },
   disclosure: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
-  modeRow: { flexDirection: "row", gap: 6, width: "100%" },
-  modeButton: { alignItems: "center", borderColor: "#b8aea1", borderRadius: 6, borderWidth: 2, flexBasis: 0, flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 40, minWidth: 0, paddingHorizontal: 4, paddingVertical: 8 },
+  modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
+  modeButton: { alignItems: "center", borderColor: "#b8aea1", borderRadius: 6, borderWidth: 2, flexBasis: "48%", flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 38, minWidth: 0, paddingHorizontal: 6, paddingVertical: 7 },
   modeButtonActive: { backgroundColor: "#ffd84f", borderColor: "#12100e" },
   modeText: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
   modeTextActive: { color: "#12100e" },
+  modeExplainBox: { backgroundColor: "#fcfaf6", borderColor: "#ded7cc", borderRadius: 8, borderWidth: 1.5, gap: 4, padding: 6, width: "100%" },
+  modeExplainItem: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
+  modeExplainItemActive: { backgroundColor: "#fffdf7", borderColor: "#12100e", borderWidth: 1.5 },
+  modeExplainText: { color: "#6c665f", fontSize: 11, lineHeight: 16 },
+  modeExplainTextActive: { color: "#12100e" },
+  modeExplainLabel: { color: "#544e47", fontWeight: "700" },
+  modeExplainLabelActive: { color: "#12100e", fontWeight: "900" },
   protoSectionHeader: {
     alignItems: "center",
     flexDirection: "row",

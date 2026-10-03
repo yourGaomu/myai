@@ -118,6 +118,16 @@ function formatToolActionRowTitle(tool: ToolCallStep): string {
   const summary = formatSingleLineCommand(extractToolSummary(tool));
   const lower = tool.name.toLowerCase();
 
+  if (tool.name === "knowledge_search") {
+    if (tool.status === "running") {
+      return summary ? `正在执行 知识库检索 · ${summary}` : "正在执行 知识库检索";
+    }
+    if (tool.status === "error" || tool.error) {
+      return summary ? `知识库检索失败 · ${summary}` : "知识库检索失败";
+    }
+    return summary ? `已检索知识库 · ${summary}` : "知识库检索";
+  }
+
   if (tool.status === "running") {
     return summary ? `正在运行 ${tool.name} · ${summary}` : `正在运行 ${tool.name}`;
   }
@@ -512,7 +522,7 @@ function InterleavedToolRow({
                   <Text style={styles.toolReqBadgeText}>调用请求</Text>
                 </View>
                 <Text numberOfLines={1} style={styles.shellHeaderTitle}>
-                  {tool.name}
+                  {tool.name === "knowledge_search" ? "知识库检索" : tool.name}
                 </Text>
               </View>
             </View>

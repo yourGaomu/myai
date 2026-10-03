@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   composerBox: {
-    alignItems: "center",
+    alignItems: "flex-end",
     backgroundColor: "#fffdf7",
     borderColor: "#12100e",
     borderRadius: 14,

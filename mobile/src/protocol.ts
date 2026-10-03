@@ -853,6 +853,7 @@ export type IntentTraceRoute =
   | "chat"
   | "plan_only"
   | "plan_execute"
+  | "plan_resume"
   | "test"
   | string;
 
@@ -871,10 +872,9 @@ export type IntentTracePayload = {
   http_status?: number;
   status: IntentTraceStatus;
   error_code?: string;
-  choice?: "conversation" | "explanation" | "implementation" | string;
+  choice?: "conversation" | "explanation" | "implementation" | "resume_plan" | string;
   confidence?: number;
-  should_plan: boolean;
-  should_execute: boolean;
+  action: "chat" | "plan_only" | "plan_execute" | "plan_resume" | string;
   route?: IntentTraceRoute;
 };
 

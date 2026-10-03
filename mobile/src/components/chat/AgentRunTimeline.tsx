@@ -214,6 +214,9 @@ function eventLabel(event: AgentRunEvent) {
 }
 
 function eventTitle(event: AgentRunEvent) {
+  if (event.tool_name === "knowledge_search" || event.title === "knowledge_search") {
+    return event.type === "tool_result" ? "知识库检索结果" : "知识库检索";
+  }
   if (event.tool_name) {
     return event.tool_name;
   }

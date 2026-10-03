@@ -170,13 +170,14 @@ const styles = StyleSheet.create({
     width: 42,
   },
   brandImage: {
-    height: 40,
-    width: 40,
+    height: 38,
+    resizeMode: "contain",
+    width: 38,
   },
   motionImage: {
-    height: 50,
+    height: 38,
     resizeMode: "contain",
-    width: 24,
+    width: 32,
   },
   headerText: {
     flex: 1,

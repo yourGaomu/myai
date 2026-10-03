@@ -11,7 +11,7 @@
 1. `RuleBasedAutoPlanClassifier` 用中英文关键词做子串匹配。
 2. 只有规则拿不准、且最近聊过项目时，才让聊天模型返回一段 JSON。
 
-问题是规则一旦判成「要实现」，就不会再问模型。规则需要同时命中动作关键词和项目上下文，因此包含动作词与项目上下文的表达，例如 `增加了解这个项目`、`修复这个 bug`，可能直接得到 `ShouldPlan=true`；单独的 `问题` 或 `fix` 并不必然触发自动规划。内置判断保持原有的规划并执行行为，Jev 判断则按置信度分别进入聊天、只规划、规划并执行。
+问题是规则一旦判成「要实现」，就不会再问模型。规则需要同时命中动作关键词和项目上下文，因此包含动作词与项目上下文的表达，例如 `增加了解这个项目`、`修复这个 bug`，可能直接得到 `plan_execute`；单独的 `问题` 或 `fix` 并不必然触发自动规划。内置判断保持原有的规划并执行行为，Jev 判断则按置信度分别进入聊天、只规划、规划并执行。
 
 Jev（`jev-latest`；需要固定版本时使用官方版本号 `jev-1.13.0`）是 TypeSafe 的 System One 模型。它不生成普通回复、不调工具。一次请求给 state 和定型题目，返回选项、概率和 confidence。这正好适合「进不进 Plan」，不适合替换写代码的模型。
 
@@ -20,7 +20,7 @@ Jev（`jev-latest`；需要固定版本时使用官方版本号 `jev-1.13.0`）�
 - 不用 Jev 替换 AgentLoop、工具调用或聊天模型。
 - 不把「Jev 判成 implementation」直接等同于现在的自动执行。
 - 不把整段会话、工具输出、系统提示塞给 Jev。state 越大、无关内容越多，越容易判错。
-- 不让 Jev 处理子会话、空消息、以及「继续 / 继续执行 / resume plan」这类整句。这些留在代码里。
+- 不让 Jev 处理子会话和空消息；恢复计划可以交给 Jev 结合当前计划上下文判断，最终是否允许执行仍由代码确认。
 - 不靠再加关键词来补洞。
 
 ## 3. 后端行为
@@ -42,7 +42,7 @@ Jev（`jev-latest`；需要固定版本时使用官方版本号 `jev-1.13.0`）�
 
 三条路对应 TypeSafe 的 confidence routing：低不行动，中先生成计划并等待用户确认，高才自动做。写文件是高风险动作，门槛要高于「只是切到 Plan」。
 
-后端 `AutoPlanDecision` 已包含 `ShouldPlan` 和 `ShouldExecute`；前端尚未提供切换策略的页面。未保存新配置时默认 `system`，以兼容旧行为。Jev 请求失败不自动退回 `system`。
+后端 `AutoPlanDecision` 使用互斥的 `Action`；前端尚未提供切换策略的页面。未保存新配置时默认 `system`，以兼容旧行为。Jev 请求失败不自动退回 `system`。
 
 Jev 默认阈值如下，上线前仍需用中文用例校准：
 
@@ -83,54 +83,51 @@ Jev 默认阈值如下，上线前仍需用中文用例校准：
 
 Jev 按字面理解题目。边界必须写进 criteria，不能靠它猜「增加了解」不是「增加功能」。中文例句要放进测试，不放进一大段 state。
 
-返回使用 `answers.intent.choice` 和 `answers.intent.confidence`。未知选项当失败。
+返回使用 `answers.intent.choice` 和 `answers.intent.confidence`。`choice` 支持 `conversation`、`explanation`、`implementation`、`resume_plan`；未知选项当失败。`resume_plan` 只表示用户想恢复当前已有计划，最终是否允许执行仍由后端检查当前计划状态。
 
 当前请求超时为 3 秒，响应体上限为 64 KiB；这些是本项目的工程配置，不是 TypeSafe 的 API 保证。
 
 ## 5. 和现有代码怎么接
 
-`AutoPlanClassifier.Classify` 方法签名保持不变，`AutoPlanDecision` 已新增 `ShouldExecute`。`ChatService` 在分类失败时退回普通聊天。
+`AutoPlanClassifier.Classify` 方法签名保持不变，`AutoPlanDecision.Action` 表示本轮唯一的编排动作。`ChatService` 在分类失败时退回普通聊天。
 
-「进 Plan」和「马上执行」已经拆开。分类控制器给出两个显式结果，ChatService 不再自行推断 confidence：
+「进 Plan」和「马上执行」已经拆开。分类控制器给出一个互斥动作，ChatService 不再自行推断 confidence：
 
 ```text
-ShouldPlan      是否进入只读规划
-ShouldExecute   是否在同一请求里执行
+Action = chat          普通聊天
+Action = plan_only     只读规划并保存计划
+Action = plan_execute  生成计划后立即执行
+Action = plan_resume   执行当前已有计划
 ```
 
-| ShouldPlan | ShouldExecute | 行为 |
-|---|---|---|
-| false | false | 普通聊天 |
-| true | false | 只读规划，Plan 停在可执行状态 |
-| true | true | 现有自动规划并执行 |
+四种 Action 互斥，因此不会出现“新建计划”和“恢复旧计划”同时为真的状态。`plan_resume` 在执行前仍由 ChatService 本地检查当前计划是否可执行。
 
-`ShouldExecute` 不能在 `ShouldPlan=false` 时为 true。
-
-当前分支先判断“恢复已有计划”，再进行自动意图分类：
+当前分支先加载会话，再使用所选策略进行统一意图分类：
 
 ```go
 // 伪代码，展示已实现的职责边界。
 if isSubagent || strings.TrimSpace(input) == "" {
 	return normalChat()
 }
-if shouldResumePlanRequest(current, input) {
-	return executeExistingPlan()
-}
 if !autoPlanEnabled {
 	return normalChat()
 }
 
 decision := classifyWithSelectedStrategy(current, input) // off / system / jev
-if decision.ShouldPlan {
-	if decision.ShouldExecute {
-		return generateAndExecutePlan()
+switch decision.Action {
+case "plan_resume":
+	if hasExecutablePlan(current) {
+		return executeExistingPlan()
 	}
+case "plan_execute":
+	return generateAndExecutePlan()
+case "plan_only":
 	return generatePlanOnly() // 保存可执行 Plan，但不调用 PlanExecution.Execute
 }
 return normalChat()
 ```
 
-`generatePlanOnly` 复用只读规划生成流程，保存可执行 Plan，不调用 `PlanExecution.Execute`。用户之后发送“继续执行”等精确短语时，进入 `executeExistingPlan`。
+`generatePlanOnly` 复用只读规划生成流程，保存可执行 Plan，不调用 `PlanExecution.Execute`。用户之后发送“继续执行”等表达恢复意图的输入时，由 system/Jev 分类为 `resume_plan`，再进入 `executeExistingPlan`。`off` 策略仍保留精确恢复短语作为本地快捷入口。
 
 配置由 Agent 后端管理，前端将在“设置 → 自动规划”页面提供操作。以下是独立于聊天模型的配置字段示意，不是静态 YAML 文件：
 
@@ -154,7 +151,7 @@ intent_classifier:
 core/port/intent          Config、Trace、Client 与 Store 契约
 core/adapter/intent/jev   HTTP 客户端，只负责 System One Choice
 core/adapter/intent/store Mongo/内存配置与记录仓储
-core/service              IntentController，把 choice/confidence 变成 ShouldPlan/ShouldExecute
+core/service              IntentController，把 choice/confidence 变成互斥 Action
 core/composition/chat     注入可动态切换的分类控制器
 core/remote/protocol      配置、连接测试、判断记录的消息协议
 core/remote/agent         配置和记录的处理入口
@@ -188,7 +185,7 @@ Jev 不注册成普通聊天模型：现有 `ModelConfig`、`ChatModelPort`、`F
 
 ## 7. 记录每次 Jev 判断
 
-每次实际调用 Jev（包括连接测试）都生成 `trace_id`，并在手机请求中关联 `session_id`、`request_id`。记录实际发出的裁剪后请求体和收到的响应体；若内容恰好包含当前 API Key，则该片段会在记录里脱敏。原始响应体保留 `answers.intent.probabilities` 和 usage，列表中只给摘要，详情才返回正文。HTTP 失败保存状态码、错误类别和耗时；超时或无响应时响应体为空。子会话、空消息、恢复计划短语不调用 Jev，也不生成 Jev 记录。
+每次实际调用 Jev（包括连接测试）都生成 `trace_id`，并在手机请求中关联 `session_id`、`request_id`。记录实际发出的裁剪后请求体和收到的响应体；若内容恰好包含当前 API Key，则该片段会在记录里脱敏。原始响应体保留 `answers.intent.probabilities` 和 usage，列表中只给摘要，详情才返回正文。HTTP 失败保存状态码、错误类别和耗时；超时或无响应时响应体为空。子会话和空消息不调用 Jev；恢复计划请求在 `jev` 策略下会调用 Jev 并记录 `route=plan_resume`。
 
 建议的记录字段：
 
@@ -196,7 +193,7 @@ Jev 不注册成普通聊天模型：现有 `ModelConfig`、`ChatModelPort`、`F
 trace_id, session_id, request_id, created_at, duration_ms
 base_url, requested_model, response_model
 request_body, response_body, response_truncated, http_status, error_code
-choice, confidence, should_plan, should_execute, route
+choice, confidence, action, route
 status: started | succeeded | http_error | timeout | invalid_response
 ```
 
@@ -208,7 +205,7 @@ status: started | succeeded | http_error | timeout | invalid_response
 
 - 子会话：不调用 Jev，不自动规划。
 - 空消息：闲聊。
-- `shouldResumePlanRequest`：整句等于「继续」「继续执行」「resume plan」等，且当前计划存在并处于可执行状态，才恢复已有计划。这是确定性规则，不交给 Jev；当前它先于选定策略的分类执行，所以 Jev 失效或策略为 `off` 时仍可恢复已有 Plan。
+- `shouldResumePlanRequest`：system/off 策略下，整句等于「继续」「继续执行」「resume plan」等时提供本地快捷恢复；jev 策略把 `resume_plan` 交给 Jev 结合当前计划上下文判断。无论来源是什么，执行前都必须再次确认当前计划处于可执行状态。
 - 用户在设置里手动切到 Plan：与 Jev 无关，保持现有 Plan 模式。
 
 ## 9. 验收用例

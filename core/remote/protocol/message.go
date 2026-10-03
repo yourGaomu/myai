@@ -900,8 +900,7 @@ type IntentTracePayload struct {
 	ErrorCode         string    `json:"error_code,omitempty"`
 	Choice            string    `json:"choice,omitempty"`
 	Confidence        float64   `json:"confidence,omitempty"`
-	ShouldPlan        bool      `json:"should_plan"`
-	ShouldExecute     bool      `json:"should_execute"`
+	Action            string    `json:"action"`
 	Route             string    `json:"route,omitempty"`
 }
 

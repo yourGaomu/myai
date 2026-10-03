@@ -33,6 +33,7 @@ type UserIdentity struct {
 	Role             Role      `bson:"role" json:"role"`
 	GrantedBy        int64     `bson:"granted_by" json:"granted_by"`
 	PrivateSessionID string    `bson:"private_session_id" json:"private_session_id"`
+	Persona          string    `bson:"persona,omitempty" json:"persona,omitempty"`
 	LastActiveAt     time.Time `bson:"last_active_at" json:"last_active_at"`
 	CreatedAt        time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt        time.Time `bson:"updated_at" json:"updated_at"`
@@ -335,6 +336,7 @@ func (s *MongoStore) UpsertUser(ctx context.Context, user UserIdentity) error {
 			"role":               string(user.Role),
 			"granted_by":         user.GrantedBy,
 			"private_session_id": user.PrivateSessionID,
+			"persona":            user.Persona,
 			"last_active_at":     user.LastActiveAt,
 			"updated_at":         user.UpdatedAt,
 		},

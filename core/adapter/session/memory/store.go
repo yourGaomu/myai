@@ -41,7 +41,7 @@ type Store struct {
 
 func NewStore(modelID string) *Store {
 	if modelID == "" {
-		modelID = "gpt-5.5"
+		modelID = "grok-4.7"
 	}
 
 	return &Store{

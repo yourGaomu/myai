@@ -35,7 +35,7 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if command.DeduplicateSynthetic && hasSyntheticMessage(current.Messages, command.SyntheticReason, command.Input) {
 		return messageresult.Command{Session: current, Input: command.Input, Appended: false}, nil
 	}
-	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForcePlanMode)
+	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForceAutonomousPlanning)
 	messageCount := len(current.Messages)
 	if err := s.Memory.AddUserTurnWithReasonTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason); err != nil {
 		return messageresult.Command{}, err
@@ -74,11 +74,11 @@ func (s CommandService) PrepareRegeneration(ctx context.Context, command message
 	return messageresult.Command{Session: current, Input: input, RuntimeInstruction: latestRuntimeInstruction(current.Messages)}, nil
 }
 
-func (s CommandService) runtimeInstruction(ctx context.Context, current *session.Session, input string, forceChatMode bool, forcePlanMode bool) string {
+func (s CommandService) runtimeInstruction(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) string {
 	if s.RuntimeInstructions == nil {
 		return ""
 	}
-	if forcePlanMode {
+	if forceAutonomousPlanning {
 		if provider, ok := s.RuntimeInstructions.(messageport.PlanningRuntimeInstructionProvider); ok {
 			return strings.TrimSpace(provider.PromptForMode(ctx, current, input, forceChatMode, true))
 		}

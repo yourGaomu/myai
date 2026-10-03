@@ -456,6 +456,9 @@ func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *User
 	if err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(user.Persona) != "" {
+		_ = b.chat.SetStyleInstructionForSession(ctx, newID, user.Persona)
+	}
 	user.PrivateSessionID = newID
 	user.UpdatedAt = time.Now().UTC()
 	if err := b.store.UpsertUser(ctx, *user); err != nil {

@@ -28,7 +28,7 @@ type RuntimeInstructionProvider interface {
 // PlanningRuntimeInstructionProvider is an optional extension. Keeping it
 // separate preserves compatibility with existing runtime prompt providers.
 type PlanningRuntimeInstructionProvider interface {
-	PromptForMode(ctx context.Context, current *session.Session, input string, forceChatMode bool, forcePlanMode bool) string
+	PromptForMode(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) string
 }
 
 type RegenerationPersistence interface {

@@ -26,6 +26,23 @@ type Config struct {
 	ExecuteConfidence float64
 }
 
+// ClassificationRequest contains the user context needed by an intent
+// provider. CurrentPlan is advisory input for the classifier; the caller still
+// performs the final executable-plan check before running anything.
+type ClassificationRequest struct {
+	Input       string
+	History     []string
+	Model       string
+	CurrentPlan *PlanContext
+}
+
+type PlanContext struct {
+	Exists         bool
+	Status         string
+	Goal           string
+	RemainingSteps int
+}
+
 type ConfigView struct {
 	Strategy          Strategy
 	BaseURL           string
@@ -61,8 +78,7 @@ type Trace struct {
 	ErrorCode         string
 	Choice            string
 	Confidence        float64
-	ShouldPlan        bool
-	ShouldExecute     bool
+	Action            string
 	Route             string
 }
 

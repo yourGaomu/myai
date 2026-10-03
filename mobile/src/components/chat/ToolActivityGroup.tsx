@@ -63,7 +63,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
       <View style={styles.toolGroupStepHeader}>
         <Text style={[styles.toolGroupStepBadge, failed && styles.toolGroupStepBadgeError]}>{badge}</Text>
         <Text numberOfLines={1} style={styles.toolGroupStepTitle}>
-          {message.toolName || "tool"}
+          {message.toolName === "knowledge_search" ? "知识库检索" : message.toolName || "tool"}
         </Text>
         <Text style={styles.toolGroupStepMeta}>#{index}</Text>
       </View>
@@ -109,7 +109,10 @@ function toolActivitySummary(group: ToolActivityGroupItem) {
     parts.push(`${group.failedCount} 个失败`);
   }
 
-  const names = group.names.slice(0, 4).join(", ");
+  const names = group.names
+    .map((name) => (name === "knowledge_search" ? "知识库检索" : name))
+    .slice(0, 4)
+    .join(", ");
   if (names) {
     parts.push(names + (group.names.length > 4 ? "..." : ""));
   }

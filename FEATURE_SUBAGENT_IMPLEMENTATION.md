@@ -75,12 +75,13 @@ return service.ChatDependencies{
 
 ### 2.2 分类结果
 
-分类器返回固定的三类意图：
+分类器返回固定的四类意图：
 
 ~~~text
 conversation    普通聊天、创作或未充分明确的请求
 explanation     为什么、如何、能否、是否等解释/可行性问题
 implementation   要求实现、修改、修复、构建或变更项目
+resume_plan      要求执行当前已有计划
 ~~~
 
 对应结构：
@@ -88,17 +89,18 @@ implementation   要求实现、修改、修复、构建或变更项目
 ~~~go
 type AutoPlanDecision struct {
     Intent     AutoPlanIntent
-    ShouldPlan bool
+    Action     AutoPlanAction
     Confidence float64
     Reason     string
 }
 ~~~
 
-ShouldPlan=true 必须同时满足：
+`Action` 是互斥的：
 
-- 意图为 implementation。
-- 请求有足够的代码/项目上下文。
-- 分类置信度达到阈值。
+- `chat`：普通聊天。
+- `plan_only`：生成并保存计划，等待后续恢复。
+- `plan_execute`：生成计划后立即执行。
+- `plan_resume`：执行当前已有计划，执行前还要本地确认计划可执行。
 
 ### 2.3 两级分类策略
 
@@ -118,14 +120,13 @@ ShouldPlan=true 必须同时满足：
 
 ~~~json
 {
-  "intent": "implementation|explanation|conversation",
-  "should_plan": true,
+  "intent": "implementation|resume_plan|explanation|conversation",
   "confidence": 0.92,
   "reason": "用户明确要求修改项目"
 }
 ~~~
 
-分类阶段不执行工具、不写文件、不修改 Session。分类失败时安全降级为普通 Chat，避免模型分类故障意外触发写操作。
+分类阶段不执行工具、不写文件、不修改 Session。模型只返回意图和置信度，Action 由后端唯一决定。分类失败时安全降级为普通 Chat，避免模型分类故障意外触发写操作。
 
 ### 2.4 一条消息内的规划与执行
 
@@ -134,8 +135,11 @@ ChatService.SendMessageStreamForSession 的关键流程：
 ~~~text
 加载当前 Session
   -> AutoPlanClassifier.Classify
-  -> AppendUserMessage(ForcePlanMode=ShouldPlan)
-  -> ShouldPlan=true ? generateAndExecutePlan : 普通生成
+  -> AppendUserMessage(ForceAutonomousPlanning=Action in {plan_only, plan_execute})
+  -> Action=plan_execute ? generateAndExecutePlan
+  -> Action=plan_only ? generatePlanOnly
+  -> Action=plan_resume ? executeExistingPlan
+  -> otherwise 普通生成
 ~~~
 
 generateAndExecutePlan 会：
@@ -711,7 +715,7 @@ mobile/src/components/subagents/SubagentPanel.tsx 提供：
 系统行为：
 
 ~~~text
-1. AutoPlanClassifier -> implementation / should_plan=true
+1. AutoPlanClassifier -> implementation / action=plan_execute
 2. 只读规划模型生成结构化 Plan：
    - 设计接口
    - 修改 Go 后端

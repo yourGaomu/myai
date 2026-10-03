@@ -10,6 +10,7 @@ import (
 
 	jevclient "myai/core/adapter/intent/jev"
 	intentstore "myai/core/adapter/intent/store"
+	agentplan "myai/core/plan"
 	intentport "myai/core/port/intent"
 	"myai/core/session"
 )
@@ -41,17 +42,17 @@ func TestIntentControllerJevRoutesAndRecordsExactBodies(t *testing.T) {
 	}
 	current := &session.Session{ID: "session-1", Kind: session.KindUser}
 	decision, err := controller.Classify(intentport.WithRequestID(context.Background(), "request-1"), current, "实现这个功能")
-	if err != nil || !decision.ShouldPlan || !decision.ShouldExecute {
+	if err != nil || decision.Action != AutoPlanActionPlanExecute {
 		t.Fatalf("high-confidence decision = %#v, %v", decision, err)
 	}
 	confidence = 0.7
 	decision, err = controller.Classify(context.Background(), current, "实现另一个功能")
-	if err != nil || !decision.ShouldPlan || decision.ShouldExecute {
+	if err != nil || decision.Action != AutoPlanActionPlanOnly {
 		t.Fatalf("medium-confidence decision = %#v, %v", decision, err)
 	}
 	confidence = 0.3
 	decision, err = controller.Classify(context.Background(), current, "实现第三个功能")
-	if err != nil || decision.ShouldPlan || decision.ShouldExecute {
+	if err != nil || decision.Action != AutoPlanActionChat {
 		t.Fatalf("low-confidence decision = %#v, %v", decision, err)
 	}
 	traces, err := controller.ListTraces(context.Background(), current.ID, 10)
@@ -88,6 +89,51 @@ func TestIntentControllerJevRoutesAndRecordsExactBodies(t *testing.T) {
 	}
 }
 
+func TestIntentControllerJevCanResumeExecutablePlan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			State struct {
+				CurrentPlan struct {
+					Exists bool `json:"exists"`
+				} `json:"current_plan"`
+			} `json:"state"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || !payload.State.CurrentPlan.Exists {
+			t.Errorf("Jev did not receive current plan context: %#v, %v", payload, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"intent":{"type":"choice","choice":"resume_plan","confidence":0.96}}}`))
+	}))
+	defer server.Close()
+
+	store := intentstore.NewMemory()
+	controller, err := NewIntentController(context.Background(), store, jevclient.Client{}, RuleBasedAutoPlanClassifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := intentport.DefaultConfig()
+	config.Strategy, config.BaseURL, config.APIKey = intentport.StrategyJev, server.URL, "secret"
+	if _, err := controller.SaveConfig(context.Background(), config, false); err != nil {
+		t.Fatal(err)
+	}
+	current := &session.Session{
+		ID:   "session-resume",
+		Kind: session.KindUser,
+		CurrentPlan: &agentplan.Plan{
+			ID: "plan-1", Status: agentplan.StatusFailed,
+			Steps: []agentplan.Step{{ID: "step-1", Status: agentplan.StepStatusPending}},
+		},
+	}
+	decision, err := controller.Classify(context.Background(), current, "继续执行")
+	if err != nil || decision.Action != AutoPlanActionResumePlan {
+		t.Fatalf("resume decision = %#v, %v", decision, err)
+	}
+	traces, err := controller.ListTraces(context.Background(), current.ID, 10)
+	if err != nil || len(traces) != 1 || traces[0].Route != "plan_resume" || traces[0].Action != string(AutoPlanActionResumePlan) {
+		t.Fatalf("resume trace = %#v, %v", traces, err)
+	}
+}
+
 func TestIntentControllerFailsClosedAndRecordsInvalidResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"answers":{"intent":{"type":"choice","choice":"implementation"}}}`))
@@ -117,7 +163,7 @@ func TestIntentControllerFailsClosedAndRecordsInvalidResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	decision, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修复代码")
-	if err != nil || decision.ShouldPlan {
+	if err != nil || decision.Action != AutoPlanActionChat {
 		t.Fatalf("off strategy = %#v, %v", decision, err)
 	}
 }
@@ -138,7 +184,7 @@ func TestIntentControllerRecordsHTTPFailure(t *testing.T) {
 	if _, err := controller.SaveConfig(context.Background(), config, false); err != nil {
 		t.Fatal(err)
 	}
-	if decision, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修改代码"); err == nil || decision.ShouldPlan {
+	if decision, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修改代码"); err == nil || decision.Action != "" {
 		t.Fatalf("401 must fail closed: %#v, %v", decision, err)
 	}
 	traces, err := controller.ListTraces(context.Background(), "session-1", 10)
@@ -175,7 +221,7 @@ func TestIntentControllerDoesNotExecuteWithoutFinalTrace(t *testing.T) {
 	if _, err := controller.SaveConfig(context.Background(), config, false); err != nil {
 		t.Fatal(err)
 	}
-	if decision, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修复代码"); err == nil || decision.ShouldExecute {
+	if decision, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修复代码"); err == nil || decision.Action != "" {
 		t.Fatalf("missing final trace must fail closed: %#v, %v", decision, err)
 	}
 }

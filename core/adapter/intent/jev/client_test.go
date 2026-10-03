@@ -19,14 +19,17 @@ func TestJevClientSendsChoiceToConfiguredBaseURL(t *testing.T) {
 			State     map[string]any `json:"state"`
 			Questions map[string]any `json:"questions"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.State["latest_request"] != "修复代码" || payload.Questions["intent"] == nil {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.State["latest_request"] != "修复代码" || payload.State["current_plan"] == nil || payload.Questions["intent"] == nil {
 			t.Errorf("request payload=%#v error=%v", payload, err)
 		}
 		_, _ = w.Write([]byte(`{"answers":{"intent":{"type":"choice","choice":"implementation","confidence":1}}}`))
 	}))
 	defer server.Close()
 	client := Client{}
-	body, err := client.BuildRequest("修复代码", []string{"这个项目有问题"}, "jev-latest")
+	body, err := client.BuildRequest(intentport.ClassificationRequest{
+		Input: "修复代码", History: []string{"这个项目有问题"}, Model: "jev-latest",
+		CurrentPlan: &intentport.PlanContext{Exists: true, Status: "failed", RemainingSteps: 1},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

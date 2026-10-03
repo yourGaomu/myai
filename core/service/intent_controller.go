@@ -14,6 +14,7 @@ import (
 	"time"
 
 	domainmessage "myai/core/domain/message"
+	agentplan "myai/core/plan"
 	intentport "myai/core/port/intent"
 	"myai/core/session"
 )
@@ -115,17 +116,29 @@ func isLoopbackHost(host string) bool {
 }
 
 func (c *IntentController) Classify(ctx context.Context, current *session.Session, input string) (AutoPlanDecision, error) {
+	//如果是子代理则不应该触发
 	if (current != nil && current.Kind == session.KindSubagent) || strings.TrimSpace(input) == "" {
-		return AutoPlanDecision{Intent: AutoPlanIntentConversation}, nil
+		return AutoPlanDecision{Intent: AutoPlanIntentConversation, Action: AutoPlanActionChat}, nil
 	}
 	c.mu.RLock()
 	config := c.config
 	c.mu.RUnlock()
+	//根据设置进行分类进行操作
 	switch config.Strategy {
 	case intentport.StrategyOff:
-		return AutoPlanDecision{Intent: AutoPlanIntentConversation, Reason: "automatic intent judgment is disabled"}, nil
+		if shouldResumePlanRequest(current, input) {
+			return AutoPlanDecision{
+				Intent:     AutoPlanIntentResumePlan,
+				Action:     AutoPlanActionResumePlan,
+				Confidence: 1,
+				Reason:     "explicit request to resume the existing plan",
+			}, nil
+		}
+		return AutoPlanDecision{Intent: AutoPlanIntentConversation, Action: AutoPlanActionChat, Reason: "automatic intent judgment is disabled"}, nil
+		//如果是系统自动判断
 	case intentport.StrategySystem:
 		return c.builtin.Classify(ctx, current, input)
+		//如果是采用jev模型
 	case intentport.StrategyJev:
 		if current == nil {
 			return AutoPlanDecision{}, errors.New("Jev classification requires a session")
@@ -141,29 +154,39 @@ func (c *IntentController) Classify(ctx context.Context, current *session.Sessio
 
 func (c *IntentController) classifyJev(ctx context.Context, current *session.Session, input string, config intentport.Config) (AutoPlanDecision, error) {
 	history := recentIntentUserMessages(current)
-	result, err := c.evaluateJev(ctx, current.ID, input, history, config, false)
+	result, err := c.evaluateJev(ctx, current, input, history, config, false)
 	if err != nil {
 		return AutoPlanDecision{}, err
 	}
-	decision := AutoPlanDecision{Intent: AutoPlanIntent(result.Choice), Confidence: result.Confidence}
+	decision := AutoPlanDecision{Intent: AutoPlanIntent(result.Choice), Action: AutoPlanActionChat, Confidence: result.Confidence}
 	if decision.Intent == AutoPlanIntentImplementation && decision.Confidence >= config.PlanConfidence {
-		decision.ShouldPlan = true
-		decision.ShouldExecute = decision.Confidence >= config.ExecuteConfidence
+		decision.Action = AutoPlanActionPlanOnly
+		if decision.Confidence >= config.ExecuteConfidence {
+			decision.Action = AutoPlanActionPlanExecute
+		}
+	} else if decision.Intent == AutoPlanIntentResumePlan && decision.Confidence >= config.ExecuteConfidence && hasExecutablePlan(current) {
+		decision.Action = AutoPlanActionResumePlan
 	}
 	// The trace is finalized before the caller is allowed to plan or execute.
-	result.Trace.ShouldPlan = decision.ShouldPlan
-	result.Trace.ShouldExecute = decision.ShouldExecute
+	result.Trace.Action = string(decision.Action)
 	result.Trace.Route = "chat"
-	if decision.ShouldPlan {
+	if decision.Action == AutoPlanActionResumePlan {
+		result.Trace.Route = "plan_resume"
+	} else if decision.Action == AutoPlanActionPlanOnly {
 		result.Trace.Route = "plan_only"
-		if decision.ShouldExecute {
-			result.Trace.Route = "plan_execute"
-		}
+	} else if decision.Action == AutoPlanActionPlanExecute {
+		result.Trace.Route = "plan_execute"
 	}
 	if err := c.store.SaveTrace(ctx, result.Trace); err != nil {
 		return AutoPlanDecision{}, fmt.Errorf("record Jev decision: %w", err)
 	}
 	return decision, nil
+}
+
+func hasExecutablePlan(current *session.Session) bool {
+	return current != nil && current.CurrentPlan != nil &&
+		agentplan.IsExecutableStatus(current.CurrentPlan.Status) &&
+		current.CurrentPlan.Status != agentplan.StatusDone
 }
 
 type jevResult struct {
@@ -172,12 +195,18 @@ type jevResult struct {
 	Trace      intentport.Trace
 }
 
-func (c *IntentController) evaluateJev(ctx context.Context, sessionID, input string, history []string, config intentport.Config, test bool) (jevResult, error) {
+func (c *IntentController) evaluateJev(ctx context.Context, current *session.Session, input string, history []string, config intentport.Config, test bool) (jevResult, error) {
 	runes := []rune(input)
 	if len(runes) > 4000 {
 		input = string(runes[:4000])
 	}
-	requestBody, err := c.client.BuildRequest(input, history, config.Model)
+	var sessionID string
+	if current != nil {
+		sessionID = current.ID
+	}
+	requestBody, err := c.client.BuildRequest(intentport.ClassificationRequest{
+		Input: input, History: history, Model: config.Model, CurrentPlan: currentPlanContext(current),
+	})
 	if err != nil {
 		return jevResult{}, err
 	}
@@ -185,11 +214,18 @@ func (c *IntentController) evaluateJev(ctx context.Context, sessionID, input str
 	if _, err := rand.Read(idBytes); err != nil {
 		return jevResult{}, err
 	}
+	//记录链路
 	started := time.Now()
 	trace := intentport.Trace{
-		ID: hex.EncodeToString(idBytes), SessionID: sessionID, RequestID: intentport.RequestID(ctx), CreatedAt: started,
-		ExpiresAt: started.Add(intentTraceRetention), BaseURL: config.BaseURL,
-		RequestedModel: config.Model, RequestBody: strings.ReplaceAll(string(requestBody), config.APIKey, "[REDACTED]"), Status: "started",
+		ID:             hex.EncodeToString(idBytes),
+		SessionID:      sessionID,
+		RequestID:      intentport.RequestID(ctx),
+		CreatedAt:      started,
+		ExpiresAt:      started.Add(intentTraceRetention),
+		BaseURL:        config.BaseURL,
+		RequestedModel: config.Model,
+		RequestBody:    strings.ReplaceAll(string(requestBody), config.APIKey, "[REDACTED]"),
+		Status:         "started",
 	}
 	if test {
 		trace.Route = "test"
@@ -199,6 +235,7 @@ func (c *IntentController) evaluateJev(ctx context.Context, sessionID, input str
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	//发送请求
 	responseBody, httpStatus, sendErr := c.client.Send(requestCtx, config, requestBody)
 	trace.DurationMS = time.Since(started).Milliseconds()
 	trace.HTTPStatus = httpStatus
@@ -231,7 +268,7 @@ func (c *IntentController) evaluateJev(ctx context.Context, sessionID, input str
 		Confidence *float64
 	}
 	answerErr := json.Unmarshal(answers["intent"], &answer)
-	if answersErr != nil || answerErr != nil || answer.Type != "choice" || answer.Confidence == nil || *answer.Confidence < 0 || *answer.Confidence > 1 || (answer.Choice != "conversation" && answer.Choice != "explanation" && answer.Choice != "implementation") {
+	if answersErr != nil || answerErr != nil || answer.Type != "choice" || answer.Confidence == nil || *answer.Confidence < 0 || *answer.Confidence > 1 || (answer.Choice != "conversation" && answer.Choice != "explanation" && answer.Choice != "implementation" && answer.Choice != "resume_plan") {
 		trace.Status, trace.ErrorCode = "invalid_response", "invalid_choice"
 		if saveErr := c.saveFinalTrace(ctx, trace); saveErr != nil {
 			return jevResult{}, saveErr
@@ -282,6 +319,24 @@ func recentIntentUserMessages(current *session.Session) []string {
 	return history
 }
 
+func currentPlanContext(current *session.Session) *intentport.PlanContext {
+	if current == nil || current.CurrentPlan == nil {
+		return nil
+	}
+	remaining := 0
+	for _, step := range current.CurrentPlan.Steps {
+		if step.Status != agentplan.StepStatusDone && step.Status != agentplan.StepStatusSkipped {
+			remaining++
+		}
+	}
+	return &intentport.PlanContext{
+		Exists:         true,
+		Status:         current.CurrentPlan.Status,
+		Goal:           current.CurrentPlan.Goal,
+		RemainingSteps: remaining,
+	}
+}
+
 func (c *IntentController) TestJev(ctx context.Context, input intentport.Config) (int64, error) {
 	c.mu.RLock()
 	current := c.config
@@ -305,7 +360,7 @@ func (c *IntentController) TestJev(ctx context.Context, input intentport.Config)
 	if err := validateIntentConfig(input); err != nil {
 		return 0, err
 	}
-	result, err := c.evaluateJev(ctx, "", "你好", nil, input, true)
+	result, err := c.evaluateJev(ctx, nil, "你好", nil, input, true)
 	return result.Trace.DurationMS, err
 }
 

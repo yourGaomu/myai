@@ -57,8 +57,8 @@ func TestRuntimeInstructionBuilderAddsAutonomousPlanPrompt(t *testing.T) {
 	builder := NewRuntimeInstructionBuilder(stubSkillPromptProvider{})
 
 	prompt := builder.Build(context.Background(), InstructionRequest{
-		ForcePlanMode: true,
-		Input:         "implement a feature",
+		ForceAutonomousPlanning: true,
+		Input:                   "implement a feature",
 	})
 
 	if !strings.Contains(prompt, AutonomousPlanPrompt) {

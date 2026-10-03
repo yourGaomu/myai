@@ -156,6 +156,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		return ChatResponse{}, err
 	}
 	defer unlock()
+	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
 
 	var currentBefore *session.Session
 	autoPlanAction := AutoPlanActionChat
@@ -187,16 +188,19 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
 	var retrievalInfo chatretrievalresult.Context
-	if s.dependencies.RetrievalContext != nil {
+	// Auto mode is fully model-driven: the Agent Loop exposes knowledge_search
+	// and the model decides whether to invoke it. Only always mode performs a
+	// deterministic search before generation.
+	if s.dependencies.RetrievalContext != nil && currentBefore != nil &&
+		session.NormalizeRAGSettings(currentBefore.RAGSettings).Mode == session.RetrievalModeAlways {
 		var retrievalErr error
-		// Auto mode defers retrieval to the model's knowledge_search tool;
-		// always mode is the only mode that performs a pre-generation search.
 		retrievalInfo, retrievalErr = s.dependencies.RetrievalContext.Prepare(ctx, chatretrievalcommand.Prepare{Session: currentBefore, Input: input})
 		if retrievalErr != nil {
 			// 前置检索失败不阻断聊天；错误随终态响应返回客户端。
 			retrievalInfo.Error = retrievalErr.Error()
 		}
 	}
+	//进行消息的追加，包括提示词等等。
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 		SessionID:               sessionID,
 		Input:                   input,
@@ -450,6 +454,7 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 		return ChatResponse{}, err
 	}
 	defer unlock()
+	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
 
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 		SessionID: sessionID, Input: input, ForceChatMode: true, SyntheticReason: syntheticReason,
@@ -598,6 +603,7 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 		return ChatResponse{}, err
 	}
 	defer unlock()
+	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
 
 	prepared, err := s.dependencies.MessageCommands.PrepareRegeneration(ctx, messagecommand.PrepareRegeneration{
 		SessionID: sessionID,
@@ -619,6 +625,7 @@ func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID
 		return ChatResponse{}, err
 	}
 	defer unlock()
+	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
 
 	// UpdateSink 把步骤 running/done/failed 状态实时桥接到远程协议层。
 	var updates planport.UpdateSink

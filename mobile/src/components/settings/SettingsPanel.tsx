@@ -2475,10 +2475,7 @@ export function SettingsPanel({
                           响应模型: {detail.response_model || "-"}
                         </Text>
                         <Text style={styles.triggerChip}>
-                          should_plan: {String(Boolean(detail.should_plan))}
-                        </Text>
-                        <Text style={styles.triggerChip}>
-                          should_execute: {String(Boolean(detail.should_execute))}
+                          action: {detail.action || "chat"}
                         </Text>
                       </View>
 
@@ -3047,6 +3044,8 @@ function traceRouteLabel(route?: string): string {
       return "plan_only (生成计划)";
     case "plan_execute":
       return "plan_execute (计划并执行)";
+    case "plan_resume":
+      return "plan_resume (恢复计划)";
     case "fallback":
       return "fallback (回退系统规则)";
     case "test":
