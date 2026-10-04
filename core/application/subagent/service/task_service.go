@@ -525,7 +525,7 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 		}
 	} else {
 		continuation, continueErr = service.ParentContinuation.Continue(ctx, subagentport.ParentContinuationRequest{
-			Task: claimed, Stream: command.Stream,
+			Task: claimed, MessageID: domainsubagent.AgentResultMessageID(claimed.ID), Stream: command.Stream,
 		})
 	}
 	if continueErr != nil {
@@ -885,6 +885,7 @@ func (service *Service) deliverMailboxMessage(ctx context.Context, task domainsu
 }
 
 func (service *Service) claimMailboxMessage(taskID string) (domainsubagent.Message, bool, error) {
+	// 1. 子代理先原子领取一条 mailbox 消息，避免多个 runner 同时执行同一 follow-up。
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	if service.AgentMessages != nil {
@@ -917,6 +918,7 @@ func (service *Service) claimMailboxMessage(taskID string) (domainsubagent.Messa
 }
 
 func (service *Service) acknowledgeMailboxMessage(taskID string, messageID string) error {
+	// 2. 只有子代理 turn 成功后才确认；失败路径由调用方释放 claim。
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	if service.AgentMessages != nil {
@@ -950,6 +952,7 @@ func (service *Service) acknowledgeMailboxMessage(taskID string, messageID strin
 }
 
 func (service *Service) releaseMailboxMessage(taskID string, messageID string, deliveryErr error) error {
+	// 3. 释放后消息回到 pending，进程重启或下一轮可以继续重试。
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	if service.AgentMessages != nil {

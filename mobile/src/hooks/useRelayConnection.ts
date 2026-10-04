@@ -58,6 +58,7 @@ export function useRelayConnection({
 }: Args) {
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const nativeConnectedRef = useRef(false);
+  const nativeConnectingRef = useRef(false);
   const onConnectedRef = useRef(onConnected);
   const onDisconnectedRef = useRef(onDisconnected);
   const onMessageRef = useRef(onMessage);
@@ -87,6 +88,7 @@ export function useRelayConnection({
     (nextState: RelayForegroundServiceState) => {
       const state = nextState.state;
       if (state === "connected") {
+        nativeConnectingRef.current = false;
         nativeConnectedRef.current = true;
         stopPending("connect");
         setConnected(true);
@@ -107,9 +109,11 @@ export function useRelayConnection({
         stopPending("connect");
         setStatus(nextState.status || "Reconnecting");
       } else if (state === "error") {
+        nativeConnectingRef.current = false;
         stopPending("connect");
         setStatus(nextState.status || "WebSocket error");
       } else if (state === "stopped") {
+        nativeConnectingRef.current = false;
         stopPending("connect");
         setStatus("Disconnected");
       }
@@ -139,6 +143,7 @@ export function useRelayConnection({
 
   useEffect(() => {
     return () => {
+      nativeConnectingRef.current = false;
       if (heartbeatTimerRef.current) {
         clearInterval(heartbeatTimerRef.current);
         heartbeatTimerRef.current = null;
@@ -165,6 +170,11 @@ export function useRelayConnection({
     }
 
     if (isNativeRelayAvailable()) {
+      if (nativeConnectingRef.current || nativeConnectedRef.current) {
+        return;
+      }
+      nativeConnectingRef.current = true;
+
       let nativeSocket = socketRef.current;
       if (!nativeSocket) {
         nativeSocket = {
@@ -177,6 +187,7 @@ export function useRelayConnection({
             }
             void sendRelayForegroundServiceMessage(data).then((sent) => {
               if (!sent) {
+                nativeConnectingRef.current = false;
                 nativeConnectedRef.current = false;
                 setConnected(false);
                 setStatus("Relay send failed");
@@ -186,6 +197,7 @@ export function useRelayConnection({
           },
           // Closing the JS adapter must not stop the process-wide foreground service.
           close() {
+            nativeConnectingRef.current = false;
             nativeConnectedRef.current = false;
           },
         };
@@ -201,6 +213,7 @@ export function useRelayConnection({
         clientToken: clientToken.trim(),
       })
         .then((started) => {
+          nativeConnectingRef.current = false;
           if (!started) {
             socketRef.current = null;
             nativeConnectedRef.current = false;
@@ -214,6 +227,7 @@ export function useRelayConnection({
           return getRelayForegroundServiceState().then(handleNativeState);
         })
         .catch((error) => {
+          nativeConnectingRef.current = false;
           socketRef.current = null;
           nativeConnectedRef.current = false;
           stopPending("connect");

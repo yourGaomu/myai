@@ -3,8 +3,10 @@ package pendinginput
 import (
 	"strings"
 	"testing"
+	"time"
 
 	domaingeneration "myai/core/domain/generation"
+	domainsubagent "myai/core/domain/subagent"
 )
 
 func TestQueueEnqueueDrainAndHasPending(t *testing.T) {
@@ -97,5 +99,63 @@ func TestQueueIdentifiedMessagesAreIdempotentAndAcknowledged(t *testing.T) {
 	}
 	if len(acknowledger.ids) != 1 || acknowledger.ids[0] != "message-1" {
 		t.Fatalf("unexpected acknowledgements: %#v", acknowledger.ids)
+	}
+}
+
+func TestQueueRejectsConflictingReuseOfMessageID(t *testing.T) {
+	queue := NewQueue()
+	if err := queue.EnqueueIdentified("session-1", "message-1", "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueIdentified("session-1", "message-1", "second"); err == nil {
+		t.Fatal("expected conflicting queued message to fail")
+	}
+	claimed := queue.DrainIdentified("session-1")
+	if err := queue.EnqueueIdentified("session-1", "message-1", "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueIdentified("session-1", "message-2", "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueIdentified("session-1", "message-1", "second"); err == nil {
+		t.Fatal("expected conflicting in-flight message to fail")
+	}
+	if err := queue.RequeueIdentified("session-1", claimed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueueAllowsSameContentForDifferentMessageIDs(t *testing.T) {
+	queue := NewQueue()
+	if err := queue.EnqueueIdentified("session-1", "message-1", "same"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueIdentified("session-1", "message-2", "same"); err != nil {
+		t.Fatal(err)
+	}
+	items := queue.DrainIdentified("session-1")
+	if len(items) != 2 || items[0].ID != "message-1" || items[1].ID != "message-2" {
+		t.Fatalf("same content from different events was collapsed: %#v", items)
+	}
+}
+
+func TestQueueTreatsSameMessageWithDifferentCreatedAtAsIdempotent(t *testing.T) {
+	queue := NewQueue()
+	first := domainsubagent.AgentMessage{
+		ID: "message-time", RecipientAgentID: "parent-1", Kind: domainsubagent.AgentMessageKindTaskResult,
+		Content: "same result", Trigger: domainsubagent.AgentMessageTriggerTurn,
+		Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now().UTC(),
+	}
+	if err := queue.EnqueueAgentMessage("parent-1", first); err != nil {
+		t.Fatal(err)
+	}
+	second := domainsubagent.CloneAgentMessage(first)
+	second.CreatedAt = second.CreatedAt.Add(time.Minute)
+	if err := queue.EnqueueAgentMessage("parent-1", second); err != nil {
+		t.Fatalf("same message ID with a reconstructed timestamp should be idempotent: %v", err)
+	}
+	items := queue.DrainIdentified("parent-1")
+	if len(items) != 1 || items[0].ID != first.ID {
+		t.Fatalf("expected one queued message, got %#v", items)
 	}
 }

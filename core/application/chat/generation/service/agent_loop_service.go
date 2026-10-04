@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	generationapi "myai/core/application/chat/generation/api"
@@ -19,26 +20,52 @@ import (
 
 const DefaultMaxToolRounds = 32
 const DefaultMaxKnowledgeSearchCalls = 2
+const DefaultMaxMemorySearchCalls = 1
 const maxStopHookContinuations = 3
+
+// MailboxDeliveryPhase describes when queued inter-agent messages may enter
+// the model context. Keeping this as an explicit phase prevents a boolean
+// from hiding the difference between queue-only delivery and turn steering.
+type MailboxDeliveryPhase string
+
+const (
+	// MailboxDeferred means the current model turn keeps its context unchanged.
+	MailboxDeferred MailboxDeliveryPhase = "deferred"
+	// MailboxAcceptCurrentTurn means a steer message may be consumed before the
+	// next model sample in the active turn.
+	MailboxAcceptCurrentTurn MailboxDeliveryPhase = "accept_current_turn"
+	// MailboxNextTurn means the current answer reached a boundary and queued
+	// messages may be consumed by the next model sample.
+	MailboxNextTurn MailboxDeliveryPhase = "next_turn"
+)
+
+func (phase MailboxDeliveryPhase) shouldDrain() bool {
+	return phase == MailboxAcceptCurrentTurn || phase == MailboxNextTurn
+}
 
 type AgentLoopService struct {
 	// AgentLoopService 实现“模型 -> 工具 -> 模型”的循环，直到模型不再请求工具。
-	Contexts                generationport.ContextProvider
-	Tools                   generationport.ToolCatalog
-	ToolExecutor            generationport.ToolExecutor
-	ToolRecords             generationport.ToolExecutionRecordSink
-	Compactor               generationport.AutoCompactor
-	TurnHooks               generationport.TurnLifecycleHooks
-	PendingInput            generationport.PendingTurnInput
-	OnPendingInputError     func(error)
+	Contexts            generationport.ContextProvider
+	Tools               generationport.ToolCatalog
+	ToolExecutor        generationport.ToolExecutor
+	ToolRecords         generationport.ToolExecutionRecordSink
+	Compactor           generationport.AutoCompactor
+	TurnHooks           generationport.TurnLifecycleHooks
+	PendingInput        generationport.PendingTurnInput
+	OnPendingInputError func(error)
+	// OnPendingInputAppended persists structured mailbox messages consumed while
+	// a turn is already running. The callback is optional for isolated tests.
+	OnPendingInputAppended  func(current *session.Session, messages []domainmessage.Message)
 	MaxToolRounds           int
 	MaxKnowledgeSearchCalls int
+	MaxMemorySearchCalls    int
 	OnCompactError          func(error)
 }
 
 var _ generationapi.AgentRunner = AgentLoopService{}
 
 func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run) (response modelport.ChatResult, runErr error) {
+	// 1. 先确认本轮生成具备模型、会话和上下文能力，再进入 mailbox/工具循环。
 	if command.Model == nil {
 		return modelport.ChatResult{}, errors.New("model is nil")
 	}
@@ -51,6 +78,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 	var consumedPending []domaingeneration.PendingTurnInputItem
 	defer func() {
+		// 2. 生成失败则释放已领取消息，生成成功才确认消息已经被本轮消费。
 		if len(consumedPending) == 0 || command.Session == nil {
 			return
 		}
@@ -64,12 +92,23 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	totalUsage := modelport.TokenUsage{}
 	maxToolRounds := s.maxToolRounds(command.Session)
 	runCtx := toolruntime.WithKnowledgeSearchBudget(ctx, toolruntime.NewKnowledgeSearchBudget(s.maxKnowledgeSearchCalls()))
+	runCtx = toolruntime.WithMemorySearchBudget(runCtx, toolruntime.NewMemorySearchBudget(s.maxMemorySearchCalls()))
 	reasoningParts := make([]string, 0, maxToolRounds)
 	stopContinuations := 0
-	canDrainPending := false
+	// Queue-only inter-agent messages are delivered at an answer boundary. This
+	// mirrors Codex mailbox semantics: tool execution keeps its current context
+	// stable, while the next model turn sees the completed mailbox batch.
+	mailboxPhase := MailboxDeferred
 	for round := 0; round < maxToolRounds; round++ {
-		if canDrainPending {
-			consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
+		if mailboxPhase.shouldDrain() {
+			// 3. 只有显式 phase 允许时才领取 mailbox，避免工具执行中途改变上下文。
+			pending, drainErr := s.drainPendingInput(command.Session)
+			consumedPending = append(consumedPending, pending...)
+			// 3.1 一批消息进入当前上下文后回到 deferred，下一次迁移必须由新的事件触发。
+			mailboxPhase = MailboxDeferred
+			if drainErr != nil {
+				return modelport.ChatResult{}, drainErr
+			}
 		}
 		if err := s.compactIfNeeded(runCtx, command); err != nil {
 			return modelport.ChatResult{}, err
@@ -80,7 +119,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
 		result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
-			Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext, command.MemoryContext),
+			Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext),
 			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
 			Stream:   command.Stream,
 			Settings: command.Settings,
@@ -88,8 +127,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		if err != nil {
 			return modelport.ChatResult{}, err
 		}
-		canDrainPending = true
-
+		// 4. 模型无工具调用时形成回答边界；有工具调用时继续当前 turn。
 		totalUsage = totalUsage.Add(result.Usage)
 		reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 		if len(result.ToolCalls) == 0 {
@@ -97,7 +135,14 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			if hookErr != nil {
 				return modelport.ChatResult{}, hookErr
 			}
-			if continued || s.hasPendingInput(command.Session) {
+			if continued {
+				continue
+			}
+			if s.hasPendingInput(command.Session) {
+				// 5. 回答边界后迁移到 next_turn，下一轮再把 queue 消息加入上下文。
+				// The current answer is complete; consume queued mailbox messages
+				// only on the following model round.
+				mailboxPhase = MailboxNextTurn
 				continue
 			}
 			// 没有工具调用表示模型已经给出最终回答，汇总所有轮次的 usage 和 reasoning 后结束。
@@ -129,9 +174,18 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 				return modelport.ChatResult{}, hookErr
 			}
 		}
+		// 6. steer_current_turn 可以打断当前工具链；普通 queue 消息继续等待回答边界。
+		if s.hasImmediatePendingInput(command.Session) {
+			// 6. steer 消息迁移到 accept_current_turn，允许下一次采样读取它。
+			mailboxPhase = MailboxAcceptCurrentTurn
+		}
 	}
 
-	consumedPending = append(consumedPending, s.drainPendingInput(command.Session)...)
+	pending, drainErr := s.drainPendingInput(command.Session)
+	consumedPending = append(consumedPending, pending...)
+	if drainErr != nil {
+		return modelport.ChatResult{}, drainErr
+	}
 	if err := s.compactIfNeeded(runCtx, command); err != nil {
 		return modelport.ChatResult{}, err
 	}
@@ -142,7 +196,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
 	result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
-		Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext, command.MemoryContext),
+		Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext),
 		Stream:   command.Stream,
 		Settings: command.Settings,
 	})
@@ -154,13 +208,10 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	return finalizeResult(result, totalUsage, reasoningParts), nil
 }
 
-func withTurnContexts(messages []domainmessage.Message, environmentPrompt, memoryPrompt string) []domainmessage.Message {
-	extras := make([]domainmessage.Message, 0, 2)
+func withTurnContexts(messages []domainmessage.Message, environmentPrompt string) []domainmessage.Message {
+	extras := make([]domainmessage.Message, 0, 1)
 	if environment := domainmessage.EnvironmentContext(environmentPrompt); environment.IsSynthetic() {
 		extras = append(extras, environment)
-	}
-	if memory := domainmessage.MemoryContext(memoryPrompt); memory.IsSynthetic() {
-		extras = append(extras, memory)
 	}
 	if len(extras) == 0 {
 		return messages
@@ -206,6 +257,13 @@ func (s AgentLoopService) maxKnowledgeSearchCalls() int {
 	return DefaultMaxKnowledgeSearchCalls
 }
 
+func (s AgentLoopService) maxMemorySearchCalls() int {
+	if s.MaxMemorySearchCalls > 0 {
+		return s.MaxMemorySearchCalls
+	}
+	return DefaultMaxMemorySearchCalls
+}
+
 func (s AgentLoopService) toolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool {
 	if s.Tools == nil {
 		return nil
@@ -213,23 +271,62 @@ func (s AgentLoopService) toolsForSession(current *session.Session, forceChatMod
 	return s.Tools.ToolsForSession(current, forceChatMode)
 }
 
-func (s AgentLoopService) drainPendingInput(current *session.Session) []domaingeneration.PendingTurnInputItem {
+func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaingeneration.PendingTurnInputItem, error) {
 	if s.PendingInput == nil || current == nil || strings.TrimSpace(current.ID) == "" {
-		return nil
+		return nil, nil
 	}
 	items := make([]domaingeneration.PendingTurnInputItem, 0)
+	appended := make([]domainmessage.Message, 0)
+	var conflictErr error
 	if identified, ok := s.PendingInput.(generationport.IdentifiedPendingTurnInput); ok {
 		items = identified.DrainIdentified(current.ID)
 		for _, item := range items {
-			current.AppendMessage(domainmessage.Text(domainmessage.RoleUser, item.Content))
+			if item.ID != "" {
+				// 1. 先用 SourceID 检查消息是否已经持久化，避免重试重复追加。
+				alreadyApplied := false
+				for _, existing := range current.Messages {
+					if existing.SourceID != item.ID {
+						continue
+					}
+					alreadyApplied = true
+					if existing.Text() != item.Content && s.OnPendingInputError != nil {
+						s.OnPendingInputError(fmt.Errorf("pending message id %q conflicts with session history", item.ID))
+					}
+					if existing.Text() != item.Content && conflictErr == nil {
+						conflictErr = fmt.Errorf("pending message id %q conflicts with session history", item.ID)
+					}
+					break
+				}
+				if alreadyApplied {
+					// 1.1 相同来源已经进入会话，重试只需要确认消息，不再追加副本。
+					continue
+				}
+			}
+			// 2. pending 消息可能来自子代理，追加时必须保留事件来源，不能降级为匿名文本。
+			message := domainmessage.SyntheticUserText(domainmessage.SyntheticReasonSubagentResult, item.Content)
+			// 2.1 追加时保留来源字段，后续才能继续进行幂等确认和冲突排查。
+			message.SourceID = item.ID
+			message.SourceKind = item.SourceKind
+			message.SourceTaskID = item.SourceTaskID
+			current.AppendMessage(message)
+			appended = append(appended, domainmessage.Clone(message))
 		}
-		return items
+		if len(appended) > 0 && s.OnPendingInputAppended != nil {
+			// 3. 先把新增消息交给持久化适配器，再等待本轮最终回答完成确认。
+			s.OnPendingInputAppended(current, domainmessage.CloneAll(appended))
+		}
+		return items, conflictErr
 	}
 	for _, content := range s.PendingInput.Drain(current.ID) {
-		current.AppendMessage(domainmessage.Text(domainmessage.RoleUser, content))
+		message := domainmessage.Text(domainmessage.RoleUser, content)
+		current.AppendMessage(message)
+		appended = append(appended, domainmessage.Clone(message))
 		items = append(items, domaingeneration.PendingTurnInputItem{Content: content})
 	}
-	return items
+	if len(appended) > 0 && s.OnPendingInputAppended != nil {
+		s.OnPendingInputAppended(current, domainmessage.CloneAll(appended))
+	}
+	return items, nil
 }
 
 func (s AgentLoopService) acknowledgePendingInput(sessionID string, items []domaingeneration.PendingTurnInputItem) {
@@ -271,6 +368,18 @@ func (s AgentLoopService) hasPendingInput(current *session.Session) bool {
 	if s.PendingInput == nil || current == nil {
 		return false
 	}
+	return s.PendingInput.HasPending(current.ID)
+}
+
+func (s AgentLoopService) hasImmediatePendingInput(current *session.Session) bool {
+	if s.PendingInput == nil || current == nil {
+		return false
+	}
+	if immediate, ok := s.PendingInput.(generationport.ImmediatePendingTurnInput); ok {
+		return immediate.HasImmediatePending(current.ID)
+	}
+	// Legacy queues have no delivery mode metadata and historically represented
+	// all pending input as a steer of the active turn.
 	return s.PendingInput.HasPending(current.ID)
 }
 

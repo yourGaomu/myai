@@ -776,8 +776,9 @@ export function useRemoteMessageHandler({
               message.request_id,
               payload.message || "Remote error",
             );
+          } else {
+            addErrorMessage(targetSessionID, payload.message || "Remote error");
           }
-          addErrorMessage(targetSessionID, payload.message || "Remote error");
           setSessionPendingPermission(targetSessionID, null);
           clearSessionPendingRequest(targetSessionID, message.request_id);
           pendingHistorySessionIDRef.current = "";

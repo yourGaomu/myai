@@ -70,7 +70,7 @@ func TestMessageCommandServiceAppendsRuntimeInstructionBeforeUser(t *testing.T) 
 	}
 }
 
-func TestMessageCommandServiceDeduplicatesOnlyMatchingSyntheticMessage(t *testing.T) {
+func TestMessageCommandServiceDeduplicatesOnlyMatchingSourceID(t *testing.T) {
 	memory := memorysession.NewStore("gpt-5")
 	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestMessageCommandServiceDeduplicatesOnlyMatchingSyntheticMessage(t *testin
 	service := newMessageCommandService(memory)
 	command := AppendUserMessageCommand{
 		SessionID: "session-1", Input: "subagent task task-1 report", SyntheticReason: domainmessage.SyntheticReasonSubagentResult,
-		DeduplicateSynthetic: true,
+		SourceID: "agent-result:task-1", SourceKind: "task_result", SourceTaskID: "task-1",
 	}
 	first, err := service.AppendUserMessage(context.Background(), command)
 	if err != nil {

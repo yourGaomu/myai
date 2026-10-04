@@ -34,8 +34,10 @@ type AgentRunResult struct {
 }
 
 type ParentContinuationRequest struct {
-	Task   domainsubagent.Task
-	Stream llm.ChatStreamHandler
+	Task domainsubagent.Task
+	// 1. MessageID 贯穿 claim、入队和确认，保证父代理恢复使用同一个事件。
+	MessageID string
+	Stream    llm.ChatStreamHandler
 }
 
 type ParentContinuationResult struct {

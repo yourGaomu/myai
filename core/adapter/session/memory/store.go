@@ -176,6 +176,11 @@ func (sm *Store) AddUserTurnWithContextTo(sessionID string, ragContext string, r
 }
 
 func (sm *Store) AddUserTurnWithReasonTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason) error {
+	return sm.AddUserTurnWithMetadataTo(sessionID, ragContext, runtimeInstruction, input, reason, "", "", "")
+}
+
+func (sm *Store) AddUserTurnWithMetadataTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason, sourceID string, sourceKind string, sourceTaskID string) error {
+	// 1. 内存会话先完成原子追加，外层再把新增消息异步写入持久化仓库。
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -184,7 +189,20 @@ func (sm *Store) AddUserTurnWithReasonTo(sessionID string, ragContext string, ru
 		return err
 	}
 
-	session.AddUserTurnWithReason(ragContext, runtimeInstruction, input, reason)
+	session.AddUserTurnWithMetadata(ragContext, runtimeInstruction, input, reason, sourceID, sourceKind, sourceTaskID)
+	return nil
+}
+
+func (sm *Store) AppendMessageTo(sessionID string, message domainmessage.Message) error {
+	// 2. 运行中的 AgentLoop 使用同一聚合根追加 mailbox 消息，保持上下文顺序。
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	session.AppendMessage(message)
 	return nil
 }
 

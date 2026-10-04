@@ -278,6 +278,12 @@ func (app *Application) InitStore() {
 		panic("mongo database not exist")
 	}
 	app.store = adaptermongo.New(app.mongoDb, database)
+	// 1. 初始化会话消息来源唯一索引，保证跨进程写入时同一事件不会重复落库。
+	if indexer, ok := app.store.(interface{ EnsureIndexes(context.Context) error }); ok {
+		if err := indexer.EnsureIndexes(context.Background()); err != nil {
+			panic(fmt.Errorf("init chat message indexes failed: %w", err))
+		}
+	}
 	app.agentRunRepository = agentrunmongo.New(app.mongoDb, database)
 	app.recoverAgentRuns()
 }
@@ -776,7 +782,6 @@ func (app *Application) InitChatService() {
 		KnowledgeSearch:  app.knowledgeSearchService,
 		AgentRuns:        app.agentRunRepository,
 		AgentRunObserver: app.memoryExtractionService,
-		MemoryContext:    app.memoryRetrievalService,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -845,7 +850,10 @@ func (app *Application) InitSubagents() {
 	eventBus := subagentevents.NewBus(taskEvents)
 	applicationService.Events = eventBus
 	applicationService.Workspaces = app.workspaceIsolationManager
-	if err := app.chatService.SetPendingInputAcknowledger(subagentservice.AgentMessageAcknowledger{Repository: applicationService.AgentMessages}); err != nil {
+	if err := app.chatService.SetPendingInputAcknowledger(subagentservice.AgentMessageAcknowledger{
+		// 1. 使用当前应用实例的 owner，确认动作必须经过 durable claim。
+		Repository: applicationService.AgentMessages, OwnerID: applicationService.MessageOwnerID,
+	}); err != nil {
 		scheduler.Close()
 		panic(fmt.Errorf("configure subagent message acknowledgements failed: %w", err))
 	}
@@ -1091,6 +1099,9 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 	}
 	if app.knowledgeSearchService != nil {
 		localTools = append(localTools, local.NewKnowledgeSearchTool(app.knowledgeSearchService))
+	}
+	if app.memoryRetrievalService != nil {
+		localTools = append(localTools, local.NewMemorySearchTool(app.memoryRetrievalService))
 	}
 	tools.RegisterSource("local", localTools)
 	app.toolRegister = tools

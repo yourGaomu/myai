@@ -13,6 +13,7 @@ import (
 	domaintool "myai/core/domain/tool"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	toolruntime "myai/core/tool/runtimecontext"
 )
 
 func TestAgentLoopServiceReturnsWhenModelDoesNotRequestTools(t *testing.T) {
@@ -149,7 +150,33 @@ func TestAgentLoopServiceExecutesToolsAndContinuesGeneration(t *testing.T) {
 	}
 }
 
-func TestAgentLoopServiceReusesMemoryContextWithoutPersistingIt(t *testing.T) {
+func TestAgentLoopServiceProvidesMemorySearchBudgetToTools(t *testing.T) {
+	call := domainmessage.ToolCall{ID: "memory-call", Type: "function", Name: "memory_search", Arguments: `{"query":"past decision"}`}
+	model := &scriptedModel{results: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{call}},
+		{Content: "answer"},
+	}}
+	executor := &memorySearchBudgetProbeExecutor{}
+
+	_, err := AgentLoopService{
+		Contexts: &recordingContextProvider{}, Tools: &recordingToolCatalog{}, ToolExecutor: executor,
+		MaxMemorySearchCalls: 1,
+	}.Run(context.Background(), RunCommand{Model: model, Session: testSession()})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !executor.budgetFound {
+		t.Fatal("tool executor did not receive memory search budget")
+	}
+	if executor.firstReserveErr != nil {
+		t.Fatalf("first reservation error = %v", executor.firstReserveErr)
+	}
+	if executor.secondReserveErr == nil || executor.secondReserveErr.Error() != "memory search call limit reached for this turn" {
+		t.Fatalf("second reservation error = %v, want call limit", executor.secondReserveErr)
+	}
+}
+
+func TestAgentLoopServiceDoesNotInjectMemoryContextBeforeToolUse(t *testing.T) {
 	current := testSession()
 	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
 	model := &scriptedModel{results: []modelport.ChatResult{
@@ -162,7 +189,7 @@ func TestAgentLoopServiceReusesMemoryContextWithoutPersistingIt(t *testing.T) {
 
 	_, err := AgentLoopService{Contexts: &recordingContextProvider{}, Tools: &recordingToolCatalog{}, ToolExecutor: executor}.Run(
 		context.Background(),
-		RunCommand{Model: model, Session: current, MemoryContext: "Prefer the durable retry solution."},
+		RunCommand{Model: model, Session: current},
 	)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -171,22 +198,10 @@ func TestAgentLoopServiceReusesMemoryContextWithoutPersistingIt(t *testing.T) {
 		t.Fatalf("expected two model requests, got %d", len(model.requests))
 	}
 	for index, request := range model.requests {
-		memoryMessages := 0
 		for _, message := range request.Messages {
 			if message.IsSyntheticReason(domainmessage.SyntheticReasonMemoryContext) {
-				memoryMessages++
-				if !strings.Contains(message.Text(), "durable retry solution") {
-					t.Fatalf("request %d has unexpected memory context: %q", index, message.Text())
-				}
+				t.Fatalf("request %d unexpectedly received eager memory context: %q", index, message.Text())
 			}
-		}
-		if memoryMessages != 1 {
-			t.Fatalf("request %d expected one memory context, got %d", index, memoryMessages)
-		}
-	}
-	for _, message := range current.Messages {
-		if message.IsSyntheticReason(domainmessage.SyntheticReasonMemoryContext) {
-			t.Fatalf("memory context was persisted in the session: %#v", current.Messages)
 		}
 	}
 }
@@ -619,6 +634,25 @@ type recordingToolExecutor struct {
 	last   ToolExecutionCommand
 	result ToolExecutionResult
 	err    error
+}
+
+type memorySearchBudgetProbeExecutor struct {
+	budgetFound      bool
+	firstReserveErr  error
+	secondReserveErr error
+}
+
+func (e *memorySearchBudgetProbeExecutor) Execute(ctx context.Context, command ToolExecutionCommand) (ToolExecutionResult, error) {
+	budget, ok := toolruntime.MemorySearchBudgetFrom(ctx)
+	e.budgetFound = ok
+	if ok {
+		e.firstReserveErr = budget.Reserve("first query")
+		e.secondReserveErr = budget.Reserve("second query")
+	}
+	call := command.Calls[0]
+	return ToolExecutionResult{Messages: []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "{}"}),
+	}}, nil
 }
 
 func (e *recordingToolExecutor) Execute(ctx context.Context, command ToolExecutionCommand) (ToolExecutionResult, error) {

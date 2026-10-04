@@ -12,7 +12,8 @@ type ParentContinuation interface {
 }
 
 // ParentCompletionNotifier places a structured child result into the parent
-// session input queue. It does not start a model turn itself.
+// session input queue and may request an asynchronous parent wakeup. It never
+// runs the parent model synchronously on the child completion stack.
 type ParentCompletionNotifier interface {
 	Notify(ctx context.Context, task domainsubagent.Task) error
 }

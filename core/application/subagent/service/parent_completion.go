@@ -12,11 +12,39 @@ import (
 
 type AgentMessageAcknowledger struct {
 	Repository subagentport.AgentMessageRepository
+	// OwnerID makes acknowledgement a lease-based completion instead of an
+	// unconditional status update. It must identify this application instance.
+	OwnerID  string
+	LeaseTTL time.Duration
 }
 
 func (acknowledger AgentMessageAcknowledger) Acknowledge(messageID string) error {
 	if acknowledger.Repository == nil {
 		return nil
+	}
+	if parentRepository, ok := acknowledger.Repository.(subagentport.ParentCompletionMessageRepository); ok {
+		// 1. 为当前进程确定稳定 owner，并创建短期 lease，防止多个 worker 同时确认。
+		ownerID := strings.TrimSpace(acknowledger.OwnerID)
+		if ownerID == "" {
+			ownerID = "parent-message-ack"
+		}
+		ttl := acknowledger.LeaseTTL
+		if ttl <= 0 {
+			ttl = 2 * time.Minute
+		}
+		now := time.Now().UTC()
+		if _, err := parentRepository.ClaimParentCompletion(context.Background(), messageID, ownerID, now, ttl); err != nil {
+			// Completion is idempotent: another worker may have completed it
+			// between the model response and this acknowledgement.
+			if errors.Is(err, subagentport.ErrTaskStateConflict) {
+				if message, getErr := acknowledger.Repository.GetAgentMessage(context.Background(), messageID); getErr == nil && message.Status == domainsubagent.AgentMessageDelivered {
+					return nil
+				}
+			}
+			return err
+		}
+		// 2. 只有 claim 成功后才将消息标记为 delivered；失败会保留为可重试状态。
+		return parentRepository.CompleteParentCompletion(context.Background(), messageID, ownerID, now)
 	}
 	return acknowledger.Repository.MarkAgentMessageDelivered(context.Background(), messageID, time.Now().UTC())
 }
@@ -82,26 +110,27 @@ func (service *Service) ensureParentCompletionQueued(task domainsubagent.Task) e
 }
 
 func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent.Task) (domainsubagent.AgentMessage, error) {
+	// 1. 先复用已有 envelope，保证任务完成事件在重试时保持同一个消息 ID。
 	messageID := domainsubagent.AgentResultMessageID(task.ID)
 	if existing, err := service.AgentMessages.GetAgentMessage(context.Background(), messageID); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, subagentport.ErrNotFound) {
 		return domainsubagent.AgentMessage{}, err
 	}
-	content := strings.TrimSpace(task.Result)
+	// 2. 持久化内容必须与实际进入父会话的 continuation prompt 完全一致。
+	content, contentErr := domainsubagent.CompletionMessageContent(task)
+	if contentErr != nil {
+		return domainsubagent.AgentMessage{}, contentErr
+	}
 	kind := domainsubagent.AgentMessageKindTaskResult
 	if task.Status == domainsubagent.TaskStatusFailed {
-		content = strings.TrimSpace(task.ErrorMessage)
 		kind = domainsubagent.AgentMessageKindTaskError
-	}
-	if content == "" {
-		content = "subagent completed without a textual result"
 	}
 	message := domainsubagent.AgentMessage{
 		ID: messageID, SourceTaskID: task.ID, AuthorAgentID: task.ChildSessionID,
 		RecipientAgentID: task.ParentSessionID, ParentTurnID: task.ParentRunID,
 		RootAgentID: task.ParentSessionID, Kind: kind, Content: content,
-		Trigger: domainsubagent.AgentMessageTriggerQueue, Status: domainsubagent.AgentMessagePending,
+		Trigger: domainsubagent.AgentMessageTriggerTurn, Status: domainsubagent.AgentMessagePending,
 		CreatedAt: service.now(),
 	}
 	if err := message.Validate(); err != nil {
@@ -128,6 +157,7 @@ func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
 		return err
 	}
 	for _, message := range messages {
+		// 1. 进程启动后先领取 durable message，避免多个实例重复恢复同一事件。
 		if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {
 			ownerID := service.MessageOwnerID
 			if ownerID == "" {
@@ -152,6 +182,7 @@ func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
 			continue
 		}
 		service.mu.Lock()
+		// 2. 恢复只负责重新放入父会话 mailbox，不在这里提前确认 delivered。
 		if err := service.ParentNotifier.Notify(ctx, domainsubagent.CloneTask(task)); err != nil {
 			service.mu.Unlock()
 			if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {

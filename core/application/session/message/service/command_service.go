@@ -28,16 +28,29 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 	if strings.TrimSpace(command.Input) == "" {
 		return messageresult.Command{}, errors.New("input is empty")
 	}
+	command.SourceID = strings.TrimSpace(command.SourceID)
 	current, err := s.loadSession(ctx, command.SessionID)
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	if command.DeduplicateSynthetic && hasSyntheticMessage(current.Messages, command.SyntheticReason, command.Input) {
-		return messageresult.Command{Session: current, Input: command.Input, Appended: false}, nil
+	// 1. 只有调用方提供稳定 SourceID 时才执行幂等判断；普通消息不能按文本猜测重复。
+	if command.SourceID != "" {
+		for _, message := range current.Messages {
+			if message.SourceID != command.SourceID {
+				continue
+			}
+			// 2. 同一个事件再次投递且内容一致，表示已经应用，直接返回成功。
+			if message.Text() == command.Input && (command.SourceKind == "" || message.SourceKind == command.SourceKind) {
+				return messageresult.Command{Session: current, Input: command.Input, Appended: false}, nil
+			}
+			// 3. 同一个事件 ID 携带不同内容，说明上游协议发生冲突，不能静默覆盖。
+			return messageresult.Command{}, fmt.Errorf("source message id %q conflicts with existing session message", command.SourceID)
+		}
 	}
 	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForceAutonomousPlanning)
 	messageCount := len(current.Messages)
-	if err := s.Memory.AddUserTurnWithReasonTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason); err != nil {
+	// 4. 追加时把事件来源一起写入会话聚合根，后续重试和进程恢复才能继续按 ID 判断。
+	if err := s.Memory.AddUserTurnWithMetadataTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason, command.SourceID, command.SourceKind, command.SourceTaskID); err != nil {
 		return messageresult.Command{}, err
 	}
 	current, err = s.Memory.GetSession(current.ID)
@@ -99,19 +112,6 @@ func latestRuntimeInstruction(messages []domainmessage.Message) string {
 		return ""
 	}
 	return ""
-}
-
-func hasSyntheticMessage(messages []domainmessage.Message, reason domainmessage.SyntheticReason, input string) bool {
-	if reason == "" {
-		return false
-	}
-	for index := len(messages) - 1; index >= 0; index-- {
-		message := messages[index]
-		if message.IsSyntheticReason(reason) && message.Text() == input {
-			return true
-		}
-	}
-	return false
 }
 
 func (s CommandService) loadSession(ctx context.Context, sessionID string) (*session.Session, error) {

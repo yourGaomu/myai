@@ -160,6 +160,13 @@ func (s *Session) AddUserTurnWithContext(ragContext string, runtimeInstruction s
 }
 
 func (s *Session) AddUserTurnWithReason(ragContext string, runtimeInstruction string, content string, reason domainmessage.SyntheticReason) {
+	s.AddUserTurnWithMetadata(ragContext, runtimeInstruction, content, reason, "", "", "")
+}
+
+// AddUserTurnWithMetadata appends a user turn and preserves the identity of a
+// generated event when the turn came from a plan or another agent.
+func (s *Session) AddUserTurnWithMetadata(ragContext string, runtimeInstruction string, content string, reason domainmessage.SyntheticReason, sourceID string, sourceKind string, sourceTaskID string) {
+	// 1. 先追加本轮运行指令和检索上下文，再追加真正的用户/代理输入。
 	if ragMessage := domainmessage.RAGContext(ragContext); ragMessage.IsSynthetic() {
 		s.AppendMessage(ragMessage)
 	}
@@ -170,6 +177,10 @@ func (s *Session) AddUserTurnWithReason(ragContext string, runtimeInstruction st
 	if reason != "" {
 		message = domainmessage.SyntheticUserText(reason, content)
 	}
+	message.SourceID = sourceID
+	// 2. 来源元数据跟随输入消息进入会话，后续重试可以按事件 ID 幂等处理。
+	message.SourceKind = sourceKind
+	message.SourceTaskID = sourceTaskID
 	s.AppendMessage(message)
 }
 

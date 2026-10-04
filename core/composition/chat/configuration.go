@@ -23,12 +23,12 @@ import (
 	agentrunservice "myai/core/application/agentrun/service"
 	compactionservice "myai/core/application/chat/compaction/service"
 	chatcontextservice "myai/core/application/chat/context/service"
+	generationcommand "myai/core/application/chat/generation/command"
 	generationservice "myai/core/application/chat/generation/service"
 	planservice "myai/core/application/chat/plan/service"
 	chatretrievalapi "myai/core/application/chat/retrieval/api"
 	chatretrievalservice "myai/core/application/chat/retrieval/service"
 	searchapi "myai/core/application/knowledge/search/api"
-	memoryretrievalapi "myai/core/application/memory/retrieval/api"
 	modelservice "myai/core/application/model/service"
 	planserviceapp "myai/core/application/plan/service"
 	runtimeservice "myai/core/application/runtime/service"
@@ -42,6 +42,7 @@ import (
 	queryservice "myai/core/application/session/query/service"
 	settingsservice "myai/core/application/session/settings/service"
 	skillservice "myai/core/application/skill/service"
+	domainmessage "myai/core/domain/message"
 	"myai/core/hook"
 	agentrunport "myai/core/port/agentrun"
 	asyncport "myai/core/port/async"
@@ -49,6 +50,7 @@ import (
 	modelport "myai/core/port/model"
 	persistenceport "myai/core/port/persistence"
 	"myai/core/service"
+	"myai/core/session"
 	"myai/core/skill"
 	"myai/core/tool"
 )
@@ -79,7 +81,6 @@ type Configuration struct {
 	KnowledgeSearch  searchapi.Service
 	AgentRuns        agentrunport.Repository
 	AgentRunObserver agentrunport.CompletionObserver
-	MemoryContext    memoryretrievalapi.ContextPreparer
 	IntentController *service.IntentController
 }
 
@@ -225,6 +226,17 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Compactor:    compactor,
 		TurnHooks:    turnHooks,
 		PendingInput: turnInputQueue,
+		OnPendingInputAppended: func(current *session.Session, messages []domainmessage.Message) {
+			// 1. AgentLoop 领取 mailbox 后先把新增消息写入持久化队列，避免只留在内存。
+			if current == nil || len(messages) == 0 {
+				return
+			}
+			// 2. 运行中的 turn 也可能收到子代理消息，按会话顺序写入增量消息。
+			userMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+				SessionID: current.ID, Model: current.Model, Input: messages[len(messages)-1].Text(),
+				AppendedMessages: domainmessage.CloneAll(messages), SessionSnapshot: session.Clone(current),
+			})
+		},
 		OnCompactError: func(err error) {
 			log.Printf("auto compact failed: %v", err)
 		},
@@ -254,12 +266,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		AgentRunner:       agentLoop,
 		ResponseCommitter: responseCommit,
 		Persistence:       generationPersistence,
-		MemoryContext:     configuration.MemoryContext,
 		OnCompactError: func(err error) {
 			log.Printf("auto compact failed: %v", err)
-		},
-		OnMemoryError: func(err error) {
-			log.Printf("AI memory retrieval failed: %v", err)
 		},
 	}
 	generationTasks := generationservice.TaskService{
@@ -383,5 +391,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		SkillCatalog:    skillCatalog,
 		Events:          events,
 		AgentRunQueries: runQueries,
+		OnPendingTurnError: func(err error) {
+			log.Printf("background parent turn failed: %v", err)
+		},
 	}
 }

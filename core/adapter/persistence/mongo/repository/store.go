@@ -46,6 +46,20 @@ func NewWithTemplate(template mongotemplate.Operations) *Store {
 	return &Store{template: template}
 }
 
+// EnsureIndexes creates the identity index used by generated inter-agent
+// messages. The sparse option keeps legacy messages without SourceID valid.
+func (m *Store) EnsureIndexes(ctx context.Context) error {
+	// 1. 为带 SourceID 的消息建立会话内唯一约束，防止跨进程重复落库。
+	if m == nil || m.database == nil {
+		return errors.New("mongo chat database is nil")
+	}
+	// 2. sparse 保证旧消息没有 source_id 时仍可正常读取和写入。
+	_, err := m.database.Collection(messagesCollection).Indexes().CreateMany(ctx, []gomongo.IndexModel{
+		{Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "source_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+	})
+	return err
+}
+
 func (m *Store) GetSession(ctx context.Context, sessionID string) (repository.SessionRecord, error) {
 	var session po.SessionDocument
 	err := m.template.FindOne(ctx, sessionsCollection, bson.M{

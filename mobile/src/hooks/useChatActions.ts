@@ -66,6 +66,7 @@ export function useChatActions({
     if (!sent) {
       activeRequestIDRef.current = "";
       delete requestSessionMapRef.current[requestID];
+      addEventMessage(targetSessionID, "消息发送失败：未连接到 Relay 服务，请检查连接状态。");
       return;
     }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	agentrunquery "myai/core/application/agentrun/query"
 	agentrunresult "myai/core/application/agentrun/result"
@@ -32,6 +33,7 @@ import (
 	domaingeneration "myai/core/domain/generation"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
+	domainsubagent "myai/core/domain/subagent"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/session"
@@ -43,7 +45,17 @@ type ChatService struct {
 	dependencies  ChatDependencies
 	operationInit sync.Once
 	operations    *sessionOperationCoordinator
+	pendingWakeMu sync.Mutex
+	pendingWakes  map[string]*pendingWakeState
 }
+
+type pendingWakeState struct {
+	// requested records an enqueue that happened while the worker was already
+	// running, so the worker gets another chance before it exits.
+	requested bool
+}
+
+var ErrNoPendingParentInput = errors.New("no pending parent input")
 
 type ContextInfo = contextmgr.Info
 
@@ -121,6 +133,81 @@ func (s *ChatService) EnqueueTurnInputMessage(sessionID, messageID, input string
 		return identified.EnqueueIdentified(sessionID, messageID, input)
 	}
 	return s.dependencies.TurnInputQueue.Enqueue(sessionID, input)
+}
+
+func (s *ChatService) EnqueueTurnInputAgentMessage(sessionID string, message domainsubagent.AgentMessage) error {
+	// 1. 优先走结构化队列，保留来源、触发方式和父子代理关系。
+	if s == nil || s.dependencies.TurnInputQueue == nil {
+		return errors.New("turn input queue is not configured")
+	}
+	if structured, ok := s.dependencies.TurnInputQueue.(generationport.StructuredPendingTurnInput); ok {
+		// 2. 队列负责做消息 ID 幂等和 in-flight 管理，ChatService 不再按文本猜测重复。
+		if err := structured.EnqueueAgentMessage(sessionID, message); err != nil {
+			return err
+		}
+		// 3. trigger_turn 只负责请求一次异步唤醒；真正的模型调用在 worker
+		// 中重新获取会话锁，不能阻塞子代理完成通知。
+		if message.Trigger == domainsubagent.AgentMessageTriggerTurn {
+			s.schedulePendingTurn(sessionID)
+		}
+		return nil
+	}
+	// 3. 兼容旧队列实现；迁移完成后应删除这个匿名文本降级路径。
+	if err := s.EnqueueTurnInputMessage(sessionID, message.ID, message.Content); err != nil {
+		return err
+	}
+	if message.Trigger == domainsubagent.AgentMessageTriggerTurn {
+		s.schedulePendingTurn(sessionID)
+	}
+	return nil
+}
+
+// schedulePendingTurn wakes an idle parent session without starting a model
+// call from the child completion callback. One worker is admitted per session;
+// concurrent enqueue events set requested and are coalesced by that worker.
+func (s *ChatService) schedulePendingTurn(sessionID string) {
+	if s == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	s.pendingWakeMu.Lock()
+	if s.pendingWakes == nil {
+		s.pendingWakes = make(map[string]*pendingWakeState)
+	}
+	if state, exists := s.pendingWakes[sessionID]; exists {
+		state.requested = true
+		s.pendingWakeMu.Unlock()
+		return
+	}
+	s.pendingWakes[sessionID] = &pendingWakeState{}
+	s.pendingWakeMu.Unlock()
+
+	go s.runPendingTurnWorker(sessionID)
+}
+
+func (s *ChatService) runPendingTurnWorker(sessionID string) {
+	for {
+		_, err := s.ContinuePendingStreamForSession(context.Background(), sessionID, llm.ChatStreamHandler{})
+		if err != nil && !errors.Is(err, ErrNoPendingParentInput) {
+			if s.dependencies.OnPendingTurnError != nil {
+				s.dependencies.OnPendingTurnError(fmt.Errorf("wake parent session %s: %w", sessionID, err))
+			}
+		}
+
+		s.pendingWakeMu.Lock()
+		state := s.pendingWakes[sessionID]
+		if state == nil || !state.requested {
+			delete(s.pendingWakes, sessionID)
+			s.pendingWakeMu.Unlock()
+			return
+		}
+		// 1. 消费 worker 运行期间合并的下一次唤醒请求，再重新检查队列。
+		state.requested = false
+		s.pendingWakeMu.Unlock()
+	}
 }
 
 func (s *ChatService) SetPendingInputAcknowledger(acknowledger generationport.PendingInputAcknowledger) error {
@@ -212,7 +299,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	}
 	current := prepared.Session
 
-	title := "New chat"
+	title := "New chat-" + time.Now().Format("2006-01-02 15:04:05")
 	if userMessageCount(current.Messages) == 1 {
 		title = titleFromInput(input)
 	}
@@ -434,6 +521,14 @@ func shouldResumePlanRequest(current *session.Session, input string) bool {
 }
 
 func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessionID string, input string, syntheticReason domainmessage.SyntheticReason, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	return s.continueSessionStreamForSessionWithSource(ctx, sessionID, input, syntheticReason, "", "", stream)
+}
+
+func (s *ChatService) ContinueSessionStreamForMessage(ctx context.Context, sessionID string, input string, syntheticReason domainmessage.SyntheticReason, sourceID string, sourceKind string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	return s.continueSessionStreamForSessionWithSource(ctx, sessionID, input, syntheticReason, sourceID, sourceKind, stream)
+}
+
+func (s *ChatService) continueSessionStreamForSessionWithSource(ctx context.Context, sessionID string, input string, syntheticReason domainmessage.SyntheticReason, sourceID string, sourceKind string, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
 	}
@@ -458,7 +553,7 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 		SessionID: sessionID, Input: input, ForceChatMode: true, SyntheticReason: syntheticReason,
-		DeduplicateSynthetic: true,
+		SourceID: sourceID, SourceKind: sourceKind,
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -482,6 +577,7 @@ func (s *ChatService) ContinueSessionStreamForSession(ctx context.Context, sessi
 // starts one continuation turn. The queue is drained only after the session
 // operation lock is acquired, so a normal user turn cannot race the delivery.
 func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	// 1. 先锁定父会话，再领取 mailbox；普通用户输入不能与恢复 turn 交错。
 	if s == nil || s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
 	}
@@ -500,6 +596,7 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 
 	var pendingItems []domaingeneration.PendingTurnInputItem
 	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		// 2. 结构化队列返回的是一次性领取快照，失败时必须完整回滚。
 		pendingItems = identified.DrainIdentified(sessionID)
 	} else {
 		for _, input := range s.dependencies.TurnInputQueue.Drain(sessionID) {
@@ -507,9 +604,10 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 		}
 	}
 	if len(pendingItems) == 0 {
-		return ChatResponse{}, errors.New("no pending parent input")
+		return ChatResponse{}, ErrNoPendingParentInput
 	}
 	requeue := func(items []domaingeneration.PendingTurnInputItem) error {
+		// 3. 模型调用失败时恢复原顺序，下一次重试仍使用同一 SourceID。
 		if len(items) == 0 {
 			return nil
 		}
@@ -530,9 +628,24 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 		if input == "" {
 			continue
 		}
+		// 4. 把队列项恢复为结构化来源，不能再只按文本追加普通用户消息。
+		agentMessage := domainsubagent.AgentMessage{
+			ID: item.ID, SourceTaskID: item.SourceTaskID, AuthorAgentID: item.AuthorAgentID,
+			RecipientAgentID: item.RecipientAgentID, ParentTurnID: item.ParentTurnID,
+			RootAgentID: item.RootAgentID, Kind: domainsubagent.AgentMessageKind(item.SourceKind),
+			Content: input, Trigger: domainsubagent.AgentMessageTrigger(item.Trigger),
+			Status: domainsubagent.AgentMessagePending,
+		}
+		if agentMessage.Kind == "" {
+			agentMessage.Kind = domainsubagent.AgentMessageKindTaskResult
+		}
+		if agentMessage.Trigger == "" {
+			agentMessage.Trigger = domainsubagent.AgentMessageTriggerQueue
+		}
 		prepared, appendErr := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 			SessionID: sessionID, Input: input, ForceChatMode: true,
-			SyntheticReason: domainmessage.SyntheticReasonSubagentResult, DeduplicateSynthetic: true,
+			SyntheticReason: domainmessage.SyntheticReasonSubagentResult,
+			SourceID:        item.ID, SourceKind: string(agentMessage.Kind), SourceTaskID: item.SourceTaskID,
 		})
 		if appendErr != nil {
 			return ChatResponse{}, errors.Join(appendErr, requeue(pendingItems))
@@ -540,6 +653,7 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 		current = prepared.Session
 		latestInput = prepared.Input
 		if prepared.Appended && s.dependencies.UserMessages != nil {
+			// 5. 先记录父会话新增消息，模型成功后才确认 mailbox 事件完成。
 			s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 				SessionID: current.ID, Model: current.Model, Input: prepared.Input,
 				RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
@@ -556,9 +670,11 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 		chatretrievalresult.Context{}, stream, false, true,
 	)
 	if err != nil {
+		// 6. 生成失败不确认消息，保持 durable message 可恢复。
 		return ChatResponse{}, errors.Join(err, requeue(pendingItems))
 	}
 	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		// 7. 所有模型处理成功后逐个确认；确认失败的事件重新入队。
 		var ackErrors []error
 		var unacknowledged []domaingeneration.PendingTurnInputItem
 		for _, item := range pendingItems {

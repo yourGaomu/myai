@@ -106,7 +106,8 @@ function upsertTask(current: SubagentTask[], value: SubagentTask) {
   }
   const next = current.filter((item) => item.id !== value.id);
   next.push(existing ? { ...existing, ...value } : value);
-  return next.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  const sorted = next.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+  return sorted.slice(0, 64);
 }
 
 function appendTaskEvent(current: Record<string, SubagentTaskEvent[]>, value: SubagentTaskEvent) {
@@ -115,5 +116,10 @@ function appendTaskEvent(current: Record<string, SubagentTaskEvent[]>, value: Su
     return current;
   }
   const next = [...previous, value].sort((left, right) => left.sequence - right.sequence);
-  return { ...current, [value.task_id]: next.slice(-256) };
+  const updated = { ...current, [value.task_id]: next.slice(-256) };
+  const keys = Object.keys(updated);
+  if (keys.length > 64) {
+    delete updated[keys[0]];
+  }
+  return updated;
 }

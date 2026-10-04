@@ -78,6 +78,9 @@ type MessageDocument struct {
 	ToolPromptError     string    `bson:"tool_prompt_error,omitempty"`
 	ToolPromptTruncated bool      `bson:"tool_prompt_truncated,omitempty"`
 	SyntheticReason     string    `bson:"synthetic_reason,omitempty"`
+	SourceID            string    `bson:"source_id,omitempty"`
+	SourceKind          string    `bson:"source_kind,omitempty"`
+	SourceTaskID        string    `bson:"source_task_id,omitempty"`
 	PromptTokens        int       `bson:"prompt_tokens,omitempty"`
 	CompletionTokens    int       `bson:"completion_tokens,omitempty"`
 	TotalTokens         int       `bson:"total_tokens,omitempty"`

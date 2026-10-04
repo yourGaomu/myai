@@ -44,10 +44,14 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	if s.Generator == nil {
 		return generationresult.GenerationResponse{}, errors.New("generation handler is nil")
 	}
-
+	//标识本次生成请求或历史任务
 	requestID := s.RequestIDs.NewRequestID()
+	//标识 Agent Run，用于运行事件、状态和父子运行关系
 	runID := agentrunruntime.RunID(ctx)
 	ownsRun := false
+	//如果当前上下文没有已有 Run，
+	//并且系统配置了 Run 服务，
+	//就创建一个新的 Run。
 	if runID == "" && s.Runs != nil {
 		metadata := agentrunruntime.MetadataFrom(ctx)
 		run, err := s.Runs.Start(ctx, agentruncommand.Start{
@@ -75,6 +79,8 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 			}
 		}
 	}
+	//自己创建的 Run，自己负责 Finish
+	//别人传进来的 Run，只使用，不负责结束
 	if ownsRun {
 		defer func() {
 			status := domainagentrun.StatusSucceeded

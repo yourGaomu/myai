@@ -50,14 +50,14 @@ func TestContextServiceRanksApplicableScopesAndRecordsUse(t *testing.T) {
 	}
 }
 
-func TestContextServiceSkipsGreeting(t *testing.T) {
+func TestContextServiceHonorsExplicitSearchForShortQuery(t *testing.T) {
 	service := ContextService{Memories: memoryrepository.New()}
 	result, err := service.Prepare(context.Background(), memoryretrievalcommand.Prepare{Input: "hello"})
 	if err != nil {
-		t.Fatalf("prepare greeting: %v", err)
+		t.Fatalf("prepare explicit search: %v", err)
 	}
-	if result.Triggered || result.Prompt != "" {
-		t.Fatalf("greeting unexpectedly triggered retrieval: %#v", result)
+	if !result.Triggered || result.Query != "hello" || result.Prompt != "" {
+		t.Fatalf("explicit search was unexpectedly skipped: %#v", result)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
 
 import type {
   AssetListResultPayload,
@@ -141,6 +141,39 @@ export function useRemoteResultAppliers({
   setSessions,
   setViewMode,
 }: Args) {
+  const filePathRef = useRef(filePath);
+  filePathRef.current = filePath;
+  const selectedChangeRef = useRef(selectedChange);
+  selectedChangeRef.current = selectedChange;
+  const historyDiffRef = useRef(historyDiff);
+  historyDiffRef.current = historyDiff;
+  const hasPendingRequestRef = useRef(hasPendingRequest);
+  hasPendingRequestRef.current = hasPendingRequest;
+  const hasSessionMessagesRef = useRef(hasSessionMessages);
+  hasSessionMessagesRef.current = hasSessionMessages;
+  const addEventMessageRef = useRef(addEventMessage);
+  addEventMessageRef.current = addEventMessage;
+  const appendMessagesRef = useRef(appendMessages);
+  appendMessagesRef.current = appendMessages;
+  const replaceMessagesRef = useRef(replaceMessages);
+  replaceMessagesRef.current = replaceMessages;
+  const requestAssetsRef = useRef(requestAssets);
+  requestAssetsRef.current = requestAssets;
+  const requestChangesRef = useRef(requestChanges);
+  requestChangesRef.current = requestChanges;
+  const requestFilesRef = useRef(requestFiles);
+  requestFilesRef.current = requestFiles;
+  const requestHistoryRef = useRef(requestHistory);
+  requestHistoryRef.current = requestHistory;
+  const requestSessionHistoryDeltaRef = useRef(requestSessionHistoryDelta);
+  requestSessionHistoryDeltaRef.current = requestSessionHistoryDelta;
+  const requestSessionHistoryFullRef = useRef(requestSessionHistoryFull);
+  requestSessionHistoryFullRef.current = requestSessionHistoryFull;
+  const requestSessionHistoryRef = useRef(requestSessionHistory);
+  requestSessionHistoryRef.current = requestSessionHistory;
+  const resetActiveAssistantRef = useRef(resetActiveAssistant);
+  resetActiveAssistantRef.current = resetActiveAssistant;
+
   return useMemo(() => {
     const applyAssistantPlan = (targetSessionID: string, plan?: Plan) => {
       const normalizedSessionID = targetSessionID.trim();
@@ -180,19 +213,19 @@ export function useRemoteResultAppliers({
       if (sessionIDRef.current !== currentSessionID) {
         setSessionID(currentSessionID);
         sessionIDRef.current = currentSessionID;
-        requestAssets(currentSessionID);
+        requestAssetsRef.current(currentSessionID);
       }
       setSessionLastUsage(currentSessionID, findSessionUsage(nextSessions, currentSessionID));
-      if (hasSessionMessages(currentSessionID)) {
+      if (hasSessionMessagesRef.current(currentSessionID)) {
         historySessionIDRef.current = currentSessionID;
         return;
       }
       if (
         historySessionIDRef.current !== currentSessionID &&
         pendingHistorySessionIDRef.current !== currentSessionID &&
-        !hasPendingRequest(currentSessionID)
+        !hasPendingRequestRef.current(currentSessionID)
       ) {
-        requestSessionHistory(currentSessionID);
+        requestSessionHistoryRef.current(currentSessionID);
       }
     };
 
@@ -214,9 +247,9 @@ export function useRemoteResultAppliers({
         historySessionIDRef.current !== targetSessionID &&
         pendingHistorySessionIDRef.current !== targetSessionID
       ) {
-        requestSessionHistory(targetSessionID);
+        requestSessionHistoryRef.current(targetSessionID);
       }
-      requestAssets(targetSessionID);
+      requestAssetsRef.current(targetSessionID);
     };
 
     const applySessionSettings = (payload?: SessionSettingsResultPayload) => {
@@ -241,7 +274,7 @@ export function useRemoteResultAppliers({
       }
 
       if (payload.message) {
-        addEventMessage(nextSessionID || sessionIDRef.current, payload.message);
+        addEventMessageRef.current(nextSessionID || sessionIDRef.current, payload.message);
       }
     };
 
@@ -254,14 +287,14 @@ export function useRemoteResultAppliers({
         return;
       }
       const responseSessionID = (payload.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
-      if (!responseSessionID || hasPendingRequest(responseSessionID)) {
+      if (!responseSessionID || hasPendingRequestRef.current(responseSessionID)) {
         return;
       }
 
       const messages = payload.messages || [];
       void replaceCachedSessionHistory(responseSessionID, messages);
-      replaceMessages(responseSessionID, messages.map(historyMessageToChatItem));
-      resetActiveAssistant(responseSessionID);
+      replaceMessagesRef.current(responseSessionID, messages.map(historyMessageToChatItem));
+      resetActiveAssistantRef.current(responseSessionID);
 
       if (pendingHistorySessionIDRef.current === responseSessionID) {
         pendingHistorySessionIDRef.current = "";
@@ -270,7 +303,7 @@ export function useRemoteResultAppliers({
         historySessionIDRef.current = responseSessionID;
         setSessionID(responseSessionID);
         sessionIDRef.current = responseSessionID;
-        requestAssets(responseSessionID);
+        requestAssetsRef.current(responseSessionID);
       }
     };
 
@@ -279,7 +312,7 @@ export function useRemoteResultAppliers({
       if (!responseSessionID) {
         return;
       }
-      const hasLocalMessages = hasSessionMessages(responseSessionID);
+      const hasLocalMessages = hasSessionMessagesRef.current(responseSessionID);
       const remoteHasMessages = (payload?.message_count ?? 0) > 0;
       if (payload?.up_to_date && (hasLocalMessages || !remoteHasMessages)) {
         if (pendingHistorySessionIDRef.current === responseSessionID) {
@@ -289,15 +322,15 @@ export function useRemoteResultAppliers({
           historySessionIDRef.current = responseSessionID;
           setSessionID(responseSessionID);
           sessionIDRef.current = responseSessionID;
-          requestAssets(responseSessionID);
+          requestAssetsRef.current(responseSessionID);
         }
         return;
       }
       if (payload?.can_delta && hasLocalMessages) {
-        requestSessionHistoryDelta(responseSessionID);
+        requestSessionHistoryDeltaRef.current(responseSessionID);
         return;
       }
-      requestSessionHistoryFull(responseSessionID);
+      requestSessionHistoryFullRef.current(responseSessionID);
     };
 
     const applySessionHistoryDelta = (payload?: SessionHistoryDeltaResultPayload) => {
@@ -306,7 +339,7 @@ export function useRemoteResultAppliers({
         return;
       }
       if (payload?.full_sync_required) {
-        requestSessionHistoryFull(responseSessionID);
+        requestSessionHistoryFullRef.current(responseSessionID);
         return;
       }
 
@@ -318,11 +351,11 @@ export function useRemoteResultAppliers({
         historySessionIDRef.current = responseSessionID;
         setSessionID(responseSessionID);
         sessionIDRef.current = responseSessionID;
-        requestAssets(responseSessionID);
+        requestAssetsRef.current(responseSessionID);
       }
       if (messages.length > 0) {
         void appendCachedSessionHistory(responseSessionID, messages);
-        appendMessages(responseSessionID, messages.map(historyMessageToChatItem));
+        appendMessagesRef.current(responseSessionID, messages.map(historyMessageToChatItem));
       }
     };
 
@@ -345,7 +378,7 @@ export function useRemoteResultAppliers({
         setSessions((current) => upsertSession(current, payload.session as SessionSummary));
         setSessionLastUsage(payload.session.id, payload.session.last_usage || null);
       }
-      addEventMessage(payload?.session?.id || sessionIDRef.current, payload?.message || `Model switched to ${payload?.current_model_id || "selected model"}`);
+      addEventMessageRef.current(payload?.session?.id || sessionIDRef.current, payload?.message || `Model switched to ${payload?.current_model_id || "selected model"}`);
     };
 
     const applyModelConfigAdd = (payload?: ModelConfigAddResultPayload) => {
@@ -376,7 +409,7 @@ export function useRemoteResultAppliers({
       setSkillRoot(payload?.root || "");
       setSkillMessage(payload?.message || (nextSkills.length === 0 ? "No local skills found" : ""));
       if (payload?.message) {
-        addEventMessage(sessionIDRef.current, payload.message);
+        addEventMessageRef.current(sessionIDRef.current, payload.message);
       }
     };
 
@@ -407,7 +440,7 @@ export function useRemoteResultAppliers({
       setChanges(nextChanges);
       setChangesClean(Boolean(payload?.clean));
       setChangesMessage(payload?.message || "");
-      if (selectedChange && !nextChanges.some((entry) => entry.path === selectedChange)) {
+      if (selectedChangeRef.current && !nextChanges.some((entry) => entry.path === selectedChangeRef.current)) {
         setSelectedChange("");
         setChangeDiff(null);
       }
@@ -427,20 +460,21 @@ export function useRemoteResultAppliers({
       if (!payload) {
         return;
       }
-      addEventMessage(sessionIDRef.current, payload.message || `Reverted ${payload.path}`);
+      addEventMessageRef.current(sessionIDRef.current, payload.message || `Reverted ${payload.path}`);
       setSelectedChange("");
       setChangeDiff(null);
       setViewMode("changes");
-      requestChanges();
-      requestHistory();
-      requestFiles(filePath);
+      requestChangesRef.current();
+      requestHistoryRef.current();
+      requestFilesRef.current(filePathRef.current);
     };
 
     const applyHistoryList = (payload?: HistoryListResultPayload) => {
       const checkpoints = payload?.checkpoints || [];
       setHistoryCheckpoints(checkpoints);
       setHistoryMessage(checkpoints.length === 0 ? "No file history recorded yet" : "");
-      if (historyDiff && !checkpoints.some((checkpoint) => checkpoint.id === historyDiff.checkpoint_id)) {
+      const currentHistoryDiff = historyDiffRef.current;
+      if (currentHistoryDiff && !checkpoints.some((checkpoint) => checkpoint.id === currentHistoryDiff.checkpoint_id)) {
         setHistoryDiff(null);
       }
     };
@@ -460,14 +494,14 @@ export function useRemoteResultAppliers({
       if (!payload) {
         return;
       }
-      addEventMessage(sessionIDRef.current, payload.message || `Reverted checkpoint ${shortID(payload.checkpoint_id)}`);
+      addEventMessageRef.current(sessionIDRef.current, payload.message || `Reverted checkpoint ${shortID(payload.checkpoint_id)}`);
       setSelectedChange("");
       setChangeDiff(null);
       setHistoryDiff(null);
       setViewMode("changes");
-      requestChanges();
-      requestHistory();
-      requestFiles(filePath);
+      requestChangesRef.current();
+      requestHistoryRef.current();
+      requestFilesRef.current(filePathRef.current);
     };
 
     return {
@@ -497,24 +531,8 @@ export function useRemoteResultAppliers({
       applySessionGenerationPreferences,
     };
   }, [
-    addEventMessage,
-    appendMessages,
-    filePath,
-    hasPendingRequest,
-    hasSessionMessages,
-    historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
-    replaceMessages,
-    requestAssets,
-    requestChanges,
-    requestFiles,
-    requestHistory,
-    requestSessionHistoryDelta,
-    requestSessionHistoryFull,
-    requestSessionHistory,
-    resetActiveAssistant,
-    selectedChange,
     sessionIDRef,
     setChangeDiff,
     setAssets,

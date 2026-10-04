@@ -137,6 +137,7 @@ func CompactionCheckpointDomainFromDocument(document *po.CompactionCheckpointDoc
 }
 
 func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocument {
+	// 1. 写入 Mongo 前把领域记录的来源身份映射到 BSON 文档。
 	return po.MessageDocument{
 		ID:                  record.ID,
 		SessionID:           record.SessionID,
@@ -154,6 +155,9 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 		ToolPromptError:     record.ToolPromptError,
 		ToolPromptTruncated: record.ToolPromptTruncated,
 		SyntheticReason:     record.SyntheticReason,
+		SourceID:            record.SourceID,
+		SourceKind:          record.SourceKind,
+		SourceTaskID:        record.SourceTaskID,
 		PromptTokens:        record.PromptTokens,
 		CompletionTokens:    record.CompletionTokens,
 		TotalTokens:         record.TotalTokens,
@@ -165,6 +169,7 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 }
 
 func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRecord {
+	// 2. 读取 Mongo 时恢复来源身份，供会话层继续执行幂等判断。
 	return repository.MessageRecord{
 		ID:                  document.ID,
 		SessionID:           document.SessionID,
@@ -182,6 +187,9 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 		ToolPromptError:     document.ToolPromptError,
 		ToolPromptTruncated: document.ToolPromptTruncated,
 		SyntheticReason:     document.SyntheticReason,
+		SourceID:            document.SourceID,
+		SourceKind:          document.SourceKind,
+		SourceTaskID:        document.SourceTaskID,
 		PromptTokens:        document.PromptTokens,
 		CompletionTokens:    document.CompletionTokens,
 		TotalTokens:         document.TotalTokens,

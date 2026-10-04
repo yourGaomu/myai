@@ -30,6 +30,7 @@ const (
 	SyntheticReasonEnvironmentContext SyntheticReason = "environment_context"
 	SyntheticReasonHookContext        SyntheticReason = "hook_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
+	SyntheticReasonInterAgentMessage  SyntheticReason = "inter_agent_message"
 	SyntheticReasonAutonomousPlanning SyntheticReason = "autonomous_planning"
 	SyntheticReasonCompactionSummary  SyntheticReason = "compaction_summary"
 )
@@ -59,6 +60,10 @@ type Message struct {
 	Role            Role
 	Parts           []Part
 	SyntheticReason SyntheticReason
+	// 1. SourceID 标识产生本消息的外部事件；它不同于消息自身 ID，专门用于投递幂等。
+	SourceID     string
+	SourceKind   string
+	SourceTaskID string
 }
 
 // StableID provides a deterministic identity for legacy messages that were

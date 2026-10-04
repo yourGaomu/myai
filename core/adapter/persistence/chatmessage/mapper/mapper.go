@@ -217,6 +217,10 @@ func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Me
 			}
 			mapped[partIndex].CreatedAt = createdAt
 			mapped[partIndex].Sequence = message.Sequence
+			// 1. assistant/tool 消息的每个记录也要保留来源字段，避免映射时丢失事件身份。
+			mapped[partIndex].SourceID = message.SourceID
+			mapped[partIndex].SourceKind = message.SourceKind
+			mapped[partIndex].SourceTaskID = message.SourceTaskID
 			if mapped[partIndex].Sequence <= 0 {
 				mapped[partIndex].Sequence = messageSequence(createdAt)
 			}
@@ -264,11 +268,18 @@ func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) 
 		record := newRecord(repository.RoleSystem)
 		record.Content = message.Text()
 		record.SyntheticReason = string(message.SyntheticReason)
+		// 2. system/user 消息沿用同一来源元数据，保证不同角色的持久化格式一致。
+		record.SourceID = message.SourceID
+		record.SourceKind = message.SourceKind
+		record.SourceTaskID = message.SourceTaskID
 		return []repository.MessageRecord{record}
 	case domainmessage.RoleUser:
 		record := newRecord(repository.RoleUser)
 		record.Content = message.Text()
 		record.SyntheticReason = string(message.SyntheticReason)
+		record.SourceID = message.SourceID
+		record.SourceKind = message.SourceKind
+		record.SourceTaskID = message.SourceTaskID
 		return []repository.MessageRecord{record}
 	case domainmessage.RoleAssistant:
 		records := make([]repository.MessageRecord, 0, len(message.Parts)+1)

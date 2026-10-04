@@ -36,7 +36,7 @@ var _ memoryretrievalapi.ContextPreparer = ContextService{}
 
 func (service ContextService) Prepare(ctx context.Context, command memoryretrievalcommand.Prepare) (memoryretrievalresult.Context, error) {
 	query := strings.TrimSpace(command.Input)
-	if query == "" || !shouldRetrieve(query) {
+	if query == "" {
 		return memoryretrievalresult.Context{Query: query}, nil
 	}
 	if service.Memories == nil {
@@ -217,19 +217,6 @@ func formatMemoryContext(memories []domainmemory.Memory) string {
 func writeMemoryField(builder *strings.Builder, label string, value string) {
 	if value = strings.TrimSpace(value); value != "" {
 		fmt.Fprintf(builder, "%s: %s\n", label, value)
-	}
-}
-
-func shouldRetrieve(input string) bool {
-	input = strings.TrimSpace(strings.ToLower(input))
-	if utf8.RuneCountInString(input) < 6 {
-		return false
-	}
-	switch input {
-	case "你好", "您好", "hello", "hi", "谢谢", "好的", "继续":
-		return false
-	default:
-		return true
 	}
 }
 

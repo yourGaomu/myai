@@ -33,10 +33,8 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		}
 		return allowsPermissionMode(permission, permissionMode)
 	})
-	// Retrieval in auto mode is model-driven through knowledge_search. In all
-	// other modes the chat pipeline either does not retrieve or performs the
-	// deterministic always-mode search before generation, so exposing the tool
-	// would be redundant or violate the session setting.
+	// Knowledge retrieval is exposed only in auto mode; always mode searches
+	// before generation. AI memory search is independent of those RAG settings.
 	if !knowledgeSearchToolAvailable(current) {
 		tools = withoutKnowledgeSearch(tools)
 	}

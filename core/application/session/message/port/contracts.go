@@ -16,6 +16,10 @@ type CommandMemory interface {
 	AddUserTurnTo(sessionID string, runtimeInstruction string, input string) error
 	AddUserTurnWithContextTo(sessionID string, ragContext string, runtimeInstruction string, input string) error
 	AddUserTurnWithReasonTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason) error
+	// 1. 追加代理/计划消息时必须同时写入来源元数据。
+	AddUserTurnWithMetadataTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason, sourceID string, sourceKind string, sourceTaskID string) error
+	// 2. AgentLoop 消费运行中 mailbox 时通过该接口追加到同一会话聚合根。
+	AppendMessageTo(sessionID string, message domainmessage.Message) error
 	TrimAfterLastUserMessage(sessionID string) (string, error)
 	RestoreSession(snapshot *session.Session) error
 	GetSession(sessionID string) (*session.Session, error)

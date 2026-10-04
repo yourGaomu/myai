@@ -27,13 +27,17 @@ type MessageRecord struct {
 	ToolPromptError     string
 	ToolPromptTruncated bool
 	SyntheticReason     string
-	PromptTokens        int
-	CompletionTokens    int
-	TotalTokens         int
-	ReasoningTokens     int
-	PromptCachedTokens  int
-	Sequence            int64
-	CreatedAt           time.Time
+	// 1. 持久化记录必须保存来源身份，否则重启后无法判断消息是否已经应用。
+	SourceID           string
+	SourceKind         string
+	SourceTaskID       string
+	PromptTokens       int
+	CompletionTokens   int
+	TotalTokens        int
+	ReasoningTokens    int
+	PromptCachedTokens int
+	Sequence           int64
+	CreatedAt          time.Time
 }
 
 type MessageHistoryMeta struct {

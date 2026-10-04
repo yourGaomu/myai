@@ -12,6 +12,7 @@ import (
 type ragSettingsKey struct{}
 type executionKey struct{}
 type knowledgeSearchBudgetKey struct{}
+type memorySearchBudgetKey struct{}
 
 // KnowledgeSearchBudget limits model-driven knowledge searches to one turn.
 // It is intentionally shared through context so the tool executor can preserve
@@ -83,6 +84,52 @@ func WithKnowledgeSearchBudget(ctx context.Context, budget *KnowledgeSearchBudge
 
 func KnowledgeSearchBudgetFrom(ctx context.Context) (*KnowledgeSearchBudget, bool) {
 	budget, ok := ctx.Value(knowledgeSearchBudgetKey{}).(*KnowledgeSearchBudget)
+	return budget, ok && budget != nil
+}
+
+// MemorySearchBudget limits model-driven AI memory searches to one generation turn.
+type MemorySearchBudget struct {
+	mu       sync.Mutex
+	maxCalls int
+	calls    int
+	queries  map[string]struct{}
+}
+
+func NewMemorySearchBudget(maxCalls int) *MemorySearchBudget {
+	if maxCalls < 1 {
+		maxCalls = 1
+	}
+	return &MemorySearchBudget{maxCalls: maxCalls, queries: make(map[string]struct{})}
+}
+
+func (budget *MemorySearchBudget) Reserve(query string) error {
+	if budget == nil {
+		return nil
+	}
+	key := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(query)), " "))
+	if key == "" {
+		return errors.New("memory search query is required")
+	}
+
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	if _, exists := budget.queries[key]; exists {
+		return errors.New("memory search query was already used in this turn")
+	}
+	if budget.calls >= budget.maxCalls {
+		return errors.New("memory search call limit reached for this turn")
+	}
+	budget.calls++
+	budget.queries[key] = struct{}{}
+	return nil
+}
+
+func WithMemorySearchBudget(ctx context.Context, budget *MemorySearchBudget) context.Context {
+	return context.WithValue(ctx, memorySearchBudgetKey{}, budget)
+}
+
+func MemorySearchBudgetFrom(ctx context.Context) (*MemorySearchBudget, bool) {
+	budget, ok := ctx.Value(memorySearchBudgetKey{}).(*MemorySearchBudget)
 	return budget, ok && budget != nil
 }
 

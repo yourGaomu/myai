@@ -27,8 +27,8 @@ func TestSelectionServiceFiltersReadonlyPermissionMode(t *testing.T) {
 	}
 }
 
-func TestSelectionServiceExposesKnowledgeSearchOnlyInAutoRetrievalMode(t *testing.T) {
-	catalog := namedCatalog{names: []string{"knowledge_search", "read_file"}}
+func TestSelectionServiceKeepsMemorySearchIndependentOfRAGMode(t *testing.T) {
+	catalog := namedCatalog{names: []string{"knowledge_search", "memory_search", "read_file"}}
 	for _, test := range []struct {
 		name string
 		mode session.RetrievalMode
@@ -44,14 +44,21 @@ func TestSelectionServiceExposesKnowledgeSearchOnlyInAutoRetrievalMode(t *testin
 				RAGSettings:    session.RAGSettings{Mode: test.mode},
 				PermissionMode: session.PermissionModeFull,
 			}, false)
-			found := false
+			foundKnowledgeSearch := false
+			foundMemorySearch := false
 			for _, tool := range tools {
 				if tool.Function != nil && tool.Function.Name == "knowledge_search" {
-					found = true
+					foundKnowledgeSearch = true
+				}
+				if tool.Function != nil && tool.Function.Name == "memory_search" {
+					foundMemorySearch = true
 				}
 			}
-			if found != test.want {
-				t.Fatalf("knowledge_search availability = %v, want %v; tools=%#v", found, test.want, tools)
+			if foundKnowledgeSearch != test.want {
+				t.Fatalf("knowledge_search availability = %v, want %v; tools=%#v", foundKnowledgeSearch, test.want, tools)
+			}
+			if !foundMemorySearch {
+				t.Fatalf("memory_search must be independent of RAG mode; tools=%#v", tools)
 			}
 		})
 	}

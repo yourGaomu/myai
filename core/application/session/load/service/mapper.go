@@ -80,8 +80,12 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 }
 
 func messageWithRecord(message domainmessage.Message, record repository.MessageRecord) domainmessage.Message {
+	// 1. 从持久化记录恢复来源身份，进程重启后仍可按 SourceID 做幂等判断。
 	message.ID = record.ID
 	message.RecordIDs = []string{record.ID}
+	message.SourceID = record.SourceID
+	message.SourceKind = record.SourceKind
+	message.SourceTaskID = record.SourceTaskID
 	message.Sequence = record.Sequence
 	message.CreatedAt = record.CreatedAt
 	return message
