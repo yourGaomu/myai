@@ -111,6 +111,19 @@ func (repository *Repository) SaveCandidate(_ context.Context, candidate domainm
 	return nil
 }
 
+func (repository *Repository) InsertCandidateIfAbsent(_ context.Context, candidate domainmemory.Candidate) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	repository.ensureMaps()
+	if _, exists := repository.candidates[candidate.ID]; !exists {
+		repository.candidates[candidate.ID] = cloneCandidate(candidate)
+	}
+	return nil
+}
+
 func (repository *Repository) SaveCandidateApproval(_ context.Context, memory domainmemory.Memory, candidate domainmemory.Candidate, expectedMemoryVersion int) error {
 	if err := memory.Validate(); err != nil {
 		return err
@@ -188,7 +201,7 @@ func (repository *Repository) GetExtractionJob(_ context.Context, jobID string) 
 	if !ok {
 		return domainmemory.ExtractionJob{}, memoryport.ErrNotFound
 	}
-	return job, nil
+	return cloneExtractionJob(job), nil
 }
 
 func (repository *Repository) GetExtractionJobByRun(_ context.Context, agentRunID string, extractorVersion string) (domainmemory.ExtractionJob, error) {
@@ -196,7 +209,7 @@ func (repository *Repository) GetExtractionJobByRun(_ context.Context, agentRunI
 	defer repository.mu.RUnlock()
 	for _, job := range repository.jobs {
 		if job.AgentRunID == strings.TrimSpace(agentRunID) && job.ExtractorVersion == strings.TrimSpace(extractorVersion) {
-			return job, nil
+			return cloneExtractionJob(job), nil
 		}
 	}
 	return domainmemory.ExtractionJob{}, memoryport.ErrNotFound
@@ -210,7 +223,7 @@ func (repository *Repository) ListExtractionJobs(_ context.Context, statuses []d
 		if len(statuses) > 0 && !containsJobStatus(statuses, job.Status) {
 			continue
 		}
-		items = append(items, job)
+		items = append(items, cloneExtractionJob(job))
 	}
 	sort.Slice(items, func(left, right int) bool { return items[left].UpdatedAt.Before(items[right].UpdatedAt) })
 	if limit > 0 && len(items) > limit {
@@ -231,8 +244,57 @@ func (repository *Repository) SaveExtractionJob(_ context.Context, job domainmem
 			return memoryport.ErrConflict
 		}
 	}
-	repository.jobs[job.ID] = job
+	repository.jobs[job.ID] = cloneExtractionJob(job)
 	return nil
+}
+
+func (repository *Repository) ListRecoverableExtractionJobs(_ context.Context, now time.Time, maxAttempts, limit int) ([]domainmemory.ExtractionJob, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	var jobs []domainmemory.ExtractionJob
+	for _, job := range repository.jobs {
+		if job.Recoverable(now, maxAttempts) {
+			jobs = append(jobs, cloneExtractionJob(job))
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].UpdatedAt.Before(jobs[j].UpdatedAt) })
+	if limit > 0 && len(jobs) > limit {
+		jobs = jobs[:limit]
+	}
+	return jobs, nil
+}
+
+func (repository *Repository) CompareAndSwapExtractionJob(_ context.Context, expectedRevision int, job domainmemory.ExtractionJob) error {
+	if err := job.Validate(); err != nil {
+		return err
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	current, ok := repository.jobs[job.ID]
+	if !ok || current.Revision != expectedRevision || job.Revision != expectedRevision+1 {
+		return memoryport.ErrConflict
+	}
+	repository.jobs[job.ID] = cloneExtractionJob(job)
+	return nil
+}
+
+func cloneExtractionJob(job domainmemory.ExtractionJob) domainmemory.ExtractionJob {
+	if job.LeaseUntil != nil {
+		value := *job.LeaseUntil
+		job.LeaseUntil = &value
+	}
+	if job.CompletedAt != nil {
+		value := *job.CompletedAt
+		job.CompletedAt = &value
+	}
+	if job.Candidates != nil {
+		candidates := make([]domainmemory.Candidate, len(job.Candidates))
+		for i, candidate := range job.Candidates {
+			candidates[i] = cloneCandidate(candidate)
+		}
+		job.Candidates = candidates
+	}
+	return job
 }
 
 func (repository *Repository) GetDreamRun(_ context.Context, runID string) (domainmemory.DreamRun, error) {

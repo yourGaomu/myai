@@ -49,6 +49,7 @@ func TestCandidateAndExtractionJobDocumentRoundTrip(t *testing.T) {
 
 	completedAt := now.Add(2 * time.Minute)
 	job := domainmemory.ExtractionJob{
+		Revision: 4, LeaseUntil: &completedAt, ResultPrepared: true, Candidates: []domainmemory.Candidate{candidate},
 		ID: "job-1", AgentRunID: "run-1", ExtractorVersion: "model-memory-v1",
 		Status: domainmemory.JobSucceeded, Attempts: 2, CreatedAt: now, UpdatedAt: completedAt, CompletedAt: &completedAt,
 	}

@@ -95,10 +95,10 @@ func (extractor ModelExtractor) Extract(ctx context.Context, run domainagentrun.
 			Title: strings.TrimSpace(item.Title), Kind: kind, Scope: scope,
 			Tags: normalizeOutputTags(item.Tags), Confidence: item.Confidence,
 			Content: domainmemory.Content{
-				Goal: strings.TrimSpace(item.Goal), ApplicableContext: strings.TrimSpace(item.ApplicableContext),
-				Approach: strings.TrimSpace(item.Approach), Result: strings.TrimSpace(item.Result),
-				PainPoints: strings.TrimSpace(item.PainPoints), RootCause: strings.TrimSpace(item.RootCause),
-				Lessons: strings.TrimSpace(item.Lessons), Verification: strings.TrimSpace(item.Verification),
+				Goal: strings.TrimSpace(string(item.Goal)), ApplicableContext: strings.TrimSpace(string(item.ApplicableContext)),
+				Approach: strings.TrimSpace(string(item.Approach)), Result: strings.TrimSpace(string(item.Result)),
+				PainPoints: strings.TrimSpace(string(item.PainPoints)), RootCause: strings.TrimSpace(string(item.RootCause)),
+				Lessons: strings.TrimSpace(string(item.Lessons)), Verification: strings.TrimSpace(string(item.Verification)),
 			},
 		})
 	}
@@ -198,20 +198,57 @@ type extractionOutput struct {
 }
 
 type extractionCandidate struct {
-	Title             string   `json:"title"`
-	Kind              string   `json:"kind"`
-	ScopeType         string   `json:"scope_type"`
-	ScopeKey          string   `json:"scope_key"`
-	Tags              []string `json:"tags"`
-	Goal              string   `json:"goal"`
-	ApplicableContext string   `json:"applicable_context"`
-	Approach          string   `json:"approach"`
-	Result            string   `json:"result"`
-	PainPoints        string   `json:"pain_points"`
-	RootCause         string   `json:"root_cause"`
-	Lessons           string   `json:"lessons"`
-	Verification      string   `json:"verification"`
-	Confidence        float64  `json:"confidence"`
+	Title             string       `json:"title"`
+	Kind              string       `json:"kind"`
+	ScopeType         string       `json:"scope_type"`
+	ScopeKey          string       `json:"scope_key"`
+	Tags              []string     `json:"tags"`
+	Goal              flexibleText `json:"goal"`
+	ApplicableContext flexibleText `json:"applicable_context"`
+	Approach          flexibleText `json:"approach"`
+	Result            flexibleText `json:"result"`
+	PainPoints        flexibleText `json:"pain_points"`
+	RootCause         flexibleText `json:"root_cause"`
+	Lessons           flexibleText `json:"lessons"`
+	Verification      flexibleText `json:"verification"`
+	Confidence        float64      `json:"confidence"`
+}
+
+// flexibleText accepts the scalar string format requested from the model and
+// the common fallback format where a model returns a list of bullet points.
+// The domain and persistence layers intentionally remain string-based.
+type flexibleText string
+
+func (value *flexibleText) UnmarshalJSON(data []byte) error {
+	if value == nil {
+		return errors.New("cannot decode memory extraction text into nil value")
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*value = flexibleText(text)
+		return nil
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(data, &parts); err != nil {
+		if string(data) == "null" {
+			*value = ""
+			return nil
+		}
+		return err
+	}
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		var item string
+		if err := json.Unmarshal(part, &item); err != nil {
+			return fmt.Errorf("memory extraction text array item: %w", err)
+		}
+		item = strings.TrimSpace(item)
+		if item != "" {
+			lines = append(lines, item)
+		}
+	}
+	*value = flexibleText(strings.Join(lines, "\n"))
+	return nil
 }
 
 func decodeExtractionOutput(content string) (extractionOutput, error) {
@@ -254,6 +291,7 @@ func memoryExtractionSystemPrompt() string {
 Return exactly one JSON object with a "candidates" array and no markdown.
 Create at most three candidates. Return an empty array for routine chat, canceled work, or evidence without reusable lessons.
 Each candidate must contain: title, kind, scope_type, scope_key, tags, goal, applicable_context, approach, result, pain_points, root_cause, lessons, verification, confidence.
+All text fields must be JSON strings (not arrays); tags must be a JSON string array.
 kind must be experience, failure, decision, or preference. confidence must be between 0 and 1.
 scope_type must be global, workspace, project, or session. global requires an empty scope_key; other scopes require a scope_key.
 Prefer concise Chinese text when the evidence is Chinese. Never include credentials, tokens, passwords, private keys, or unsupported conclusions.

@@ -56,7 +56,15 @@ func CandidateDomainFromDocument(document po.CandidateDocument) domainmemory.Can
 }
 
 func ExtractionJobDocumentFromDomain(job domainmemory.ExtractionJob) po.ExtractionJobDocument {
+	var candidates []po.CandidateDocument
+	if job.Candidates != nil {
+		candidates = make([]po.CandidateDocument, 0, len(job.Candidates))
+		for _, candidate := range job.Candidates {
+			candidates = append(candidates, CandidateDocumentFromDomain(candidate))
+		}
+	}
 	return po.ExtractionJobDocument{
+		Revision: job.Revision, LeaseUntil: job.LeaseUntil, ResultPrepared: job.ResultPrepared, Candidates: candidates,
 		ID: job.ID, AgentRunID: job.AgentRunID, ExtractorVersion: job.ExtractorVersion,
 		Status: string(job.Status), Attempts: job.Attempts, LastError: job.LastError,
 		CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, CompletedAt: job.CompletedAt,
@@ -64,7 +72,15 @@ func ExtractionJobDocumentFromDomain(job domainmemory.ExtractionJob) po.Extracti
 }
 
 func ExtractionJobDomainFromDocument(document po.ExtractionJobDocument) domainmemory.ExtractionJob {
+	var candidates []domainmemory.Candidate
+	if document.Candidates != nil {
+		candidates = make([]domainmemory.Candidate, 0, len(document.Candidates))
+		for _, candidate := range document.Candidates {
+			candidates = append(candidates, CandidateDomainFromDocument(candidate))
+		}
+	}
 	return domainmemory.ExtractionJob{
+		Revision: document.Revision, LeaseUntil: document.LeaseUntil, ResultPrepared: document.ResultPrepared, Candidates: candidates,
 		ID: document.ID, AgentRunID: document.AgentRunID, ExtractorVersion: document.ExtractorVersion,
 		Status: domainmemory.JobStatus(document.Status), Attempts: document.Attempts, LastError: document.LastError,
 		CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt, CompletedAt: document.CompletedAt,

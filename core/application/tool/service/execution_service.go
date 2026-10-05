@@ -12,6 +12,7 @@ import (
 	toolcommand "myai/core/application/tool/command"
 	toolport "myai/core/application/tool/port"
 	toolresult "myai/core/application/tool/result"
+	toolruntime "myai/core/application/tool/runtime"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/session"
@@ -39,6 +40,9 @@ type ExecutionService struct {
 var _ toolapi.ExecutionService = ExecutionService{}
 
 func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execution) (toolresult.Execution, error) {
+	if snapshot := toolruntime.RegistryFrom(ctx); snapshot != nil {
+		s.Registry = snapshot
+	}
 	if s.Registry == nil {
 		return toolresult.Execution{}, errors.New("tool registry is nil")
 	}

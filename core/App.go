@@ -166,6 +166,8 @@ type Application struct {
 	subagentRegistry            *subagentmemory.Registry
 	subagentEvents              *subagentevents.Bus
 	subagentRecoveryCancel      context.CancelFunc
+	memoryRecoveryCancel        context.CancelFunc
+	memoryRecoveryDone          chan struct{}
 	subagentRecoveryDone        <-chan struct{}
 	workspaceIsolationManager   workspaceport.Manager
 	workspaceCommandRunner      workspaceport.CommandRunner
@@ -364,6 +366,10 @@ func (app *Application) InitMemoryServices() {
 		if err := extraction.Recover(context.Background(), memoryextractioncommand.Recover{Limit: 100}); err != nil {
 			log.Printf("recover AI memory extraction jobs failed: %v", err)
 		}
+		recoveryCtx, cancel := context.WithCancel(context.Background())
+		app.memoryRecoveryCancel = cancel
+		app.memoryRecoveryDone = make(chan struct{})
+		go func() { defer close(app.memoryRecoveryDone); extraction.RunRecovery(recoveryCtx) }()
 	}
 
 	dreamModelID := strings.TrimSpace(app.properties.Memory.Dream.ModelID)
@@ -903,6 +909,10 @@ func (app *Application) Close() error {
 		return nil
 	}
 	var errs []error
+	if app.memoryRecoveryCancel != nil {
+		app.memoryRecoveryCancel()
+		<-app.memoryRecoveryDone
+	}
 	if app.subagentRecoveryCancel != nil {
 		app.subagentRecoveryCancel()
 		<-app.subagentRecoveryDone

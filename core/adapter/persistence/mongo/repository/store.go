@@ -74,20 +74,31 @@ func (m *Store) EnsureIndexes(ctx context.Context) error {
 func removeLegacyMessageSourceIndexes(ctx context.Context, indexes gomongo.IndexView) error {
 	specifications, err := indexes.ListSpecifications(ctx)
 	if err != nil {
+		var commandErr gomongo.CommandError
+		if errors.As(err, &commandErr) && commandErr.Code == 26 {
+			return nil
+		}
 		return err
 	}
 	for _, specification := range specifications {
-		if specification.Name == "_id_" || !isMessageSourceIndex(specification.KeysDocument) {
+		if !shouldRemoveMessageSourceIndex(specification.Name, specification.KeysDocument) {
 			continue
 		}
-		// The old index was named session_id_1_source_id_1. Remove any other
-		// index on the same key pair as well, so an earlier custom name cannot
-		// keep the broken uniqueness behavior alive.
+		// Only the known legacy index is a migration target. Never drop the
+		// current identity index or indexes managed by an operator.
 		if err := indexes.DropOne(ctx, specification.Name); err != nil {
+			var commandErr gomongo.CommandError
+			if errors.As(err, &commandErr) && (commandErr.Code == 27 || commandErr.Code == 26) {
+				continue
+			}
 			return err
 		}
 	}
 	return nil
+}
+
+func shouldRemoveMessageSourceIndex(name string, keys bson.Raw) bool {
+	return name == "session_id_1_source_id_1" && isMessageSourceIndex(keys)
 }
 
 func isMessageSourceIndex(raw bson.Raw) bool {

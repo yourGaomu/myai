@@ -7,6 +7,10 @@ import (
 )
 
 type ExtractionJob struct {
+	Revision         int
+	LeaseUntil       *time.Time
+	ResultPrepared   bool
+	Candidates       []Candidate
 	ID               string
 	AgentRunID       string
 	ExtractorVersion string
@@ -16,6 +20,19 @@ type ExtractionJob struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	CompletedAt      *time.Time
+}
+
+func (job ExtractionJob) Recoverable(now time.Time, maxAttempts int) bool {
+	switch job.Status {
+	case JobPending:
+		return true
+	case JobFailed:
+		return job.Attempts < maxAttempts
+	case JobRunning:
+		return job.LeaseUntil == nil || !job.LeaseUntil.After(now)
+	default:
+		return false
+	}
 }
 
 func (job ExtractionJob) Validate() error {

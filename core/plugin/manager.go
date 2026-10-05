@@ -84,6 +84,7 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 	}
 
 	manager.mu.RLock()
+	reloading := manager.registry != nil
 	oldRuntimes := make(map[string]*mcp.Manager, len(manager.runtimes))
 	oldSources := make([]string, 0)
 	for id, runtime := range manager.runtimes {
@@ -105,6 +106,9 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 	}
 
 	entries, err := os.ReadDir(manager.root)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		releaseTurn := registry.BeginReload()
 		registry.ReplaceSources(candidateRegistry, oldSources, nil)
@@ -113,9 +117,9 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		manager.infos = candidateInfos
 		manager.runtimes = candidateRuntimes
 		manager.mu.Unlock()
-		closeErr := closeRuntimes(oldRuntimes)
+		registry.Retire(func() { _ = closeRuntimes(oldRuntimes) })
 		releaseTurn()
-		return closeErr
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("scan plugin root %s: %w", manager.root, err)
@@ -129,31 +133,43 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		if _, statErr := os.Stat(filepath.Join(directory, ManifestFileName)); errors.Is(statErr, os.ErrNotExist) {
 			continue
 		} else if statErr != nil {
+			if reloading {
+				cleanupCandidates()
+				return statErr
+			}
 			candidateInfos[entry.Name()] = failedInfo(entry.Name(), directory, statErr.Error())
 			continue
 		}
 
 		manifest, manifestErr := loadManifest(directory)
 		if manifestErr != nil {
+			if reloading {
+				cleanupCandidates()
+				return manifestErr
+			}
 			candidateInfos[entry.Name()] = failedInfo(entry.Name(), directory, manifestErr.Error())
 			continue
 		}
 		if _, exists := candidateInfos[manifest.ID]; exists {
-			log.Printf("warning: local plugin %s in %s ignored because the id is already registered", manifest.ID, directory)
-			continue
+			cleanupCandidates()
+			return fmt.Errorf("duplicate plugin id %q in %s", manifest.ID, directory)
 		}
 		if !manifest.enabled() {
 			candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusDisabled}
 			continue
 		}
 
-		runtime := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{manifest.serverConfig(directory)}})
+		server := manifest.serverConfig(directory)
+		// Always surface startup errors to the plugin manager. Optional plugin
+		// policy is applied here, so a failed runtime can never appear loaded.
+		server.Required = true
+		runtime := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{server}, SourcePrefix: "plugin:"})
 		if err := runtime.RegisterAll(ctx, candidateRegistry); err != nil {
 			_ = runtime.Close()
 			candidateInfos[manifest.ID] = failedInfo(manifest.ID, directory, err.Error())
-			if manifest.Required {
+			if manifest.Required || reloading {
 				cleanupCandidates()
-				return fmt.Errorf("load required plugin %s: %w", manifest.ID, err)
+				return fmt.Errorf("load plugin %s: %w", manifest.ID, err)
 			}
 			log.Printf("warning: local plugin %s failed to load: %v", manifest.ID, err)
 			continue
@@ -167,15 +183,20 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		candidateSources = append(candidateSources, runtime.Sources()...)
 	}
 	releaseTurn := registry.BeginReload()
+	if err := ctx.Err(); err != nil {
+		releaseTurn()
+		cleanupCandidates()
+		return err
+	}
 	registry.ReplaceSources(candidateRegistry, oldSources, candidateSources)
 	manager.mu.Lock()
 	manager.registry = registry
 	manager.infos = candidateInfos
 	manager.runtimes = candidateRuntimes
 	manager.mu.Unlock()
-	closeErr := closeRuntimes(oldRuntimes)
+	registry.Retire(func() { _ = closeRuntimes(oldRuntimes) })
 	releaseTurn()
-	return closeErr
+	return nil
 }
 
 func (manager *Manager) Reload(ctx context.Context) error {
@@ -247,7 +268,9 @@ func (manager *Manager) SetEnabled(ctx context.Context, id string, enabled bool)
 		// The manifest is a user-facing source of truth. If the candidate reload
 		// fails, restore it so a later reload does not silently apply a state that
 		// was never successfully activated.
-		_ = os.WriteFile(manifestPath, original, 0o644)
+		if restoreErr := os.WriteFile(manifestPath, original, 0o644); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("restore plugin manifest: %w", restoreErr))
+		}
 		return err
 	}
 	return nil
@@ -294,7 +317,9 @@ func (manager *Manager) Close() error {
 	if registry != nil {
 		releaseTurn := registry.BeginReload()
 		registry.UnregisterSources(sources)
+		registry.Retire(func() { _ = closeRuntimes(runtimes) })
 		releaseTurn()
+		return nil
 	}
 	return closeRuntimes(runtimes)
 }

@@ -14,7 +14,8 @@ const (
 )
 
 type Config struct {
-	Servers []ServerConfig
+	Servers      []ServerConfig
+	SourcePrefix string
 }
 
 type ServerConfig struct {
@@ -31,7 +32,7 @@ type ServerConfig struct {
 }
 
 func NormalizeConfig(config Config, workspace string) Config {
-	normalized := Config{Servers: append([]ServerConfig(nil), config.Servers...)}
+	normalized := Config{Servers: append([]ServerConfig(nil), config.Servers...), SourcePrefix: config.SourcePrefix}
 	for index := range normalized.Servers {
 		normalized.Servers[index].Args = append([]string(nil), normalized.Servers[index].Args...)
 		normalized.Servers[index].Env = cloneEnvironment(normalized.Servers[index].Env)

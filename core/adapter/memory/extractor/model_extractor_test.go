@@ -93,6 +93,19 @@ func TestModelExtractorVersionIncludesConfiguredModel(t *testing.T) {
 	}
 }
 
+func TestDecodeExtractionOutputAcceptsTextArrays(t *testing.T) {
+	output, err := decodeExtractionOutput(`{"candidates":[{"title":"array output","pain_points":["one","two"],"lessons":["first","second"]}]}`)
+	if err != nil {
+		t.Fatalf("decode array text fields: %v", err)
+	}
+	if got := string(output.Candidates[0].PainPoints); got != "one\ntwo" {
+		t.Fatalf("unexpected pain points: %q", got)
+	}
+	if got := string(output.Candidates[0].Lessons); got != "first\nsecond" {
+		t.Fatalf("unexpected lessons: %q", got)
+	}
+}
+
 func TestTruncateUTF8DoesNotSplitCharacters(t *testing.T) {
 	value := strings.Repeat("你", 1000)
 	truncated := truncateUTF8(value, 2000)

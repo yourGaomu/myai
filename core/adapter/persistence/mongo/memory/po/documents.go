@@ -73,15 +73,19 @@ type CandidateDocument struct {
 }
 
 type ExtractionJobDocument struct {
-	ID               string     `bson:"_id"`
-	AgentRunID       string     `bson:"agent_run_id"`
-	ExtractorVersion string     `bson:"extractor_version"`
-	Status           string     `bson:"status"`
-	Attempts         int        `bson:"attempts,omitempty"`
-	LastError        string     `bson:"last_error,omitempty"`
-	CreatedAt        time.Time  `bson:"created_at"`
-	UpdatedAt        time.Time  `bson:"updated_at"`
-	CompletedAt      *time.Time `bson:"completed_at,omitempty"`
+	Revision         int                 `bson:"revision"`
+	LeaseUntil       *time.Time          `bson:"lease_until"`
+	ResultPrepared   bool                `bson:"result_prepared"`
+	Candidates       []CandidateDocument `bson:"candidates"`
+	ID               string              `bson:"_id"`
+	AgentRunID       string              `bson:"agent_run_id"`
+	ExtractorVersion string              `bson:"extractor_version"`
+	Status           string              `bson:"status"`
+	Attempts         int                 `bson:"attempts,omitempty"`
+	LastError        string              `bson:"last_error,omitempty"`
+	CreatedAt        time.Time           `bson:"created_at"`
+	UpdatedAt        time.Time           `bson:"updated_at"`
+	CompletedAt      *time.Time          `bson:"completed_at,omitempty"`
 }
 
 type DreamActionDocument struct {

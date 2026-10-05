@@ -273,13 +273,11 @@ agent_run_id + extractor_version
 
 ```text
 GetExtractionJob
--> status=running, attempts++
--> GetRun
--> ListEvents
--> CandidateExtractor.Extract
--> CandidateDraft -> Candidate
--> SaveCandidate
--> status=succeeded
+-> 按 Revision 条件更新领取任务：status=running, attempts++, lease_until
+-> 若没有暂存结果：GetRun -> ListEvents -> CandidateExtractor.Extract
+-> 完整校验所有 Candidate，并把整批结果暂存到 Job
+-> InsertCandidateIfAbsent（已存在候选不覆盖）
+-> 按 Revision 条件更新：status=succeeded，清除租约
 ```
 
 失败时保存：
@@ -290,7 +288,9 @@ last_error=错误文本
 attempts=本次尝试次数
 ```
 
-启动恢复最多自动尝试三次。达到三次后不再在每次启动时无限重试；失败任务可以在 Mobile 中通过 `ai_memory_extraction_job_retry` 手动重新提交。
+任务处理超时为四分钟，租约为五分钟。并发 worker 使用 Revision 条件更新争取执行权；未到期的运行中任务不会被恢复线程抢占。候选写入中途失败后，重试使用 Job 中已校验的同一批结果，不重新调用模型，也不覆盖已审核候选。
+
+启动时及运行期间每 30 秒恢复一次，每批最多 100 条。查询在应用 limit 前排除已耗尽次数的失败任务和租约未到期的运行中任务。后台自动尝试最多三次；失败任务仍可通过 `ai_memory_extraction_job_retry` 手动重新提交。待处理任务会保留在数据库中，供后续恢复周期继续调度。
 
 ## 6. 模型提取器
 

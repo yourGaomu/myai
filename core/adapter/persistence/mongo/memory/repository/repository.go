@@ -327,6 +327,71 @@ func (repository *Repository) SaveExtractionJob(ctx context.Context, job domainm
 	})
 }
 
+func (repository *Repository) InsertCandidateIfAbsent(ctx context.Context, candidate domainmemory.Candidate) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	_, err := repository.template.UpdateOne(ctx, candidatesCollection, bson.M{"_id": candidate.ID}, bson.M{"$setOnInsert": mapper.CandidateDocumentFromDomain(candidate)}, options.UpdateOne().SetUpsert(true))
+	if gomongo.IsDuplicateKeyError(err) {
+		if _, lookupErr := repository.GetCandidate(ctx, candidate.ID); lookupErr == nil {
+			return nil
+		}
+	}
+	return translateError(err)
+}
+
+func (repository *Repository) ListRecoverableExtractionJobs(ctx context.Context, now time.Time, maxAttempts, limit int) ([]domainmemory.ExtractionJob, error) {
+	query := bson.M{"$or": bson.A{
+		bson.M{"status": string(domainmemory.JobPending)},
+		bson.M{"status": string(domainmemory.JobFailed), "$or": bson.A{bson.M{"attempts": bson.M{"$lt": maxAttempts}}, bson.M{"attempts": bson.M{"$exists": false}}}},
+		bson.M{"status": string(domainmemory.JobRunning), "$or": bson.A{bson.M{"lease_until": nil}, bson.M{"lease_until": bson.M{"$lte": now}}}},
+	}}
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	var documents []po.ExtractionJobDocument
+	if err := repository.template.FindAll(ctx, jobsCollection, query, &documents, options.Find().SetSort(bson.D{{Key: "updated_at", Value: 1}, {Key: "_id", Value: 1}}).SetLimit(int64(limit))); err != nil {
+		return nil, err
+	}
+	jobs := make([]domainmemory.ExtractionJob, 0, len(documents))
+	for _, document := range documents {
+		jobs = append(jobs, mapper.ExtractionJobDomainFromDocument(document))
+	}
+	return jobs, nil
+}
+
+func (repository *Repository) CompareAndSwapExtractionJob(ctx context.Context, expectedRevision int, job domainmemory.ExtractionJob) error {
+	if err := job.Validate(); err != nil {
+		return err
+	}
+	if job.Revision != expectedRevision+1 {
+		return memoryport.ErrConflict
+	}
+	filter := bson.M{"_id": job.ID, "revision": expectedRevision}
+	if expectedRevision == 0 {
+		delete(filter, "revision")
+		filter["$or"] = bson.A{bson.M{"revision": 0}, bson.M{"revision": bson.M{"$exists": false}}}
+	}
+	raw, err := bson.Marshal(mapper.ExtractionJobDocumentFromDomain(job))
+	if err != nil {
+		return err
+	}
+	var fields bson.M
+	if err := bson.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	delete(fields, "_id")
+	fields["attempts"], fields["last_error"], fields["completed_at"] = job.Attempts, job.LastError, job.CompletedAt
+	updated, err := repository.template.UpdateOne(ctx, jobsCollection, filter, bson.M{"$set": fields})
+	if err != nil {
+		return translateError(err)
+	}
+	if updated == nil || updated.MatchedCount != 1 {
+		return memoryport.ErrConflict
+	}
+	return nil
+}
+
 func (repository *Repository) GetDreamRun(ctx context.Context, runID string) (domainmemory.DreamRun, error) {
 	var document po.DreamRunDocument
 	if err := repository.template.FindOne(ctx, dreamRunsCollection, bson.M{"_id": strings.TrimSpace(runID)}, &document); err != nil {

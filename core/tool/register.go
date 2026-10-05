@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	modelport "myai/core/port/model"
 	tooldef "myai/core/tool/tool"
@@ -11,21 +12,56 @@ import (
 
 type RegisterTools struct {
 	mu        sync.RWMutex
-	turns     sync.RWMutex
+	turns     sync.Mutex
+	leases    map[*RegisterTools][]func()
 	sources   map[string]map[string]tooldef.Tool
 	flatTools []tooldef.Tool
 	flatMap   map[string]tooldef.Tool
 }
 
-// BeginTurn pins the live tool set for one model/tool loop. Reloaders acquire
-// BeginReload, so an active turn never observes a tool description from one
-// runtime and executes against another.
-func (rt *RegisterTools) BeginTurn() func() {
+// Snapshot pins a private tool catalog. Publishing a new catalog never waits
+// for active turns; retired processes close after their last snapshot releases.
+func (rt *RegisterTools) Snapshot() (*RegisterTools, func()) {
 	if rt == nil {
-		return func() {}
+		return NewRegisterTools(), func() {}
 	}
-	rt.turns.RLock()
-	return rt.turns.RUnlock
+	rt.turns.Lock()
+	snapshot := rt.CloneExcludingSources(nil)
+	if rt.leases == nil {
+		rt.leases = make(map[*RegisterTools][]func())
+	}
+	rt.leases[snapshot] = nil
+	rt.turns.Unlock()
+	var once sync.Once
+	return snapshot, func() {
+		once.Do(func() {
+			rt.turns.Lock()
+			callbacks := rt.leases[snapshot]
+			delete(rt.leases, snapshot)
+			rt.turns.Unlock()
+			for _, callback := range callbacks {
+				callback()
+			}
+		})
+	}
+}
+
+// Retire must be called while BeginReload is held, after publishing/removing
+// sources. Only snapshots acquired before this publication delay cleanup.
+func (rt *RegisterTools) Retire(cleanup func()) {
+	var remaining atomic.Int64
+	remaining.Store(int64(len(rt.leases)))
+	if remaining.Load() == 0 {
+		cleanup()
+		return
+	}
+	for snapshot := range rt.leases {
+		rt.leases[snapshot] = append(rt.leases[snapshot], func() {
+			if remaining.Add(-1) == 0 {
+				cleanup()
+			}
+		})
+	}
 }
 
 func (rt *RegisterTools) BeginReload() func() {

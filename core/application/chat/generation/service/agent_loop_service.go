@@ -77,7 +77,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	}
 	var releaseToolTurn func()
 	if guard, ok := s.Tools.(generationport.TurnGuard); ok {
-		releaseToolTurn = guard.BeginTurn()
+		ctx, s.Tools, releaseToolTurn = guard.BeginTurn(ctx)
 		defer releaseToolTurn()
 	}
 

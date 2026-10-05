@@ -18,10 +18,9 @@ type ToolCatalog interface {
 	ToolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool
 }
 
-// TurnGuard is implemented by live tool catalogs that can pin a tool runtime
-// while one agent loop is active. Reloads wait for this guard to be released.
+// TurnGuard binds tool discovery and execution to the same leased snapshot.
 type TurnGuard interface {
-	BeginTurn() func()
+	BeginTurn(context.Context) (context.Context, ToolCatalog, func())
 }
 
 type ToolExecutor interface {

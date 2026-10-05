@@ -39,6 +39,9 @@ type Agent struct {
 	runtimes              *sessionRuntimeManager
 	writeMu               sync.Mutex
 	requestMu             sync.Mutex
+	catalogMu             sync.Mutex
+	catalogQueueMu        sync.Mutex
+	catalogTail           <-chan struct{}
 	lastTaskEventSequence atomic.Uint64
 	permissionWaiters     *permissionWaiterRegistry
 	permissionTimeout     time.Duration
@@ -433,13 +436,17 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	case protocol.TypePluginList:
 		return a.handlePluginList(ctx, conn, message)
 	case protocol.TypePluginReload:
-		return a.handlePluginReload(ctx, conn, message)
+		a.enqueueCatalogMutation(ctx, conn, message, a.handlePluginReload)
 	case protocol.TypeMCPReload:
-		return a.handleMCPReload(ctx, conn, message)
+		a.enqueueCatalogMutation(ctx, conn, message, a.handleMCPReload)
 	case protocol.TypePluginEnable:
-		return a.handlePluginToggle(ctx, conn, message, true)
+		a.enqueueCatalogMutation(ctx, conn, message, func(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+			return a.handlePluginToggle(ctx, conn, message, true)
+		})
 	case protocol.TypePluginDisable:
-		return a.handlePluginToggle(ctx, conn, message, false)
+		a.enqueueCatalogMutation(ctx, conn, message, func(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+			return a.handlePluginToggle(ctx, conn, message, false)
+		})
 	case protocol.TypeAssetList:
 		return a.handleAssetList(ctx, conn, message)
 	case protocol.TypeKnowledgeCatalogList:

@@ -20,6 +20,7 @@ type Repository interface {
 }
 
 type CandidateRepository interface {
+	InsertCandidateIfAbsent(ctx context.Context, candidate domainmemory.Candidate) error
 	GetCandidate(ctx context.Context, candidateID string) (domainmemory.Candidate, error)
 	ListCandidates(ctx context.Context, filter CandidateFilter) ([]domainmemory.Candidate, error)
 	SaveCandidate(ctx context.Context, candidate domainmemory.Candidate) error
@@ -38,6 +39,8 @@ type UsageRepository interface {
 }
 
 type ExtractionJobRepository interface {
+	ListRecoverableExtractionJobs(ctx context.Context, now time.Time, maxAttempts, limit int) ([]domainmemory.ExtractionJob, error)
+	CompareAndSwapExtractionJob(ctx context.Context, expectedRevision int, job domainmemory.ExtractionJob) error
 	GetExtractionJob(ctx context.Context, jobID string) (domainmemory.ExtractionJob, error)
 	GetExtractionJobByRun(ctx context.Context, agentRunID string, extractorVersion string) (domainmemory.ExtractionJob, error)
 	ListExtractionJobs(ctx context.Context, statuses []domainmemory.JobStatus, limit int) ([]domainmemory.ExtractionJob, error)

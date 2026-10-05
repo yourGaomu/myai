@@ -36,6 +36,23 @@ type Service struct {
 
 var _ api.Service = Service{}
 
+// RunRecovery also recovers leases that were still live during startup and
+// retries durable pending jobs left behind by a full worker queue.
+func (service Service) RunRecovery(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := service.Recover(ctx, memorycommand.Recover{Limit: 100}); err != nil {
+				service.report(err)
+			}
+		}
+	}
+}
+
 func (service Service) EnqueueRun(ctx context.Context, command memorycommand.EnqueueRun) (result.Job, error) {
 	if err := service.validate(); err != nil {
 		return result.Job{}, err
@@ -103,6 +120,10 @@ func (service Service) Process(ctx context.Context, command memorycommand.Proces
 	if err := service.validate(); err != nil {
 		return err
 	}
+	// Bound work below the lease duration. A crashed worker is recoverable;
+	// a slow/stale worker cannot overwrite a newer owner's job state.
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	defer cancel()
 	job, err := service.Store.GetExtractionJob(ctx, strings.TrimSpace(command.JobID))
 	if err != nil {
 		return err
@@ -110,59 +131,92 @@ func (service Service) Process(ctx context.Context, command memorycommand.Proces
 	if job.Status == domainmemory.JobSucceeded {
 		return nil
 	}
+	if job.Status == domainmemory.JobRunning && job.LeaseUntil != nil && job.LeaseUntil.After(service.now()) {
+		return nil
+	}
+	if job.Status != domainmemory.JobPending && job.Attempts >= maxAutomaticExtractionAttempts {
+		return nil
+	}
+	expectedRevision := job.Revision
 	now := service.now()
 	job.Status = domainmemory.JobRunning
 	job.Attempts++
+	job.Revision++
+	lease := now.Add(5 * time.Minute)
+	job.LeaseUntil = &lease
 	job.LastError = ""
 	job.CompletedAt = nil
 	job.UpdatedAt = now
-	if err := service.Store.SaveExtractionJob(ctx, job); err != nil {
+	if err := service.Store.CompareAndSwapExtractionJob(ctx, expectedRevision, job); err != nil {
+		if errors.Is(err, memoryport.ErrConflict) {
+			return nil
+		}
 		return err
 	}
+	if !job.ResultPrepared {
+		prepared, prepareErr := service.prepareCandidates(ctx, job, now)
+		if prepareErr != nil {
+			return service.finishJob(ctx, job, prepareErr)
+		}
+		if err := ctx.Err(); err != nil {
+			return service.finishJob(ctx, job, err)
+		}
+		job.Candidates, job.ResultPrepared = prepared, true
+		job.Revision++
+		if err := service.Store.CompareAndSwapExtractionJob(ctx, job.Revision-1, job); err != nil {
+			return err
+		}
+	}
+	return service.finishJob(ctx, job, service.persistPreparedCandidates(ctx, job))
+}
+
+func (service Service) prepareCandidates(ctx context.Context, job domainmemory.ExtractionJob, now time.Time) ([]domainmemory.Candidate, error) {
 	run, err := service.Runs.GetRun(ctx, job.AgentRunID)
-	if err == nil {
-		var events []domainagentrun.Event
-		events, err = service.Runs.ListEvents(ctx, []string{run.ID})
-		if err == nil {
-			drafts, extractErr := service.Extractor.Extract(ctx, run, events)
-			if extractErr != nil {
-				err = extractErr
-			} else {
-				for index, draft := range drafts {
-					candidate := service.candidateFromDraft(draft, run, events, job.ID, index, now)
-					if candidateErr := candidate.Validate(); candidateErr != nil {
-						err = candidateErr
-						break
-					}
-					if _, candidateErr := service.Store.GetCandidate(ctx, candidate.ID); candidateErr == nil {
-						continue
-					} else if !errors.Is(candidateErr, memoryport.ErrNotFound) {
-						err = candidateErr
-						break
-					}
-					if candidateErr := service.Store.SaveCandidate(ctx, candidate); candidateErr != nil {
-						err = candidateErr
-						break
-					}
-				}
-			}
-		}
-	}
 	if err != nil {
-		job.Status = domainmemory.JobFailed
-		job.LastError = err.Error()
-		job.UpdatedAt = service.now()
-		if saveErr := service.Store.SaveExtractionJob(ctx, job); saveErr != nil {
-			return errors.Join(err, fmt.Errorf("save failed memory extraction job %q: %w", job.ID, saveErr))
-		}
-		return err
+		return nil, err
 	}
-	completedAt := service.now()
+	events, err := service.Runs.ListEvents(ctx, []string{run.ID})
+	if err != nil {
+		return nil, err
+	}
+	drafts, err := service.Extractor.Extract(ctx, run, events)
+	if err != nil {
+		return nil, err
+	}
+	prepared := make([]domainmemory.Candidate, 0, len(drafts))
+	for index, draft := range drafts {
+		candidate := service.candidateFromDraft(draft, run, events, job.ID, index, now)
+		if err := candidate.Validate(); err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, candidate)
+	}
+	return prepared, nil
+}
+
+func (service Service) persistPreparedCandidates(ctx context.Context, job domainmemory.ExtractionJob) error {
+	for _, candidate := range job.Candidates {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := service.Store.InsertCandidateIfAbsent(ctx, candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (service Service) finishJob(ctx context.Context, job domainmemory.ExtractionJob, cause error) error {
 	job.Status = domainmemory.JobSucceeded
-	job.LastError = ""
-	job.UpdatedAt = completedAt
-	job.CompletedAt = &completedAt
-	return service.Store.SaveExtractionJob(ctx, job)
+	now := service.now()
+	job.CompletedAt, job.UpdatedAt, job.LeaseUntil = &now, now, nil
+	if cause != nil {
+		job.Status, job.LastError, job.CompletedAt = domainmemory.JobFailed, cause.Error(), nil
+	}
+	job.Revision++
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return errors.Join(cause, service.Store.CompareAndSwapExtractionJob(finishCtx, job.Revision-1, job))
 }
 
 func (service Service) AgentRunCompleted(ctx context.Context, run domainagentrun.Run) {
@@ -184,38 +238,29 @@ func (service Service) Recover(ctx context.Context, command memorycommand.Recove
 		limit = 100
 	}
 	//查询还有哪些任务在运行，限制最多100条
-	jobs, err := service.Store.ListExtractionJobs(ctx, []domainmemory.JobStatus{
-		domainmemory.JobPending, domainmemory.JobRunning, domainmemory.JobFailed,
-	}, limit)
+	jobs, err := service.Store.ListRecoverableExtractionJobs(ctx, service.now(), maxAutomaticExtractionAttempts, limit)
 	if err != nil {
 		return err
 	}
 	var recoveryErrors []error
 	for _, job := range jobs {
-		//检测这个任务是否超过了最大的重试次数
-		if job.Attempts >= maxAutomaticExtractionAttempts {
-			if job.Status != domainmemory.JobFailed {
-				job.Status = domainmemory.JobFailed
-				if strings.TrimSpace(job.LastError) == "" {
-					job.LastError = "automatic retry limit reached after interrupted extraction"
-				}
-				job.UpdatedAt = service.now()
-				if saveErr := service.Store.SaveExtractionJob(ctx, job); saveErr != nil {
-					recoveryErrors = append(recoveryErrors, saveErr)
-				}
+		exhausted := job.Status != domainmemory.JobPending && job.Attempts >= maxAutomaticExtractionAttempts
+		if service.Async == nil && !exhausted {
+			continue
+		}
+		job.Status, job.LeaseUntil = domainmemory.JobPending, nil
+		if exhausted {
+			job.Status, job.LastError = domainmemory.JobFailed, "automatic retry limit reached after interrupted extraction"
+		}
+		job.Revision++
+		job.UpdatedAt = service.now()
+		if saveErr := service.Store.CompareAndSwapExtractionJob(ctx, job.Revision-1, job); saveErr != nil {
+			if !errors.Is(saveErr, memoryport.ErrConflict) {
+				recoveryErrors = append(recoveryErrors, saveErr)
 			}
 			continue
 		}
-		//修改运行的任务为等待，因为之前的执行线程不存在了，所有需要重新提交任务
-		if job.Status == domainmemory.JobRunning {
-			job.Status = domainmemory.JobPending
-			job.UpdatedAt = service.now()
-			if saveErr := service.Store.SaveExtractionJob(ctx, job); saveErr != nil {
-				recoveryErrors = append(recoveryErrors, saveErr)
-				continue
-			}
-		}
-		if service.Async == nil {
+		if exhausted {
 			continue
 		}
 		jobID := job.ID
@@ -249,7 +294,9 @@ func (service Service) Retry(ctx context.Context, command memorycommand.Retry) (
 	job.LastError = ""
 	job.CompletedAt = nil
 	job.UpdatedAt = service.now()
-	if err := service.Store.SaveExtractionJob(ctx, job); err != nil {
+	job.LeaseUntil = nil
+	job.Revision++
+	if err := service.Store.CompareAndSwapExtractionJob(ctx, job.Revision-1, job); err != nil {
 		return result.Job{}, err
 	}
 	if service.Async != nil {

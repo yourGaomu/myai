@@ -31,8 +31,8 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 }
 
 // Reload prepares every configured MCP runtime before publishing any change.
-// If a required server cannot start or list its tools, the previous runtime
-// and registry sources remain untouched.
+// Reload failure preserves the previous runtime, including optional servers.
+// During initial startup only, optional server failures can be skipped.
 func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.RegisterTools) error {
 	if registry == nil {
 		return errors.New("tool registry is nil")
@@ -48,7 +48,20 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 
 	m.mu.Lock()
 	oldSources := append([]string(nil), m.sources...)
+	reloading := m.registry != nil
 	m.mu.Unlock()
+	prefix := config.SourcePrefix
+	if prefix == "" {
+		prefix = "mcp:"
+	}
+	names := make(map[string]bool)
+	for _, server := range config.Servers {
+		name := strings.TrimSpace(server.Name)
+		if name == "" || names[name] {
+			return fmt.Errorf("empty or duplicate MCP server name: %q", name)
+		}
+		names[name] = true
+	}
 	oldSourceSet := make(map[string]bool, len(oldSources))
 	for _, source := range oldSources {
 		oldSourceSet[source] = true
@@ -86,7 +99,7 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 		client := NewClient(server)
 		if err := client.Start(ctx); err != nil {
 			err = fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
-			if server.Required {
+			if server.Required || reloading {
 				cleanupCandidate()
 				return err
 			}
@@ -98,7 +111,7 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 		if err != nil {
 			_ = client.Close()
 			err = fmt.Errorf("list mcp tools for %s failed: %w", server.Name, err)
-			if server.Required {
+			if server.Required || reloading {
 				cleanupCandidate()
 				return err
 			}
@@ -116,7 +129,7 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 			wrapped = append(wrapped, NewToolWithName(client, server.Name, info, exposedName, server.toolPermission()))
 		}
 
-		source := "mcp:" + server.Name
+		source := prefix + strings.TrimSpace(server.Name)
 		candidateClients = append(candidateClients, client)
 		candidateSources = append(candidateSources, source)
 		candidateTools[source] = wrapped
@@ -127,6 +140,10 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 	// clients are closed only after the new sources are visible.
 	releaseTurn := registry.BeginReload()
 	defer releaseTurn()
+	if err := ctx.Err(); err != nil {
+		cleanupCandidate()
+		return err
+	}
 	for source, tools := range candidateTools {
 		baseRegistry.RegisterSource(source, tools)
 	}
@@ -138,15 +155,8 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 	m.clients = candidateClients
 	m.sources = candidateSources
 	m.mu.Unlock()
-	var closeErrors []error
-	for index := len(oldClients) - 1; index >= 0; index-- {
-		if oldClients[index] != nil {
-			if err := oldClients[index].Close(); err != nil {
-				closeErrors = append(closeErrors, err)
-			}
-		}
-	}
-	return errors.Join(closeErrors...)
+	registry.Retire(func() { closeClients(oldClients) })
+	return nil
 }
 
 func uniqueToolName(base string, used map[string]int) string {
@@ -200,17 +210,20 @@ func (m *Manager) Close() error {
 	if registry != nil {
 		registry.UnregisterSources(sources)
 	}
-	var closeErrors []error
-	for index := len(clients) - 1; index >= 0; index-- {
-		client := clients[index]
-		if client == nil {
-			continue
-		}
-		if err := client.Close(); err != nil {
-			closeErrors = append(closeErrors, err)
+	if registry != nil {
+		registry.Retire(func() { closeClients(clients) })
+	} else {
+		closeClients(clients)
+	}
+	return nil
+}
+
+func closeClients(clients []*Client) {
+	for _, client := range clients {
+		if client != nil {
+			_ = client.Close()
 		}
 	}
-	return errors.Join(closeErrors...)
 }
 
 // Sources returns the registry source names owned by this runtime.

@@ -2,12 +2,59 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"myai/core/tool"
 )
+
+func TestOptionalReloadFailurePreservesCallableOldSnapshot(t *testing.T) {
+	t.Setenv("MYAI_MCP_TEST_HELPER", "1")
+	registry := tool.NewRegisterTools()
+	config := Config{Servers: []ServerConfig{{Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5}}}
+	manager := NewManager(config)
+	if err := manager.RegisterAll(context.Background(), registry); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	snapshot, release := registry.Snapshot()
+	defer release()
+	oldTool, err := snapshot.GetTool("mcp_first_echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := Config{Servers: []ServerConfig{{Name: "first", Command: filepath.Join(t.TempDir(), "missing")}}}
+	if err := manager.Reload(context.Background(), broken, registry); err == nil {
+		t.Fatal("optional reload failure was swallowed")
+	}
+	if _, err := oldTool.Call(context.Background(), json.RawMessage(`{"text":"before"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reload(context.Background(), config, registry); err != nil {
+		t.Fatal(err)
+	}
+	currentTool, err := registry.GetTool("mcp_first_echo")
+	if err != nil || currentTool == oldTool {
+		t.Fatal("reload did not publish a new tool")
+	}
+	if _, err := oldTool.Call(context.Background(), json.RawMessage(`{"text":"after"}`)); err != nil {
+		t.Fatalf("old turn lost its process: %v", err)
+	}
+	release()
+	if _, err := oldTool.Call(context.Background(), json.RawMessage(`{}`)); err == nil {
+		t.Fatal("retired process is still running")
+	}
+}
+
+func TestMCPRejectsDuplicateNames(t *testing.T) {
+	registry := tool.NewRegisterTools()
+	manager := NewManager(Config{Servers: []ServerConfig{{Name: "same"}, {Name: " same "}}})
+	if err := manager.RegisterAll(context.Background(), registry); err == nil {
+		t.Fatal("duplicate names were accepted")
+	}
+}
 
 func TestManagerRollsBackEarlierServersWhenRequiredServerFails(t *testing.T) {
 	t.Setenv("MYAI_MCP_TEST_HELPER", "1")

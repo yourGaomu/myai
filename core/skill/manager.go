@@ -40,6 +40,8 @@ type skillMeta struct {
 }
 
 type Manager struct {
+	reloadMu sync.Mutex
+	revision uint64
 	mu       sync.RWMutex
 	root     string
 	skills   []Skill
@@ -70,11 +72,20 @@ func (m *Manager) Root() string {
 }
 
 func (m *Manager) Reload(ctx context.Context) error {
+	return m.reload(ctx, scan)
+}
+
+func (m *Manager) reload(ctx context.Context, scanCatalog func(context.Context, string) ([]Skill, error)) error {
 	if m == nil {
 		return nil
 	}
 
-	skills, err := scan(ctx, m.root)
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
+	m.mu.RLock()
+	revision := m.revision
+	m.mu.RUnlock()
+	skills, err := scanCatalog(ctx, m.root)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -87,7 +98,7 @@ func (m *Manager) Reload(ctx context.Context) error {
 	}
 	m.skills = skills
 	m.loaded = true
-	m.dirty = false
+	m.dirty = m.revision != revision
 	return nil
 }
 
@@ -141,6 +152,9 @@ func (m *Manager) StartWatcher(ctx context.Context) error {
 	m.watcherCancel = cancel
 	m.watcherDone = done
 	m.watching = true
+	// Changes between the initial scan and watcher setup must be rescanned.
+	m.dirty = true
+	m.revision++
 	m.mu.Unlock()
 
 	go m.watchLoop(watchCtx, watcher, done)
@@ -191,9 +205,7 @@ func (m *Manager) Prompt(ctx context.Context) string {
 		return ""
 	}
 
-	if err := m.ensureLoaded(ctx); err != nil {
-		return ""
-	}
+	_ = m.ensureLoaded(ctx) // On scan failure, continue using the last valid catalog.
 
 	return Prompt(m.List())
 }
@@ -203,9 +215,7 @@ func (m *Manager) PromptForInput(ctx context.Context, input string) string {
 		return ""
 	}
 
-	if err := m.ensureLoaded(ctx); err != nil {
-		return ""
-	}
+	_ = m.ensureLoaded(ctx)
 
 	return PromptForInput(m.List(), input)
 }
@@ -222,6 +232,7 @@ func (m *Manager) ensureLoaded(ctx context.Context) error {
 
 func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, done chan struct{}) {
 	defer close(done)
+	defer watcher.Close()
 	defer func() {
 		m.mu.Lock()
 		if m.watcher == watcher {
@@ -235,9 +246,7 @@ func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, done
 	var debounce *time.Timer
 	var debounceC <-chan time.Time
 	markDirty := func() {
-		m.mu.Lock()
-		m.dirty = true
-		m.mu.Unlock()
+		m.invalidate()
 		if debounce == nil {
 			debounce = time.NewTimer(150 * time.Millisecond)
 		} else {
@@ -283,6 +292,13 @@ func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, done
 			markDirty()
 		}
 	}
+}
+
+func (m *Manager) invalidate() {
+	m.mu.Lock()
+	m.revision++
+	m.dirty = true
+	m.mu.Unlock()
 }
 
 func addSkillWatchDirs(watcher *fsnotify.Watcher, root string) error {

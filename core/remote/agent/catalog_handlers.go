@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +16,36 @@ import (
 	"myai/core/remote/protocol"
 	"myai/core/skill"
 )
+
+// Lifecycle operations may wait on external processes. Never run them on the
+// websocket reader: permission replies and pause requests must remain readable.
+func (a *Agent) enqueueCatalogMutation(ctx context.Context, conn *websocket.Conn, message protocol.Message, handle func(context.Context, *websocket.Conn, protocol.Message) error) {
+	// Reserve order on the reader before starting work. Rapid disable/enable
+	// requests must preserve their receive order despite asynchronous execution.
+	a.catalogQueueMu.Lock()
+	previous := a.catalogTail
+	done := make(chan struct{})
+	a.catalogTail = done
+	a.catalogQueueMu.Unlock()
+	go func() {
+		defer close(done)
+		if previous != nil {
+			select {
+			case <-previous:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if err := handle(ctx, conn, message); err != nil {
+			if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+				log.Printf("send catalog mutation error: %v", writeErr)
+			}
+		}
+	}()
+}
 
 func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload := a.modelListPayload()
@@ -62,8 +93,11 @@ func (a *Agent) handlePluginReload(ctx context.Context, conn *websocket.Conn, me
 	if a.pluginManager == nil {
 		return fmt.Errorf("plugin manager is not configured")
 	}
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := a.pluginManager.Reload(ctx); err != nil {
 		return err
 	}
@@ -78,8 +112,11 @@ func (a *Agent) handleMCPReload(ctx context.Context, conn *websocket.Conn, messa
 	if a.mcpManager == nil {
 		return fmt.Errorf("mcp manager is not configured")
 	}
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := a.mcpManager.ReloadMCP(ctx); err != nil {
 		return err
 	}
@@ -100,8 +137,11 @@ func (a *Agent) handlePluginToggle(ctx context.Context, conn *websocket.Conn, me
 	if strings.TrimSpace(payload.PluginID) == "" {
 		return fmt.Errorf("plugin id is required")
 	}
-	a.requestMu.Lock()
-	defer a.requestMu.Unlock()
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := a.pluginManager.SetEnabled(ctx, payload.PluginID, enabled); err != nil {
 		return err
 	}
