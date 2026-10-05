@@ -13,6 +13,13 @@ type Catalog struct {
 	ModePolicy toolport.ToolModePolicy
 }
 
+func (c Catalog) BeginTurn() func() {
+	if guard, ok := c.Tools.(interface{ BeginTurn() func() }); ok {
+		return guard.BeginTurn()
+	}
+	return func() {}
+}
+
 func (c Catalog) ToolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool {
 	return toolservice.SelectionService{
 		Catalog:    c.Tools,

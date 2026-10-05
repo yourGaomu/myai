@@ -71,6 +71,24 @@ func (a *Agent) handlePluginReload(ctx context.Context, conn *websocket.Conn, me
 	return a.writeRemoteMessage(conn, protocol.TypePluginReloadResult, message.RequestID, message.SessionID, payload)
 }
 
+func (a *Agent) handleMCPReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.MCPReloadPayload](message); err != nil {
+		return fmt.Errorf("decode mcp reload failed: %w", err)
+	}
+	if a.mcpManager == nil {
+		return fmt.Errorf("mcp manager is not configured")
+	}
+	a.requestMu.Lock()
+	defer a.requestMu.Unlock()
+	if err := a.mcpManager.ReloadMCP(ctx); err != nil {
+		return err
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeMCPReloadResult, message.RequestID, message.SessionID, protocol.MCPReloadResultPayload{
+		Reloaded: true,
+		Message:  "MCP servers reloaded.",
+	})
+}
+
 func (a *Agent) handlePluginToggle(ctx context.Context, conn *websocket.Conn, message protocol.Message, enabled bool) error {
 	payload, err := protocol.DecodePayload[protocol.PluginTogglePayload](message)
 	if err != nil {

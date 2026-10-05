@@ -75,6 +75,11 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	if s.Contexts == nil {
 		return modelport.ChatResult{}, errors.New("context provider is nil")
 	}
+	var releaseToolTurn func()
+	if guard, ok := s.Tools.(generationport.TurnGuard); ok {
+		releaseToolTurn = guard.BeginTurn()
+		defer releaseToolTurn()
+	}
 
 	var consumedPending []domaingeneration.PendingTurnInputItem
 	defer func() {

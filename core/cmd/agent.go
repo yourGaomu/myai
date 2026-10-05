@@ -56,7 +56,7 @@ var agentCmd = &cobra.Command{
 			Workspace:   agentWorkspace,
 		}, core.GetApp().GetChatService(), fileService, changeService, core.GetApp().GetKnowledgeService(), core.GetApp().GetMemoryCatalogService(), core.GetApp().GetMemoryExtractionService(), core.GetApp().GetMemoryDreamService(), core.GetApp().GetSubagentService(), core.GetApp().GetSubagentEvents(), core.GetApp().GetPluginManager())
 
-		return a.Run(ctx)
+		return a.WithMCPManager(core.GetApp()).Run(ctx)
 	},
 }
 

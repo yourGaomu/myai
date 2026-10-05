@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagerPromptReloadsSkillFiles(t *testing.T) {
@@ -110,6 +111,28 @@ func TestManagerPromptForInputMatchesChineseTrigger(t *testing.T) {
 	if !strings.Contains(prompt, "Full file instructions.") {
 		t.Fatalf("expected chinese trigger to select skill instructions, got %q", prompt)
 	}
+}
+
+func TestManagerWatcherRefreshesNextPrompt(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "watch", "# Watch\ninitial instructions")
+	manager := NewManager(root)
+	if err := manager.StartWatcher(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if prompt := manager.Prompt(context.Background()); !strings.Contains(prompt, "initial instructions") {
+		t.Fatalf("expected initial prompt, got %q", prompt)
+	}
+	writeSkill(t, root, "watch", "# Watch\nupdated instructions")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if prompt := manager.Prompt(context.Background()); strings.Contains(prompt, "updated instructions") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("watcher did not refresh skill content: %q", manager.Prompt(context.Background()))
 }
 
 func TestManagerParsesTriggersAndSkipsTriggerLineDescription(t *testing.T) {

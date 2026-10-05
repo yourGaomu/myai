@@ -11,9 +11,29 @@ import (
 
 type RegisterTools struct {
 	mu        sync.RWMutex
+	turns     sync.RWMutex
 	sources   map[string]map[string]tooldef.Tool
 	flatTools []tooldef.Tool
 	flatMap   map[string]tooldef.Tool
+}
+
+// BeginTurn pins the live tool set for one model/tool loop. Reloaders acquire
+// BeginReload, so an active turn never observes a tool description from one
+// runtime and executes against another.
+func (rt *RegisterTools) BeginTurn() func() {
+	if rt == nil {
+		return func() {}
+	}
+	rt.turns.RLock()
+	return rt.turns.RUnlock
+}
+
+func (rt *RegisterTools) BeginReload() func() {
+	if rt == nil {
+		return func() {}
+	}
+	rt.turns.Lock()
+	return rt.turns.Unlock
 }
 
 func NewRegisterTools() *RegisterTools {
@@ -80,6 +100,119 @@ func (rt *RegisterTools) UnregisterSource(source string) {
 
 	rt.ensureLocked()
 	delete(rt.sources, source)
+	rt.rebuildLocked()
+}
+
+// UnregisterSources removes several sources and rebuilds the flattened view
+// once, so readers cannot observe a half-removed runtime set.
+func (rt *RegisterTools) UnregisterSources(sources []string) {
+	if rt == nil {
+		return
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.ensureLocked()
+	for _, source := range sources {
+		if source == "" {
+			source = "local"
+		}
+		delete(rt.sources, source)
+	}
+	rt.rebuildLocked()
+}
+
+// SourceToolNames returns the names currently owned by a source. It is used
+// by runtime reloaders to distinguish their replacement tools from unrelated
+// local or plugin tools when resolving name collisions.
+func (rt *RegisterTools) SourceToolNames(source string) []string {
+	if rt == nil {
+		return nil
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	items := rt.sources[source]
+	names := make([]string, 0, len(items))
+	for name := range items {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// SourceTools returns a copy of the tools owned by one source.
+func (rt *RegisterTools) SourceTools(source string) []tooldef.Tool {
+	if rt == nil {
+		return nil
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	items := rt.sources[source]
+	tools := make([]tooldef.Tool, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			tools = append(tools, item)
+		}
+	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name() < tools[j].Name() })
+	return tools
+}
+
+// CloneExcludingSources creates a private registry snapshot. It is intended
+// for validating a complete replacement before publishing it to the live
+// registry.
+func (rt *RegisterTools) CloneExcludingSources(excluded map[string]bool) *RegisterTools {
+	clone := NewRegisterTools()
+	if rt == nil {
+		return clone
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	for source, items := range rt.sources {
+		if excluded != nil && excluded[source] {
+			continue
+		}
+		tools := make([]tooldef.Tool, 0, len(items))
+		for _, item := range items {
+			tools = append(tools, item)
+		}
+		clone.sources[source] = make(map[string]tooldef.Tool, len(tools))
+		for _, item := range tools {
+			if item != nil {
+				clone.sources[source][item.Name()] = item
+			}
+		}
+	}
+	clone.rebuildLocked()
+	return clone
+}
+
+// ReplaceSources publishes selected sources from a validated snapshot while
+// holding one registry lock, so model tool discovery cannot observe a partial
+// plugin replacement.
+func (rt *RegisterTools) ReplaceSources(snapshot *RegisterTools, remove []string, add []string) {
+	if rt == nil || snapshot == nil {
+		return
+	}
+	copySources := make(map[string]map[string]tooldef.Tool, len(add))
+	snapshot.mu.RLock()
+	for _, source := range add {
+		items := snapshot.sources[source]
+		copied := make(map[string]tooldef.Tool, len(items))
+		for name, item := range items {
+			copied[name] = item
+		}
+		copySources[source] = copied
+	}
+	snapshot.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.ensureLocked()
+	for _, source := range remove {
+		delete(rt.sources, source)
+	}
+	for source, items := range copySources {
+		rt.sources[source] = items
+	}
 	rt.rebuildLocked()
 }
 

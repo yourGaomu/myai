@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -44,6 +45,13 @@ type Manager struct {
 	skills   []Skill
 	lastScan time.Time
 	lastErr  error
+	loaded   bool
+	dirty    bool
+
+	watcher       *fsnotify.Watcher
+	watcherCancel context.CancelFunc
+	watcherDone   chan struct{}
+	watching      bool
 }
 
 func NewManager(root string) *Manager {
@@ -74,9 +82,94 @@ func (m *Manager) Reload(ctx context.Context) error {
 	m.lastScan = time.Now()
 	m.lastErr = err
 	if err != nil {
+		m.dirty = true
 		return err
 	}
 	m.skills = skills
+	m.loaded = true
+	m.dirty = false
+	return nil
+}
+
+// StartWatcher watches the skill root and invalidates the in-memory catalog
+// when a skill file changes. The next Prompt call performs the actual scan,
+// keeping file-system work out of the watcher goroutine.
+func (m *Manager) StartWatcher(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := m.Reload(ctx); err != nil {
+		// A missing root is a valid empty catalog. Other errors are retained and
+		// retried by the next prompt after the watcher is available.
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	m.mu.Lock()
+	if m.watching {
+		m.mu.Unlock()
+		return nil
+	}
+	m.mu.Unlock()
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	if err := addSkillWatchDirs(watcher, m.root); err != nil {
+		_ = watcher.Close()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.mu.Lock()
+	if m.watching {
+		m.mu.Unlock()
+		cancel()
+		_ = watcher.Close()
+		return nil
+	}
+	m.watcher = watcher
+	m.watcherCancel = cancel
+	m.watcherDone = done
+	m.watching = true
+	m.mu.Unlock()
+
+	go m.watchLoop(watchCtx, watcher, done)
+	return nil
+}
+
+// Close stops the skill watcher. It is safe to call multiple times.
+func (m *Manager) Close() error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	cancel := m.watcherCancel
+	done := m.watcherDone
+	watcher := m.watcher
+	m.watcherCancel = nil
+	m.watcherDone = nil
+	m.watcher = nil
+	m.watching = false
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if watcher != nil {
+		_ = watcher.Close()
+	}
+	if done != nil {
+		<-done
+	}
 	return nil
 }
 
@@ -98,7 +191,7 @@ func (m *Manager) Prompt(ctx context.Context) string {
 		return ""
 	}
 
-	if err := m.Reload(ctx); err != nil {
+	if err := m.ensureLoaded(ctx); err != nil {
 		return ""
 	}
 
@@ -110,11 +203,109 @@ func (m *Manager) PromptForInput(ctx context.Context, input string) string {
 		return ""
 	}
 
-	if err := m.Reload(ctx); err != nil {
+	if err := m.ensureLoaded(ctx); err != nil {
 		return ""
 	}
 
 	return PromptForInput(m.List(), input)
+}
+
+func (m *Manager) ensureLoaded(ctx context.Context) error {
+	m.mu.RLock()
+	needsReload := !m.loaded || m.dirty || !m.watching
+	m.mu.RUnlock()
+	if !needsReload {
+		return nil
+	}
+	return m.Reload(ctx)
+}
+
+func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, done chan struct{}) {
+	defer close(done)
+	defer func() {
+		m.mu.Lock()
+		if m.watcher == watcher {
+			m.watching = false
+			m.watcher = nil
+			m.watcherCancel = nil
+		}
+		m.mu.Unlock()
+	}()
+
+	var debounce *time.Timer
+	var debounceC <-chan time.Time
+	markDirty := func() {
+		m.mu.Lock()
+		m.dirty = true
+		m.mu.Unlock()
+		if debounce == nil {
+			debounce = time.NewTimer(150 * time.Millisecond)
+		} else {
+			if !debounce.Stop() {
+				select {
+				case <-debounce.C:
+				default:
+				}
+			}
+			debounce.Reset(150 * time.Millisecond)
+		}
+		debounceC = debounce.C
+	}
+	defer func() {
+		if debounce != nil {
+			debounce.Stop()
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-debounceC:
+			debounceC = nil
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0 {
+				continue
+			}
+			if event.Op&fsnotify.Create != 0 {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					_ = addSkillWatchDirs(watcher, event.Name)
+				}
+			}
+			markDirty()
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			markDirty()
+		}
+	}
+}
+
+func addSkillWatchDirs(watcher *fsnotify.Watcher, root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("skill root is not a directory: %s", root)
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
+			return filepath.SkipDir
+		}
+		return watcher.Add(path)
+	})
 }
 
 func Prompt(skills []Skill) string {

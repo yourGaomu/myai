@@ -14,6 +14,13 @@ type SelectionService struct {
 	ModePolicy toolport.ToolModePolicy
 }
 
+func (s SelectionService) BeginTurn() func() {
+	if guard, ok := s.Catalog.(interface{ BeginTurn() func() }); ok {
+		return guard.BeginTurn()
+	}
+	return func() {}
+}
+
 var _ toolapi.SelectionService = SelectionService{}
 
 func (s SelectionService) ToolsForSession(current *session.Session, forceChatMode bool) []modelport.Tool {

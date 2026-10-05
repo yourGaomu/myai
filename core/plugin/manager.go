@@ -83,14 +83,39 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		ctx = context.Background()
 	}
 
-	manager.Close()
-	manager.mu.Lock()
-	manager.registry = registry
-	manager.mu.Unlock()
+	manager.mu.RLock()
+	oldRuntimes := make(map[string]*mcp.Manager, len(manager.runtimes))
+	oldSources := make([]string, 0)
+	for id, runtime := range manager.runtimes {
+		oldRuntimes[id] = runtime
+		oldSources = append(oldSources, runtime.Sources()...)
+	}
+	manager.mu.RUnlock()
+	oldSourceSet := make(map[string]bool, len(oldSources))
+	for _, source := range oldSources {
+		oldSourceSet[source] = true
+	}
+	candidateRegistry := registry.CloneExcludingSources(oldSourceSet)
+	candidateRuntimes := make(map[string]*mcp.Manager)
+	candidateInfos := make(map[string]Info)
+	cleanupCandidates := func() {
+		for _, runtime := range candidateRuntimes {
+			_ = runtime.Close()
+		}
+	}
 
 	entries, err := os.ReadDir(manager.root)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		releaseTurn := registry.BeginReload()
+		registry.ReplaceSources(candidateRegistry, oldSources, nil)
+		manager.mu.Lock()
+		manager.registry = registry
+		manager.infos = candidateInfos
+		manager.runtimes = candidateRuntimes
+		manager.mu.Unlock()
+		closeErr := closeRuntimes(oldRuntimes)
+		releaseTurn()
+		return closeErr
 	}
 	if err != nil {
 		return fmt.Errorf("scan plugin root %s: %w", manager.root, err)
@@ -104,42 +129,53 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		if _, statErr := os.Stat(filepath.Join(directory, ManifestFileName)); errors.Is(statErr, os.ErrNotExist) {
 			continue
 		} else if statErr != nil {
-			manager.recordFailure(entry.Name(), directory, statErr.Error())
+			candidateInfos[entry.Name()] = failedInfo(entry.Name(), directory, statErr.Error())
 			continue
 		}
 
 		manifest, manifestErr := loadManifest(directory)
 		if manifestErr != nil {
-			manager.recordFailure(entry.Name(), directory, manifestErr.Error())
+			candidateInfos[entry.Name()] = failedInfo(entry.Name(), directory, manifestErr.Error())
 			continue
 		}
-		if manager.hasInfo(manifest.ID) {
+		if _, exists := candidateInfos[manifest.ID]; exists {
 			log.Printf("warning: local plugin %s in %s ignored because the id is already registered", manifest.ID, directory)
 			continue
 		}
 		if !manifest.enabled() {
-			manager.recordInfo(Info{Manifest: manifest, Directory: directory, Status: StatusDisabled})
+			candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusDisabled}
 			continue
 		}
 
 		runtime := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{manifest.serverConfig(directory)}})
-		if err := runtime.RegisterAll(ctx, registry); err != nil {
+		if err := runtime.RegisterAll(ctx, candidateRegistry); err != nil {
 			_ = runtime.Close()
-			manager.recordFailure(manifest.ID, directory, err.Error())
+			candidateInfos[manifest.ID] = failedInfo(manifest.ID, directory, err.Error())
 			if manifest.Required {
-				manager.Close()
+				cleanupCandidates()
 				return fmt.Errorf("load required plugin %s: %w", manifest.ID, err)
 			}
 			log.Printf("warning: local plugin %s failed to load: %v", manifest.ID, err)
 			continue
 		}
-		manager.mu.Lock()
-		manager.runtimes[manifest.ID] = runtime
-		manager.mu.Unlock()
-		manager.recordInfo(Info{Manifest: manifest, Directory: directory, Status: StatusLoaded})
+		candidateRuntimes[manifest.ID] = runtime
+		candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusLoaded}
 		log.Printf("plugin %s loaded from %s", manifest.ID, directory)
 	}
-	return nil
+	candidateSources := make([]string, 0)
+	for _, runtime := range candidateRuntimes {
+		candidateSources = append(candidateSources, runtime.Sources()...)
+	}
+	releaseTurn := registry.BeginReload()
+	registry.ReplaceSources(candidateRegistry, oldSources, candidateSources)
+	manager.mu.Lock()
+	manager.registry = registry
+	manager.infos = candidateInfos
+	manager.runtimes = candidateRuntimes
+	manager.mu.Unlock()
+	closeErr := closeRuntimes(oldRuntimes)
+	releaseTurn()
+	return closeErr
 }
 
 func (manager *Manager) Reload(ctx context.Context) error {
@@ -207,7 +243,14 @@ func (manager *Manager) SetEnabled(ctx context.Context, id string, enabled bool)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		return fmt.Errorf("persist plugin %s manifest failed: %w", id, err)
 	}
-	return manager.load(ctx, registry)
+	if err := manager.load(ctx, registry); err != nil {
+		// The manifest is a user-facing source of truth. If the candidate reload
+		// fails, restore it so a later reload does not silently apply a state that
+		// was never successfully activated.
+		_ = os.WriteFile(manifestPath, original, 0o644)
+		return err
+	}
+	return nil
 }
 
 func (manager *Manager) List() []Info {
@@ -232,25 +275,52 @@ func (manager *Manager) Close() error {
 	if manager == nil {
 		return nil
 	}
+	manager.operationMu.Lock()
+	defer manager.operationMu.Unlock()
 	manager.mu.Lock()
-	runtimes := make([]*mcp.Manager, 0, len(manager.runtimes))
-	for _, runtime := range manager.runtimes {
-		runtimes = append(runtimes, runtime)
+	runtimes := make(map[string]*mcp.Manager, len(manager.runtimes))
+	for id, runtime := range manager.runtimes {
+		runtimes[id] = runtime
 	}
+	sources := make([]string, 0)
+	for _, runtime := range runtimes {
+		sources = append(sources, runtime.Sources()...)
+	}
+	registry := manager.registry
 	manager.runtimes = make(map[string]*mcp.Manager)
 	manager.infos = make(map[string]Info)
 	manager.registry = nil
 	manager.mu.Unlock()
+	if registry != nil {
+		releaseTurn := registry.BeginReload()
+		registry.UnregisterSources(sources)
+		releaseTurn()
+	}
+	return closeRuntimes(runtimes)
+}
 
+func closeRuntimes(runtimes map[string]*mcp.Manager) error {
+	items := make([]*mcp.Manager, 0, len(runtimes))
+	for _, runtime := range runtimes {
+		items = append(items, runtime)
+	}
 	var closeErrors []error
-	for index := len(runtimes) - 1; index >= 0; index-- {
-		if runtime := runtimes[index]; runtime != nil {
+	for index := len(items) - 1; index >= 0; index-- {
+		if runtime := items[index]; runtime != nil {
 			if err := runtime.Close(); err != nil {
 				closeErrors = append(closeErrors, err)
 			}
 		}
 	}
 	return errors.Join(closeErrors...)
+}
+
+func failedInfo(id string, directory string, message string) Info {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id = filepath.Base(directory)
+	}
+	return Info{Manifest: Manifest{ID: id, Name: id}, Directory: directory, Status: StatusFailed, Error: strings.TrimSpace(message)}
 }
 
 func (manager *Manager) recordInfo(info Info) {

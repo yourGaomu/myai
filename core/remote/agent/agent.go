@@ -35,12 +35,22 @@ type Agent struct {
 	subagentService       SubagentFacade
 	subagentEvents        SubagentEventSource
 	pluginManager         PluginManagerFacade
+	mcpManager            MCPManagerFacade
 	runtimes              *sessionRuntimeManager
 	writeMu               sync.Mutex
 	requestMu             sync.Mutex
 	lastTaskEventSequence atomic.Uint64
 	permissionWaiters     *permissionWaiterRegistry
 	permissionTimeout     time.Duration
+}
+
+// WithMCPManager attaches the narrow application-level MCP reload facade.
+// Keeping it optional preserves agents that only expose chat and plugins.
+func (a *Agent) WithMCPManager(manager MCPManagerFacade) *Agent {
+	if a != nil {
+		a.mcpManager = manager
+	}
+	return a
 }
 
 func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource, pluginManager PluginManagerFacade) *Agent {
@@ -424,6 +434,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handlePluginList(ctx, conn, message)
 	case protocol.TypePluginReload:
 		return a.handlePluginReload(ctx, conn, message)
+	case protocol.TypeMCPReload:
+		return a.handleMCPReload(ctx, conn, message)
 	case protocol.TypePluginEnable:
 		return a.handlePluginToggle(ctx, conn, message, true)
 	case protocol.TypePluginDisable:

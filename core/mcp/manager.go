@@ -14,11 +14,12 @@ import (
 
 type Manager struct {
 	// Manager 管理 MCP 子进程生命周期，并把远程工具包装成项目统一的 Tool 接口。
-	config   Config
-	mu       sync.Mutex
-	clients  []*Client
-	sources  []string
-	registry *tool.RegisterTools
+	config      Config
+	mu          sync.Mutex
+	operationMu sync.Mutex
+	clients     []*Client
+	sources     []string
+	registry    *tool.RegisterTools
 }
 
 func NewManager(config Config) *Manager {
@@ -26,28 +27,59 @@ func NewManager(config Config) *Manager {
 }
 
 func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools) error {
+	return m.Reload(ctx, m.config, registry)
+}
+
+// Reload prepares every configured MCP runtime before publishing any change.
+// If a required server cannot start or list its tools, the previous runtime
+// and registry sources remain untouched.
+func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.RegisterTools) error {
 	if registry == nil {
 		return errors.New("tool registry is nil")
 	}
-	m.mu.Lock()
-	m.registry = registry
-	m.mu.Unlock()
+	if m == nil {
+		return errors.New("mcp manager is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 
+	m.mu.Lock()
+	oldSources := append([]string(nil), m.sources...)
+	m.mu.Unlock()
+	oldSourceSet := make(map[string]bool, len(oldSources))
+	for _, source := range oldSources {
+		oldSourceSet[source] = true
+	}
+	baseRegistry := registry.CloneExcludingSources(oldSourceSet)
 	usedNames := make(map[string]int)
-	for _, registered := range registry.List() {
+	for _, registered := range baseRegistry.List() {
 		if registered != nil {
 			usedNames[registered.Name()] = 1
 		}
 	}
-	for _, server := range m.config.Servers {
+
+	var candidateClients []*Client
+	var candidateSources []string
+	var candidateTools = make(map[string][]tooldef.Tool)
+	cleanupCandidate := func() {
+		for index := len(candidateClients) - 1; index >= 0; index-- {
+			_ = candidateClients[index].Close()
+		}
+	}
+	for _, server := range config.Servers {
 		if server.Disabled {
 			continue
 		}
 		if strings.TrimSpace(server.Name) == "" {
-			return m.rollbackRegistration(errors.New("mcp server name is empty"))
+			cleanupCandidate()
+			return errors.New("mcp server name is empty")
 		}
 		if strings.TrimSpace(server.Command) == "" {
-			return m.rollbackRegistration(fmt.Errorf("mcp server %s command is empty", server.Name))
+			cleanupCandidate()
+			return fmt.Errorf("mcp server %s command is empty", server.Name)
 		}
 
 		// required 服务启动失败会阻止应用启动；可选服务只记录警告并继续。
@@ -55,7 +87,8 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 		if err := client.Start(ctx); err != nil {
 			err = fmt.Errorf("start mcp server %s failed: %w", server.Name, err)
 			if server.Required {
-				return m.rollbackRegistration(err)
+				cleanupCandidate()
+				return err
 			}
 			log.Printf("warning: %v", err)
 			continue
@@ -66,7 +99,8 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 			_ = client.Close()
 			err = fmt.Errorf("list mcp tools for %s failed: %w", server.Name, err)
 			if server.Required {
-				return m.rollbackRegistration(err)
+				cleanupCandidate()
+				return err
 			}
 			log.Printf("warning: %v", err)
 			continue
@@ -83,12 +117,36 @@ func (m *Manager) RegisterAll(ctx context.Context, registry *tool.RegisterTools)
 		}
 
 		source := "mcp:" + server.Name
-		registry.RegisterSource(source, wrapped)
-		m.addRuntime(client, source)
+		candidateClients = append(candidateClients, client)
+		candidateSources = append(candidateSources, source)
+		candidateTools[source] = wrapped
 		log.Printf("mcp %s registered %d tools", server.Name, len(wrapped))
 	}
 
-	return nil
+	// Publish the complete candidate set in one short registry update. Existing
+	// clients are closed only after the new sources are visible.
+	releaseTurn := registry.BeginReload()
+	defer releaseTurn()
+	for source, tools := range candidateTools {
+		baseRegistry.RegisterSource(source, tools)
+	}
+	registry.ReplaceSources(baseRegistry, oldSources, candidateSources)
+	m.mu.Lock()
+	oldClients := m.clients
+	m.config = config
+	m.registry = registry
+	m.clients = candidateClients
+	m.sources = candidateSources
+	m.mu.Unlock()
+	var closeErrors []error
+	for index := len(oldClients) - 1; index >= 0; index-- {
+		if oldClients[index] != nil {
+			if err := oldClients[index].Close(); err != nil {
+				closeErrors = append(closeErrors, err)
+			}
+		}
+	}
+	return errors.Join(closeErrors...)
 }
 
 func uniqueToolName(base string, used map[string]int) string {
@@ -120,6 +178,11 @@ func uniqueToolName(base string, used map[string]int) string {
 }
 
 func (m *Manager) Close() error {
+	if m == nil {
+		return nil
+	}
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	m.mu.Lock()
 	clients := append([]*Client(nil), m.clients...)
 	sources := append([]string(nil), m.sources...)
@@ -128,11 +191,14 @@ func (m *Manager) Close() error {
 	m.sources = nil
 	m.registry = nil
 	m.mu.Unlock()
+	releaseTurn := func() {}
+	if registry != nil {
+		releaseTurn = registry.BeginReload()
+		defer releaseTurn()
+	}
 
 	if registry != nil {
-		for _, source := range sources {
-			registry.UnregisterSource(source)
-		}
+		registry.UnregisterSources(sources)
 	}
 	var closeErrors []error
 	for index := len(clients) - 1; index >= 0; index-- {
@@ -147,17 +213,12 @@ func (m *Manager) Close() error {
 	return errors.Join(closeErrors...)
 }
 
-func (m *Manager) rollbackRegistration(cause error) error {
-	if closeErr := m.Close(); closeErr != nil {
-		return errors.Join(cause, fmt.Errorf("rollback mcp registration: %w", closeErr))
+// Sources returns the registry source names owned by this runtime.
+func (m *Manager) Sources() []string {
+	if m == nil {
+		return nil
 	}
-	return cause
-}
-
-func (m *Manager) addRuntime(client *Client, source string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	m.clients = append(m.clients, client)
-	m.sources = append(m.sources, source)
+	return append([]string(nil), m.sources...)
 }

@@ -921,6 +921,9 @@ func (app *Application) Close() error {
 	if app.mcpManager != nil {
 		errs = append(errs, app.mcpManager.Close())
 	}
+	if app.skillManager != nil {
+		errs = append(errs, app.skillManager.Close())
+	}
 	if app.workspaceCloser != nil {
 		errs = append(errs, app.workspaceCloser.Close())
 	}
@@ -991,6 +994,13 @@ func (app *Application) GetSubagentEvents() *subagentevents.Bus {
 
 func (app *Application) GetPluginManager() *pluginruntime.Manager {
 	return app.pluginManager
+}
+
+func (app *Application) GetMCPManager() *mcp.Manager {
+	if app == nil {
+		return nil
+	}
+	return app.mcpManager
 }
 
 func (app *Application) GetKnowledgeBaseRepository() knowledgeport.KnowledgeBaseRepository {
@@ -1122,6 +1132,27 @@ func (app *Application) InitMCP() *mcp.Manager {
 	return app.mcpManager
 }
 
+// ReloadMCP rereads MCP settings and atomically replaces the configured
+// runtimes. A failed candidate keeps the currently active servers and tools.
+func (app *Application) ReloadMCP(ctx context.Context) error {
+	if app == nil || app.mcpManager == nil {
+		return errors.New("mcp manager is not configured")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	properties, err := (appconfig.ViperLoader{}).Load(app.workspace)
+	if err != nil {
+		return err
+	}
+	config := (appconfig.Mapper{}).MCPConfig(app.workspace, properties.MCP)
+	if err := app.mcpManager.Reload(ctx, config, app.toolRegister); err != nil {
+		return err
+	}
+	app.properties.MCP = properties.MCP
+	return nil
+}
+
 func (app *Application) InitPlugins() *pluginruntime.Manager {
 	manager := pluginruntime.NewManager(app.properties.Plugin.Root)
 	app.pluginManager = manager
@@ -1136,6 +1167,9 @@ func (app *Application) InitPlugins() *pluginruntime.Manager {
 
 func (app *Application) InitSkillManager() *skill.Manager {
 	app.skillManager = skill.NewManager(app.skillRoot())
+	if err := app.skillManager.StartWatcher(context.Background()); err != nil {
+		log.Printf("warning: start skill watcher failed: %v", err)
+	}
 	return app.skillManager
 }
 

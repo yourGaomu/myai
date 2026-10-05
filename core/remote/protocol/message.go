@@ -103,6 +103,8 @@ const (
 	TypePluginEnable                     MessageType = "plugin_enable"
 	TypePluginDisable                    MessageType = "plugin_disable"
 	TypePluginMutationResult             MessageType = "plugin_mutation_result"
+	TypeMCPReload                        MessageType = "mcp_reload"
+	TypeMCPReloadResult                  MessageType = "mcp_reload_result"
 	TypeAssetList                        MessageType = "asset_list"
 	TypeAssetListResult                  MessageType = "asset_list_result"
 	TypeKnowledgeCatalogList             MessageType = "knowledge_catalog_list"
@@ -937,6 +939,13 @@ type SkillListResultPayload struct {
 }
 
 type PluginListPayload struct{}
+
+type MCPReloadPayload struct{}
+
+type MCPReloadResultPayload struct {
+	Reloaded bool   `json:"reloaded"`
+	Message  string `json:"message,omitempty"`
+}
 
 type PluginTogglePayload struct {
 	PluginID string `json:"plugin_id"`
