@@ -62,7 +62,10 @@ func (m *Store) EnsureIndexes(ctx context.Context) error {
 	_, err := indexes.CreateOne(ctx, gomongo.IndexModel{
 		Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "source_id", Value: 1}},
 		Options: options.Index().SetName(messageSourceIndexName).SetUnique(true).SetPartialFilterExpression(bson.M{
-			"source_id": bson.M{"$type": "string", "$ne": ""},
+			// MongoDB partial indexes do not support $ne/$not here. A string
+			// greater-than comparison excludes null and the empty string while
+			// retaining every valid non-empty SourceID.
+			"source_id": bson.M{"$gt": ""},
 		}),
 	})
 	return err
