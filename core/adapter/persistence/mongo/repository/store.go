@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ const (
 	messagesCollection     = "messages"
 	modelConfigsCollection = "model_configs"
 	assetsCollection       = "assets"
+	messageSourceIndexName = "messages_session_source_unique"
 )
 
 type Store struct {
@@ -47,17 +49,51 @@ func NewWithTemplate(template mongotemplate.Operations) *Store {
 }
 
 // EnsureIndexes creates the identity index used by generated inter-agent
-// messages. The sparse option keeps legacy messages without SourceID valid.
+// messages. Only messages with a non-empty SourceID participate in the
+// uniqueness constraint; ordinary chat messages are intentionally excluded.
 func (m *Store) EnsureIndexes(ctx context.Context) error {
-	// 1. 为带 SourceID 的消息建立会话内唯一约束，防止跨进程重复落库。
 	if m == nil || m.database == nil {
 		return errors.New("mongo chat database is nil")
 	}
-	// 2. sparse 保证旧消息没有 source_id 时仍可正常读取和写入。
-	_, err := m.database.Collection(messagesCollection).Indexes().CreateMany(ctx, []gomongo.IndexModel{
-		{Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "source_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+	indexes := m.database.Collection(messagesCollection).Indexes()
+	if err := removeLegacyMessageSourceIndexes(ctx, indexes); err != nil {
+		return fmt.Errorf("remove legacy message source indexes: %w", err)
+	}
+	_, err := indexes.CreateOne(ctx, gomongo.IndexModel{
+		Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "source_id", Value: 1}},
+		Options: options.Index().SetName(messageSourceIndexName).SetUnique(true).SetPartialFilterExpression(bson.M{
+			"source_id": bson.M{"$type": "string", "$ne": ""},
+		}),
 	})
 	return err
+}
+
+func removeLegacyMessageSourceIndexes(ctx context.Context, indexes gomongo.IndexView) error {
+	specifications, err := indexes.ListSpecifications(ctx)
+	if err != nil {
+		return err
+	}
+	for _, specification := range specifications {
+		if specification.Name == "_id_" || !isMessageSourceIndex(specification.KeysDocument) {
+			continue
+		}
+		// The old index was named session_id_1_source_id_1. Remove any other
+		// index on the same key pair as well, so an earlier custom name cannot
+		// keep the broken uniqueness behavior alive.
+		if err := indexes.DropOne(ctx, specification.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isMessageSourceIndex(raw bson.Raw) bool {
+	var keys bson.D
+	if err := bson.Unmarshal(raw, &keys); err != nil || len(keys) != 2 {
+		return false
+	}
+	return (keys[0].Key == "session_id" && keys[1].Key == "source_id") ||
+		(keys[0].Key == "source_id" && keys[1].Key == "session_id")
 }
 
 func (m *Store) GetSession(ctx context.Context, sessionID string) (repository.SessionRecord, error) {
