@@ -90,6 +90,9 @@ export function MobileMainContent({
           onReloadSkills={settings.onReloadSkills}
           onRefreshPlugins={settings.onRefreshPlugins}
           onReloadPlugins={settings.onReloadPlugins}
+          reloadMCP={settings.reloadMCP}
+          mcpReloading={settings.mcpReloading}
+          mcpMessage={settings.mcpMessage}
           onSetPluginEnabled={settings.onSetPluginEnabled}
           onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}

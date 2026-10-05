@@ -44,6 +44,7 @@ import { useSkillState } from "../hooks/useSkillState";
 import { useSubagentActions } from "../hooks/useSubagentActions";
 import { useSubagentState } from "../hooks/useSubagentState";
 import { useIntentSettings } from "../hooks/useIntentSettings";
+import { useMCPState } from "../hooks/useMCPState";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -122,6 +123,11 @@ export function MobileAppScreen() {
     pluginRoot,
     plugins,
   } = usePluginState();
+  const {
+    applyMCPError,
+    applyMCPReload,
+    mcpMessage,
+  } = useMCPState();
   const {
     assets,
     clearAssets,
@@ -396,6 +402,7 @@ export function MobileAppScreen() {
     requestModels,
     requestPlugins,
     reloadPlugins,
+    reloadMCP,
     reloadSkills,
     requestDeletedSessions,
     requestSkills,
@@ -706,6 +713,9 @@ export function MobileAppScreen() {
     applyModelSwitch,
     applySkillList,
     applyPluginList,
+    applyMCPReload,
+    applyMCPError,
+    isMCPOperationPending: pendingActions.mcp,
     applySubagentDefinitionList,
     applySubagentDefinitionMutation,
     applySubagentTaskList,
@@ -1146,6 +1156,9 @@ export function MobileAppScreen() {
           onReloadSkills: reloadSkills,
           onRefreshPlugins: requestPlugins,
           onReloadPlugins: reloadPlugins,
+          reloadMCP,
+          mcpReloading: pendingActions.mcp,
+          mcpMessage,
           onSetPluginEnabled: setPluginEnabled,
           onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,

@@ -161,6 +161,19 @@ export function useRemoteRequests({
     return true;
   }, [clearPlugins, clientToken, sendEnvelope, startPending, stopPending]);
 
+  const reloadMCP = useCallback(() => {
+    if (!clientToken) {
+      stopPending("mcp");
+      return false;
+    }
+    startPending("mcp");
+    if (!sendEnvelope("mcp_reload", { request_id: newRequestID(), payload: {} })) {
+      stopPending("mcp");
+      return false;
+    }
+    return true;
+  }, [clientToken, sendEnvelope, startPending, stopPending]);
+
   const requestAgentRuns = useCallback(
     (nextSessionID = currentSessionID) => {
       const targetSessionID = nextSessionID.trim();
@@ -385,6 +398,7 @@ export function useRemoteRequests({
     requestModels,
     requestPlugins,
     reloadPlugins,
+    reloadMCP,
     requestSkills,
     requestDeletedSessions,
     requestSessionHistoryDelta,

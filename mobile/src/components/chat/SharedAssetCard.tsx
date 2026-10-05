@@ -1,4 +1,4 @@
-import { ActivityIndicator, Image, Linking, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { ActivityIndicator, Image, Linking, Modal, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { useState } from "react";
 
 import { isPreviewableImageAsset, type SharedAsset } from "../../utils/toolAssets";
@@ -14,6 +14,7 @@ type Props = {
 export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
   const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
+  const [fullScreenVisible, setFullScreenVisible] = useState(false);
   const [imageSource, setImageSource] = useState(previewURL || asset.shortURL);
   const title = asset.fileName || asset.path || "共享文件";
   const meta = [asset.size !== undefined ? formatBytes(asset.size) : "", asset.contentType || "", asset.expiresAt ? `有效期至 ${formatDateTime(asset.expiresAt)}` : ""]
@@ -24,7 +25,11 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
   return (
     <View style={[styles.assetCard, showImagePreview && styles.assetImageCard]}>
       {showImagePreview ? (
-        <Pressable onPress={() => void Linking.openURL(asset.shortURL)} style={({ pressed }) => buttonFeedback(styles.assetPreviewButton, pressed)}>
+        <Pressable
+          accessibilityLabel="查看大图"
+          onPress={() => setFullScreenVisible(true)}
+          style={({ pressed }) => buttonFeedback(styles.assetPreviewButton, pressed)}
+        >
           <Image
             onError={() => {
               if (previewURL && imageSource === previewURL && previewURL !== asset.shortURL) {
@@ -40,6 +45,9 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
             source={{ uri: imageSource }}
             style={styles.assetPreviewImage}
           />
+          <View style={styles.assetPreviewTapHint}>
+            <Text style={styles.assetPreviewTapHintText}>🔍 查看大图</Text>
+          </View>
           {imageLoading ? (
             <View style={styles.assetPreviewOverlay}>
               <ActivityIndicator color="#12100e" size="small" />
@@ -48,6 +56,48 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
           ) : null}
         </Pressable>
       ) : null}
+
+      {/* 全屏大图沉浸式预览弹窗 */}
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setFullScreenVisible(false)}
+        transparent
+        visible={fullScreenVisible}
+      >
+        <View style={styles.imageModalBackdrop}>
+          <View style={styles.imageModalHeader}>
+            <Text numberOfLines={1} style={styles.imageModalTitle}>
+              {title}
+            </Text>
+            <Pressable
+              onPress={() => setFullScreenVisible(false)}
+              style={({ pressed }) => buttonFeedback(styles.imageModalCloseBtn, pressed)}
+            >
+              <Text style={styles.imageModalCloseBtnText}>✕ 关闭</Text>
+            </Pressable>
+          </View>
+
+          <Pressable
+            onPress={() => setFullScreenVisible(false)}
+            style={styles.imageModalContent}
+          >
+            <Image
+              resizeMode="contain"
+              source={{ uri: imageSource }}
+              style={styles.imageModalFullImage}
+            />
+          </Pressable>
+
+          <View style={styles.imageModalFooter}>
+            <Pressable
+              onPress={() => void Linking.openURL(asset.shortURL)}
+              style={({ pressed }) => buttonFeedback(styles.imageModalActionBtn, pressed)}
+            >
+              <Text style={styles.imageModalActionBtnText}>🔗 浏览器中打开</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.assetDetailsRow}>
         <View style={styles.assetIconBox}>
           <Text style={styles.assetIconText}>{showImagePreview ? "图片" : fileInitial(title)}</Text>

@@ -36,6 +36,7 @@ import type {
   ModelConfigMutationResultPayload,
   ModelConfigTestResultPayload,
   ModelSwitchResultPayload,
+  MCPReloadResultPayload,
   PluginListResultPayload,
   PluginMutationResultPayload,
   PermissionAskPayload,
@@ -141,6 +142,9 @@ type Args = {
   applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   applyPluginList: (payload?: PluginListResultPayload | PluginMutationResultPayload) => void;
+  applyMCPReload: (payload?: MCPReloadResultPayload) => void;
+  applyMCPError: (message: string) => void;
+  isMCPOperationPending: boolean;
   applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
   applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
@@ -257,6 +261,9 @@ export function useRemoteMessageHandler({
   applySessionGenerationError,
   applySkillList,
   applyPluginList,
+  applyMCPReload,
+  applyMCPError,
+  isMCPOperationPending,
   applySubagentDefinitionList,
   applySubagentDefinitionMutation,
   applySubagentTaskList,
@@ -629,6 +636,10 @@ export function useRemoteMessageHandler({
           stopPending("plugins");
           applyPluginList(message.payload as PluginListResultPayload | PluginMutationResultPayload | undefined);
           break;
+        case "mcp_reload_result":
+          stopPending("mcp");
+          applyMCPReload(message.payload as MCPReloadResultPayload | undefined);
+          break;
         case "asset_list_result":
           stopPending("assets");
           applyAssetList(message.payload as AssetListResultPayload | undefined);
@@ -760,6 +771,9 @@ export function useRemoteMessageHandler({
           if (isMemoryOperationPending) {
             applyAIMemoryError(payload.message || "AI 记忆操作失败");
           }
+          if (isMCPOperationPending) {
+            applyMCPError(payload.message || "MCP 重载失败");
+          }
           const targetSessionID = resolveChatSessionID(
             message,
             requestSessionMapRef,
@@ -786,6 +800,7 @@ export function useRemoteMessageHandler({
           stopPending("models");
           stopPending("skills");
           stopPending("plugins");
+          stopPending("mcp");
           stopPending("assets");
           stopPending("files");
           stopPending("changes");

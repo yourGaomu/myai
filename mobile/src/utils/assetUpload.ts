@@ -1,7 +1,8 @@
 import type { DocumentPickerAsset } from "expo-document-picker";
-import { File } from "expo-file-system";
+import { Platform } from "react-native";
 
 import type { UploadedAssetPayload } from "../protocol";
+import { inferMimeType } from "./attachments";
 
 type UploadMobileAssetOptions = {
   asset: DocumentPickerAsset;
@@ -19,18 +20,35 @@ export async function uploadMobileAsset({
     throw new Error("asset service url is required");
   }
 
+  const mimeType = inferMimeType(asset.name, asset.mimeType);
+  const fileName = asset.name || "upload";
+
   const body = new FormData();
-  if (asset.file) {
-    body.append("file", asset.file);
+  if (Platform.OS === "web") {
+    if (asset.file) {
+      body.append("file", asset.file);
+    } else {
+      try {
+        const res = await fetch(asset.uri);
+        const blob = await res.blob();
+        body.append("file", blob, fileName);
+      } catch {
+        body.append("file", {
+          uri: asset.uri,
+          name: fileName,
+          type: mimeType,
+        } as any);
+      }
+    }
   } else {
-    const file = new File(asset.uri);
+    // React Native Native (iOS / Android) FormData file object contract
     body.append("file", {
-      name: asset.name || "upload",
-      type: asset.mimeType || "application/octet-stream",
-      bytes: () => file.bytes(),
-    } as unknown as Blob);
+      uri: asset.uri,
+      name: fileName,
+      type: mimeType,
+    } as any);
   }
-  body.append("title", asset.name || "mobile upload");
+  body.append("title", fileName);
   if (sessionID) {
     body.append("scope", sessionID);
   }

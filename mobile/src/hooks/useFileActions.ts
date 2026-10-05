@@ -5,7 +5,7 @@ import { maxAttachedFiles } from "../constants/app";
 import type { FileEntry, FileReadResultPayload, RelayMessage } from "../protocol";
 import type { PendingAction, ViewMode } from "../types/app";
 import type { ChatAttachment, UploadedAssetAttachment } from "../types/chat";
-import { attachmentKey, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
+import { attachmentKey, inferMimeType, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
 import { uploadMobileAsset } from "../utils/assetUpload";
 import { newRequestID } from "../utils/ids";
 import { parentPathOf } from "../utils/paths";
@@ -135,7 +135,7 @@ export function useFileActions({
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: false,
-        base64: false,
+        type: ["image/*", "*/*"],
       });
       if (result.canceled || !result.assets?.[0]) {
         return;
@@ -149,7 +149,7 @@ export function useFileActions({
       });
       const attachment: UploadedAssetAttachment = {
         ...uploaded,
-        content_type: uploaded.content_type || asset.mimeType || "application/octet-stream",
+        content_type: uploaded.content_type || inferMimeType(asset.name, asset.mimeType),
         file_name: uploaded.file_name || asset.name || "已上传文件",
         kind: "uploaded_asset",
         local_uri: asset.uri,

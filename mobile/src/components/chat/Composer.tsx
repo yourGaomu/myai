@@ -1,8 +1,8 @@
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { attachmentKey, attachmentTitle, isUploadedAssetAttachment } from "../../utils/attachments";
+import { attachmentKey, attachmentTitle, isImageAttachment, isUploadedAssetAttachment } from "../../utils/attachments";
 
 type Props = {
   attachedFiles: ChatAttachment[];
@@ -38,36 +38,60 @@ export function Composer({
 
   return (
     <View style={styles.composerWrapper}>
-      {/* 悬浮附件预览条 */}
-      {attachedFiles.length > 0 ? (
+      {/* 悬浮附件预览条 / 暂留区 */}
+      {attachedFiles.length > 0 || pendingUpload ? (
         <ScrollView
           contentContainerStyle={styles.attachmentTray}
           horizontal
           showsHorizontalScrollIndicator={false}
         >
-          {attachedFiles.map((file) => (
-            <View
-              key={attachmentKey(file)}
-              style={[
-                styles.attachmentChip,
-                isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip,
-              ]}
-            >
-              <Text style={styles.attachmentIcon}>📎</Text>
-              <Text numberOfLines={1} style={styles.attachmentTitle}>
-                {attachmentTitle(file)}
-              </Text>
-              <Pressable
-                accessibilityLabel="移除附件"
-                onPress={() => onRemoveAttachedFile(attachmentKey(file))}
-                style={({ pressed }) =>
-                  buttonFeedback(styles.attachmentRemove, pressed)
-                }
+          {attachedFiles.map((file) => {
+            const isImg = isImageAttachment(file);
+            const imageUri = isUploadedAssetAttachment(file) ? file.local_uri || file.short_url : undefined;
+            return (
+              <View
+                key={attachmentKey(file)}
+                style={[
+                  styles.attachmentChip,
+                  isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip,
+                  isImg && styles.imageAttachmentChip,
+                ]}
               >
-                <Text style={styles.attachmentRemoveText}>✕</Text>
-              </Pressable>
+                {isImg && imageUri ? (
+                  <Image
+                    resizeMode="cover"
+                    source={{ uri: imageUri }}
+                    style={styles.attachmentThumbnail}
+                  />
+                ) : (
+                  <Text style={styles.attachmentIcon}>📎</Text>
+                )}
+                <View style={styles.attachmentInfo}>
+                  <Text numberOfLines={1} style={styles.attachmentTitle}>
+                    {attachmentTitle(file)}
+                  </Text>
+                  {isImg ? (
+                    <Text style={styles.attachmentSubtext}>图片附件</Text>
+                  ) : null}
+                </View>
+                <Pressable
+                  accessibilityLabel="移除附件"
+                  onPress={() => onRemoveAttachedFile(attachmentKey(file))}
+                  style={({ pressed }) =>
+                    buttonFeedback(styles.attachmentRemove, pressed)
+                  }
+                >
+                  <Text style={styles.attachmentRemoveText}>✕</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+          {pendingUpload ? (
+            <View style={[styles.attachmentChip, styles.uploadingChip]}>
+              <ActivityIndicator color="#12100e" size="small" />
+              <Text style={styles.uploadingText}>正在上传文件...</Text>
             </View>
-          ))}
+          ) : null}
         </ScrollView>
       ) : null}
 
@@ -227,6 +251,41 @@ const styles = StyleSheet.create({
   },
   uploadedAttachmentChip: {
     backgroundColor: "#b9e9b0",
+  },
+  imageAttachmentChip: {
+    backgroundColor: "#f2faee",
+    paddingLeft: 4,
+    paddingVertical: 4,
+    gap: 7,
+  },
+  attachmentThumbnail: {
+    backgroundColor: "#e8e3d8",
+    borderColor: "#12100e",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    height: 34,
+    width: 34,
+  },
+  attachmentInfo: {
+    justifyContent: "center",
+    maxWidth: 140,
+  },
+  attachmentSubtext: {
+    color: "#4a7c44",
+    fontSize: 9,
+    fontWeight: "800",
+    marginTop: 1,
+  },
+  uploadingChip: {
+    backgroundColor: "#fff8db",
+    borderStyle: "dashed",
+    paddingHorizontal: 10,
+  },
+  uploadingText: {
+    color: "#7a5900",
+    fontSize: 11,
+    fontWeight: "800",
+    marginLeft: 3,
   },
   attachmentIcon: {
     fontSize: 11,

@@ -88,6 +88,8 @@ export type MessageType =
   | "plugin_enable"
   | "plugin_disable"
   | "plugin_mutation_result"
+  | "mcp_reload"
+  | "mcp_reload_result"
   | "asset_list"
   | "asset_list_result"
   | "knowledge_catalog_list"
@@ -936,6 +938,13 @@ export type PluginMutationResultPayload = {
   enabled?: boolean;
   plugins?: PluginInfo[];
   count?: number;
+  message?: string;
+};
+
+export type MCPReloadPayload = {};
+
+export type MCPReloadResultPayload = {
+  reloaded: boolean;
   message?: string;
 };
 

@@ -101,6 +101,9 @@ type Props = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
+  reloadMCP: () => void;
+  mcpReloading: boolean;
+  mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
@@ -295,6 +298,9 @@ export function SettingsPanel({
   onUpdateSubagentDefinition,
   onUserIDChange,
   pendingActions,
+  reloadMCP,
+  mcpReloading,
+  mcpMessage,
   plugins,
   pluginMessage,
   pluginRoot,
@@ -1087,6 +1093,13 @@ export function SettingsPanel({
           >
             <ButtonContent loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
           </Pressable>
+          <Pressable
+            disabled={!clientToken || mcpReloading}
+            onPress={reloadMCP}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
+          >
+            <ButtonContent loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+          </Pressable>
         </View>
       </View>
 
@@ -1121,16 +1134,43 @@ export function SettingsPanel({
   );
 
   const pluginSection = (
-    <PluginPanel
-      buttonFeedback={buttonFeedback}
-      message={pluginMessage}
-      onRefresh={onRefreshPlugins}
-      onReload={onReloadPlugins}
-      onSetEnabled={onSetPluginEnabled}
-      pending={pendingActions.plugins}
-      plugins={plugins}
-      root={pluginRoot}
-    />
+    <View style={styles.sectionStack}>
+      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
+        <IconBox label="MCP" />
+        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
+          <Text style={styles.settingTitle}>MCP 运行时</Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>
+            模型上下文协议服务与动态工具安全重载
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel="重载 MCP"
+          disabled={!clientToken || mcpReloading}
+          onPress={reloadMCP}
+          style={({ pressed }) =>
+            buttonFeedback(
+              [styles.secondaryButton, (!clientToken || mcpReloading) && styles.disabledButton],
+              pressed,
+            )
+          }
+        >
+          <ButtonContent loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+        </Pressable>
+      </View>
+
+      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
+
+      <PluginPanel
+        buttonFeedback={buttonFeedback}
+        message={pluginMessage}
+        onRefresh={onRefreshPlugins}
+        onReload={onReloadPlugins}
+        onSetEnabled={onSetPluginEnabled}
+        pending={pendingActions.plugins}
+        plugins={plugins}
+        root={pluginRoot}
+      />
+    </View>
   );
 
   const sessionSection = (
@@ -1561,6 +1601,13 @@ export function SettingsPanel({
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.skills && styles.disabledButton], pressed)}
         >
           <ButtonContent loading={pendingActions.skills} text="刷新技能" />
+        </Pressable>
+        <Pressable
+          disabled={!clientToken || mcpReloading}
+          onPress={reloadMCP}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
+        >
+          <ButtonContent loading={mcpReloading} text="重载 MCP" />
         </Pressable>
         <Pressable
           disabled={pendingActions.sessions}

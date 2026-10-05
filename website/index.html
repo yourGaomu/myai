@@ -1,0 +1,3123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MyAI — 手机上的全域自主编程智能体 | Official Site & Interactive App</title>
+  <meta name="description" content="MyAI 是基于 Go + React Native 实现的高性能分布式全域自主智能体系统。采用标志性 Neo-Brutalism 风格，支持手机与电脑神经协同、Codex式两阶段规划、方案A分离式工具链与自进化记忆网络。">
+  
+  <!-- Enhanced SEO -->
+  <meta name="keywords" content="AI编程助手,移动端开发工具,智能体系统,代码生成,Go语言,React Native,远程开发,自动化编程,Codex,两阶段规划">
+  <meta name="author" content="MyAI Team">
+  
+  <!-- Open Graph (社交分享优化) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="MyAI — 手机上的全域自主编程智能体">
+  <meta property="og:description" content="随时随地，掌控代码。支持 Codex 式两阶段规划、方案A分离式工具链与自进化记忆网络。">
+  <meta property="og:site_name" content="MyAI">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MyAI — 手机上的全域自主编程智能体">
+  <meta name="twitter:description" content="随时随地，掌控代码。支持手机远程控制、两阶段规划和原子快照回滚。">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    /* -------------------------------------------------------------
+       1. NEO-BRUTALISM DESIGN SYSTEM
+       ------------------------------------------------------------- */
+    :root {
+      --ink: #12100e;
+      --bg: #f5f4ef;
+      --bg-canvas: #eceae1;
+      --surface: #fffdf7;
+      --yellow: #ffd84f;
+      --yellow-hover: #ffce1a;
+      --green: #b9e9b0;
+      --green-dark: #0e4e16;
+      --cyan: #4fd7ee;
+      --blue: #80d0ff;
+      --coral: #ff7f68;
+      --purple: #d8b4fe;
+      --border-thick: 2.5px solid var(--ink);
+      --border-thin: 1.5px solid var(--ink);
+      --shadow-xs: 1.5px 1.5px 0px var(--ink);
+      --shadow-sm: 2.5px 2.5px 0px var(--ink);
+      --shadow-md: 4.5px 4.5px 0px var(--ink);
+      --shadow-lg: 7px 7px 0px var(--ink);
+      --shadow-xl: 10px 10px 0px var(--ink);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-pill: 999px;
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+      --font-display: 'Space Grotesk', var(--font-sans);
+      --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(var(--ink) 1px, transparent 1px),
+        linear-gradient(to right, rgba(18, 16, 14, 0.03) 1px, transparent 1px);
+      background-size: 26px 26px, 130px 130px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      line-height: 1.55;
+      overflow-x: hidden;
+      cursor: default;
+    }
+
+    ::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-canvas);
+      border-left: 2px solid var(--ink);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--yellow);
+      border: 2px solid var(--ink);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--coral);
+    }
+
+    .neo-btn {
+      background: var(--surface);
+      border: var(--border-thick);
+      box-shadow: var(--shadow-md);
+      border-radius: var(--radius-md);
+      font-weight: 800;
+      color: var(--ink);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+    .neo-btn:hover {
+      transform: translate(-2px, -2px);
+      box-shadow: var(--shadow-lg);
+    }
+    .neo-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: var(--shadow-xs);
+    }
+    .neo-btn-yellow { background: var(--yellow); }
+    .neo-btn-yellow:hover { background: var(--yellow-hover); }
+
+    .neo-pill {
+      border: var(--border-thin);
+      box-shadow: var(--shadow-xs);
+      border-radius: var(--radius-pill);
+      font-weight: 800;
+      font-size: 11px;
+      padding: 2px 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+
+    /* -------------------------------------------------------------
+       2. TOP BAR & NAVIGATION
+       ------------------------------------------------------------- */
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: var(--surface);
+      border-bottom: var(--border-thick);
+      box-shadow: 0 4px 0px rgba(18, 16, 14, 0.08);
+    }
+    .nav-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      height: 72px;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+    .brand-icon-box {
+      width: 44px;
+      height: 44px;
+      border: var(--border-thick);
+      border-radius: var(--radius-md);
+      background: var(--yellow);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      transform: rotate(-3deg);
+    }
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-menu {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      list-style: none;
+    }
+    .nav-menu a {
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      transition: all 0.12s ease;
+    }
+    .nav-menu a:hover {
+      background: var(--yellow);
+      box-shadow: var(--shadow-xs);
+    }
+
+    /* -------------------------------------------------------------
+       3. HERO SECTION
+       ------------------------------------------------------------- */
+    .hero-wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 50px 24px 32px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+    }
+    .floating-sticker {
+      position: absolute;
+      border: var(--border-thick);
+      box-shadow: var(--shadow-md);
+      border-radius: var(--radius-pill);
+      padding: 6px 16px;
+      font-weight: 800;
+      font-size: 13px;
+      user-select: none;
+      z-index: 5;
+      animation: floatSway 4s ease-in-out infinite alternate;
+    }
+    @keyframes floatSway {
+      0% { transform: translateY(0px) rotate(-3deg); }
+      100% { transform: translateY(-8px) rotate(2deg); }
+    }
+    .st-left { top: 40px; left: 3%; background: var(--green); }
+    .st-right { top: 50px; right: 3%; background: var(--cyan); animation-delay: -2s; }
+
+    .hero-badge-pill {
+      background: var(--surface);
+      border: var(--border-thick);
+      box-shadow: var(--shadow-sm);
+      border-radius: var(--radius-pill);
+      padding: 6px 18px;
+      font-weight: 800;
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .hero-headline {
+      font-family: var(--font-display);
+      font-size: clamp(36px, 5.5vw, 68px);
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 18px;
+      max-width: 1060px;
+    }
+    .hero-headline .highlight-tag {
+      background: var(--yellow);
+      padding: 2px 14px;
+      border: var(--border-thick);
+      box-shadow: var(--shadow-sm);
+      border-radius: 14px;
+      display: inline-block;
+      transform: rotate(-1.5deg);
+    }
+    .hero-subtitle {
+      font-size: clamp(15px, 1.8vw, 19px);
+      color: #4a453e;
+      max-width: 800px;
+      margin-bottom: 30px;
+      font-weight: 600;
+      line-height: 1.6;
+    }
+    .hero-cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    /* -------------------------------------------------------------
+       4. SHOWCASE RIG: 100% FAITHFUL TO USER'S REAL MOBILE APP
+       ------------------------------------------------------------- */
+    .app-showcase-section {
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px 80px 24px;
+    }
+
+    .showcase-control-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+      background: var(--surface);
+      border: var(--border-thick);
+      box-shadow: var(--shadow-md);
+      border-radius: var(--radius-lg);
+      padding: 14px 22px;
+      margin-bottom: 26px;
+    }
+    .device-switch-group {
+      display: flex;
+      gap: 8px;
+    }
+    .dev-tab-btn {
+      padding: 7px 16px;
+      border: var(--border-thick);
+      border-radius: var(--radius-pill);
+      font-weight: 800;
+      font-size: 13px;
+      background: var(--surface);
+      box-shadow: var(--shadow-xs);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.12s;
+    }
+    .dev-tab-btn.active {
+      background: var(--yellow);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .preset-scenarios-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .preset-chip {
+      padding: 5px 12px;
+      border: var(--border-thin);
+      border-radius: var(--radius-pill);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.12s;
+      box-shadow: var(--shadow-xs);
+    }
+    .preset-chip:hover {
+      background: var(--yellow);
+      transform: translateY(-1px);
+    }
+
+    .device-viewport {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 24px;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* 📱 REALISTIC PHONE CHASSIS */
+    .phone-outer-frame {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .p-btn-vup {
+      position: absolute; left: -7px; top: 120px; width: 5px; height: 44px; background: #333; border: 2px solid var(--ink); border-radius: 4px 0 0 4px;
+    }
+    .p-btn-vdown {
+      position: absolute; left: -7px; top: 180px; width: 5px; height: 44px; background: #333; border: 2px solid var(--ink); border-radius: 4px 0 0 4px;
+    }
+    .p-btn-pwr {
+      position: absolute; right: -7px; top: 150px; width: 5px; height: 56px; background: #333; border: 2px solid var(--ink); border-radius: 0 4px 4px 0;
+    }
+
+    .real-phone-body {
+      width: 440px;
+      height: 820px;
+      background: #f4f5f7;
+      border: 3.5px solid var(--ink);
+      border-radius: 40px;
+      box-shadow: var(--shadow-xl);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* 1. Android Status Bar (Exact to Screenshot media_1790479904525) */
+    .p-status-bar {
+      height: 36px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #12100e;
+      background: #f4f5f7;
+      border-bottom: 1px solid rgba(18, 16, 14, 0.06);
+      user-select: none;
+    }
+
+    /* 2. AppHeader (Exact to mobile/src/components/layout/AppHeader.tsx) */
+    .p-app-header {
+      padding: 8px 16px 10px 16px;
+      background: #f4f5f7;
+      border-bottom: 2px solid var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .p-brand-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .p-avatar-box {
+      width: 42px;
+      height: 42px;
+      background: #ffd84f;
+      border: 2px solid var(--ink);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      cursor: pointer;
+    }
+    .p-header-titles {
+      display: flex;
+      flex-direction: column;
+    }
+    .p-title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .p-title-main {
+      font-size: 17px;
+      font-weight: 900;
+      color: #12100e;
+      line-height: 22px;
+    }
+    .p-device-pill {
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-size: 9.5px;
+      font-weight: 900;
+      color: #12100e;
+    }
+    .p-subtitle {
+      color: #6c665f;
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+    .p-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .p-ghost-settings-btn {
+      width: 34px;
+      height: 34px;
+      background: #4fd7ee;
+      border: 2px solid var(--ink);
+      border-radius: 10px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    .p-ghost-settings-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+    .p-status-online-pill {
+      background: #b9e9b0;
+      border: 2px solid var(--ink);
+      border-radius: 999px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      height: 34px;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11.5px;
+      font-weight: 900;
+      color: #12100e;
+    }
+    .p-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 4px;
+      background: #0e4e16;
+    }
+
+    /* 3. SessionModeSwitch (ONLY shown on chat tab) */
+    .p-mode-switch-wrapper {
+      padding: 8px 16px;
+      background: #f4f5f7;
+      display: flex;
+      justify-content: center;
+    }
+    .p-mode-control {
+      background: #ded7cc;
+      border: 2px solid #25231f;
+      border-radius: 999px;
+      padding: 3px;
+      display: flex;
+      gap: 2px;
+    }
+    .p-mode-btn {
+      height: 32px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      font-size: 12px;
+      font-weight: 900;
+      color: #6c665f;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .p-mode-btn.active {
+      background: #fffdf7;
+      border: 1.5px solid #12100e;
+      color: #12100e;
+      box-shadow: 0 1px 0 rgba(18, 16, 14, 0.2);
+    }
+
+    /* 4. Scrollable Screen Stage */
+    .p-screen-scroll-stage {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #f4f5f7;
+    }
+
+    /* --- REAL CHAT VIEW: AGENT TURN CARD --- */
+    .p-turn-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .p-turn-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+    .p-turn-agent-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 900;
+      font-size: 14px;
+    }
+    .p-turn-model-pill {
+      background: #fef08a;
+      border: 1.5px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 9.5px;
+      font-weight: 900;
+      font-family: var(--font-mono);
+    }
+    .p-turn-status-badge {
+      background: #b9e9b0;
+      border: 1.5px solid var(--ink);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 900;
+      color: #0e4e16;
+    }
+
+    /* Unified Turn Card Box */
+    .p-turn-card-box {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 16px;
+      box-shadow: 0 2px 0 var(--ink);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .p-duration-header {
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid rgba(18, 16, 14, 0.08);
+      background: #faf8f0;
+      font-size: 12.5px;
+      font-weight: 800;
+      color: #4a453e;
+    }
+
+    .p-interleaved-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-bottom: 2px solid var(--ink);
+      background: #fffdf7;
+    }
+    .p-thought-text {
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: #333;
+    }
+    .p-code-tag {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .p-tool-call-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .p-tool-call-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #12100e;
+      cursor: pointer;
+    }
+    .p-tool-term-icon {
+      border: 1.5px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 900;
+      background: #fff;
+    }
+    .p-tool-shell-card {
+      background: #f8fafc;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.55;
+      color: #334155;
+      overflow-x: auto;
+    }
+    .p-shell-label {
+      font-size: 10px;
+      font-weight: 800;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .p-shell-cmd {
+      color: #0f172a;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .p-shell-output {
+      color: #475569;
+      white-space: pre-wrap;
+    }
+
+    .p-centered-dots {
+      display: flex;
+      justify-content: center;
+      padding: 4px 0;
+    }
+    .p-dots-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1.5px solid var(--ink);
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .p-final-answer-body {
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.65;
+      color: #12100e;
+    }
+    .p-code-preview-block {
+      background: #141413;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      color: #e6edf3;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      overflow-x: auto;
+    }
+    .p-code-tag-head {
+      color: #ffd84f;
+      font-size: 9.5px;
+      font-weight: 800;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .p-turn-footer {
+      padding: 10px 14px;
+      background: #faf8f0;
+      border-top: 1px solid rgba(18, 16, 14, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+    }
+    .p-copy-btn {
+      font-weight: 800;
+      color: #6c665f;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .p-tokens-stat-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .p-token-badge {
+      background: #ffd84f;
+      border: 1.5px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-weight: 900;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #12100e;
+    }
+    .p-token-breakdown {
+      color: #71717a;
+      font-size: 10.5px;
+      font-weight: 600;
+    }
+
+    /* -------------------------------------------------------------
+       TAB 2: REAL FILES PANEL (Exact to FilesPanel.tsx)
+       ------------------------------------------------------------- */
+    .p-files-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .p-panel-box {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 16px;
+      box-shadow: 0 2px 0 var(--ink);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .p-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .p-panel-title {
+      font-size: 16px;
+      font-weight: 900;
+      color: #12100e;
+    }
+    .p-panel-meta {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #6c665f;
+      margin-top: 2px;
+    }
+    .p-btn-sm-action {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+    .p-btn-sm-action:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+    .p-btn-sm-yellow {
+      background: #ffd84f;
+    }
+
+    /* Breadcrumb Bar */
+    .p-breadcrumb-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #f4f5f7;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11.5px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+    .p-btn-parent {
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    /* File List Table */
+    .p-file-item-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(18, 16, 14, 0.08);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      transition: background 0.1s;
+    }
+    .p-file-item-row:hover { background: #fef08a; }
+    .p-file-item-row.selected { background: #ffd84f; font-weight: 800; }
+    .p-file-item-row:last-child { border-bottom: none; }
+    .p-dir-tag {
+      background: #fef08a;
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    /* -------------------------------------------------------------
+       TAB 3: REAL CHANGES PANEL (Exact to ChangesPanel.tsx)
+       ------------------------------------------------------------- */
+    .p-changes-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .p-change-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+    }
+    .p-change-row.active {
+      background: #fffdf7;
+      border-color: var(--ink);
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+    .p-badge-mod {
+      background: #ffd84f;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-weight: 900;
+      font-size: 10px;
+      font-family: var(--font-mono);
+    }
+    .p-checkpoint-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: #f4f5f7;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 11.5px;
+    }
+
+    /* -------------------------------------------------------------
+       TAB 4: REAL KNOWLEDGE WORKSPACE (Exact to KnowledgeWorkspacePanel.tsx)
+       ------------------------------------------------------------- */
+    .p-knowledge-view {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    /* Dual Knowledge Tabs: [资料知识库] [AI 记忆] */
+    .p-kw-tabs-wrapper {
+      padding: 2px 0 6px 0;
+    }
+    .p-kw-tabs {
+      background: #e6dfd3;
+      border: 2px solid var(--ink);
+      border-radius: 999px;
+      padding: 3px;
+      display: flex;
+      gap: 3px;
+    }
+    .p-kw-tab-btn {
+      flex: 1;
+      min-height: 34px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      color: #6c665f;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .p-kw-tab-btn.active {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      color: #12100e;
+      font-weight: 900;
+      box-shadow: 0 1px 0 rgba(18, 16, 14, 0.2);
+    }
+
+    /* -------------------------------------------------------------
+       TAB 5: REAL SETTINGS PANEL (Exact to media_1790479839645.jpg)
+       ------------------------------------------------------------- */
+    .p-settings-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .p-settings-header-box {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .p-set-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .p-set-title { font-size: 18px; font-weight: 900; color: #12100e; }
+    .p-set-sub { font-size: 11px; color: #666; margin-top: 4px; }
+    .p-set-sub-tabs {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      overflow-x: auto;
+    }
+    .p-sub-pill-btn {
+      padding: 5px 12px;
+      border: 2px solid var(--ink);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 11.5px;
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .p-sub-pill-btn.active {
+      background: #ffd84f;
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+
+    .p-ap-card {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .p-ap-square {
+      width: 44px;
+      height: 44px;
+      background: #ffd84f;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 900;
+    }
+    .p-ap-text-title { font-size: 14px; font-weight: 900; color: #12100e; }
+    .p-ap-text-sub { font-size: 10.5px; color: #666; margin-top: 2px; }
+
+    .p-strategy-card {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 2px 0 var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .p-strat-item {
+      border: 2px solid var(--ink);
+      border-radius: 10px;
+      padding: 9px 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: background 0.12s;
+    }
+    .p-strat-item.selected {
+      background: #fffbeb;
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+    .p-strat-item:hover { background: #fef9c3; }
+
+    .p-jev-panel {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 2px 0 var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* 5. Bottom Dock: Fixed at Bottom of Phone Frame */
+    .p-bottom-dock {
+      background: #f4f5f7;
+      padding: 6px 14px 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-top: 1px solid rgba(18, 16, 14, 0.08);
+    }
+    .p-composer-badge-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+    }
+    .p-composer-task-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 900;
+      color: #12100e;
+    }
+    .p-task-live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: #2e8b38;
+    }
+
+    .p-composer-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 16px;
+      padding: 4px 6px 4px 10px;
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .p-clip-btn {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 15px;
+      color: #555;
+    }
+    .p-composer-input {
+      flex: 1;
+      height: 32px;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 12px;
+      font-family: var(--font-sans);
+      color: #12100e;
+    }
+    .p-composer-send-btn {
+      width: 34px;
+      height: 34px;
+      background: #ffd84f;
+      border: 2px solid var(--ink);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 900;
+      box-shadow: 0 1.5px 0 var(--ink);
+      transition: all 0.1s;
+    }
+    .p-composer-send-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+
+    /* Floating Segmented BottomTabs */
+    .p-bottom-tabs-segmented {
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 16px;
+      box-shadow: 0 2px 0 var(--ink);
+      display: flex;
+      align-items: center;
+      padding: 3px;
+    }
+    .p-tab-btn {
+      flex: 1;
+      min-height: 38px;
+      border-radius: 12px;
+      border: none;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 900;
+      color: #6c665f;
+      cursor: pointer;
+      transition: all 0.1s ease;
+    }
+    .p-tab-btn.active {
+      background: #ffd84f;
+      border: 1.5px solid var(--ink);
+      color: #12100e;
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+
+    .p-android-nav-bar {
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      color: #8c857b;
+      font-size: 13px;
+      user-select: none;
+      padding-top: 2px;
+    }
+
+    /* 💻 DESKTOP WORKBENCH IN DUAL VIEW */
+    .desktop-side-workbench {
+      flex: 1;
+      max-width: 600px;
+      height: 820px;
+      background: #141413;
+      border: 3.5px solid var(--ink);
+      border-radius: 36px;
+      box-shadow: var(--shadow-xl);
+      overflow: hidden;
+      display: none;
+      flex-direction: column;
+      color: #e6edf3;
+    }
+    .d-top-header {
+      padding: 12px 18px;
+      background: #1f1e1c;
+      border-bottom: 2px solid var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .d-console-body {
+      flex: 1;
+      padding: 18px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      overflow-y: auto;
+    }
+
+    /* Comparison Table */
+    .compare-section {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+    .table-responsive {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: var(--border-thick);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      background: #fffdf7;
+    }
+    .compare-table {
+      width: 100%;
+      min-width: 680px;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: #fffdf7;
+    }
+    .compare-table th, .compare-table td {
+      padding: 14px 18px;
+      border-bottom: 1.5px solid rgba(18, 16, 14, 0.1);
+      border-right: 1.5px solid rgba(18, 16, 14, 0.1);
+      font-size: 13.5px;
+    }
+    .compare-table th:last-child, .compare-table td:last-child {
+      border-right: none;
+    }
+    .compare-table tr:last-child td {
+      border-bottom: none;
+    }
+    .compare-table th { background: #ece9df; font-weight: 900; font-family: var(--font-display); }
+
+    /* RAG Mode Grid & Explanations in Phone */
+    .p-rag-mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      width: 100%;
+    }
+    .p-rag-mode-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1.5px solid #b8aea1;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 800;
+      color: #6c665f;
+      background: #fffdf7;
+      padding: 7px 4px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .p-rag-mode-btn:hover {
+      border-color: var(--ink);
+    }
+    .p-rag-mode-btn.active {
+      background: #ffd84f;
+      border: 2px solid var(--ink);
+      color: #12100e;
+      box-shadow: 0 1.5px 0 var(--ink);
+      font-weight: 900;
+    }
+    .p-rag-explain-box {
+      background: #fcfaf6;
+      border: 1.5px solid #ded7cc;
+      border-radius: 8px;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .p-rag-explain-item {
+      border-radius: 6px;
+      padding: 5px 8px;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #6c665f;
+      transition: all 0.12s;
+    }
+    .p-rag-explain-item:hover {
+      background: #f4f1eb;
+    }
+    .p-rag-explain-item.active {
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      color: #12100e;
+    }
+    .p-rag-explain-label {
+      font-weight: 700;
+      color: #544e47;
+    }
+    .p-rag-explain-item.active .p-rag-explain-label {
+      font-weight: 900;
+      color: #12100e;
+    }
+
+    .site-footer {
+      border-top: var(--border-thick);
+      background: var(--surface);
+      padding: 44px 24px;
+    }
+    .footer-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .neo-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--yellow);
+      border: var(--border-thick);
+      box-shadow: var(--shadow-lg);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      font-weight: 900;
+      font-size: 13px;
+      transform: translateY(120px);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .neo-toast.show { transform: translateY(0); }
+
+    /* Demo Guide Banner */
+    .demo-guide-banner {
+      background: linear-gradient(135deg, #ffd84f 0%, #ffce1a 100%);
+      border: var(--border-thick);
+      border-radius: var(--radius-md);
+      padding: 14px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-md);
+      animation: slideInDown 0.5s ease-out;
+    }
+    @keyframes slideInDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .demo-guide-close {
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      line-height: 1;
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    /* Social Proof Bar */
+    .social-proof-bar {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      flex-wrap: wrap;
+    }
+    .proof-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .proof-number {
+      font-size: 28px;
+      font-weight: 900;
+      color: var(--ink);
+      font-family: var(--font-display);
+      line-height: 1;
+    }
+    .proof-label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 700;
+    }
+
+    /* Floating CTA */
+    .floating-cta {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9998;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .floating-cta.show {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* FAQ Section */
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .faq-item {
+      background: var(--surface);
+      border: var(--border-thick);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .faq-item:hover {
+      box-shadow: var(--shadow-md);
+    }
+    .faq-q {
+      padding: 16px 20px;
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .faq-q:hover {
+      background: var(--yellow);
+    }
+    .faq-chevron {
+      font-size: 18px;
+      transition: transform 0.2s;
+      font-weight: 900;
+    }
+    .faq-item.open .faq-chevron {
+      transform: rotate(90deg);
+    }
+    .faq-a {
+      padding: 0 20px 16px 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #4a453e;
+      border-top: 1px dashed rgba(18, 16, 14, 0.15);
+    }
+
+    /* Use Cases Section */
+    .use-case-card {
+      background: var(--surface);
+      border: var(--border-thick);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
+      transition: all 0.2s;
+    }
+    .use-case-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-xl);
+    }
+    .uc-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .uc-title {
+      font-size: 18px;
+      font-weight: 900;
+      margin-bottom: 12px;
+      font-family: var(--font-display);
+    }
+    .uc-desc {
+      font-size: 14px;
+      line-height: 1.7;
+      color: #4a453e;
+      margin-bottom: 16px;
+      font-style: italic;
+    }
+    .uc-author {
+      font-size: 12px;
+      font-weight: 700;
+      color: #888;
+    }
+
+    @media (max-width: 960px) {
+      .desktop-side-workbench { display: none !important; }
+      .real-phone-body { width: 100%; max-width: 440px; }
+      .nav-menu { display: none; }
+      .floating-cta { bottom: 80px; }
+    }
+
+    @media (max-width: 520px) {
+      .hero-wrap {
+        padding: 32px 16px 20px 16px;
+      }
+      .floating-sticker {
+        display: none;
+      }
+      .hero-headline {
+        font-size: 32px;
+        letter-spacing: -1px;
+      }
+      .app-showcase-section {
+        padding: 0 12px 60px 12px;
+      }
+      .showcase-control-bar {
+        padding: 10px 12px;
+        gap: 10px;
+      }
+      .phone-outer-frame {
+        width: 100%;
+        max-width: 100%;
+      }
+      .real-phone-body {
+        width: 100%;
+        max-width: 100%;
+        height: min(84vh, 760px);
+        border-radius: 28px;
+      }
+      .p-btn-vup, .p-btn-vdown, .p-btn-pwr {
+        display: none !important;
+      }
+      .compare-section {
+        padding: 40px 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- NAV -->
+  <nav class="site-nav">
+    <div class="nav-inner">
+      <a href="#" class="brand-wrap">
+        <div class="brand-icon-box">🤖</div>
+        <div class="brand-title">
+          MYAI
+          <span class="neo-pill" style="background:var(--yellow); font-size:10px;">v1.0.4 PRO</span>
+        </div>
+      </a>
+
+      <ul class="nav-menu">
+        <li><a href="#interactive-app">实机体验</a></li>
+        <li><a href="#compare">对比矩阵</a></li>
+        <li><a href="#quickstart">快速接入</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <button class="neo-btn" id="audio-btn" style="padding: 6px 12px; font-size:12px;">
+          <span>🔊</span>
+          <span id="audio-txt">音效: 开</span>
+        </button>
+        <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding: 8px 16px; font-size:13px;">
+          <span>试玩真机</span>
+          <span>⚡</span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero-wrap">
+    <div class="floating-sticker st-left">⚡ 方案 A 分离式工具调用</div>
+    <div class="floating-sticker st-right">🛡️ 原子快照无损回滚</div>
+
+    <div class="hero-badge-pill">
+      <span>🟡</span>
+      <span>真实移动客户端 1:1 像素级交互实机展示</span>
+    </div>
+
+    <h1 class="hero-headline">
+      手机上的全域自主编程智能体<br>
+      <span class="highlight-tag">随时随地，掌控代码</span>
+    </h1>
+
+    <p class="hero-subtitle">
+      无需一直端坐电脑前。在手机端即可进行 <strong>Codex 式两阶段规划</strong>、<strong>分离式工具审批</strong> 与 <strong>Git 原子时光机回滚</strong>。
+    </p>
+
+    <div class="hero-cta-group">
+      <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding:14px 30px; font-size:16px;">
+        <span>立即试玩 5 大核心标签页</span>
+        <span>➔</span>
+      </a>
+      <button class="neo-btn" onclick="copyText('go install github.com/myai/core@latest')" style="padding:14px 24px; font-size:14px; font-family:var(--font-mono);">
+        <span>$ go install github.com/myai/core@latest</span>
+        <span>📋</span>
+      </button>
+    </div>
+
+    <!-- Social Proof -->
+    <div class="social-proof-bar">
+      <div class="proof-item">
+        <span class="proof-number">1.2k+</span>
+        <span class="proof-label">GitHub Stars</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">500+</span>
+        <span class="proof-label">生产部署</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">99.8%</span>
+        <span class="proof-label">稳定性</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">14ms</span>
+        <span class="proof-label">平均延迟</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SHOWCASE SECTION -->
+  <section class="app-showcase-section" id="interactive-app">
+    <!-- Demo Guide Banner -->
+    <div class="demo-guide-banner" id="demo-guide">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 28px;">👆</span>
+        <div>
+          <div style="font-weight: 900; font-size: 15px;">这是一个完全可交互的真机模拟器！</div>
+          <div style="font-size: 12px; font-weight: 700; color: #4a453e;">点击底部 5 个标签页，输入消息，查看文件，体验完整功能</div>
+        </div>
+      </div>
+      <button class="demo-guide-close" onclick="document.getElementById('demo-guide').style.display='none'">✕</button>
+    </div>
+
+    <div class="showcase-control-bar">
+      <div class="device-switch-group">
+        <button class="dev-tab-btn active" id="btn-phone-view">
+          <span>📱</span>
+          <span>手机真机实测</span>
+        </button>
+        <button class="dev-tab-btn" id="btn-dual-view">
+          <span>📱⚡💻</span>
+          <span>双端神经协同模式</span>
+        </button>
+      </div>
+
+      <div class="preset-scenarios-group">
+        <span style="font-size:12px; font-weight:800; color:#666;">试玩剧本:</span>
+        <button class="preset-chip" id="chip-cron">⏱️ 原型图定时任务</button>
+        <button class="preset-chip" id="chip-files">📁 文件浏览器</button>
+        <button class="preset-chip" id="chip-diff">🔀 代码变更 Diff</button>
+        <button class="preset-chip" id="chip-knowledge">🧠 知识库 & AI 记忆</button>
+        <button class="preset-chip" id="chip-jev">⚙️ Jev 决策配置</button>
+      </div>
+    </div>
+
+    <!-- THE RIG -->
+    <div class="device-viewport">
+      <!-- 📱 THE PHONE CHASSIS -->
+      <div class="phone-outer-frame">
+        <div class="p-btn-vup"></div>
+        <div class="p-btn-vdown"></div>
+        <div class="p-btn-pwr"></div>
+
+        <div class="real-phone-body">
+          <!-- 1. Android Status Bar -->
+          <div class="p-status-bar">
+            <span>11:51</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-size:10px;">2.04 KB/s</span>
+              <span>5G</span>
+              <span>84%</span>
+            </div>
+          </div>
+
+          <!-- 2. AppHeader (AppHeader.tsx) -->
+          <div class="p-app-header">
+            <div class="p-brand-group">
+              <div class="p-avatar-box" title="Mikasa Avatar">🤖</div>
+              <div class="p-header-titles">
+                <div class="p-title-row">
+                  <span class="p-title-main">MYAI</span>
+                  <span class="p-device-pill">server:agent</span>
+                </div>
+                <span class="p-subtitle">Mikasa · 俄罗斯远东</span>
+              </div>
+            </div>
+            <div class="p-header-actions">
+              <button class="p-ghost-settings-btn" id="header-settings-btn" title="打开设置中心">⚙</button>
+              <div class="p-status-online-pill">
+                <div class="p-status-dot"></div>
+                <span>在线</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. SessionModeSwitch (ONLY shown on chat tab! Exact to MobileAppScreen.tsx line 962) -->
+          <div class="p-mode-switch-wrapper" id="p-mode-switch-container">
+            <div class="p-mode-control">
+              <button class="p-mode-btn active" id="mode-btn-chat">
+                <span>💬</span>
+                <span>对话模式</span>
+              </button>
+              <button class="p-mode-btn" id="mode-btn-plan">
+                <span>🎯</span>
+                <span>规划模式</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4. Scrollable Screen Stage -->
+          <div class="p-screen-scroll-stage" id="screen-stage">
+            <!-- TAB 1: CHAT VIEW (EXACT TO USER'S REAL PROTOTYPE SCREENSHOTS) -->
+            <div id="view-chat" class="p-turn-wrapper">
+              <div class="p-turn-top-row">
+                <div class="p-turn-agent-info">
+                  <span>🤖 MyAI Agent</span>
+                  <span class="p-turn-model-pill">v2.4 Auto</span>
+                </div>
+                <span class="p-turn-status-badge">✓ 完成</span>
+              </div>
+
+              <!-- Unified Turn Card Box -->
+              <div class="p-turn-card-box">
+                <!-- Elapsed Duration Header -->
+                <div class="p-duration-header" id="duration-toggle">
+                  <span>用时 34分钟 57秒</span>
+                  <span id="duration-chevron" style="font-size:11px;">⌄</span>
+                </div>
+
+                <!-- Interleaved Process Body -->
+                <div class="p-interleaved-body" id="duration-body">
+                  <div class="p-thought-text">
+                    我会只落地后端：策略配置（Jev / 内置 / 关闭）、Jev 调用、Plan/执行分流、请求响应记录，以及 Agent/Relay 的远程接口。先确认现有配置持久化和消息协议边界，再实现并跑针对性测试。完成后我会给你一段可直接交给前端的页面实现提示词。
+                  </div>
+
+                  <!-- Tool 1: 运行了命令 -->
+                  <div class="p-tool-call-group">
+                    <div class="p-tool-call-row">
+                      <span class="p-tool-term-icon">>_</span>
+                      <span>运行了命令</span>
+                    </div>
+                  </div>
+
+                  <div class="p-thought-text">
+                    当前工作区已有其他文件的未提交修改，我会保持不动。架构上需要处理一个关键点：现有聊天模型配置仓储与 <span class="p-code-tag">Generate</span> 接口绑定，Jev 必须有独立配置和判断记录；同时策略切换要在运行时生效，不能只在启动时读一次。
+                  </div>
+
+                  <!-- Tool 2: 已运行 Get-Content with Shell Box -->
+                  <div class="p-tool-call-group">
+                    <div class="p-tool-call-row" id="shell-tool-toggle">
+                      <span class="p-tool-term-icon">>_</span>
+                      <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">已运行 Get-Content -Encoding UTF8 core\remote\relay\server.go | Select-Object -Skip 475 -First 150...</span>
+                      <span id="shell-tool-chevron">⌄</span>
+                    </div>
+
+                    <div class="p-tool-shell-card" id="shell-tool-content">
+                      <div class="p-shell-label">Shell</div>
+                      <div class="p-shell-cmd">$ Get-Content -Encoding UTF8 core\remote\relay\server.go | Select-Object -Skip 475 -First 150; Get-Content -Encoding UTF8 core\remote\protocol\message.go | Select-Object -First 115; Get-...</div>
+                      <div class="p-shell-output">    execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
+        SessionID: sessionID,
+        Stream:    stream,
+    }, nil)</div>
+                    </div>
+                  </div>
+
+                  <!-- Tool 3: 运行了命令 -->
+                  <div class="p-tool-call-group">
+                    <div class="p-tool-call-row">
+                      <span class="p-tool-term-icon">>_</span>
+                      <span>运行了命令</span>
+                    </div>
+                  </div>
+
+                  <!-- Thought Summary & Centered Dots -->
+                  <div class="p-thought-text">
+                    实现方案已经收敛：策略默认保留当前“内置判断”，避免升级后行为突变；用户切到 Jev 或关闭后，新请求立即按新策略走。Jev 的中置信度只生成 Plan，高置信度才执行；配置和判断记录独立于聊天模型，记录持久化在 Agent 侧。接下来先落实核心分类与存储，再接远程协议并补测试。
+                  </div>
+
+                  <div class="p-centered-dots">
+                    <div class="p-dots-circle">···</div>
+                  </div>
+                </div>
+
+                <!-- Final Answer Body -->
+                <div class="p-final-answer-body">
+                  <strong>定时任务已经加上了。</strong><br><br>
+                  <strong>做了什么：</strong><br>
+                  • 在宿主机写入 <span class="p-code-tag">/etc/cron.d/docker-ps-log</span><br>
+                  • 每 30 分钟执行一次 <span class="p-code-tag">docker ps -a</span><br>
+                  • 输出追加到 <span class="p-code-tag">/docker/nginx/log.txt</span><br>
+                  • 已经先跑了一次，确认日志能写进去。<br><br>
+
+                  <strong>任务内容：</strong>
+                  <div class="p-code-preview-block">
+                    <div class="p-code-tag-head">CRON</div>
+                    */30 * * * * root { date --iso-8601; /usr/bin/docker ps -a; } >> /docker/nginx/log.txt 2>&1
+                  </div>
+
+                  <strong>说明：</strong><br>
+                  • 会在每小时的 :00 和 :30 执行（例如 17:30、18:00）<br>
+                  • 每次都会带时间戳，方便区分<br>
+                  • 日志会持续追加，不会覆盖旧记录<br><br>
+
+                  <strong>查看日志：</strong>
+                  <div class="p-code-preview-block">
+                    <div class="p-code-tag-head">BASH</div>
+                    tail -f /docker/nginx/log.txt
+                  </div>
+                </div>
+
+                <!-- Card Footer -->
+                <div class="p-turn-footer">
+                  <div class="p-copy-btn" id="btn-copy-turn">
+                    <span>📋</span>
+                    <span id="copy-turn-text">复制</span>
+                  </div>
+                  <div class="p-tokens-stat-row">
+                    <div class="p-token-badge">146.4k tokens</div>
+                    <span class="p-token-breakdown">(入 140.9k · 出 5.5k)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 2: REAL FILES PANEL (Exact to FilesPanel.tsx) -->
+            <div id="view-files" class="p-files-view" style="display:none;">
+              <!-- 1. 会话资源卡片 -->
+              <div class="p-panel-box">
+                <div class="p-panel-head">
+                  <div>
+                    <div class="p-panel-title">会话资源</div>
+                    <div class="p-panel-meta">2 个共享资产 · 当前会话引用</div>
+                  </div>
+                  <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-refresh-assets">刷新</button>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#f4f5f7; border:1.5px solid var(--ink); border-radius:8px;">
+                    <span style="font-size:16px;">📦</span>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:12px; font-weight:800; font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">architecture_spec.md</div>
+                      <div style="font-size:10px; color:#666;">docs/spec · 4.8 KB</div>
+                    </div>
+                    <button class="p-btn-sm-action" style="font-size:10px; padding:2px 8px;">打开</button>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#f4f5f7; border:1.5px solid var(--ink); border-radius:8px;">
+                    <span style="font-size:16px;">📦</span>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:12px; font-weight:800; font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">relay_benchmark.json</div>
+                      <div style="font-size:10px; color:#666;">benchmarks · 1.2 KB</div>
+                    </div>
+                    <button class="p-btn-sm-action" style="font-size:10px; padding:2px 8px;">打开</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 工作区文件卡片 -->
+              <div class="p-panel-box">
+                <div class="p-panel-head">
+                  <div>
+                    <div class="p-panel-title">工作区文件</div>
+                    <div class="p-panel-meta">PC Agent Workspace · 实时文件树</div>
+                  </div>
+                  <button class="p-btn-sm-action" id="btn-refresh-files">刷新目录</button>
+                </div>
+
+                <!-- 路径面包屑导航栏 -->
+                <div class="p-breadcrumb-row">
+                  <span id="breadcrumb-current-path">📁 d:\Go_All\myai</span>
+                  <button class="p-btn-parent" id="btn-go-parent">❮ 返回上一级</button>
+                </div>
+
+                <!-- 文件与目录列表 -->
+                <div style="border:1.5px solid var(--ink); border-radius:8px; overflow:hidden; background:#fff;">
+                  <div class="p-file-item-row" data-type="dir" data-name="core">
+                    <span>📁</span>
+                    <span style="flex:1; font-weight:800;">core</span>
+                    <span class="p-dir-tag">目录</span>
+                    <span style="font-size:10px; color:#888;">❯</span>
+                  </div>
+                  <div class="p-file-item-row" data-type="dir" data-name="internal">
+                    <span>📁</span>
+                    <span style="flex:1; font-weight:800;">internal</span>
+                    <span class="p-dir-tag">目录</span>
+                    <span style="font-size:10px; color:#888;">❯</span>
+                  </div>
+                  <div class="p-file-item-row" data-type="dir" data-name="mobile">
+                    <span>📁</span>
+                    <span style="flex:1; font-weight:800;">mobile</span>
+                    <span class="p-dir-tag">目录</span>
+                    <span style="font-size:10px; color:#888;">❯</span>
+                  </div>
+                  <div class="p-file-item-row selected" data-type="file" data-name="server.go">
+                    <span>📄</span>
+                    <span style="flex:1;">server.go</span>
+                    <span style="font-size:10.5px; color:#666;">2.4 KB</span>
+                  </div>
+                  <div class="p-file-item-row" data-type="file" data-name="main.go">
+                    <span>📄</span>
+                    <span style="flex:1;">main.go</span>
+                    <span style="font-size:10.5px; color:#666;">1.8 KB</span>
+                  </div>
+                  <div class="p-file-item-row" data-type="file" data-name="go.mod">
+                    <span>📄</span>
+                    <span style="flex:1;">go.mod</span>
+                    <span style="font-size:10.5px; color:#666;">420 B</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. 文件代码预览卡片 -->
+              <div class="p-panel-box" id="file-detail-card">
+                <div class="p-panel-head">
+                  <div style="flex:1; min-width:0;">
+                    <div class="p-panel-title" id="file-preview-title">📄 server.go</div>
+                    <div class="p-panel-meta" id="file-preview-path">core/remote/relay/server.go</div>
+                  </div>
+                  <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-attach-to-chat">附加到对话</button>
+                </div>
+                <div style="background:#141413; border:1.5px solid var(--ink); border-radius:10px; padding:12px; font-family:var(--font-mono); font-size:11px; color:#e6edf3; overflow-x:auto; max-height:220px;" id="file-preview-code">
+func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
+&nbsp;&nbsp;log.Printf("Agent connected: %s", ws.RemoteAddr())<br>
+&nbsp;&nbsp;go s.dispatchLoop(ws)<br>
+}
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 3: REAL CHANGES PANEL (Exact to ChangesPanel.tsx & DiffViewer.tsx) -->
+            <div id="view-changes" class="p-changes-view" style="display:none;">
+              <!-- 1. 工作区文件变更列表卡片 -->
+              <div class="p-panel-box">
+                <div class="p-panel-head">
+                  <div>
+                    <div class="p-panel-title">工作区文件变更</div>
+                    <div class="p-panel-meta">1 个文件变动 · 未提交</div>
+                  </div>
+                  <button class="p-btn-sm-action" id="btn-refresh-changes">刷新</button>
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div class="p-change-row active">
+                    <span class="p-badge-mod">MOD</span>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:12px; font-weight:800; font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <span style="color:#888;">core/remote/relay/</span>server.go
+                      </div>
+                      <div style="font-size:10px; color:#666;">工作区修改 · +3 -1 行</div>
+                    </div>
+                    <span style="font-size:11px; color:#0e4e16; font-weight:800;">查看 ❯</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 差异对比 Diff 检查卡片 -->
+              <div class="p-panel-box">
+                <div class="p-panel-head">
+                  <div style="flex:1; min-width:0;">
+                    <div class="p-panel-title">Diff 对比详情</div>
+                    <div class="p-panel-meta">core/remote/relay/server.go</div>
+                  </div>
+                  <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-revert-file">还原修改</button>
+                </div>
+
+                <div class="p-diff-viewer-box">
+                  <div style="padding:6px 10px; background:#222; color:#ffd84f; font-size:10.5px; border-bottom:1px solid #333; font-weight:800;">
+                    M &nbsp; core/remote/relay/server.go
+                  </div>
+                  <div class="p-d-row p-d-del">- const DefaultPort = 18080 // 旧默认端口冲突</div>
+                  <div class="p-d-row p-d-add">+ const DefaultPort = 18081 // 自动规避占用与冲突</div>
+                  <div class="p-d-row">&nbsp;&nbsp;func NewServer(cfg Config) *Server {</div>
+                  <div class="p-d-row p-d-add">+ &nbsp;&nbsp;cfg.AutoRollback = true // 注入原子快照守护</div>
+                  <div class="p-d-row">&nbsp;&nbsp;&nbsp;&nbsp;return &Server{config: cfg}</div>
+                </div>
+              </div>
+
+              <!-- 3. 历史快照与撤回卡片 -->
+              <div class="p-panel-box">
+                <div class="p-panel-head">
+                  <div>
+                    <div class="p-panel-title">历史快照与撤回</div>
+                    <div class="p-panel-meta">SQLite 原子时光机存储库</div>
+                  </div>
+                  <button class="p-btn-sm-action" id="btn-refresh-history">刷新</button>
+                </div>
+
+                <div>
+                  <div class="p-checkpoint-item">
+                    <div>
+                      <div style="font-weight:800; font-family:var(--font-mono);">#snap_104 · 刚刚</div>
+                      <div style="font-size:10px; color:#666;">自动规划前工作区快照点</div>
+                    </div>
+                    <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-rollback-snap-104">回滚</button>
+                  </div>
+                  <div class="p-checkpoint-item">
+                    <div>
+                      <div style="font-weight:800; font-family:var(--font-mono);">#snap_103 · 12分钟前</div>
+                      <div style="font-size:10px; color:#666;">端口冲突规避前基线</div>
+                    </div>
+                    <button class="p-btn-sm-action" id="btn-rollback-snap-103">回滚</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 4: REAL KNOWLEDGE WORKSPACE (Exact to KnowledgeWorkspacePanel.tsx) -->
+            <div id="view-knowledge" class="p-knowledge-view" style="display:none;">
+              <!-- Dual Tabs: [资料知识库] [AI 记忆] -->
+              <div class="p-kw-tabs-wrapper">
+                <div class="p-kw-tabs">
+                  <button class="p-kw-tab-btn active" id="btn-kw-docs">资料知识库</button>
+                  <button class="p-kw-tab-btn" id="btn-kw-memory">AI 记忆</button>
+                </div>
+              </div>
+
+              <!-- SUBTAB A: 资料知识库 (KnowledgePanel) -->
+              <div id="kw-docs-subpanel" style="display:flex; flex-direction:column; gap:12px;">
+                <!-- 知识库列表卡片 -->
+                <div class="p-panel-box">
+                  <div class="p-panel-head">
+                    <div>
+                      <div class="p-panel-title">知识库列表</div>
+                      <div class="p-panel-meta">2 个活跃知识库 · 分类索引</div>
+                    </div>
+                    <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-new-kb">+ 新增知识库</button>
+                  </div>
+
+                  <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div style="padding:10px; background:#f4f5f7; border:1.5px solid var(--ink); border-radius:10px; cursor:pointer;" class="p-kb-item-active">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="font-weight:900; font-size:13px;">📚 核心架构开发指南</span>
+                        <span class="neo-pill" style="background:#b9e9b0; font-size:9px;">4 个文档</span>
+                      </div>
+                      <div style="font-size:10.5px; color:#666;">内置向量模型 · SQLite FTS5 全文索引</div>
+                    </div>
+
+                    <div style="padding:10px; background:#f4f5f7; border:1.5px solid var(--ink); border-radius:10px; cursor:pointer;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="font-weight:900; font-size:13px;">📚 WebSocket 穿透与协议规范</span>
+                        <span class="neo-pill" style="background:#e0f2fe; font-size:9px;">2 个文档</span>
+                      </div>
+                      <div style="font-size:10.5px; color:#666;">Gorilla WS 通信帧结构与心跳说明</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 当前会话检索 RAG 设置卡片 (100% 对应真实 App KnowledgePanel.tsx) -->
+                <div class="p-panel-box">
+                  <div class="p-panel-head" id="rag-summary-head" style="cursor:pointer;">
+                    <div>
+                      <div class="p-panel-title">当前会话检索</div>
+                      <div class="p-panel-meta" id="rag-status-meta">智能按需检索 · Top K 8</div>
+                    </div>
+                    <button class="p-btn-sm-action" id="btn-toggle-rag-set">设置</button>
+                  </div>
+
+                  <!-- 摘要范围标签 -->
+                  <div id="rag-summary-tags" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                    <span class="neo-pill" style="background:#ffd84f;">✓ 全部分类</span>
+                    <span class="neo-pill" style="background:#ffd84f;">✓ 核心架构开发指南</span>
+                  </div>
+
+                  <!-- 展开后的完整真实设置面板 (与真实 App KnowledgePanel.tsx 完全 1:1) -->
+                  <div id="rag-settings-expanded" style="display:none; flex-direction:column; gap:8px; margin-top:8px; border-top:1.5px dashed var(--ink); padding-top:10px;">
+                    <!-- 模式选择按钮组 (2x2 网格) -->
+                    <div style="font-size:11px; font-weight:800; color:#6c665f;">检索模式</div>
+                    <div class="p-rag-mode-grid">
+                      <button class="p-rag-mode-btn" data-mode="off">关闭</button>
+                      <button class="p-rag-mode-btn" data-mode="manual">手动搜索</button>
+                      <button class="p-rag-mode-btn active" data-mode="auto">智能按需检索</button>
+                      <button class="p-rag-mode-btn" data-mode="always">每轮强制检索</button>
+                    </div>
+
+                    <!-- 模式说明区域 (与真实 App modeExplainBox 保持 100% 一致) -->
+                    <div class="p-rag-explain-box">
+                      <div class="p-rag-explain-item" data-mode="off">
+                        <span class="p-rag-explain-label">○ 关闭：</span>聊天不会使用知识库。
+                      </div>
+                      <div class="p-rag-explain-item" data-mode="manual">
+                        <span class="p-rag-explain-label">○ 手动搜索：</span>只通过知识库搜索按钮查询，不自动参与聊天。
+                      </div>
+                      <div class="p-rag-explain-item active" data-mode="auto">
+                        <span class="p-rag-explain-label">● 智能按需检索：</span>模型判断当前问题需要内部资料时，才调用 knowledge_search。
+                      </div>
+                      <div class="p-rag-explain-item" data-mode="always">
+                        <span class="p-rag-explain-label">○ 每轮强制检索：</span>每条非空消息生成前都执行知识库检索。
+                      </div>
+                    </div>
+
+                    <!-- Top K 设置 -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                      <span style="font-size:11px; font-weight:800; color:#6c665f;">Top K</span>
+                      <input type="number" id="rag-topk-input" value="8" min="1" max="30" style="width:58px; height:28px; text-align:center; border:1.5px solid var(--ink); border-radius:6px; font-family:var(--font-mono); font-weight:800; background:#fff;">
+                    </div>
+
+                    <!-- 检索范围 -->
+                    <div style="font-size:11px; font-weight:800; color:#6c665f; margin-top:2px;">检索范围</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;" id="rag-scope-chips">
+                      <span class="neo-pill" data-scope="all" style="background:#ffd84f; cursor:pointer;">✓ 全部分类</span>
+                      <span class="neo-pill" data-scope="arch" style="background:#ffd84f; cursor:pointer;">✓ 核心架构开发指南</span>
+                      <span class="neo-pill" data-scope="ws" style="background:#fff; cursor:pointer;">+ WebSocket 协议规范</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUBTAB B: AI 记忆 (AIMemoryPanel) -->
+              <div id="kw-memory-subpanel" style="display:none; flex-direction:column; gap:12px;">
+                <div class="p-panel-box">
+                  <div class="p-panel-head">
+                    <div>
+                      <div class="p-panel-title">AI 记忆提炼 (Nightly Dream)</div>
+                      <div class="p-panel-meta">自动固化的踩坑经验与规则库</div>
+                    </div>
+                    <button class="p-btn-sm-action p-btn-sm-yellow" id="btn-create-memory">+ 记录新经验</button>
+                  </div>
+
+                  <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div style="padding:10px; background:#fff; border:1.5px solid var(--ink); border-radius:10px;">
+                      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span style="font-weight:900; font-size:12.5px;">🧠 Docker 容器端口冲突自动解决</span>
+                        <span class="neo-pill" style="background:#b9e9b0; font-size:9px;">置信度 99.2%</span>
+                      </div>
+                      <div style="font-size:11px; color:#444; line-height:1.5;">
+                        目标：当宿主机 18080 被占用时直接降级为 18081 并向手机端发送更新后的握手签名。
+                      </div>
+                      <div style="display:flex; gap:4px; margin-top:6px;">
+                        <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">Docker</span>
+                        <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">Relay</span>
+                        <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">Port</span>
+                      </div>
+                    </div>
+
+                    <div style="padding:10px; background:#fff; border:1.5px solid var(--ink); border-radius:10px;">
+                      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span style="font-weight:900; font-size:12.5px;">🧠 Go WebSocket 心跳保活策略</span>
+                        <span class="neo-pill" style="background:#b9e9b0; font-size:9px;">置信度 98.5%</span>
+                      </div>
+                      <div style="font-size:11px; color:#444; line-height:1.5;">
+                        客户端每 15s 发送 Ping，服务端超时 45s 未收则静默断开并保留会话上下文 10 分钟。
+                      </div>
+                      <div style="display:flex; gap:4px; margin-top:6px;">
+                        <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">WebSocket</span>
+                        <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">Heartbeat</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 5: SETTINGS VIEW (EXACT 1:1 TO media_1790479839645.jpg) -->
+            <div id="view-settings" class="p-settings-view" style="display:none;">
+              <!-- Header -->
+              <div class="p-settings-header-box">
+                <div class="p-set-top-row">
+                  <span class="p-set-title">设置中心</span>
+                  <div style="display:flex; gap:6px;">
+                    <button class="neo-btn" style="padding:3px 8px; font-size:11px; background:#ffd84f;" id="btn-check-ota">🔄 检查更新</button>
+                    <button class="neo-btn" style="padding:3px 8px; font-size:11px;" id="btn-close-settings">✕ 关闭</button>
+                  </div>
+                </div>
+                <div class="p-set-sub">连接、模型、会话和工具权限集中管理 · v1.0.4 · Android 8</div>
+
+                <!-- Sub tabs -->
+                <div class="p-set-sub-tabs">
+                  <button class="p-sub-pill-btn">💬 会话</button>
+                  <button class="p-sub-pill-btn">🧠 模型</button>
+                  <button class="p-sub-pill-btn active">⚡ 自动规划</button>
+                  <button class="p-sub-pill-btn">⚡ 连接</button>
+                </div>
+              </div>
+
+              <!-- AP Card -->
+              <div class="p-ap-card">
+                <div class="p-ap-square">AP</div>
+                <div style="flex:1;">
+                  <div class="p-ap-text-title">自动规划 (Auto Plan)</div>
+                  <div class="p-ap-text-sub" id="p-ap-summary">当前策略: 系统内置 (system) · 模型: jev... · 阈值: plan_confidenc...</div>
+                </div>
+                <button class="neo-btn" style="padding:4px 8px; font-size:11px;" id="btn-p-refresh">刷新配置</button>
+              </div>
+
+              <!-- Note -->
+              <div style="font-size:11px; color:#555; line-height:1.5; padding:0 2px;">
+                自动判断仅在会话处于「对话 (Chat)」模式时生效；当你手动将会话切换为「计划 (Plan)」模式时，直接使用手动 Plan 模式，不会调用自动判断。Jev 是专用意图分类模型，不会加入普通聊天模型列表或会话模型切换器。
+              </div>
+
+              <!-- Strategy Selection Group -->
+              <div class="p-strategy-card">
+                <div style="font-weight:900; font-size:13px;">自动规划策略 (三选一)</div>
+                <div style="font-size:10.5px; color:#666; margin-bottom:4px;">选择在用户发送消息时如何自动判断是否需要先生成结构化计划</div>
+
+                <!-- 1. System -->
+                <div class="p-strat-item selected" id="p-strat-system">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+                      <span style="font-weight:900; font-size:12px;">⚙️ 内置判断 (system)</span>
+                      <span class="neo-pill" style="background:#fef08a; font-size:9px;">内置规则+聊天模型</span>
+                      <span class="neo-pill" style="background:var(--green); font-size:9px;">当前生效</span>
+                    </div>
+                    <div style="font-size:10.5px; color:#666;">先使用内置关键词规则匹配，必要时调用当前聊天模型做分类（并非纯离线）。</div>
+                  </div>
+                  <span class="neo-pill" id="p-tag-system" style="background:#ffd84f;">已选中</span>
+                </div>
+
+                <!-- 2. Jev -->
+                <div class="p-strat-item" id="p-strat-jev">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+                      <span style="font-weight:900; font-size:12px;">🎯 Jev 远程判断 (jev)</span>
+                      <span class="neo-pill" style="background:#e0f2fe; font-size:9px;">远程意图分类</span>
+                    </div>
+                    <div style="font-size:10.5px; color:#666;">发送当前用户消息与最近几条用户历史到 Jev 服务，按置信度阈值决定仅规划或规划后直执。</div>
+                  </div>
+                  <span class="neo-pill" id="p-tag-jev" style="background:#fff;">选择</span>
+                </div>
+
+                <!-- 3. Off -->
+                <div class="p-strat-item" id="p-strat-off">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+                      <span style="font-weight:900; font-size:12px;">⏸️ 关闭自动判断 (off)</span>
+                      <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">仅手动开关</span>
+                    </div>
+                    <div style="font-size:10.5px; color:#666;">关闭自动触发规划，仅在你手动把会话切换为 Plan 模式时才进行规划。</div>
+                  </div>
+                  <span class="neo-pill" id="p-tag-off" style="background:#fff;">选择</span>
+                </div>
+              </div>
+
+              <!-- Jev Config Box (Only visible when Jev selected) -->
+              <div class="p-jev-panel" id="p-jev-box" style="display:none;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <div style="font-weight:900; font-size:13px;">Jev 意图分类配置</div>
+                    <div style="font-size:10px; color:#666;">配置远程 Jev 服务地址、密钥、模型与置信度阈值；支持直接使用尚未保存的表单值进行“测试连接”。</div>
+                  </div>
+                  <span class="neo-pill" style="background:#f1f5f9; font-size:9px;">无已存密钥 (has_api_key=false)</span>
+                </div>
+
+                <div>
+                  <div style="font-size:11px; font-weight:800; margin-bottom:2px;">Base URL (base_url) 默认 https://api.typesafe.ai</div>
+                  <input type="text" class="neo-pill" value="https://api.typesafe.ai" style="width:100%; height:32px; background:#fff; font-size:11.5px; padding:0 8px; border-radius:8px;">
+                  <div style="font-size:9.5px; color:#777; margin-top:2px;">远程请求路径为 ${BaseURL}/v1/judge；非本地地址必须使用 HTTPS。</div>
+                </div>
+
+                <div>
+                  <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800; margin-bottom:2px;">
+                    <span>API Key (api_key)</span>
+                    <span style="color:#d94b34; font-size:10px;">未设置密钥</span>
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <input type="password" placeholder="输入 Jev Bearer API Key（不显示旧值）" id="jev-input-key" class="neo-pill" style="flex:1; height:32px; background:#fff; font-size:11.5px; padding:0 8px; border-radius:8px;">
+                    <button class="neo-btn" id="btn-clear-jev-key" style="background:#ffd84f; padding:0 10px; font-size:11px;">清除密钥</button>
+                  </div>
+                </div>
+
+                <button class="neo-btn" id="btn-test-jev-conn" style="background:#fff; padding:8px; font-size:12px; width:100%;">
+                  <span>测试连接 (Test Connection)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. BottomDock (Exact to BottomDock.tsx) -->
+          <div class="p-bottom-dock">
+            <!-- Composer (Only on Chat tab) -->
+            <div id="p-composer-section">
+              <div class="p-composer-badge-row">
+                <div class="p-composer-task-badge">
+                  <div class="p-task-live-dot"></div>
+                  <span>Agent 任务执行</span>
+                </div>
+              </div>
+
+              <div class="p-composer-box">
+                <div class="p-clip-btn" title="附加文件">📎</div>
+                <input type="text" class="p-composer-input" id="p-user-input" placeholder="输入需求，AI 将控制电脑执行..." autocomplete="off">
+                <button class="p-composer-send-btn" id="p-send-btn">▶</button>
+              </div>
+            </div>
+
+            <!-- Floating Segmented BottomTabs -->
+            <div class="p-bottom-tabs-segmented">
+              <button class="p-tab-btn active" data-tab="chat">对话</button>
+              <button class="p-tab-btn" data-tab="files">文件</button>
+              <button class="p-tab-btn" data-tab="changes">变更</button>
+              <button class="p-tab-btn" data-tab="knowledge">知识</button>
+              <button class="p-tab-btn" data-tab="settings">设置</button>
+            </div>
+
+            <!-- Android 3-Button Navigation Bar -->
+            <div class="p-android-nav-bar">
+              <span>≡</span>
+              <span>□</span>
+              <span>&lt;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 💻 COMPANION DESKTOP WORKBENCH (Only in Dual View) -->
+      <div class="desktop-side-workbench" id="dual-desktop-box">
+        <div class="d-top-header">
+          <div style="display:flex; gap:6px;">
+            <div style="width:12px; height:12px; border-radius:50%; background:#ff5f56; border:1.5px solid var(--ink);"></div>
+            <div style="width:12px; height:12px; border-radius:50%; background:#ffbd2e; border:1.5px solid var(--ink);"></div>
+            <div style="width:12px; height:12px; border-radius:50%; background:#27c93f; border:1.5px solid var(--ink);"></div>
+          </div>
+          <span style="font-family:var(--font-mono); font-size:11px; color:#888;">
+            myai-agent :: pc-core [Go 1.24 WS Hub]
+          </span>
+          <span class="neo-pill" style="background:var(--yellow); color:var(--ink); font-size:9px;">
+            RELAY LINKED
+          </span>
+        </div>
+        <div class="d-console-body" id="dual-console">
+          <div style="color:#ffd84f;">[2026-10-02 11:51:02] Mobile paired from 192.168.1.104 (Device: phone-01)</div>
+          <div style="color:#888;">[AUTH] Handshake token verified: myai-secret-token</div>
+          <div style="color:#888;">[WS] Full-duplex channel ready. Listening for intent stream...</div>
+          <div style="color:#86efac; margin-top:10px;">myai:~$ # 等待手机端下发任务...</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- USE CASES SECTION -->
+  <section class="use-cases-section" style="max-width: 1400px; margin: 60px auto; padding: 0 24px;">
+    <div style="text-align: center; margin-bottom: 40px;">
+      <span class="neo-pill" style="background: var(--cyan); margin-bottom: 10px;">Real World</span>
+      <h2 style="font-family: var(--font-display); font-size: 32px; font-weight: 900;">真实团队如何使用 MyAI</h2>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+      <!-- 场景 1 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🚀</div>
+        <div class="uc-title">创业团队快速迭代</div>
+        <div class="uc-desc">
+          "团队只有 2 个后端，用 MyAI 手机控制办公室服务器，周末在家也能快速修复线上 Bug。上周五晚上客户反馈支付接口超时，我在地铁上 5 分钟就定位并修复了。"
+        </div>
+        <div class="uc-author">— 张工，某 SaaS 创业公司 CTO</div>
+      </div>
+
+      <!-- 场景 2 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🏥</div>
+        <div class="uc-title">远程紧急运维</div>
+        <div class="uc-desc">
+          "凌晨 3 点服务器告警，我不在电脑前。用 MyAI 手机端连上生产环境，查看日志、重启服务、回滚代码，15 分钟恢复业务，甚至没有起床开电脑。"
+        </div>
+        <div class="uc-author">— 李工，某互联网公司运维负责人</div>
+      </div>
+
+      <!-- 场景 3 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🎓</div>
+        <div class="uc-title">学习与实验</div>
+        <div class="uc-desc">
+          "在学校图书馆，没带笔记本，但想试试新的 Go 并发模式。用手机连到宿舍的开发机，MyAI 帮我生成代码、跑测试、看性能，手机上就能学习和实验。"
+        </div>
+        <div class="uc-author">— 王同学，计算机专业研二</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMPARISON TABLE -->
+  <section class="compare-section" id="compare">
+    <div style="text-align:center; margin-bottom:30px;">
+      <span class="neo-pill" style="background:var(--yellow); margin-bottom:10px;">Full Matrix</span>
+      <h2 style="font-family:var(--font-display); font-size:32px; font-weight:900;">与传统 AI 编程助手全景对比</h2>
+    </div>
+
+    <div class="table-responsive">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>特性维度</th>
+            <th style="background:var(--yellow);">MyAI 智能体系统</th>
+            <th>传统云端 AI Agent</th>
+            <th>普通 Web 聊天助手</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>📱 手机移动端完整控制</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ 深度优化 React Native 原生体验</td>
+            <td>❌ 仅 Web 响应式，无法后台守护</td>
+            <td>❌ 纯文本聊天，无工作区挂载</td>
+          </tr>
+          <tr>
+            <td>🛡️ 架构安全与两阶段规划</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ Codex 级 Phase 1 只读 Plan 预审</td>
+            <td>⚠️ 盲目写盘修改，易产生级联污染</td>
+            <td>❌ 无环境交互能力</td>
+          </tr>
+          <tr>
+            <td>⚙️ 工具调用解耦展示</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ 方案 A 请求参数与执行结果彻底分离</td>
+            <td>❌ 杂糅混合在单个消息块中</td>
+            <td>❌ 不支持工具调用</td>
+          </tr>
+          <tr>
+            <td>⏳ 原子快照与秒级回滚</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ SQLite 原子时光机 + Diff 审查</td>
+            <td>❌ 依赖手动 Git Reset，易丢进度</td>
+            <td>❌ 无本地版本控制</td>
+          </tr>
+          <tr>
+            <td>🧠 记忆与自进化网络</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ 静态 RAG + Nightly Dream 经验沉淀</td>
+            <td>⚠️ 仅单次 Session 短期上下文</td>
+            <td>❌ 无代码库经验记忆</td>
+          </tr>
+          <tr>
+            <td>🌐 网络与穿透性能</td>
+            <td style="color:#0e4e16; font-weight:800;">✔ Go Gorilla WS 极速中继，14ms 延迟</td>
+            <td>⚠️ 纯 HTTP 轮询，高并发易卡顿</td>
+            <td>⚠️ 易受网络波动断联</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- FAQ SECTION -->
+  <section class="faq-section" style="max-width: 900px; margin: 60px auto; padding: 0 24px;">
+    <div style="text-align: center; margin-bottom: 40px;">
+      <span class="neo-pill" style="background: var(--purple); margin-bottom: 10px;">FAQ</span>
+      <h2 style="font-family: var(--font-display); font-size: 32px; font-weight: 900;">常见问题</h2>
+    </div>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>❓ MyAI 与 GitHub Copilot / Cursor 有什么区别？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>核心区别：</strong>MyAI 是完整的智能体系统，可以在手机上远程控制电脑完成复杂任务；Copilot 是 IDE 内的代码补全助手。MyAI 支持两阶段规划、工具链分离、原子快照回滚等企业级特性，更适合团队协作和生产环境。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>🔒 手机控制电脑安全吗？会不会被黑客利用？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>安全机制：</strong> ① 所有通信通过自建 Relay 中转，不经过第三方服务器；② 支持 TLS 加密传输；③ 基于 Token 的身份认证；④ 工具调用需要手动审批（ask 模式）；⑤ 原子快照可随时无损回滚。开源代码可审计，无后门风险。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>💰 MyAI 是免费的吗？有商业版本吗？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>开源免费：</strong>核心框架 100% 开源免费，支持自建部署。你只需要自己的 LLM API Key（OpenAI / Anthropic / 国产大模型均可）。我们计划推出企业版，提供团队协作、审计日志、权限管理等增强功能。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>📱 支持 iOS 吗？只能用 Android？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>跨平台支持：</strong>当前优先支持 Android（React Native），iOS 版本正在开发中，预计 2027 Q1 发布。Web 端也在规划，届时可以在浏览器直接使用，无需安装 App。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>⚡ 性能怎么样？会不会卡顿？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>性能指标：</strong> ① Relay 使用 Go + Gorilla WebSocket，延迟 < 20ms；② 手机端 React Native 原生渲染，60fps 流畅度；③ 支持断线重连、消息队列、并发控制；④ 在 4G 网络下依然可用，5G 下体验极佳。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>🛠️ 如何快速开始？有没有详细文档？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>快速开始：</strong>查看下方「快速接入」命令即可启动。项目根目录包含完整的架构文档、开发指南和功能实现说明（20+ 个 Markdown 文档）。GitHub 上也有详细的 README 和示例配置。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section class="compare-section" id="quickstart" style="padding-top:0;">
+    <div style="background:#141413; border:var(--border-thick); border-radius:20px; box-shadow:var(--shadow-lg); padding:28px; color:#fff;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:12px; color:var(--yellow);">
+        1. 启动轻量级高并发 Relay 中继服务:
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:10px 14px; font-family:var(--font-mono); font-size:12.5px;">
+        <span>$ go run . relay --addr 0.0.0.0:18080 --agent-token "secret"</span>
+        <button class="neo-btn" onclick="copyText('go run . relay --addr 0.0.0.0:18080 --agent-token &quot;secret&quot;')" style="padding:3px 8px; font-size:11px;">复制</button>
+      </div>
+
+      <div style="font-weight:900; font-size:16px; margin:18px 0 12px 0; color:var(--yellow);">
+        2. 在工作机挂载代码库启动 Core Agent:
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:10px 14px; font-family:var(--font-mono); font-size:12.5px;">
+        <span>$ go run . agent --server ws://relay:18080/ws/agent --workspace d:\Go_All\myai</span>
+        <button class="neo-btn" onclick="copyText('go run . agent --server ws://relay:18080/ws/agent --workspace d:\\Go_All\\myai')" style="padding:3px 8px; font-size:11px;">复制</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:24px;">🤖</span>
+        <div>
+          <div style="font-weight:900; font-size:17px;">MyAI Framework</div>
+          <div style="font-size:12px; color:#666;">下一代分布式全域自主智能体系统</div>
+        </div>
+      </div>
+      <div style="font-size:12.5px; font-weight:700; color:#555;">
+        © 2026 MyAI. All rights reserved. Built with Neo-Brutalism & Go.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast -->
+  <div class="neo-toast" id="toast">
+    <span>✔</span>
+    <span id="toast-text">通知内容</span>
+  </div>
+
+  <!-- Floating CTA -->
+  <div class="floating-cta" id="floating-cta">
+    <button onclick="window.location.href='#interactive-app'" class="neo-btn neo-btn-yellow" style="padding: 12px 24px; font-size: 15px; box-shadow: var(--shadow-xl);">
+      <span>🚀 立即试玩真机</span>
+    </button>
+  </div>
+
+  <!-- JAVASCRIPT: AUTHENTIC LOGIC -->
+  <script>
+    let audioCtx = null;
+    let soundEnabled = true;
+
+    function initAudio() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playPop(freq = 600) {
+      if (!soundEnabled) return;
+      initAudio();
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.05);
+      } catch (e) {}
+    }
+
+    document.getElementById('audio-btn').addEventListener('click', () => {
+      soundEnabled = !soundEnabled;
+      document.getElementById('audio-txt').textContent = soundEnabled ? '音效: 开' : '音效: 关';
+      if (soundEnabled) playPop(800);
+      showToast(soundEnabled ? '已开启音效 🔊' : '音效已静音 🔇');
+    });
+
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-text').textContent = text;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2400);
+    }
+
+    function copyText(str) {
+      playPop(750);
+      navigator.clipboard.writeText(str);
+      showToast('已复制命令到剪贴板！');
+    }
+
+    // --- 5 BOTTOM TABS SEGMENTED CONTROL ---
+    const views = {
+      chat: document.getElementById('view-chat'),
+      files: document.getElementById('view-files'),
+      changes: document.getElementById('view-changes'),
+      knowledge: document.getElementById('view-knowledge'),
+      settings: document.getElementById('view-settings')
+    };
+    const pModeSwitchContainer = document.getElementById('p-mode-switch-container');
+    const pComposerSection = document.getElementById('p-composer-section');
+
+    function switchTab(tabKey) {
+      playPop(620);
+      document.querySelectorAll('.p-tab-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabKey);
+      });
+      Object.keys(views).forEach((k) => {
+        views[k].style.display = k === tabKey ? 'flex' : 'none';
+      });
+
+      // KEY FIX: SessionModeSwitch is ONLY shown when viewMode === "chat"!
+      // (Matching MobileAppScreen.tsx line 962: {viewMode === "chat" ? <SessionModeSwitch /> : null})
+      pModeSwitchContainer.style.display = tabKey === 'chat' ? 'flex' : 'none';
+
+      // Composer is ONLY shown when viewMode === "chat"!
+      pComposerSection.style.display = tabKey === 'chat' ? 'block' : 'none';
+    }
+
+    document.querySelectorAll('.p-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        switchTab(btn.getAttribute('data-tab'));
+      });
+    });
+
+    document.getElementById('header-settings-btn').addEventListener('click', () => {
+      switchTab('settings');
+    });
+    document.getElementById('btn-close-settings').addEventListener('click', () => {
+      switchTab('chat');
+    });
+
+    // --- MODE SWITCHER (SessionModeSwitch.tsx) ---
+    const modeBtnChat = document.getElementById('mode-btn-chat');
+    const modeBtnPlan = document.getElementById('mode-btn-plan');
+
+    modeBtnChat.addEventListener('click', () => {
+      playPop(520);
+      modeBtnChat.classList.add('active');
+      modeBtnPlan.classList.remove('active');
+      showToast('已切换至「对话模式」');
+    });
+    modeBtnPlan.addEventListener('click', () => {
+      playPop(720);
+      modeBtnPlan.classList.add('active');
+      modeBtnChat.classList.remove('active');
+      showToast('已切换至「两阶段规划模式 (Plan)」');
+    });
+
+    // --- REASONING ACCORDION ---
+    const durationToggle = document.getElementById('duration-toggle');
+    const durationBody = document.getElementById('duration-body');
+    const durationChevron = document.getElementById('duration-chevron');
+    let durationOpen = true;
+
+    durationToggle.addEventListener('click', () => {
+      playPop(500);
+      durationOpen = !durationOpen;
+      durationBody.style.display = durationOpen ? 'flex' : 'none';
+      durationChevron.textContent = durationOpen ? '⌄' : '›';
+    });
+
+    const shellToolToggle = document.getElementById('shell-tool-toggle');
+    const shellToolContent = document.getElementById('shell-tool-content');
+    const shellToolChevron = document.getElementById('shell-tool-chevron');
+    let shellOpen = true;
+
+    shellToolToggle.addEventListener('click', () => {
+      playPop(480);
+      shellOpen = !shellOpen;
+      shellToolContent.style.display = shellOpen ? 'block' : 'none';
+      shellToolChevron.textContent = shellOpen ? '⌄' : '›';
+    });
+
+    document.getElementById('btn-copy-turn').addEventListener('click', () => {
+      playPop(850);
+      navigator.clipboard.writeText('定时任务已经加上了。\n在宿主机写入 /etc/cron.d/docker-ps-log...');
+      document.getElementById('copy-turn-text').textContent = '已复制';
+      setTimeout(() => document.getElementById('copy-turn-text').textContent = '复制', 2000);
+      showToast('已复制对话内容');
+    });
+
+    // --- SEND MESSAGE IN CHAT ---
+    const pUserInput = document.getElementById('p-user-input');
+    const pSendBtn = document.getElementById('p-send-btn');
+    const screenStage = document.getElementById('screen-stage');
+
+    function sendChat(msg) {
+      if (!msg.trim()) return;
+      playPop(900);
+
+      const userBubble = document.createElement('div');
+      userBubble.style.cssText = 'align-self:flex-end; background:#ffd84f; border:2px solid #12100e; border-radius:14px 14px 2px 14px; padding:9px 13px; font-weight:700; font-size:12.5px; box-shadow:0 1.5px 0 #12100e; max-width:85%;';
+      userBubble.textContent = msg;
+      views.chat.appendChild(userBubble);
+      pUserInput.value = '';
+
+      const typingBubble = document.createElement('div');
+      typingBubble.style.cssText = 'align-self:flex-start; background:#fffdf7; border:2px solid #12100e; border-radius:14px 14px 14px 2px; padding:8px 12px; font-size:12px; box-shadow:0 1.5px 0 #12100e; font-weight:800;';
+      typingBubble.textContent = '🤖 Agent 正在思考与探查工作区...';
+      views.chat.appendChild(typingBubble);
+
+      screenStage.scrollTop = screenStage.scrollHeight;
+
+      const dualConsole = document.getElementById('dual-console');
+      if (dualConsole) {
+        const line = document.createElement('div');
+        line.style.color = '#ffd84f';
+        line.textContent = `[MOBILE INTENT] "${msg}"`;
+        dualConsole.appendChild(line);
+      }
+
+      setTimeout(() => {
+        playPop(720);
+        typingBubble.innerHTML = `<strong>✔ 已执行对应探查与规划：</strong><br>已匹配到上下文规则，并在只读沙箱生成了对应 Diff。可通过下方【变更】标签核对并一键提交。`;
+        screenStage.scrollTop = screenStage.scrollHeight;
+      }, 900);
+    }
+
+    pSendBtn.addEventListener('click', () => sendChat(pUserInput.value));
+    pUserInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendChat(pUserInput.value);
+    });
+
+    // --- TAB 2: FILES PANEL INTERACTIONS ---
+    const fileData = {
+      "server.go": {
+        path: "core/remote/relay/server.go",
+        code: `// core/remote/relay/server.go\nfunc (s *RelayServer) HandleConnection(ws *websocket.Conn) {\n  log.Printf("Agent connected: %s", ws.RemoteAddr())\n  go s.dispatchLoop(ws)\n}`
+      },
+      "main.go": {
+        path: "cmd/agent/main.go",
+        code: `// cmd/agent/main.go\nfunc main() {\n  cmd := rootCmd.Execute()\n  if err != nil {\n    os.Exit(1)\n  }\n}`
+      },
+      "go.mod": {
+        path: "go.mod",
+        code: `module github.com/myai/core\n\ngo 1.24\n\nrequire (\n  github.com/gorilla/websocket v1.5.1\n  github.com/spf13/cobra v1.8.0\n)`
+      }
+    };
+
+    document.querySelectorAll('.p-file-item-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        playPop(650);
+        const type = row.getAttribute('data-type');
+        const name = row.getAttribute('data-name');
+        if (type === 'dir') {
+          document.getElementById('breadcrumb-current-path').textContent = `📁 d:\\Go_All\\myai\\${name}`;
+          showToast(`进入目录: ${name}`);
+        } else if (type === 'file') {
+          document.querySelectorAll('.p-file-item-row').forEach(r => r.classList.remove('selected'));
+          row.classList.add('selected');
+          const item = fileData[name] || { path: name, code: `// ${name}\n// File loaded` };
+          document.getElementById('file-preview-title').textContent = `📄 ${name}`;
+          document.getElementById('file-preview-path').textContent = item.path;
+          document.getElementById('file-preview-code').innerHTML = item.code.replace(/\n/g, '<br>');
+          showToast(`已加载代码预览: ${name}`);
+        }
+      });
+    });
+
+    document.getElementById('btn-go-parent').addEventListener('click', () => {
+      playPop(550);
+      document.getElementById('breadcrumb-current-path').textContent = '📁 d:\\Go_All\\myai';
+      showToast('已返回工作区根目录');
+    });
+    document.getElementById('btn-attach-to-chat').addEventListener('click', () => {
+      playPop(850);
+      showToast('已将文件附加到会话上下文 📎');
+      switchTab('chat');
+    });
+    document.getElementById('btn-refresh-assets').addEventListener('click', () => {
+      playPop(700);
+      showToast('已刷新会话资源列表');
+    });
+    document.getElementById('btn-refresh-files').addEventListener('click', () => {
+      playPop(700);
+      showToast('已刷新工作区目录');
+    });
+
+    // --- TAB 3: CHANGES & DIFF INTERACTIONS ---
+    document.getElementById('btn-revert-file').addEventListener('click', () => {
+      playPop(400);
+      showToast('已还原 server.go 至 Git HEAD');
+    });
+    document.getElementById('btn-rollback-snap-104').addEventListener('click', () => {
+      playPop(400);
+      showToast('🛡️ 原子快照 #snap_104 已成功无损回滚！');
+    });
+    document.getElementById('btn-rollback-snap-103').addEventListener('click', () => {
+      playPop(400);
+      showToast('🛡️ 原子快照 #snap_103 已成功回滚！');
+    });
+    document.getElementById('btn-refresh-changes').addEventListener('click', () => {
+      playPop(680);
+      showToast('已检查未提交变更 (1 变动)');
+    });
+    document.getElementById('btn-refresh-history').addEventListener('click', () => {
+      playPop(680);
+      showToast('已拉取最新 SQLite 快照树');
+    });
+
+    // --- TAB 4: KNOWLEDGE WORKSPACE DUAL TABS (KnowledgeWorkspacePanel.tsx) ---
+    const btnKwDocs = document.getElementById('btn-kw-docs');
+    const btnKwMemory = document.getElementById('btn-kw-memory');
+    const kwDocsSubpanel = document.getElementById('kw-docs-subpanel');
+    const kwMemorySubpanel = document.getElementById('kw-memory-subpanel');
+
+    btnKwDocs.addEventListener('click', () => {
+      playPop(620);
+      btnKwDocs.classList.add('active');
+      btnKwMemory.classList.remove('active');
+      kwDocsSubpanel.style.display = 'flex';
+      kwMemorySubpanel.style.display = 'none';
+      showToast('已切换至「资料知识库 (RAG)」');
+    });
+
+    btnKwMemory.addEventListener('click', () => {
+      playPop(620);
+      btnKwMemory.classList.add('active');
+      btnKwDocs.classList.remove('active');
+      kwMemorySubpanel.style.display = 'flex';
+      kwDocsSubpanel.style.display = 'none';
+      showToast('已切换至「AI 记忆 (Nightly Dream)」');
+    });
+
+    document.getElementById('btn-new-kb').addEventListener('click', () => {
+      playPop(800);
+      showToast('打开新增知识库表单');
+    });
+    document.getElementById('btn-create-memory').addEventListener('click', () => {
+      playPop(800);
+      showToast('打开经验规则编辑器');
+    });
+
+    // --- RAG SESSION SETTINGS INTERACTION (KnowledgePanel.tsx 1:1) ---
+    const btnToggleRagSet = document.getElementById('btn-toggle-rag-set');
+    const ragSettingsExpanded = document.getElementById('rag-settings-expanded');
+    const ragSummaryHead = document.getElementById('rag-summary-head');
+    const ragStatusMeta = document.getElementById('rag-status-meta');
+    const ragTopkInput = document.getElementById('rag-topk-input');
+
+    const ragModeLabels = {
+      off: '关闭',
+      manual: '手动搜索',
+      auto: '智能按需检索',
+      always: '每轮强制检索'
+    };
+
+    let currentRagMode = 'auto';
+
+    function toggleRagSettings() {
+      playPop(550);
+      const isVisible = ragSettingsExpanded.style.display === 'flex';
+      ragSettingsExpanded.style.display = isVisible ? 'none' : 'flex';
+      btnToggleRagSet.textContent = isVisible ? '设置' : '收起';
+    }
+
+    if (btnToggleRagSet) {
+      btnToggleRagSet.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleRagSettings();
+      });
+    }
+    if (ragSummaryHead) {
+      ragSummaryHead.addEventListener('click', toggleRagSettings);
+    }
+
+    function selectRagMode(mode) {
+      playPop(680);
+      currentRagMode = mode;
+      document.querySelectorAll('.p-rag-mode-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+      });
+      document.querySelectorAll('.p-rag-explain-item').forEach((item) => {
+        const itemMode = item.getAttribute('data-mode');
+        const isActive = itemMode === mode;
+        item.classList.toggle('active', isActive);
+        const labelEl = item.querySelector('.p-rag-explain-label');
+        if (labelEl) {
+          labelEl.textContent = `${isActive ? '● ' : '○ '}${ragModeLabels[itemMode]}：`;
+        }
+      });
+      const topK = ragTopkInput ? ragTopkInput.value : 8;
+      if (ragStatusMeta) {
+        ragStatusMeta.textContent = `${ragModeLabels[mode]} · Top K ${topK}`;
+      }
+      showToast(`RAG 检索模式已切换为「${ragModeLabels[mode]}」`);
+    }
+
+    document.querySelectorAll('.p-rag-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectRagMode(btn.getAttribute('data-mode'));
+      });
+    });
+
+    document.querySelectorAll('.p-rag-explain-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        selectRagMode(item.getAttribute('data-mode'));
+      });
+    });
+
+    if (ragTopkInput) {
+      ragTopkInput.addEventListener('change', () => {
+        playPop(500);
+        if (ragStatusMeta) {
+          ragStatusMeta.textContent = `${ragModeLabels[currentRagMode]} · Top K ${ragTopkInput.value}`;
+        }
+        showToast(`已更新检索 Top K: ${ragTopkInput.value}`);
+      });
+    }
+
+    document.querySelectorAll('#rag-scope-chips .neo-pill').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        playPop(600);
+        const isActive = chip.textContent.startsWith('✓');
+        if (isActive) {
+          chip.textContent = chip.textContent.replace('✓', '+');
+          chip.style.background = '#fff';
+        } else {
+          chip.textContent = chip.textContent.replace('+', '✓');
+          chip.style.background = '#ffd84f';
+        }
+      });
+    });
+
+    // --- FAQ Toggle ---
+    function toggleFaq(el) {
+      const item = el.parentElement;
+      const answer = item.querySelector('.faq-a');
+      const isOpen = item.classList.contains('open');
+      
+      // 关闭所有其他 FAQ
+      document.querySelectorAll('.faq-item').forEach(i => {
+        i.classList.remove('open');
+        i.querySelector('.faq-a').style.display = 'none';
+      });
+      
+      if (!isOpen) {
+        item.classList.add('open');
+        answer.style.display = 'block';
+        playPop(680);
+      }
+    }
+
+    // --- Floating CTA Logic ---
+    let lastScrollTop = 0;
+    window.addEventListener('scroll', () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const floatingCta = document.getElementById('floating-cta');
+      const heroWrap = document.querySelector('.hero-wrap');
+      const showcaseSection = document.querySelector('.app-showcase-section');
+      
+      if (!heroWrap || !showcaseSection) return;
+      
+      const heroBottom = heroWrap.offsetTop + heroWrap.offsetHeight;
+      const showcaseTop = showcaseSection.offsetTop;
+      
+      // 滚动超过 Hero 区域且向下滚动时显示
+      if (scrollTop > heroBottom && scrollTop < showcaseTop && scrollTop > lastScrollTop) {
+        floatingCta.classList.add('show');
+      } else {
+        floatingCta.classList.remove('show');
+      }
+      
+      lastScrollTop = scrollTop;
+    }, { passive: true });
+
+    // --- Dynamic Placeholder for Input ---
+    const placeholders = [
+      "帮我在 server.go 里添加心跳检测...",
+      "查看 core/adapter 目录下的文件...",
+      "回滚到上一个 Git 快照...",
+      "检索知识库中的 WebSocket 配置...",
+      "切换到 Jev 自动规划策略..."
+    ];
+    let placeholderIndex = 0;
+
+    setInterval(() => {
+      const input = document.getElementById('p-user-input');
+      if (input && !input.value) {
+        placeholderIndex = (placeholderIndex + 1) % placeholders.length;
+        input.placeholder = placeholders[placeholderIndex];
+      }
+    }, 3500);
+
+    // --- TAB 5: SETTINGS INTERACTIONS (media_1790479839645.jpg) ---
+    const pStratSystem = document.getElementById('p-strat-system');
+    const pStratJev = document.getElementById('p-strat-jev');
+    const pStratOff = document.getElementById('p-strat-off');
+
+    const pTagSystem = document.getElementById('p-tag-system');
+    const pTagJev = document.getElementById('p-tag-jev');
+    const pTagOff = document.getElementById('p-tag-off');
+
+    const pJevBox = document.getElementById('p-jev-box');
+    const pApSummary = document.getElementById('p-ap-summary');
+
+    function selectStrategy(type) {
+      playPop(640);
+      pStratSystem.classList.remove('selected');
+      pStratJev.classList.remove('selected');
+      pStratOff.classList.remove('selected');
+
+      pTagSystem.textContent = '选择'; pTagSystem.style.background = '#fff';
+      pTagJev.textContent = '选择'; pTagJev.style.background = '#fff';
+      pTagOff.textContent = '选择'; pTagOff.style.background = '#fff';
+
+      if (type === 'system') {
+        pStratSystem.classList.add('selected');
+        pTagSystem.textContent = '已选中'; pTagSystem.style.background = '#ffd84f';
+        pJevBox.style.display = 'none';
+        pApSummary.textContent = '当前策略: 系统内置 (system) · 模型: jev... · 阈值: plan_confidenc...';
+        showToast('已选择「内置判断」策略');
+      } else if (type === 'jev') {
+        pStratJev.classList.add('selected');
+        pTagJev.textContent = '已选中'; pTagJev.style.background = '#ffd84f';
+        pJevBox.style.display = 'flex';
+        pApSummary.textContent = '当前策略: Jev 远程判断 (jev) · 阈值: plan_confidenc...';
+        showToast('已选择「Jev 远程判断」，已展开下方配置面板！');
+      } else if (type === 'off') {
+        pStratOff.classList.add('selected');
+        pTagOff.textContent = '已选中'; pTagOff.style.background = '#ffd84f';
+        pJevBox.style.display = 'none';
+        pApSummary.textContent = '当前策略: 关闭自动判断 (仅手动 Plan 生效)';
+        showToast('已关闭自动规划策略');
+      }
+    }
+
+    pStratSystem.addEventListener('click', () => selectStrategy('system'));
+    pStratJev.addEventListener('click', () => selectStrategy('jev'));
+    pStratOff.addEventListener('click', () => selectStrategy('off'));
+
+    document.getElementById('btn-test-jev-conn').addEventListener('click', () => {
+      playPop(950);
+      showToast('正在向 https://api.typesafe.ai/v1/judge 测试握手... [成功 200 OK 延迟 22ms]');
+    });
+    document.getElementById('btn-clear-jev-key').addEventListener('click', () => {
+      playPop(420);
+      document.getElementById('jev-input-key').value = '';
+      showToast('已清除 API Key');
+    });
+    document.getElementById('btn-p-refresh').addEventListener('click', () => {
+      playPop(800);
+      showToast('已从服务器刷新最新策略配置');
+    });
+    document.getElementById('btn-check-ota').addEventListener('click', () => {
+      playPop(820);
+      showToast('已检查版本：当前已是最新版 v1.0.4');
+    });
+
+    // Dual view toggle
+    const btnPhoneView = document.getElementById('btn-phone-view');
+    const btnDualView = document.getElementById('btn-dual-view');
+    const dualDesktopBox = document.getElementById('dual-desktop-box');
+
+    btnPhoneView.addEventListener('click', () => {
+      playPop(580);
+      btnPhoneView.classList.add('active');
+      btnDualView.classList.remove('active');
+      dualDesktopBox.style.display = 'none';
+      showToast('已切换至单机真机视图');
+    });
+    btnDualView.addEventListener('click', () => {
+      playPop(820);
+      btnDualView.classList.add('active');
+      btnPhoneView.classList.remove('active');
+      dualDesktopBox.style.display = 'flex';
+      showToast('已展开【手机 ⚡ PC 终端双端协同视图】');
+    });
+
+    // Preset chips
+    document.getElementById('chip-cron').addEventListener('click', () => {
+      switchTab('chat');
+      showToast('已载入原型图经典场景：定时任务添加');
+    });
+    document.getElementById('chip-files').addEventListener('click', () => {
+      switchTab('files');
+      showToast('已切换至真实工作区文件浏览器');
+    });
+    document.getElementById('chip-diff').addEventListener('click', () => {
+      switchTab('changes');
+      showToast('已切换至代码 Diff 审查与快照');
+    });
+    document.getElementById('chip-knowledge').addEventListener('click', () => {
+      switchTab('knowledge');
+      showToast('已切换至知识库与 AI 记忆');
+    });
+    document.getElementById('chip-jev').addEventListener('click', () => {
+      switchTab('settings');
+      selectStrategy('jev');
+    });
+  </script>
+</body>
+</html>

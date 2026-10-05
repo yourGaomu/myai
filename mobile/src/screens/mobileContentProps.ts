@@ -117,6 +117,9 @@ export type SettingsContentProps = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
+  reloadMCP: () => void;
+  mcpReloading: boolean;
+  mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;

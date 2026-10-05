@@ -134,6 +134,51 @@ export function isUploadedAssetAttachment(file: ChatAttachment): file is Uploade
   return file.kind === "uploaded_asset";
 }
 
+export function isImageAttachment(file: ChatAttachment): boolean {
+  if (isUploadedAssetAttachment(file)) {
+    const contentType = (file.content_type || "").toLowerCase();
+    if (contentType.startsWith("image/") && contentType !== "image/svg+xml") {
+      return true;
+    }
+    const name = (file.file_name || "").toLowerCase();
+    return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"].some((ext) => name.endsWith(ext));
+  }
+  const name = (file.name || file.path || "").toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"].some((ext) => name.endsWith(ext));
+}
+
+export function inferMimeType(name?: string, fallback?: string): string {
+  if (fallback && fallback !== "application/octet-stream" && fallback !== "image/*") {
+    return fallback;
+  }
+  const ext = (name || "").split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "svg":
+      return "image/svg+xml";
+    case "pdf":
+      return "application/pdf";
+    case "txt":
+      return "text/plain";
+    case "md":
+      return "text/markdown";
+    case "json":
+      return "application/json";
+    default:
+      return fallback || "application/octet-stream";
+  }
+}
+
 function truncateText(text: string, maxChars: number) {
   if (text.length <= maxChars) {
     return text;
