@@ -201,6 +201,7 @@ function runKindLabel(kind: string) {
 function eventLabel(event: AgentRunEvent) {
   switch (event.type) {
     case "reasoning": return "思考";
+    case "answer": return "回答";
     case "tool_call": return "调用";
     case "tool_result": return isFailure(event.status) ? "错误" : "结果";
     case "permission": return "权限";
@@ -214,6 +215,12 @@ function eventLabel(event: AgentRunEvent) {
 }
 
 function eventTitle(event: AgentRunEvent) {
+  if (
+    (event.tool_name === "wait_agent" || event.title === "wait_agent") &&
+    (event.status === "waiting" || event.status === "running" || event.type === "tool_call")
+  ) {
+    return "等待子代理结果";
+  }
   if (event.tool_name === "knowledge_search" || event.title === "knowledge_search") {
     return event.type === "tool_result" ? "知识库检索结果" : "知识库检索";
   }
@@ -236,6 +243,7 @@ function runStatusLabel(status: string) {
 
 function eventTypeLabel(type: string) {
   switch (type) {
+    case "answer": return "回答快照";
     case "tool_call": return "工具调用";
     case "tool_result": return "工具结果";
     case "plan_update": return "计划更新";

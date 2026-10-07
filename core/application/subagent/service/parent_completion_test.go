@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,47 @@ import (
 )
 
 type recordingParentNotifier struct {
-	tasks []domainsubagent.Task
+	tasks []domainsubagent.AgentMessage
+}
+
+func TestParentCompletionSeparatesRunsAndReplaysSavedContent(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.NewRepository()
+	notifier := &recordingParentNotifier{}
+	svc := &Service{Tasks: repository, AgentMessages: repository, ParentNotifier: notifier}
+	task := domainsubagent.Task{ID: "task", CurrentRunID: "run-1", ParentSessionID: "parent", Status: domainsubagent.TaskStatusSucceeded, Result: "first result"}
+	for _, run := range []string{"run-1", "run-2"} {
+		task.CurrentRunID = run
+		if run == "run-2" {
+			task.Result = "second result"
+		}
+		if err := repository.SaveTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.ensureParentCompletionQueued(task); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.ensureParentCompletionQueued(task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(notifier.tasks) != 2 || notifier.tasks[0].ID == notifier.tasks[1].ID {
+		t.Fatalf("runs were deduplicated: %#v", notifier.tasks)
+	}
+	// Recovery must replay run-1's envelope even though the current task is run-2.
+	recovered := &recordingParentNotifier{}
+	restarted := &Service{Tasks: repository, AgentMessages: repository, ParentNotifier: recovered}
+	if err := restarted.RecoverPendingAgentMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(recovered.tasks) != 2 {
+		t.Fatalf("recovered %d messages", len(recovered.tasks))
+	}
+	for _, msg := range recovered.tasks {
+		if msg.ID == domainsubagent.AgentResultMessageID("task", "run-1") && !strings.Contains(msg.Content, "first result") {
+			t.Fatalf("recovery replaced old result: %#v", msg)
+		}
+	}
 }
 
 func TestRecoverPendingParentMessagesSkipsChildMailboxEnvelopes(t *testing.T) {
@@ -32,7 +73,7 @@ func TestRecoverPendingParentMessagesSkipsChildMailboxEnvelopes(t *testing.T) {
 	}
 }
 
-func (notifier *recordingParentNotifier) Notify(_ context.Context, task domainsubagent.Task) error {
+func (notifier *recordingParentNotifier) Notify(_ context.Context, task domainsubagent.AgentMessage) error {
 	notifier.tasks = append(notifier.tasks, task)
 	return nil
 }
@@ -50,7 +91,7 @@ func TestParentCompletionNotificationIsIdempotentPerTask(t *testing.T) {
 	if len(notifier.tasks) != 1 {
 		t.Fatalf("notification count = %d, want 1", len(notifier.tasks))
 	}
-	if notifier.tasks[0].ID != task.ID {
+	if notifier.tasks[0].SourceTaskID != task.ID {
 		t.Fatalf("notified task = %q, want %q", notifier.tasks[0].ID, task.ID)
 	}
 }
@@ -61,7 +102,7 @@ func TestParentCompletionClaimPreventsDuplicateRecovery(t *testing.T) {
 	if err := repository.SaveTask(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID), SourceTaskID: task.ID,
+	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID), SourceTaskID: task.ID,
 		RecipientAgentID: task.ParentSessionID, Kind: domainsubagent.AgentMessageKindTaskResult,
 		Trigger: domainsubagent.AgentMessageTriggerQueue, Content: task.Result, Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now().UTC()}
 	if _, err := repository.EnqueueParentCompletion(context.Background(), task.ID, message); err != nil {
@@ -85,7 +126,7 @@ func TestParentCompletionClaimExpiresAndCanBeTakenOver(t *testing.T) {
 	if err := repository.SaveTask(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID), SourceTaskID: task.ID,
+	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID), SourceTaskID: task.ID,
 		RecipientAgentID: task.ParentSessionID, Kind: domainsubagent.AgentMessageKindTaskResult,
 		Trigger: domainsubagent.AgentMessageTriggerQueue, Content: task.Result, Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now().UTC()}
 	if _, err := repository.EnqueueParentCompletion(context.Background(), task.ID, message); err != nil {
@@ -115,7 +156,7 @@ func TestRecoverParentCompletionDoesNotAckBeforeParentConsumes(t *testing.T) {
 	if err := repository.SaveTask(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID), SourceTaskID: task.ID,
+	message := domainsubagent.AgentMessage{ID: domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID), SourceTaskID: task.ID,
 		RecipientAgentID: task.ParentSessionID, Kind: domainsubagent.AgentMessageKindTaskResult,
 		Trigger: domainsubagent.AgentMessageTriggerQueue, Content: task.Result, Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now().UTC()}
 	if _, err := repository.EnqueueParentCompletion(context.Background(), task.ID, message); err != nil {

@@ -12,6 +12,7 @@ export type ToolCallStep = {
   errorCode?: string;
   truncated?: boolean;
   status: "running" | "completed" | "error";
+  toolStatus?: string;
   duration?: string;
   createdAt?: string;
   completedAt?: string;
@@ -212,12 +213,16 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
   for (const ev of sorted) {
     if (ev.type === "reasoning") {
       pushThoughtStep(timeline, `run-thought-${ev.id}`, ev.content);
+    } else if (ev.type === "answer") {
+      // 兼容 Run answer 事件：属于回答快照，不在工具时间线中重复作为工具展示
+      continue;
     } else if (ev.type === "tool_call") {
       const step: ToolCallStep = {
         id: ev.id,
         name: ev.tool_name || ev.title || "tool",
         arguments: ev.arguments,
         status: "running",
+        toolStatus: ev.status,
         createdAt: ev.created_at,
       };
       tools.push(step);
@@ -233,6 +238,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
         existing.error = failed ? ev.error_message || ev.content || ev.error_code : undefined;
         existing.errorCode = ev.error_code;
         existing.truncated = ev.truncated;
+        existing.toolStatus = ev.status;
         if (!existing.arguments && ev.arguments) {
           existing.arguments = ev.arguments;
         }
@@ -254,6 +260,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
           errorCode: ev.error_code,
           truncated: ev.truncated,
           status: failed ? "error" : "completed",
+          toolStatus: ev.status,
           createdAt: ev.created_at,
           completedAt: ev.created_at,
         };
@@ -339,6 +346,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
           name: msg.toolName || "tool",
           arguments: msg.toolArguments,
           status: "running",
+          toolStatus: msg.toolStatus,
           createdAt: msg.createdAt,
         };
         tools.push(step);
@@ -356,6 +364,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
           existing.error = msg.toolError;
           existing.errorCode = msg.toolErrorCode;
           existing.truncated = msg.toolTruncated;
+          existing.toolStatus = msg.toolStatus;
           if (!existing.arguments && msg.toolArguments) {
             existing.arguments = msg.toolArguments;
           }
@@ -378,6 +387,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
             errorCode: msg.toolErrorCode,
             truncated: msg.toolTruncated,
             status: msg.toolError ? "error" : "completed",
+            toolStatus: msg.toolStatus,
             createdAt: msg.createdAt,
             completedAt: msg.completedAt || msg.createdAt,
           };
@@ -510,6 +520,18 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
 
     turn.text = answerParts.join("\n\n");
 
+    // 兼容 Run answer 事件：若消息列表中没有最终回复正文，但 matchingRun 中有 answer 快照事件，用其作为兜底正文
+    if (!turn.text && matchingRun) {
+      const answerEv = matchingRun.events.find((e) => e.type === "answer" && e.content);
+      if (answerEv?.content) {
+        turn.text = answerEv.content;
+      }
+    }
+
+    if (matchingRun?.run.title && (!turn.model || turn.model === "MyAI Agent")) {
+      turn.model = matchingRun.run.title;
+    }
+
     // 4. 计算整轮耗时（优先使用 AgentRun 的 started_at/finished_at，其次使用消息时间戳区间）
     const startCandidates: number[] = [];
     const endCandidates: number[] = [];
@@ -586,6 +608,22 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
     }
 
     // Assistant, tool_call, tool, or permission event -> merge into current Agent Turn
+    // 若当前 Agent Turn 存在且与当前消息的 requestID 不同（或者上一次 Agent 轮次已完成，新消息开启了新的后台轮次），
+    // 则先 flush 掉旧轮次，避免把后台续跑拼接到已结束的旧回答中。
+    if (
+      currentAgentTurn &&
+      (
+        (message.requestID && currentAgentTurn.requestID && message.requestID !== currentAgentTurn.requestID) ||
+        (currentAgentTurn.status !== "running" &&
+          currentAgentTurn.messages.some(
+            (m) => m.role === "assistant" && (m.status === "done" || m.status === "paused" || m.status === "error"),
+          ) &&
+          message.requestID !== currentAgentTurn.requestID)
+      )
+    ) {
+      flushAgentTurn(message.createdAt);
+    }
+
     if (!currentAgentTurn) {
       currentAgentTurn = {
         type: "agent_turn",

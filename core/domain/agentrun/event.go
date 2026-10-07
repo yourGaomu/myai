@@ -11,6 +11,7 @@ type EventType string
 const (
 	EventTypeProgress   EventType = "progress"
 	EventTypeReasoning  EventType = "reasoning"
+	EventTypeAnswer     EventType = "answer"
 	EventTypeToolCall   EventType = "tool_call"
 	EventTypeToolResult EventType = "tool_result"
 	EventTypePermission EventType = "permission"

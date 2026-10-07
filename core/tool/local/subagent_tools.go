@@ -125,7 +125,7 @@ func (tool *StartAsyncTaskTool) Call(ctx context.Context, args json.RawMessage) 
 // metadata in the returned task summary.
 func (tool *SpawnAgentTool) Name() string { return "spawn_agent" }
 func (tool *SpawnAgentTool) Description() string {
-	return "Create a child agent, start it asynchronously, and return its task identity immediately."
+	return "Create a child agent and return its task identity immediately. Started does not mean completed. Continue independent work; when your next step or final answer depends on this child, call wait_agent and integrate its result before claiming completion."
 }
 func (tool *SpawnAgentTool) Schema() any {
 	return map[string]any{
@@ -379,7 +379,7 @@ func (tool *ListAgentsTool) Call(ctx context.Context, args json.RawMessage) (too
 
 func (tool *WaitAgentTool) Name() string { return "wait_agent" }
 func (tool *WaitAgentTool) Description() string {
-	return "Wait asynchronously for whichever child agent in targets reaches a terminal state first, or until the timeout expires. If the current child is waiting on descendants, a parent mailbox message can wake it (woken_by_mailbox=true) and is injected before the next model turn."
+	return "Wait for any target child to finish. Prefer a long wait when blocked on a required result. timed_out only ends this wait, never cancels the child or proves completion; wait again if still needed. woken_by_mailbox means new input, not necessarily completion. Inspect each returned status, handle failures, and integrate results before your final answer. Canceling this wait does not cancel children; use cancel_async_task explicitly."
 }
 func (tool *WaitAgentTool) Schema() any {
 	return map[string]any{"type": "object", "properties": map[string]any{
@@ -412,6 +412,9 @@ func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tool
 		return tooldef.ToolOutput{}, errors.New("subagent parent execution context is unavailable")
 	}
 	var timeout time.Duration
+	if input.TimeoutMS < 0 || input.TimeoutMS > 600000 {
+		return tooldef.ToolOutput{}, errors.New("timeout_ms must be between 0 and 600000")
+	}
 	if input.TimeoutMS > 0 {
 		timeout = time.Duration(input.TimeoutMS) * time.Millisecond
 	}
@@ -421,15 +424,25 @@ func (tool *WaitAgentTool) Call(ctx context.Context, args json.RawMessage) (tool
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
+	waitView := func(task domainsubagent.Task) taskToolView {
+		view := taskView(task, true)
+		if result.ResultsInMailbox && (task.Status == domainsubagent.TaskStatusSucceeded || task.Status == domainsubagent.TaskStatusFailed) {
+			// The identified mailbox event is the sole copy of result content.
+			view.Result = ""
+			view.CompletionMessageID = domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID)
+		}
+		return view
+	}
 	tasks := make([]taskToolView, 0, len(result.Tasks))
 	for _, task := range result.Tasks {
-		tasks = append(tasks, taskView(task, true))
+		tasks = append(tasks, waitView(task))
 	}
 	if len(tasks) == 0 && result.Task.ID != "" {
-		tasks = append(tasks, taskView(result.Task, true))
+		tasks = append(tasks, waitView(result.Task))
 	}
 	return jsonToolOutput(map[string]any{
-		"task": taskView(result.Task, true), "tasks": tasks, "timed_out": result.TimedOut, "woken_by_mailbox": result.WokenByMailbox, "sequence": result.Sequence,
+		"task": waitView(result.Task), "tasks": tasks, "timed_out": result.TimedOut, "woken_by_mailbox": result.WokenByMailbox, "sequence": result.Sequence,
+		"results_in_mailbox": result.ResultsInMailbox,
 	})
 }
 
@@ -551,23 +564,24 @@ type definitionToolView struct {
 }
 
 type taskToolView struct {
-	TaskID         string     `json:"task_id"`
-	ParentTaskID   string     `json:"parent_task_id,omitempty"`
-	ParentRunID    string     `json:"parent_run_id,omitempty"`
-	PlanID         string     `json:"plan_id,omitempty"`
-	StepID         string     `json:"step_id,omitempty"`
-	AgentPath      string     `json:"agent_path,omitempty"`
-	AgentNickname  string     `json:"agent_nickname,omitempty"`
-	Title          string     `json:"title"`
-	DefinitionID   string     `json:"definition_id"`
-	ChildSessionID string     `json:"child_session_id,omitempty"`
-	Status         string     `json:"status"`
-	CanFollowup    bool       `json:"can_followup"`
-	Result         string     `json:"result,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	TaskID              string     `json:"task_id"`
+	ParentTaskID        string     `json:"parent_task_id,omitempty"`
+	ParentRunID         string     `json:"parent_run_id,omitempty"`
+	PlanID              string     `json:"plan_id,omitempty"`
+	StepID              string     `json:"step_id,omitempty"`
+	AgentPath           string     `json:"agent_path,omitempty"`
+	AgentNickname       string     `json:"agent_nickname,omitempty"`
+	Title               string     `json:"title"`
+	DefinitionID        string     `json:"definition_id"`
+	ChildSessionID      string     `json:"child_session_id,omitempty"`
+	Status              string     `json:"status"`
+	CanFollowup         bool       `json:"can_followup"`
+	CompletionMessageID string     `json:"completion_message_id,omitempty"`
+	Result              string     `json:"result,omitempty"`
+	Error               string     `json:"error,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	StartedAt           *time.Time `json:"started_at,omitempty"`
+	CompletedAt         *time.Time `json:"completed_at,omitempty"`
 }
 
 func definitionView(definition domainsubagent.Definition) definitionToolView {

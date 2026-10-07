@@ -49,6 +49,7 @@ import (
 	cacheport "myai/core/port/cache"
 	modelport "myai/core/port/model"
 	persistenceport "myai/core/port/persistence"
+	repository "myai/core/port/repository"
 	"myai/core/service"
 	"myai/core/session"
 	"myai/core/skill"
@@ -351,12 +352,14 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	if configuration.IntentController != nil {
 		classifier = configuration.IntentController
 	}
+	continuationControl, _ := configuration.Store.(repository.SessionContinuationStore)
 	return service.ChatDependencies{
-		Models:             configuration.Models,
-		AutoPlanEnabled:    true,
-		AutoPlanClassifier: classifier,
-		IntentController:   configuration.IntentController,
-		ModelMetadata:      configuration.Models,
+		ContinuationControl: continuationControl,
+		Models:              configuration.Models,
+		AutoPlanEnabled:     true,
+		AutoPlanClassifier:  classifier,
+		IntentController:    configuration.IntentController,
+		ModelMetadata:       configuration.Models,
 
 		GenerationTasks: generationTasks,
 		TurnInputQueue:  turnInputQueue,

@@ -201,6 +201,71 @@ type pendingTestAcknowledger struct {
 	ids []string
 }
 
+func TestWaitBoundaryConsumesMailboxBeforeNextSample(t *testing.T) {
+	queue := pendinginput.NewQueue()
+	ack := &pendingTestAcknowledger{}
+	queue.SetAcknowledger(ack)
+	if err := queue.EnqueueIdentified("parent", "completion", "verified child result"); err != nil {
+		t.Fatal(err)
+	}
+	model := &pendingModel{responses: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{{ID: "wait", Name: "wait_agent", Type: "function", Arguments: `{"targets":["child"]}`}}},
+		{Content: "summary"},
+	}}
+	s := AgentLoopService{Contexts: pendingContextProvider{}, PendingInput: queue, ToolExecutor: pendingToolExecutor{}}
+	_, err := s.Run(context.Background(), generationcommand.Run{Model: model, Session: &session.Session{ID: "parent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.requests) != 2 || !requestContainsText(model.requests[1], "verified child result") {
+		t.Fatal("wait returned without exposing mailbox to the next model sample")
+	}
+	if len(ack.ids) != 1 {
+		t.Fatalf("completion acknowledgements=%v", ack.ids)
+	}
+}
+
+func TestWaitRoundsDoNotExhaustWorkspaceToolBudget(t *testing.T) {
+	model := &pendingModel{responses: []modelport.ChatResult{
+		{ToolCalls: []domainmessage.ToolCall{{ID: "w1", Name: "wait_agent", Type: "function", Arguments: `{}`}}},
+		{ToolCalls: []domainmessage.ToolCall{{ID: "w2", Name: "wait_agent", Type: "function", Arguments: `{}`}}},
+		{ToolCalls: []domainmessage.ToolCall{{ID: "work", Name: "read_file", Type: "function", Arguments: `{}`}}},
+		{Content: "done"},
+	}}
+	s := AgentLoopService{Contexts: pendingContextProvider{}, ToolExecutor: pendingToolExecutor{}}
+	current := &session.Session{ID: "parent", MaxToolRounds: 1}
+	_, err := s.Run(context.Background(), generationcommand.Run{Model: model, Session: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.calls != 4 {
+		t.Fatalf("waits consumed work budget: %d samples", model.calls)
+	}
+	found := false
+	for _, msg := range current.Messages {
+		for _, part := range msg.Parts {
+			if part.ToolCall != nil && part.ToolCall.Name == "read_file" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("workspace tool was not executed after waits")
+	}
+}
+
+func TestRepeatedWaitsAreBoundedWithoutFalseFinalAnswer(t *testing.T) {
+	model := &pendingModel{}
+	for i := 0; i < 40; i++ {
+		model.responses = append(model.responses, modelport.ChatResult{ToolCalls: []domainmessage.ToolCall{{ID: "wait", Name: "wait_agent", Arguments: `{}`}}})
+	}
+	s := AgentLoopService{Contexts: pendingContextProvider{}, ToolExecutor: pendingToolExecutor{}}
+	_, err := s.Run(context.Background(), generationcommand.Run{Model: model, Session: &session.Session{ID: "parent", MaxToolRounds: 1}})
+	if err == nil || !strings.Contains(err.Error(), "wait limit") || model.calls != 32 {
+		t.Fatalf("wait budget: calls=%d err=%v", model.calls, err)
+	}
+}
+
 func (acknowledger *pendingTestAcknowledger) Acknowledge(messageID string) error {
 	acknowledger.ids = append(acknowledger.ids, messageID)
 	return nil

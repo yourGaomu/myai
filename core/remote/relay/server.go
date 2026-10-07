@@ -364,9 +364,11 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		*agentUserID = ""
 		*agentDeviceID = ""
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
-	case protocol.TypeSubagentTaskEvent:
+	case protocol.TypeSubagentTaskEvent, protocol.TypeBackgroundTurnEvent:
 		return s.forwardEventToClients(message)
 	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeMCPReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskWaitResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+		return s.forwardToClient(message)
+	case protocol.TypeUserMessageQueued:
 		return s.forwardToClient(message)
 	case protocol.TypeIntentConfigQueryResult, protocol.TypeIntentConfigSetResult, protocol.TypeIntentConfigTestResult, protocol.TypeIntentTraceListResult, protocol.TypeIntentTraceGetResult, protocol.TypeIntentTraceClearResult:
 		return s.forwardToClient(message)
@@ -451,7 +453,7 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 		return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 	}
 
-	if err := target.writeJSON(message); err != nil {
+	if err := s.writeAuthorizedClient(target, message); err != nil {
 		// The TCP close can race with an agent response. Retire the stale peer
 		// and retry once against a replacement connection for the same identity.
 		s.unregisterClientPeer(target)
@@ -463,7 +465,7 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 		if !found || replacement == target {
 			return err
 		}
-		if err := replacement.writeJSON(message); err != nil {
+		if err := s.writeAuthorizedClient(replacement, message); err != nil {
 			return err
 		}
 	}
@@ -480,7 +482,7 @@ func (s *Server) forwardEventToClients(message protocol.Message) error {
 	}
 	var errs []error
 	for _, peer := range peers {
-		if err := peer.writeJSON(message); err != nil {
+		if err := s.writeAuthorizedClient(peer, message); err != nil {
 			errs = append(errs, err)
 		}
 	}

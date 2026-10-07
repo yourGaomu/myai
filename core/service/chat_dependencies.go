@@ -21,6 +21,7 @@ import (
 	settingsapi "myai/core/application/session/settings/api"
 	skillapi "myai/core/application/skill/api"
 	modelport "myai/core/port/model"
+	repository "myai/core/port/repository"
 )
 
 type ChatEventPublisher interface {
@@ -58,11 +59,12 @@ type ChatDependencies struct {
 	CurrentState     currentapi.StateQueryService
 	SessionBootstrap bootstrapapi.Service
 
-	ModelConfig     modelapi.ConfigService
-	ModelQueries    modelapi.QueryService
-	SkillCatalog    skillapi.CatalogService
-	Events          ChatEventPublisher
-	AgentRunQueries agentrunapi.QueryService
+	ModelConfig         modelapi.ConfigService
+	ModelQueries        modelapi.QueryService
+	SkillCatalog        skillapi.CatalogService
+	Events              ChatEventPublisher
+	AgentRunQueries     agentrunapi.QueryService
+	ContinuationControl repository.SessionContinuationStore
 	// OnPendingTurnError receives errors from asynchronous parent-agent wakeups.
 	// The wakeup itself is best-effort; durable mailbox messages remain queued
 	// when generation fails and can be retried by a later event or recovery.

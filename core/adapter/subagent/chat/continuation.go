@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"errors"
-	"time"
 
 	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
@@ -59,32 +58,14 @@ func (continuation Continuation) Continue(ctx context.Context, request subagentp
 	}, nil
 }
 
-func (continuation Continuation) Notify(ctx context.Context, task domainsubagent.Task) error {
+func (continuation Continuation) Notify(ctx context.Context, message domainsubagent.AgentMessage) error {
 	if continuation.Chat == nil {
 		return errors.New("subagent parent chat continuation is nil")
-	}
-	prompt, err := continuationPrompt(subagentport.ParentContinuationRequest{Task: task})
-	if err != nil {
-		return err
-	}
-	// 2. 优先把完整 AgentMessage 放入结构化 mailbox，保留任务来源和投递语义。
-	messageKind := domainsubagent.AgentMessageKindTaskResult
-	if task.Status == domainsubagent.TaskStatusFailed {
-		messageKind = domainsubagent.AgentMessageKindTaskError
-	}
-	message := domainsubagent.AgentMessage{
-		ID: domainsubagent.AgentResultMessageID(task.ID), SourceTaskID: task.ID,
-		AuthorAgentID: task.ChildSessionID, RecipientAgentID: task.ParentSessionID,
-		ParentTurnID: task.ParentRunID, RootAgentID: task.ParentSessionID,
-		// 子代理完成后要求父 Agent 在空闲时自动开启 continuation；如果父 Agent
-		// 仍在运行，AgentLoop 会在回答边界按 queue 语义安全领取这条消息。
-		Kind: messageKind, Content: prompt, Trigger: domainsubagent.AgentMessageTriggerTurn,
-		Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now().UTC(),
 	}
 	if err := message.Validate(); err != nil {
 		return err
 	}
-	return continuation.Chat.EnqueueTurnInputAgentMessage(task.ParentSessionID, message)
+	return continuation.Chat.EnqueueTurnInputAgentMessage(message.RecipientAgentID, message)
 }
 
 func (continuation Continuation) ContinuePending(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (subagentport.ParentContinuationResult, error) {

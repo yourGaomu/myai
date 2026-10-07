@@ -1,4 +1,4 @@
-import { useCallback, type RefObject } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 
 import type {
   AIMemoryCandidateListResultPayload,
@@ -6,6 +6,7 @@ import type {
   AIMemoryExtractionJobListResultPayload,
   AIMemoryDreamResultPayload,
   AIMemoryListResultPayload,
+  AgentRun,
   AgentRunCompletedPayload,
   AgentRunEventPayload,
   AgentRunListResultPayload,
@@ -13,6 +14,7 @@ import type {
   AssetListResultPayload,
   AssistantDeltaPayload,
   AssistantDonePayload,
+  BackgroundTurnEventPayload,
   ChangeDiffResultPayload,
   ChangeRevertResultPayload,
   ChangesListResultPayload,
@@ -176,6 +178,10 @@ type Args = {
   ) => void;
   mergeSessionChats: (fromSessionID: string, toSessionID: string) => void;
   mergeSessionRuns: (fromSessionID: string, toSessionID: string) => void;
+  addUnreadSession?: (sessionID: string) => void;
+  requestAgentRuns?: (sessionID?: string) => boolean;
+  requestSessionHistory?: (sessionID?: string) => boolean;
+  startBackgroundAssistant?: (sessionID: string, turnID: string, title?: string) => void;
   requestChanges: () => boolean;
   requestAssets: (sessionID?: string) => boolean;
   requestFiles: (path?: string) => boolean;
@@ -281,6 +287,10 @@ export function useRemoteMessageHandler({
   markAssistantError,
   mergeSessionChats,
   mergeSessionRuns,
+  addUnreadSession,
+  requestAgentRuns,
+  requestSessionHistory,
+  startBackgroundAssistant,
   requestChanges,
   requestAssets,
   requestFiles,
@@ -299,6 +309,8 @@ export function useRemoteMessageHandler({
   setStatus,
   stopPending,
 }: Args) {
+  const turnSequenceMapRef = useRef<Record<string, number>>({});
+
   return useCallback(
     (message: RelayMessage) => {
       // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
@@ -334,6 +346,152 @@ export function useRemoteMessageHandler({
         case "agent_run_list_result":
           applyRunList(message.payload as AgentRunListResultPayload | undefined);
           break;
+        case "background_turn_event": {
+          const payload = (message.payload || {}) as BackgroundTurnEventPayload;
+          const turnID = payload.turn_id || message.request_id || "";
+          const targetSessionID =
+            payload.session_id ||
+            message.session_id ||
+            (turnID ? requestSessionMapRef.current[turnID] : "") ||
+            sessionIDRef.current;
+
+          if (payload.kind === "resync_required") {
+            const resyncSessionID = targetSessionID || sessionIDRef.current;
+            if (resyncSessionID) {
+              requestAgentRuns?.(resyncSessionID);
+              requestSessionHistory?.(resyncSessionID);
+            }
+            break;
+          }
+
+          if (!turnID || !targetSessionID) {
+            break;
+          }
+
+          if (turnID) {
+            requestSessionMapRef.current[turnID] = targetSessionID;
+          }
+
+          const seq = typeof payload.sequence === "number" ? payload.sequence : 0;
+          const turnKey = `${targetSessionID}:${turnID}`;
+          const lastSeq = turnSequenceMapRef.current[turnKey] || 0;
+
+          if (seq > 0) {
+            if (seq <= lastSeq) {
+              // 实时轮次序号去重
+              break;
+            }
+            if (lastSeq > 0 && seq > lastSeq + 1) {
+              // 序号缺口，自动重查校准
+              requestAgentRuns?.(targetSessionID);
+              requestSessionHistory?.(targetSessionID);
+            }
+            turnSequenceMapRef.current[turnKey] = seq;
+          }
+
+          if (targetSessionID !== sessionIDRef.current) {
+            addUnreadSession?.(targetSessionID);
+          }
+
+          switch (payload.kind) {
+            case "started": {
+              const run: AgentRun = payload.run || {
+                id: payload.run_id || turnID,
+                request_id: turnID,
+                session_id: targetSessionID,
+                kind: "chat",
+                title: "正在处理子代理结果",
+                status: "running",
+                started_at: new Date().toISOString(),
+              };
+              applyRunStarted({
+                run: { ...run, title: run.title || "正在处理子代理结果" },
+              });
+              startBackgroundAssistant?.(targetSessionID, turnID, "正在处理子代理结果");
+              break;
+            }
+
+            case "delta": {
+              if (payload.run_id && !hasRunForRequest(targetSessionID, turnID)) {
+                applyRunStarted({
+                  run: {
+                    id: payload.run_id,
+                    request_id: turnID,
+                    session_id: targetSessionID,
+                    kind: "chat",
+                    title: "正在处理子代理结果",
+                    status: "running",
+                    started_at: new Date().toISOString(),
+                  },
+                });
+                requestAgentRuns?.(targetSessionID);
+              }
+              appendAssistant(
+                targetSessionID,
+                turnID,
+                payload.content || "",
+                payload.reasoning || "",
+              );
+              break;
+            }
+
+            case "run_event": {
+              if (payload.event) {
+                applyRunEvent({ event: payload.event });
+              }
+              break;
+            }
+
+            case "completed": {
+              if (payload.run) {
+                applyRunCompleted({ run: payload.run });
+              } else if (payload.run_id) {
+                applyRunCompleted({
+                  run: {
+                    id: payload.run_id,
+                    request_id: turnID,
+                    session_id: targetSessionID,
+                    kind: "chat",
+                    status:
+                      payload.status === "failed"
+                        ? "failed"
+                        : payload.status === "paused"
+                          ? "paused"
+                          : "succeeded",
+                    error_message: payload.error,
+                    started_at: new Date().toISOString(),
+                    finished_at: new Date().toISOString(),
+                  },
+                });
+              }
+
+              const isFailed = payload.status === "failed";
+              const isPaused = payload.status === "paused";
+
+              if (isFailed) {
+                markAssistantError(
+                  targetSessionID,
+                  turnID,
+                  payload.error || "Subagent continuation failed.",
+                );
+              } else {
+                completeAssistant(
+                  targetSessionID,
+                  turnID,
+                  isPaused ? "paused" : "done",
+                  null,
+                  payload.content,
+                  payload.reasoning,
+                );
+              }
+
+              delete requestSessionMapRef.current[turnID];
+              requestSessions();
+              break;
+            }
+          }
+          break;
+        }
         case "assistant_done": {
           const requestSessionID = message.request_id
             ? requestSessionMapRef.current[message.request_id] || ""

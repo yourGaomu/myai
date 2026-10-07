@@ -140,6 +140,7 @@ type Props = {
   subagentEvents: Record<string, SubagentTaskEvent[]>;
   subagentMessage: string;
   subagentTasks: SubagentTask[];
+  unreadSessionIDs?: Record<string, boolean>;
   userID: string;
 };
 
@@ -314,6 +315,7 @@ export function SettingsPanel({
   subagentEvents,
   subagentMessage,
   subagentTasks,
+  unreadSessionIDs,
   userID,
 }: Props) {
   const { width } = useWindowDimensions();
@@ -1321,6 +1323,7 @@ export function SettingsPanel({
                 <View style={styles.sessionStreamLeft}>
                   <View style={[styles.sessionAvatarBox, selected && styles.sessionAvatarBoxActive]}>
                     <Text style={styles.sessionAvatarIcon}>💬</Text>
+                    {unreadSessionIDs?.[session.id] ? <View style={styles.unreadDot} /> : null}
                   </View>
                   <View style={styles.sessionInfoBox}>
                     <Text numberOfLines={1} style={styles.sessionStreamTitle}>
@@ -4179,6 +4182,17 @@ const styles = StyleSheet.create({
   },
   sessionAvatarBoxActive: {
     backgroundColor: "#ffd84f",
+  },
+  unreadDot: {
+    backgroundColor: "#ff4d4f",
+    borderColor: "#ffffff",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    height: 10,
+    position: "absolute",
+    right: -2,
+    top: -2,
+    width: 10,
   },
   sessionAvatarIcon: {
     fontSize: 15,

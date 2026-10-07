@@ -21,6 +21,7 @@ const (
 	TypeAssistantDone                    MessageType = "assistant_done"
 	TypeAgentRunStarted                  MessageType = "agent_run_started"
 	TypeAgentRunEvent                    MessageType = "agent_run_event"
+	TypeBackgroundTurnEvent              MessageType = "background_turn_event"
 	TypeAgentRunCompleted                MessageType = "agent_run_completed"
 	TypeAgentRunList                     MessageType = "agent_run_list"
 	TypeAgentRunListResult               MessageType = "agent_run_list_result"
@@ -414,6 +415,22 @@ type AgentRunCompletedPayload struct {
 	Run AgentRun `json:"run"`
 }
 
+// BackgroundTurnEventPayload is an unsolicited session-scoped event. TurnID
+// identifies a new continuation, never the foreground request that spawned it.
+type BackgroundTurnEventPayload struct {
+	TurnID    string         `json:"turn_id"`
+	SessionID string         `json:"session_id"`
+	RunID     string         `json:"run_id,omitempty"`
+	Sequence  uint64         `json:"sequence"`
+	Kind      string         `json:"kind"`
+	Status    string         `json:"status,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	Reasoning string         `json:"reasoning,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Run       *AgentRun      `json:"run,omitempty"`
+	Event     *AgentRunEvent `json:"event,omitempty"`
+}
+
 type AgentRunListPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
@@ -455,13 +472,15 @@ type ToolResultPayload struct {
 }
 
 type PermissionAskPayload struct {
+	ApprovalID string `json:"approval_id"`
 	Name       string `json:"name"`
 	Arguments  string `json:"arguments"`
 	Permission string `json:"permission"`
 }
 
 type PermissionResultPayload struct {
-	Allowed bool `json:"allowed"`
+	ApprovalID string `json:"approval_id"`
+	Allowed    bool   `json:"allowed"`
 }
 
 type SessionListPayload struct {

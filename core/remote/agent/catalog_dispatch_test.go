@@ -33,7 +33,7 @@ func TestReloadDoesNotBlockPermissionReply(t *testing.T) {
 	manager := &blockingMCPReload{started: make(chan struct{}), release: make(chan struct{})}
 	defer close(manager.release)
 	agent := &Agent{mcpManager: manager, permissionWaiters: newPermissionWaiterRegistry()}
-	permission := agent.permissionWaiters.register("turn")
+	permission := agent.permissionWaiters.register("turn:approval-1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
@@ -56,7 +56,7 @@ func TestReloadDoesNotBlockPermissionReply(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("reload did not start")
 	}
-	if err := conn.WriteJSON(protocol.Message{Type: protocol.TypePermissionResult, RequestID: "turn", Payload: json.RawMessage(`{"allowed":true}`)}); err != nil {
+	if err := conn.WriteJSON(protocol.Message{Type: protocol.TypePermissionResult, RequestID: "turn", Payload: json.RawMessage(`{"approval_id":"approval-1","allowed":true}`)}); err != nil {
 		t.Fatal(err)
 	}
 	select {

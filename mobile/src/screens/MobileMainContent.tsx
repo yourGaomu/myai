@@ -129,6 +129,7 @@ export function MobileMainContent({
           subagentEvents={settings.subagentEvents}
           subagentMessage={settings.subagentMessage}
           subagentTasks={settings.subagentTasks}
+          unreadSessionIDs={settings.unreadSessionIDs}
           userID={settings.userID}
         />
       ) : null}
@@ -286,6 +287,7 @@ export function MobileMainContent({
           pendingSessions={common.pendingActions.sessions}
           sessionID={settings.sessionID}
           sessions={settings.sessions}
+          unreadSessionIDs={sessions.unreadSessionIDs}
         />
       ) : null}
 

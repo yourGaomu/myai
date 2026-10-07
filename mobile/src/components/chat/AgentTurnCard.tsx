@@ -118,6 +118,16 @@ function formatToolActionRowTitle(tool: ToolCallStep): string {
   const summary = formatSingleLineCommand(extractToolSummary(tool));
   const lower = tool.name.toLowerCase();
 
+  if (tool.name === "wait_agent") {
+    if (tool.status === "running") {
+      return summary ? `等待子代理结果 · ${summary}` : "等待子代理结果";
+    }
+    if (tool.status === "error" || tool.error) {
+      return summary ? `等待子代理失败 · ${summary}` : "等待子代理失败";
+    }
+    return summary ? `已获取子代理结果 · ${summary}` : "子代理结果已就绪";
+  }
+
   if (tool.name === "knowledge_search") {
     if (tool.status === "running") {
       return summary ? `正在执行 知识库检索 · ${summary}` : "正在执行 知识库检索";
@@ -221,6 +231,12 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
 
   const durationHeaderLabel = useMemo(() => {
     if (isRunning) {
+      const isWaitingSubagent = turn.tools?.some(
+        (t) => t.name === "wait_agent" && t.status === "running",
+      );
+      if (isWaitingSubagent) {
+        return turn.elapsed ? `等待子代理结果 · ${turn.elapsed}` : "等待子代理结果...";
+      }
       return turn.elapsed ? `正在思考与执行 · ${turn.elapsed}` : "正在思考与执行...";
     }
     if (turn.elapsed) {
@@ -230,7 +246,7 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
       return `已执行 ${toolCount} 个命令与操作`;
     }
     return "思考推导过程";
-  }, [isRunning, toolCount, turn.elapsed]);
+  }, [isRunning, toolCount, turn.elapsed, turn.tools]);
 
   const handleCopy = () => {
     const copyContent = (turn.text || turn.reasoning || "").trim();

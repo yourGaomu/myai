@@ -525,7 +525,7 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 		}
 	} else {
 		continuation, continueErr = service.ParentContinuation.Continue(ctx, subagentport.ParentContinuationRequest{
-			Task: claimed, MessageID: domainsubagent.AgentResultMessageID(claimed.ID), Stream: command.Stream,
+			Task: claimed, MessageID: domainsubagent.AgentResultMessageID(claimed.ID, claimed.CurrentRunID), Stream: command.Stream,
 		})
 	}
 	if continueErr != nil {

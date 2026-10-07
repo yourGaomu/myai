@@ -156,6 +156,7 @@ export type SettingsContentProps = {
   subagentMessage: string;
   subagentTasks: SubagentTask[];
   setupVisible: boolean;
+  unreadSessionIDs?: Record<string, boolean>;
   userID: string;
 };
 
@@ -218,6 +219,7 @@ export type SessionsContentProps = {
   onRefreshDeletedSessions: () => void;
   onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
+  unreadSessionIDs?: Record<string, boolean>;
 };
 
 export type KnowledgeContentProps = {

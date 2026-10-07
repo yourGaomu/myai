@@ -65,6 +65,23 @@ func TestRunStreamRecorderBoundsReasoningBuffer(t *testing.T) {
 
 type runStreamIDs struct{ next int }
 
+func TestRunStreamWaitReportsWaitingWithoutCompletingRun(t *testing.T) {
+	repository := agentrunmemory.New()
+	commands := agentrunservice.CommandService{Repository: repository, IDs: &runStreamIDs{}}
+	run, err := commands.Start(context.Background(), agentruncommand.Start{SessionID: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live []domainagentrun.Event
+	recorder := newRunStreamRecorder(context.Background(), run.ID, commands, modelport.ChatStreamHandler{OnRunEvent: func(e domainagentrun.Event) { live = append(live, e) }}, func(err error) { t.Fatal(err) })
+	recorder.Handler().OnToolCall("wait_agent", `{"targets":["child"]}`)
+	recorder.Close()
+	stored, err := repository.GetRun(context.Background(), run.ID)
+	if err != nil || stored.Status != domainagentrun.StatusRunning || len(live) != 1 || live[0].Status != "waiting" {
+		t.Fatalf("waiting ended run: %#v %#v %v", stored, live, err)
+	}
+}
+
 func (ids *runStreamIDs) NewID() string {
 	ids.next++
 	return fmt.Sprintf("run-stream-%d", ids.next)

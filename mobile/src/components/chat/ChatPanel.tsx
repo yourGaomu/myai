@@ -155,7 +155,7 @@ export function ChatPanel({
             );
           })
         )}
-        {pendingRequestID && !renderItems.some((it) => it.type === "agent_turn" && it.status === "running") ? (
+        {(pendingRequestID || runs.some(({ run }) => run.status === "running")) && !renderItems.some((it) => it.type === "agent_turn" && it.status === "running") ? (
           <AssistantLoadingBubble label={assistantLoadingLabel} />
         ) : null}
       </ScrollView>
@@ -246,12 +246,48 @@ function isCoveredByRun(message: ChatItem, runs: AgentRunSnapshot[]) {
   });
 }
 
+function isWaitingSubagent(
+  pendingRequestID: string,
+  messages: ChatItem[],
+  runs: AgentRunSnapshot[],
+) {
+  const activeRuns = runs.filter(({ run }) => run.status === "running");
+  for (const { events } of activeRuns) {
+    const waitEvent = [...events].reverse().find(
+      (e) =>
+        (e.tool_name === "wait_agent" || e.title === "wait_agent") &&
+        (e.status === "waiting" || e.type === "tool_call"),
+    );
+    if (waitEvent) {
+      return true;
+    }
+  }
+
+  const waitMessage = [...messages].reverse().find(
+    (m) => m.toolName === "wait_agent" && m.status === "tool_running",
+  );
+  if (waitMessage) {
+    return true;
+  }
+
+  return false;
+}
+
 function loadingLabel(
   pendingRequestID: string,
   activeAssistantID: string,
   messages: ChatItem[],
   runs: AgentRunSnapshot[],
 ) {
+  if (isWaitingSubagent(pendingRequestID, messages, runs)) {
+    return "等待子代理结果";
+  }
+  const hasRunningContinuation = runs.some(
+    ({ run }) => run.status === "running" && run.title?.includes("子代理"),
+  );
+  if (hasRunningContinuation) {
+    return "正在处理子代理结果";
+  }
   if (hasRunningTool(pendingRequestID, activeAssistantID, messages, runs)) {
     return "正在运行工具";
   }

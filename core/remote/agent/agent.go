@@ -45,6 +45,7 @@ type Agent struct {
 	lastTaskEventSequence atomic.Uint64
 	permissionWaiters     *permissionWaiterRegistry
 	permissionTimeout     time.Duration
+	activeSubagentWaits   atomic.Int32
 }
 
 // WithMCPManager attaches the narrow application-level MCP reload facade.
@@ -173,6 +174,16 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	}
 	eventCtx, cancelEvents := context.WithCancel(ctx)
 	defer cancelEvents()
+	if source, ok := a.chatService.(BackgroundTurnSource); ok {
+		events, unsubscribe := source.SubscribeBackgroundTurns(256)
+		defer unsubscribe()
+		// Clients may remain connected to Relay while this Agent reconnects.
+		// Signal snapshot recovery for any events missed during the outage.
+		if err := a.writeRemoteMessage(conn, protocol.TypeBackgroundTurnEvent, newRequestID(), "", protocol.BackgroundTurnEventPayload{Kind: "resync_required"}); err != nil {
+			return true, err
+		}
+		go a.forwardBackgroundTurns(eventCtx, conn, events)
+	}
 	//是否存在子智能体调用能力
 	if a.subagentEvents != nil {
 		if source, ok := a.subagentEvents.(SubagentTaskEventSource); ok {
@@ -307,6 +318,8 @@ func (a *Agent) advanceTaskEventSequence(sequence uint64) {
 }
 
 func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, done chan<- error) {
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	for {
 		var message protocol.Message
 		if err := conn.ReadJSON(&message); err != nil {
@@ -319,7 +332,11 @@ func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, done chan<- 
 		}
 
 		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
-		if err := a.handleRelayMessage(ctx, conn, message); err != nil {
+		messageCtx := ctx
+		if message.Type == protocol.TypeSubagentTaskWait {
+			messageCtx = waitCtx
+		}
+		if err := a.handleRelayMessage(messageCtx, conn, message); err != nil {
 			if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
 				done <- fmt.Errorf("send remote error failed: %w", writeErr)
 				return
@@ -516,7 +533,19 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	case protocol.TypeSubagentTaskFollowup:
 		return a.handleSubagentTaskFollowup(ctx, conn, message)
 	case protocol.TypeSubagentTaskWait:
-		return a.handleSubagentTaskWait(ctx, conn, message)
+		if a.subagentService == nil {
+			return errors.New("subagent service is unavailable")
+		}
+		if a.activeSubagentWaits.Add(1) > 32 {
+			a.activeSubagentWaits.Add(-1)
+			return errors.New("too many pending subagent waits")
+		}
+		go func() {
+			defer a.activeSubagentWaits.Add(-1)
+			if err := a.handleSubagentTaskWait(ctx, conn, message); err != nil {
+				_ = a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()})
+			}
+		}()
 	case protocol.TypeSubagentTaskCancel:
 		return a.handleSubagentTaskCancel(ctx, conn, message)
 	case protocol.TypeSubagentTaskApply:

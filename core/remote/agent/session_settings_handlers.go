@@ -327,9 +327,15 @@ func (a *Agent) handleSessionPause(ctx context.Context, conn *websocket.Conn, me
 	}
 
 	paused := a.runtimes.get(sessionID).pause()
+	if control, ok := a.chatService.(SessionContinuationControl); ok {
+		if err := control.PauseSessionContinuations(ctx, sessionID); err != nil {
+			return err
+		}
+		paused = true
+	}
 	text := "No running task for this session."
 	if paused {
-		text = "Session task paused."
+		text = "Session task and automatic continuations paused. Child results remain available."
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSessionPauseResult, message.RequestID, sessionID, protocol.SessionPauseResultPayload{
 		SessionID: sessionID,

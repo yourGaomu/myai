@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"myai/core/llm"
@@ -18,7 +19,10 @@ func (a *Agent) handlePermissionResult(message protocol.Message) error {
 		return fmt.Errorf("decode permission result failed: %w", err)
 	}
 
-	a.permissionWaiters.resolve(message.RequestID, payload.Allowed)
+	if payload.ApprovalID == "" {
+		return fmt.Errorf("permission approval_id is required")
+	}
+	a.permissionWaiters.resolve(message.RequestID+":"+payload.ApprovalID, payload.Allowed)
 	return nil
 }
 
@@ -27,10 +31,13 @@ func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, mes
 		return false
 	}
 
-	ch := a.permissionWaiters.register(message.RequestID)
-	defer a.permissionWaiters.unregister(message.RequestID, ch)
+	approvalID := uuid.NewString()
+	key := message.RequestID + ":" + approvalID
+	ch := a.permissionWaiters.register(key)
+	defer a.permissionWaiters.unregister(key, ch)
 
 	if err := a.writeRemoteMessage(conn, protocol.TypePermissionAsk, message.RequestID, message.SessionID, protocol.PermissionAskPayload{
+		ApprovalID: approvalID,
 		Name:       request.Name,
 		Arguments:  request.Arguments,
 		Permission: string(request.Permission),

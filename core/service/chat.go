@@ -42,11 +42,15 @@ import (
 
 type ChatService struct {
 	// ChatService 是 CLI 与远程 Agent 共用的 Facade；业务实现由 dependencies 中的应用用例完成。
-	dependencies  ChatDependencies
-	operationInit sync.Once
-	operations    *sessionOperationCoordinator
-	pendingWakeMu sync.Mutex
-	pendingWakes  map[string]*pendingWakeState
+	dependencies          ChatDependencies
+	operationInit         sync.Once
+	operations            *sessionOperationCoordinator
+	pendingWakeMu         sync.Mutex
+	pendingWakes          map[string]*pendingWakeState
+	continuationMu        sync.Mutex
+	continuations         map[string]*continuationState
+	backgroundEventsMu    sync.Mutex
+	backgroundSubscribers map[chan BackgroundTurnEvent]struct{}
 }
 
 type pendingWakeState struct {
@@ -190,8 +194,8 @@ func (s *ChatService) schedulePendingTurn(sessionID string) {
 
 func (s *ChatService) runPendingTurnWorker(sessionID string) {
 	for {
-		_, err := s.ContinuePendingStreamForSession(context.Background(), sessionID, llm.ChatStreamHandler{})
-		if err != nil && !errors.Is(err, ErrNoPendingParentInput) {
+		_, err := s.continuePendingStreamForSession(context.Background(), sessionID, llm.ChatStreamHandler{}, true)
+		if err != nil && !errors.Is(err, ErrNoPendingParentInput) && !errors.Is(err, ErrContinuationPaused) && !errors.Is(err, context.Canceled) {
 			if s.dependencies.OnPendingTurnError != nil {
 				s.dependencies.OnPendingTurnError(fmt.Errorf("wake parent session %s: %w", sessionID, err))
 			}
@@ -244,6 +248,9 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	if err := s.resumeContinuations(ctx, sessionID); err != nil {
+		return ChatResponse{}, err
+	}
 
 	var currentBefore *session.Session
 	autoPlanAction := AutoPlanActionChat
@@ -577,6 +584,10 @@ func (s *ChatService) continueSessionStreamForSessionWithSource(ctx context.Cont
 // starts one continuation turn. The queue is drained only after the session
 // operation lock is acquired, so a normal user turn cannot race the delivery.
 func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler) (ChatResponse, error) {
+	return s.continuePendingStreamForSession(ctx, sessionID, stream, false)
+}
+
+func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessionID string, stream llm.ChatStreamHandler, background bool) (response ChatResponse, resultErr error) {
 	// 1. 先锁定父会话，再领取 mailbox；普通用户输入不能与恢复 turn 交错。
 	if s == nil || s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
@@ -593,6 +604,17 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 		return ChatResponse{}, err
 	}
 	defer unlock()
+	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	if background {
+		var finish func()
+		ctx, finish, err = s.beginContinuation(ctx, sessionID)
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		defer finish()
+	} else if err := s.resumeContinuations(ctx, sessionID); err != nil {
+		return ChatResponse{}, err
+	}
 
 	var pendingItems []domaingeneration.PendingTurnInputItem
 	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
@@ -665,7 +687,12 @@ func (s *ChatService) ContinuePendingStreamForSession(ctx context.Context, sessi
 	if current == nil || latestInput == "" {
 		return ChatResponse{}, errors.Join(errors.New("pending parent input is empty"), requeue(pendingItems))
 	}
-	response, err := s.generateAssistantForSession(
+	if background {
+		var completed func(ChatResponse, error)
+		stream, completed = s.backgroundStream(sessionID)
+		defer func() { completed(response, resultErr) }()
+	}
+	response, err = s.generateAssistantForSession(
 		ctx, current, latestInput, "", "resume parent session from background subagent",
 		chatretrievalresult.Context{}, stream, false, true,
 	)
@@ -720,6 +747,9 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	if err := s.resumeContinuations(ctx, sessionID); err != nil {
+		return ChatResponse{}, err
+	}
 
 	prepared, err := s.dependencies.MessageCommands.PrepareRegeneration(ctx, messagecommand.PrepareRegeneration{
 		SessionID: sessionID,
@@ -742,6 +772,9 @@ func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	if err := s.resumeContinuations(ctx, sessionID); err != nil {
+		return ChatResponse{}, err
+	}
 
 	// UpdateSink 把步骤 running/done/failed 状态实时桥接到远程协议层。
 	var updates planport.UpdateSink
@@ -837,6 +870,12 @@ func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if err := s.PauseSessionContinuations(ctx, sessionID); err != nil {
+		return err
+	}
 	unlock, err := s.lockSessionOperation(ctx, sessionID)
 	if err != nil {
 		return err

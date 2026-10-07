@@ -90,6 +90,7 @@ export type MessageType =
   | "plugin_mutation_result"
   | "mcp_reload"
   | "mcp_reload_result"
+  | "background_turn_event"
   | "asset_list"
   | "asset_list_result"
   | "knowledge_catalog_list"
@@ -339,6 +340,7 @@ export type AgentRunKind = "chat" | "regenerate" | "plan" | "internal";
 export type AgentRunEventType =
   | "progress"
   | "reasoning"
+  | "answer"
   | "tool_call"
   | "tool_result"
   | "permission"
@@ -399,6 +401,27 @@ export type AgentRunCompletedPayload = { run: AgentRun };
 export type AgentRunListResultPayload = {
   session_id: string;
   runs?: AgentRunSnapshot[];
+};
+
+export type BackgroundTurnKind =
+  | "started"
+  | "delta"
+  | "run_event"
+  | "completed"
+  | "resync_required";
+
+export type BackgroundTurnEventPayload = {
+  turn_id?: string;
+  session_id?: string;
+  run_id?: string;
+  sequence?: number;
+  kind: BackgroundTurnKind;
+  status?: string;
+  content?: string;
+  reasoning?: string;
+  error?: string;
+  run?: AgentRun;
+  event?: AgentRunEvent;
 };
 
 export type TokenUsage = {

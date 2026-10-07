@@ -283,6 +283,8 @@ export function useChatMessages() {
                 completedAt: item.completedAt || completedAt,
                 status,
                 usage: usage || item.usage,
+                text: (content && content.trim() !== "") ? content : (item.text || content || ""),
+                reasoning: (reasoning && reasoning.trim() !== "") ? reasoning : item.reasoning,
               };
             }
             return item;
@@ -329,10 +331,11 @@ export function useChatMessages() {
                 completedAt,
                 requestID: item.requestID || requestID,
                 reasoning:
-                  item.reasoning ||
-                  (hasAnyReasoning ? undefined : reasoning || undefined),
+                  (reasoning && reasoning.trim() !== "")
+                    ? reasoning
+                    : (item.reasoning || (hasAnyReasoning ? undefined : reasoning || undefined)),
                 status,
-                text: item.text || content || "",
+                text: (content && content.trim() !== "") ? content : (item.text || content || ""),
                 usage: usage || item.usage,
               };
             }
@@ -422,7 +425,9 @@ export function useChatMessages() {
                 completedAt,
                 requestID: item.requestID || requestID,
                 status: "error",
-                text: item.text || message || "Request failed.",
+                text: item.text
+                  ? (message ? `${item.text}\n\n[错误: ${message}]` : item.text)
+                  : (message || "Request failed."),
               };
             }
             if (isInLatestTurn(idx, item)) {
@@ -573,6 +578,36 @@ export function useChatMessages() {
     [commitSessionChats],
   );
 
+  const startBackgroundAssistant = useCallback(
+    (sessionID: string, turnID: string) => {
+      updateSessionChat(sessionID, (current) => {
+        const existing = current.messages.find(
+          (m) => m.role === "assistant" && m.requestID === turnID,
+        );
+        if (existing) {
+          return current;
+        }
+        const id = newRequestID();
+        return {
+          ...current,
+          activeAssistantID: id,
+          messages: [
+            ...current.messages,
+            {
+              id,
+              requestID: turnID,
+              createdAt: new Date().toISOString(),
+              role: "assistant",
+              status: "streaming",
+              text: "",
+            },
+          ],
+        };
+      });
+    },
+    [updateSessionChat],
+  );
+
   return {
     addMessage,
     addToolCall,
@@ -591,6 +626,7 @@ export function useChatMessages() {
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingRequest,
+    startBackgroundAssistant,
     sessionChats: sessionChatsRef.current,
     sessionChatsVersion,
   };

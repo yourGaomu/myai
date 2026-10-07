@@ -17,6 +17,7 @@ type Props = {
   pendingSessions: boolean;
   sessionID: string;
   sessions: SessionSummary[];
+  unreadSessionIDs?: Record<string, boolean>;
 };
 
 export function SessionsPanel({
@@ -31,6 +32,7 @@ export function SessionsPanel({
   pendingSessions,
   sessionID,
   sessions,
+  unreadSessionIDs,
 }: Props) {
   return (
     <View style={[styles.panel, styles.sessionsPanel]}>
@@ -70,6 +72,7 @@ export function SessionsPanel({
               >
                 <View style={styles.sessionAvatar}>
                   <Text style={styles.sessionAvatarText}>…</Text>
+                  {unreadSessionIDs?.[session.id] ? <View style={styles.unreadDot} /> : null}
                 </View>
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "新对话"}</Text>
@@ -330,5 +333,16 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#6c665f",
+  },
+  unreadDot: {
+    backgroundColor: "#ff4d4f",
+    borderColor: "#ffffff",
+    borderRadius: 5,
+    borderWidth: 1.5,
+    height: 10,
+    position: "absolute",
+    right: -2,
+    top: -2,
+    width: 10,
   },
 });

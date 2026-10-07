@@ -11,6 +11,7 @@ import (
 
 	domainauthorization "myai/core/domain/authorization"
 	authorizationport "myai/core/port/authorization"
+	"myai/core/remote/protocol"
 )
 
 const (
@@ -98,7 +99,34 @@ func (s *Server) revokeClientAuthorization(id string, userID string, deviceID st
 	if authorization.UserID != userID || authorization.DeviceID != deviceID {
 		return authorizationport.ErrNotFound
 	}
-	return s.authStore.Revoke(ctx, id, time.Now())
+	if err := s.authStore.Revoke(ctx, id, time.Now()); err != nil {
+		return err
+	}
+	s.invalidateClientAuthorization(id)
+	return nil
+}
+
+// Check the durable authorization at the delivery boundary as revocations may
+// originate on another relay instance. Do not extend expiry when delivering.
+func (s *Server) writeAuthorizedClient(p *peer, message protocol.Message) error {
+	s.clientLock.RLock()
+	connection := s.connections[p]
+	var identity clientConnection
+	if connection != nil {
+		identity = *connection
+	}
+	s.clientLock.RUnlock()
+	if connection == nil {
+		return fmt.Errorf("client connection is no longer registered")
+	}
+	ctx, cancel := authContext()
+	defer cancel()
+	authorization, err := s.authStore.Get(ctx, identity.ClientID)
+	if err != nil || !authorization.ActiveAt(time.Now()) || authorization.UserID != identity.UserID || authorization.DeviceID != identity.DeviceID {
+		s.invalidateClientAuthorization(identity.ClientID)
+		return fmt.Errorf("client authorization is unavailable, revoked or expired")
+	}
+	return p.writeJSON(message)
 }
 
 func normalizeClientName(name string) string {

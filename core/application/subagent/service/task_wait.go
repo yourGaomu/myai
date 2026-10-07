@@ -45,12 +45,20 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 		timeout = maxTaskWaitTimeout
 	}
 
+	// Subscribe before reading state: a completion between the state read and
+	// subscription must not depend on the bounded replay buffer retaining it.
+	var events <-chan subagentport.TaskEvent
+	if source, ok := service.Events.(subagentport.TaskEventSource); ok {
+		var unsubscribe func()
+		events, unsubscribe = source.SubscribeTaskEvents(parentID, 0, 32)
+		defer unsubscribe()
+	}
 	tasks, err := service.loadWaitTasks(ctx, targetIDs, parentID)
 	if err != nil {
 		return subagentresult.Wait{}, err
 	}
 	if terminalTasks := terminalWaitTasks(tasks); len(terminalTasks) > 0 {
-		return newWaitResult(terminalTasks, false, false, 0), nil
+		return service.completedWaitResult(terminalTasks, 0)
 	}
 	waiter, err := service.markWaitingForChildren(command)
 	if err != nil {
@@ -64,15 +72,9 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 			defer service.unparkScheduler(waiter.runID)
 		}
 	}
-	source, ok := service.Events.(subagentport.TaskEventSource)
-	if !ok {
+	if events == nil {
 		return subagentresult.Wait{}, errors.New("subagent task event source is not configured")
 	}
-
-	// Subscribe after the initial read; replay from sequence zero covers a
-	// completion that races with this subscription.
-	events, unsubscribe := source.SubscribeTaskEvents(parentID, 0, 32)
-	defer unsubscribe()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -81,17 +83,17 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 		case <-ctx.Done():
 			return subagentresult.Wait{}, ctx.Err()
 		case <-timer.C:
-			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
+			current, err := service.loadWaitTasks(ctx, targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
 			terminal := terminalWaitTasks(current)
 			if len(terminal) > 0 {
-				return newWaitResult(terminal, false, false, 0), nil
+				return service.completedWaitResult(terminal, 0)
 			}
 			return newWaitResult(current, true, false, 0), nil
 		case <-wakeup:
-			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
+			current, err := service.loadWaitTasks(ctx, targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
@@ -103,15 +105,31 @@ func (service *Service) Wait(ctx context.Context, command subagentcommand.WaitTa
 			if !containsWaitTarget(targetIDs, event.Task.ID) {
 				continue
 			}
-			current, err := service.loadWaitTasks(context.Background(), targetIDs, parentID)
+			current, err := service.loadWaitTasks(ctx, targetIDs, parentID)
 			if err != nil {
 				return subagentresult.Wait{}, err
 			}
 			if terminal := terminalWaitTasks(current); len(terminal) > 0 {
-				return newWaitResult(terminal, false, false, event.Sequence), nil
+				return service.completedWaitResult(terminal, event.Sequence)
 			}
 		}
 	}
+}
+
+func (service *Service) completedWaitResult(tasks []domainsubagent.Task, sequence uint64) (subagentresult.Wait, error) {
+	// A terminal status can become visible before its completion callback.
+	// Queue the same stable event before returning, so AgentLoop can consume it
+	// at the wait boundary instead of generating a second answer later.
+	for _, task := range tasks {
+		if task.Status == domainsubagent.TaskStatusSucceeded || task.Status == domainsubagent.TaskStatusFailed {
+			if err := service.ensureParentCompletionQueued(task); err != nil {
+				return subagentresult.Wait{}, err
+			}
+		}
+	}
+	result := newWaitResult(tasks, false, false, sequence)
+	result.ResultsInMailbox = service.ParentNotifier != nil
+	return result, nil
 }
 
 func waitTargetIDs(command subagentcommand.WaitTask) ([]string, error) {

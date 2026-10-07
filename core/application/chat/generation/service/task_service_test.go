@@ -69,6 +69,25 @@ func TestRunKindMarksAutonomousPlanningAsPlan(t *testing.T) {
 	}
 }
 
+func TestTaskServicePersistsFinalAnswerForDisconnectedClients(t *testing.T) {
+	repository := agentrunmemory.New()
+	commands := agentrunservice.CommandService{Repository: repository, IDs: &runStreamIDs{}}
+	response, err := (TaskService{RequestIDs: taskRequestIDStub{}, Runs: commands, Generator: taskGeneratorStub{response: generationresult.GenerationResponse{SessionID: "parent", Result: modelport.ChatResult{Content: "summary"}}}}).Generate(context.Background(), generationcommand.GenerationTask{
+		Session: &session.Session{ID: "parent"}, Reason: "resume parent session from background subagent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := repository.ListEvents(context.Background(), []string{response.RunID})
+	if err != nil || len(events) != 2 || events[0].Type != domainagentrun.EventTypeAnswer || events[0].Content != "summary" || events[1].Type != domainagentrun.EventTypeCompleted {
+		t.Fatalf("missing durable answer: %#v %v", events, err)
+	}
+	run, err := repository.GetRun(context.Background(), response.RunID)
+	if err != nil || run.Kind != domainagentrun.KindChat {
+		t.Fatalf("wrong continuation run kind: %#v %v", run, err)
+	}
+}
+
 type taskRequestIDStub struct{}
 
 func (taskRequestIDStub) NewRequestID() string { return "generation-request-1" }

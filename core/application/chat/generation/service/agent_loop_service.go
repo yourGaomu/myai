@@ -77,10 +77,12 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	}
 	var releaseToolTurn func()
 	if guard, ok := s.Tools.(generationport.TurnGuard); ok {
+		//检测工具注册表
 		ctx, s.Tools, releaseToolTurn = guard.BeginTurn(ctx)
 		defer releaseToolTurn()
 	}
 
+	//子agent的消息处理队列
 	var consumedPending []domaingeneration.PendingTurnInputItem
 	defer func() {
 		// 2. 生成失败则释放已领取消息，生成成功才确认消息已经被本轮消费。
@@ -100,11 +102,18 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	runCtx = toolruntime.WithMemorySearchBudget(runCtx, toolruntime.NewMemorySearchBudget(s.maxMemorySearchCalls()))
 	reasoningParts := make([]string, 0, maxToolRounds)
 	stopContinuations := 0
+	// Wait-only rounds have a separate bounded budget. Time spent waiting does
+	// not consume the budget intended for workspace/tool work.
+	waitRounds := 0
+	const maxWaitRounds = 32
 	// Queue-only inter-agent messages are delivered at an answer boundary. This
 	// mirrors Codex mailbox semantics: tool execution keeps its current context
 	// stable, while the next model turn sees the completed mailbox batch.
 	mailboxPhase := MailboxDeferred
 	for round := 0; round < maxToolRounds; round++ {
+		if err := runCtx.Err(); err != nil {
+			return modelport.ChatResult{}, err
+		}
 		if mailboxPhase.shouldDrain() {
 			// 3. 只有显式 phase 允许时才领取 mailbox，避免工具执行中途改变上下文。
 			pending, drainErr := s.drainPendingInput(command.Session)
@@ -180,7 +189,20 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			}
 		}
 		// 6. steer_current_turn 可以打断当前工具链；普通 queue 消息继续等待回答边界。
-		if s.hasImmediatePendingInput(command.Session) {
+		waitOnly := len(calls) > 0
+		waited := false
+		for _, call := range calls {
+			waited = waited || call.Name == "wait_agent"
+			waitOnly = waitOnly && call.Name == "wait_agent"
+		}
+		if waitOnly {
+			waitRounds++
+			if waitRounds >= maxWaitRounds {
+				return modelport.ChatResult{}, errors.New("subagent wait limit reached; child tasks may still be running")
+			}
+			round--
+		}
+		if waited || s.hasImmediatePendingInput(command.Session) {
 			// 6. steer 消息迁移到 accept_current_turn，允许下一次采样读取它。
 			mailboxPhase = MailboxAcceptCurrentTurn
 		}

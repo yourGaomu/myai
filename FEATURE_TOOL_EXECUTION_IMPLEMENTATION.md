@@ -330,12 +330,12 @@ Hook 显式 allow 不可覆盖 Session 权限模式。Plan 生成阶段还会在
 PermissionService.Allow
 -> stream.OnToolAsk
 -> Agent.askToolPermission
--> permissionWaiters.register(remote request_id)
+-> permissionWaiters.register(remote request_id + approval_id)
 -> permission_ask
 -> Mobile useRemoteMessageHandler
 -> 用户点击 Allow/Deny
 -> useChatActions.sendPermissionResult
--> permission_result（复用原 request_id）
+-> permission_result（复用原 request_id，回传 approval_id）
 -> Agent.handlePermissionResult
 -> waiter.resolve
 -> PermissionService 继续
@@ -345,7 +345,7 @@ PermissionService.Allow
 
 ## 18. 为什么权限使用手机 request ID
 
-权限弹窗属于正在运行的远程聊天请求。Agent 的 waiter map 使用原协议 `request_id`，让手机的 `permission_result` 唤醒正确生成 goroutine。
+权限弹窗属于正在运行的远程聊天请求。`request_id` 用于 Relay 路由；Agent 为每次工具授权生成独立的 `approval_id`，waiter 按两者共同匹配。前端必须保存并原样回传 `approval_id`，缺失时拒绝处理；已超时或已消费的授权回复不会放行其他工具。同一聊天请求可以同时有多个授权弹窗，不能仅按 `request_id` 覆盖它们。
 
 Relay 转发 `permission_result` 时不能覆盖原 `clients[request_id].RequestType=user_message`，否则最终 `assistant_done` 无法按聊天终态释放路由。
 

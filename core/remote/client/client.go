@@ -148,7 +148,7 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, requestID s
 				c.config.UserID,
 				c.config.DeviceID,
 				message.SessionID,
-				protocol.PermissionResultPayload{Allowed: c.config.AllowTools},
+				protocol.PermissionResultPayload{ApprovalID: payload.ApprovalID, Allowed: c.config.AllowTools},
 			)
 			if err != nil {
 				return err

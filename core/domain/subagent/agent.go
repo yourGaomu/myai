@@ -98,8 +98,8 @@ type AgentMessage struct {
 	ClaimExpiresAt   *time.Time
 }
 
-func AgentResultMessageID(taskID string) string {
-	return "agent-result:" + strings.TrimSpace(taskID)
+func AgentResultMessageID(taskID, runID string) string {
+	return "agent-result:" + strings.TrimSpace(taskID) + ":" + strings.TrimSpace(runID)
 }
 
 func (message AgentMessage) Validate() error {

@@ -4,6 +4,7 @@ const state = {
   activeRequestID: "",
   activeAssistant: null,
   pendingPermission: null,
+  permissionQueue: [],
   pendingSessionRequestID: "",
   sessions: [],
   clientToken: localStorage.getItem("myai_client_token") || "",
@@ -385,7 +386,7 @@ function sendUserMessage(content) {
 
   state.activeRequestID = newRequestID();
   state.activeAssistant = null;
-  hidePermission();
+  hidePermission(true);
 
   addMessage("user", content);
   el.requestText.textContent = `Request ${state.activeRequestID}`;
@@ -445,7 +446,7 @@ function sendPermissionResult(allowed) {
   const sent = sendEnvelope("permission_result", {
     request_id: state.pendingPermission.requestID,
     session_id: state.pendingPermission.sessionID,
-    payload: { allowed },
+    payload: { allowed, approval_id: state.pendingPermission.approvalID },
   });
   if (!sent) {
     return;
@@ -496,7 +497,7 @@ function handleMessage(message) {
       if (message.session_id) {
         el.sessionId.value = message.session_id;
       }
-      hidePermission();
+      clearPermissionsForRequest(message.request_id);
       break;
     case "tool_call": {
       const payload = readPayload(message);
@@ -524,7 +525,7 @@ function handleMessage(message) {
       if (errorText.includes("client token is invalid or expired")) {
         clearPairing("Pairing expired. Pair this browser again");
       }
-      hidePermission();
+      clearPermissionsForRequest(message.request_id);
       break;
     }
     default:
@@ -648,19 +649,48 @@ function addMessage(kind, text) {
 
 function showPermission(message) {
   const payload = readPayload(message);
-  state.pendingPermission = {
+  if (!payload.approval_id) {
+    addMessage("error", "Permission request is missing approval_id");
+    return;
+  }
+  const permission = {
+    approvalID: payload.approval_id,
     requestID: message.request_id,
     sessionID: message.session_id || "",
     name: payload.name || "tool",
+    permission: payload.permission || "permission",
+    arguments: payload.arguments || "",
   };
-  el.permissionTitle.textContent = `${payload.name || "Tool"} requires ${payload.permission || "permission"}`;
-  el.permissionArgs.textContent = payload.arguments || "";
+  if (state.pendingPermission) {
+    state.permissionQueue.push(permission);
+    return;
+  }
+  displayPermission(permission);
+}
+
+function displayPermission(permission) {
+  state.pendingPermission = permission;
+  el.permissionTitle.textContent = `${permission.name} requires ${permission.permission}`;
+  el.permissionArgs.textContent = permission.arguments;
   el.permissionBox.classList.remove("hidden");
 }
 
-function hidePermission() {
+function hidePermission(clearAll = false) {
+  if (clearAll) {
+    state.permissionQueue = [];
+  }
   state.pendingPermission = null;
   el.permissionBox.classList.add("hidden");
+  if (state.permissionQueue.length > 0) {
+    displayPermission(state.permissionQueue.shift());
+  }
+}
+
+function clearPermissionsForRequest(requestID) {
+  state.permissionQueue = state.permissionQueue.filter((item) => item.requestID !== requestID);
+  if (state.pendingPermission?.requestID === requestID) {
+    hidePermission();
+  }
 }
 
 function newRequestID() {

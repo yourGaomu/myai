@@ -304,12 +304,22 @@ type stepExecutionResult struct {
 
 func (s ExecutionService) executeReadyBatch(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, indexes []int, runID string, stream modelport.ChatStreamHandler, titleFirst bool) []stepExecutionResult {
 	results := make([]stepExecutionResult, len(indexes))
-	var appendMu sync.Mutex
+	// Freeze the batch history before any sibling appends instructions or commits
+	// a result. Prepare all inputs before launching the parallel generations.
+	baseline := session.Clone(current)
+	tasks := make([]generationcommand.GenerationTask, len(indexes))
+	for i, index := range indexes {
+		tasks[i], results[i].Err = s.preparePlanStep(ctx, current, baseline, currentPlan, index, titleFirst && i == 0)
+		results[i].Index = index
+	}
 	serializedStream := synchronizedStream{base: stream}
 	parallel := len(indexes) > 1
 	var waitGroup sync.WaitGroup
 	for resultIndex, stepIndex := range indexes {
 		resultIndex, stepIndex := resultIndex, stepIndex
+		if results[resultIndex].Err != nil {
+			continue
+		}
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
@@ -319,7 +329,11 @@ func (s ExecutionService) executeReadyBatch(ctx context.Context, current *sessio
 				output = &bufferedStepOutput{}
 				stepStream = output.Handler(stepStream)
 			}
-			results[resultIndex] = s.executePlanStep(ctx, current, currentPlan, stepIndex, runID, stepStream, &appendMu, titleFirst && resultIndex == 0)
+			stepContext := agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{ParentRunID: runID, PlanID: currentPlan.ID, StepID: currentPlan.Steps[stepIndex].ID})
+			stepContext = agentrunruntime.WithRunID(stepContext, "")
+			task := tasks[resultIndex]
+			task.Stream = stepStream
+			results[resultIndex].Response, results[resultIndex].Err = s.Generation.Generate(stepContext, task)
 			results[resultIndex].Output = output
 		}()
 	}
@@ -429,15 +443,10 @@ func (s *synchronizedStream) Handler() modelport.ChatStreamHandler {
 	return handler
 }
 
-func (s ExecutionService) executePlanStep(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, index int, runID string, stream modelport.ChatStreamHandler, appendMu *sync.Mutex, titleFirst bool) stepExecutionResult {
-	result := stepExecutionResult{Index: index}
+func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline *session.Session, currentPlan *agentplan.Plan, index int, titleFirst bool) (generationcommand.GenerationTask, error) {
 	step := currentPlan.Steps[index]
 	input := s.Inputs.BuildStepInput(currentPlan, step, index, len(currentPlan.Steps))
-	// Message append and its persistence snapshot are serialized because most
-	// session adapters expose a single mutable aggregate. The model/tool turn
-	// itself runs outside this critical section, allowing independent steps to
-	// overlap.
-	appendMu.Lock()
+	// Called serially before any generation in this batch starts.
 	prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
 	if err == nil && prepared.Session == nil {
 		err = errors.New("message appender returned nil session")
@@ -452,24 +461,18 @@ func (s ExecutionService) executePlanStep(ctx context.Context, current *session.
 			RuntimeInstruction: prepared.RuntimeInstruction, AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(prepared.Session),
 		})
 	}
-	appendMu.Unlock()
 	if err != nil {
-		result.Err = err
-		return result
+		return generationcommand.GenerationTask{}, err
 	}
-	stepSession := session.Clone(prepared.Session)
-	stepContext := agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{
-		ParentRunID: runID, PlanID: currentPlan.ID, StepID: step.ID,
-	})
-	stepContext = agentrunruntime.WithRunID(stepContext, "")
+	stepSession := session.Clone(baseline)
+	stepSession.Messages = append(stepSession.Messages, domainmessage.CloneAll(prepared.AppendedMessages)...)
 	title := ""
 	if titleFirst {
 		title = "Execute plan"
 	}
-	result.Response, result.Err = s.Generation.Generate(stepContext, generationcommand.GenerationTask{
-		Session: stepSession, LatestInput: input, Title: title, Reason: "execute plan step", Stream: stream, ForceChatMode: true,
-	})
-	return result
+	return generationcommand.GenerationTask{
+		Session: stepSession, LatestInput: input, Title: title, Reason: "execute plan step", ForceChatMode: true,
+	}, nil
 }
 
 func readyStepIndexes(currentPlan *agentplan.Plan) []int {

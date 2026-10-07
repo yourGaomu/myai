@@ -335,6 +335,26 @@ func (s *Server) unregisterClientPeer(p *peer) {
 	delete(s.connections, p)
 }
 
+func (s *Server) invalidateClientAuthorization(clientID string) {
+	var peers []*peer
+	s.clientLock.Lock()
+	for requestID, client := range s.clients {
+		if client.ClientID == clientID {
+			delete(s.clients, requestID)
+		}
+	}
+	for p, connection := range s.connections {
+		if connection.ClientID == clientID {
+			delete(s.connections, p)
+			peers = append(peers, p)
+		}
+	}
+	s.clientLock.Unlock()
+	for _, p := range peers {
+		_ = p.close()
+	}
+}
+
 func (s *Server) getClient(requestID string) *clientEntry {
 	if requestID == "" {
 		return nil

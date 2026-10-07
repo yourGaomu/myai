@@ -59,25 +59,24 @@ func (service *Service) notifyParentCompletionLocked(task domainsubagent.Task) {
 	if service.parentNotified == nil {
 		service.parentNotified = make(map[string]struct{})
 	}
-	if _, exists := service.parentNotified[task.ID]; exists {
+	messageID := domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID)
+	if _, exists := service.parentNotified[messageID]; exists {
 		return
 	}
-	if service.AgentMessages != nil {
-		message, err := service.prepareParentCompletionMessageLocked(task)
-		if err != nil {
-			service.reportError(err)
-			return
-		}
-		if message.Status == domainsubagent.AgentMessageDelivered {
-			service.parentNotified[task.ID] = struct{}{}
-			return
-		}
-	}
-	if err := service.ParentNotifier.Notify(context.Background(), domainsubagent.CloneTask(task)); err != nil {
+	message, err := service.prepareParentCompletionMessageLocked(task)
+	if err != nil {
 		service.reportError(err)
 		return
 	}
-	service.parentNotified[task.ID] = struct{}{}
+	if message.Status == domainsubagent.AgentMessageDelivered {
+		service.parentNotified[messageID] = struct{}{}
+		return
+	}
+	if err := service.ParentNotifier.Notify(context.Background(), message); err != nil {
+		service.reportError(err)
+		return
+	}
+	service.parentNotified[messageID] = struct{}{}
 }
 
 func (service *Service) ensureParentCompletionQueued(task domainsubagent.Task) error {
@@ -89,33 +88,34 @@ func (service *Service) ensureParentCompletionQueued(task domainsubagent.Task) e
 	if service.parentNotified == nil {
 		service.parentNotified = make(map[string]struct{})
 	}
-	if _, exists := service.parentNotified[task.ID]; exists {
+	messageID := domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID)
+	if _, exists := service.parentNotified[messageID]; exists {
 		return nil
 	}
-	if service.AgentMessages != nil {
-		message, err := service.prepareParentCompletionMessageLocked(task)
-		if err != nil {
-			return err
-		}
-		if message.Status == domainsubagent.AgentMessageDelivered {
-			service.parentNotified[task.ID] = struct{}{}
-			return nil
-		}
-	}
-	if err := service.ParentNotifier.Notify(context.Background(), domainsubagent.CloneTask(task)); err != nil {
+	message, err := service.prepareParentCompletionMessageLocked(task)
+	if err != nil {
 		return err
 	}
-	service.parentNotified[task.ID] = struct{}{}
+	if message.Status == domainsubagent.AgentMessageDelivered {
+		service.parentNotified[messageID] = struct{}{}
+		return nil
+	}
+	if err := service.ParentNotifier.Notify(context.Background(), message); err != nil {
+		return err
+	}
+	service.parentNotified[messageID] = struct{}{}
 	return nil
 }
 
 func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent.Task) (domainsubagent.AgentMessage, error) {
 	// 1. 先复用已有 envelope，保证任务完成事件在重试时保持同一个消息 ID。
-	messageID := domainsubagent.AgentResultMessageID(task.ID)
-	if existing, err := service.AgentMessages.GetAgentMessage(context.Background(), messageID); err == nil {
-		return existing, nil
-	} else if !errors.Is(err, subagentport.ErrNotFound) {
-		return domainsubagent.AgentMessage{}, err
+	messageID := domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID)
+	if service.AgentMessages != nil {
+		if existing, err := service.AgentMessages.GetAgentMessage(context.Background(), messageID); err == nil {
+			return existing, nil
+		} else if !errors.Is(err, subagentport.ErrNotFound) {
+			return domainsubagent.AgentMessage{}, err
+		}
 	}
 	// 2. 持久化内容必须与实际进入父会话的 continuation prompt 完全一致。
 	content, contentErr := domainsubagent.CompletionMessageContent(task)
@@ -136,6 +136,9 @@ func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent
 	if err := message.Validate(); err != nil {
 		return domainsubagent.AgentMessage{}, err
 	}
+	if service.AgentMessages == nil {
+		return message, nil
+	}
 	if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {
 		return repository.EnqueueParentCompletion(context.Background(), task.ID, message)
 	}
@@ -149,7 +152,7 @@ func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent
 // The durable message is the source of truth; the in-memory parent queue is
 // only an execution optimization.
 func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
-	if service == nil || service.AgentMessages == nil || service.ParentNotifier == nil || service.Tasks == nil {
+	if service == nil || service.AgentMessages == nil || service.ParentNotifier == nil {
 		return nil
 	}
 	messages, err := service.AgentMessages.ListPendingParentMessages(ctx)
@@ -172,18 +175,10 @@ func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
 			}
 			message = claimed
 		}
-		task, loadErr := service.Tasks.GetTask(ctx, message.SourceTaskID)
-		if loadErr != nil {
-			if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {
-				_ = repository.ReleaseParentCompletion(ctx, message.ID, message.ClaimOwnerID, loadErr.Error())
-			} else {
-				_ = service.AgentMessages.MarkAgentMessageFailed(ctx, message.ID, loadErr.Error())
-			}
-			continue
-		}
 		service.mu.Lock()
 		// 2. 恢复只负责重新放入父会话 mailbox，不在这里提前确认 delivered。
-		if err := service.ParentNotifier.Notify(ctx, domainsubagent.CloneTask(task)); err != nil {
+		// Replay the persisted envelope, never rebuild it from a newer task run.
+		if err := service.ParentNotifier.Notify(ctx, domainsubagent.CloneAgentMessage(message)); err != nil {
 			service.mu.Unlock()
 			if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {
 				_ = repository.ReleaseParentCompletion(ctx, message.ID, message.ClaimOwnerID, err.Error())
@@ -208,7 +203,7 @@ func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
 		if service.parentNotified == nil {
 			service.parentNotified = make(map[string]struct{})
 		}
-		service.parentNotified[task.ID] = struct{}{}
+		service.parentNotified[message.ID] = struct{}{}
 		service.mu.Unlock()
 	}
 	return nil

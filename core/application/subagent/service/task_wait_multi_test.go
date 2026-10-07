@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,48 @@ import (
 	subagentresult "myai/core/application/subagent/result"
 	domainsubagent "myai/core/domain/subagent"
 )
+
+func TestWaitQueuesCompletionBeforeReturningAndDoesNotDuplicateCallback(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{ID: "child", CurrentRunID: "run", ParentSessionID: "parent", Status: domainsubagent.TaskStatusSucceeded, Result: "verified result"}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	notifier := &recordingParentNotifier{}
+	s := &Service{Tasks: repository, AgentMessages: repository, ParentNotifier: notifier}
+	result, err := s.Wait(context.Background(), subagentcommand.WaitTask{Targets: []string{"child"}, ParentSessionID: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ResultsInMailbox || len(notifier.tasks) != 1 {
+		t.Fatalf("result returned before delivery: %#v", result)
+	}
+	s.mu.Lock()
+	s.notifyParentCompletionLocked(task)
+	s.mu.Unlock()
+	if len(notifier.tasks) != 1 {
+		t.Fatal("completion callback duplicated wait delivery")
+	}
+}
+
+func TestWaitCancellationDoesNotCancelChild(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{ID: "child", ParentSessionID: "parent", Status: domainsubagent.TaskStatusRunning}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{Tasks: repository, Events: subagentevents.NewBus()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.Wait(ctx, subagentcommand.WaitTask{Targets: []string{"child"}, ParentSessionID: "parent"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation=%v", err)
+	}
+	stored, err := repository.GetTask(context.Background(), "child")
+	if err != nil || stored.Status != domainsubagent.TaskStatusRunning {
+		t.Fatal("canceling wait changed child status")
+	}
+}
 
 func TestWaitReturnsWhenAnyTargetReachesTerminalState(t *testing.T) {
 	repository := memory.NewRepository()

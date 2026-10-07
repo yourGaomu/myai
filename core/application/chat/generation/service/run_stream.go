@@ -94,9 +94,13 @@ func (r *runStreamRecorder) onAnswer(text string) {
 func (r *runStreamRecorder) onToolCall(name string, arguments string) {
 	r.flushReasoning()
 	boundedArguments, truncated := boundedText(arguments, maxToolArgumentBytes)
+	status, title := "running", "Tool started"
+	if name == "wait_agent" {
+		status, title = "waiting", "Waiting for subagent results"
+	}
 	r.record(agentruncommand.Append{
-		RunID: r.runID, Type: domainagentrun.EventTypeToolCall, Title: "Tool started",
-		ToolName: name, Arguments: boundedArguments, Status: "running", Truncated: truncated,
+		RunID: r.runID, Type: domainagentrun.EventTypeToolCall, Title: title,
+		ToolName: name, Arguments: boundedArguments, Status: status, Truncated: truncated,
 	})
 	if r.base.OnToolCall != nil {
 		r.base.OnToolCall(name, arguments)

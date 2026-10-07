@@ -643,7 +643,7 @@ Agent 等待授权的代码：
 
 ```text
 Agent.askToolPermission
-  -> permissionWaiters.register(requestID)
+  -> permissionWaiters.register(requestID + approvalID)
   -> TypePermissionAsk
   -> 最多等待 60 秒
   -> handlePermissionResult -> resolve(requestID, allowed)

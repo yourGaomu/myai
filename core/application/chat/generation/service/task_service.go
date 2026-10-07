@@ -129,6 +129,19 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	})
 	response.RunID = runID
 	if resultErr == nil {
+		// Persist the final answer in the run log so disconnected consumers can
+		// recover it even before asynchronous chat-message persistence catches up.
+		if runID != "" && s.Runs != nil && response.Result.Content != "" {
+			content, truncated := boundedText(response.Result.Content, maxReasoningEventBytes)
+			event, err := s.Runs.Append(context.WithoutCancel(ctx), agentruncommand.Append{
+				RunID: runID, Type: domainagentrun.EventTypeAnswer, Title: "Assistant answer", Content: content, Truncated: truncated,
+			})
+			if err != nil {
+				s.reportRunError(err)
+			} else if command.Stream.OnRunEvent != nil {
+				command.Stream.OnRunEvent(event)
+			}
+		}
 		s.recordCapturedPlan(context.WithoutCancel(ctx), runID, response.Plan, command.Reason, command.Stream)
 	}
 	return response, resultErr
@@ -142,6 +155,8 @@ func runKind(reason string, current *session.Session, forceChatMode bool) domain
 		return domainagentrun.KindPlan
 	case "autonomous planning":
 		return domainagentrun.KindPlan
+	case "resume parent session from background subagent":
+		return domainagentrun.KindChat
 	case "user request":
 		if !forceChatMode && current != nil && session.NormalizeAgentMode(current.AgentMode) == session.AgentModePlan {
 			return domainagentrun.KindPlan

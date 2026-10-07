@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Platform, type AppStateStatus, type ScrollView } from "react-native";
 
 import { AppHeader } from "../components/layout/AppHeader";
@@ -226,7 +226,20 @@ export function MobileAppScreen() {
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingRequest,
+    startBackgroundAssistant,
   } = useChatMessages();
+  const [unreadSessionIDs, setUnreadSessionIDs] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (sessionID) {
+      setUnreadSessionIDs((prev: Record<string, boolean>) => {
+        if (!prev[sessionID]) return prev;
+        const next = { ...prev };
+        delete next[sessionID];
+        return next;
+      });
+    }
+  }, [sessionID]);
   const {
     applyRunCompleted,
     applyRunEvent,
@@ -410,6 +423,7 @@ export function MobileAppScreen() {
     requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,
+    requestAgentRuns,
   } = useRemoteRequests({
     clearAssets,
     clearFileEntries,
@@ -741,6 +755,12 @@ export function MobileAppScreen() {
     markAssistantError,
     mergeSessionChats,
     mergeSessionRuns,
+    addUnreadSession: (targetID: string) => {
+      setUnreadSessionIDs((prev: Record<string, boolean>) => (prev[targetID] ? prev : { ...prev, [targetID]: true }));
+    },
+    requestAgentRuns,
+    requestSessionHistory,
+    startBackgroundAssistant,
     requestChanges,
     requestAssets,
     requestFiles,
@@ -762,6 +782,10 @@ export function MobileAppScreen() {
 
   const refreshAllRemoteState = useCallback(() => {
     refreshRemoteState();
+    if (sessionID) {
+      requestAgentRuns(sessionID);
+      requestSessionHistory(sessionID);
+    }
     requestIntentConfig();
     requestCatalog();
     requestProfiles();
@@ -771,7 +795,7 @@ export function MobileAppScreen() {
     requestAIMemoryDreamRuns();
     requestSubagentDefinitions();
     requestSubagentTasks();
-  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestCatalog, requestIntentConfig, requestProfiles, requestSubagentDefinitions, requestSubagentTasks]);
+  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, requestSubagentTasks, sessionID]);
 
   const scheduleReconnect = useCallback(() => {
     if (!clientToken) {
@@ -906,6 +930,20 @@ export function MobileAppScreen() {
       console.warn("Relay foreground service stop failed", error);
     });
   }, [clientToken, deviceID, normalizedRelayURL, settingsLoaded, userID]);
+
+  const handleLoadSession = useCallback(
+    (targetSessionID: string) => {
+      setUnreadSessionIDs((prev: Record<string, boolean>) => {
+        if (!prev[targetSessionID]) return prev;
+        const next = { ...prev };
+        delete next[targetSessionID];
+        return next;
+      });
+      loadSession(targetSessionID);
+    },
+    [loadSession],
+  );
+
   const {
     openChanges,
     openChat,
@@ -918,7 +956,7 @@ export function MobileAppScreen() {
   } = useNavigationActions({
     fileEntriesCount: fileEntries.length,
     filePath,
-    loadSession,
+    loadSession: handleLoadSession,
     requestAssets,
     requestChanges,
     requestFiles,
@@ -927,6 +965,21 @@ export function MobileAppScreen() {
     requestSessions,
     setViewMode,
   });
+
+  const sessionHasRunningAgent = useMemo(() => {
+    return currentRuns.some(({ run }) => run.status === "running");
+  }, [currentRuns]);
+
+  const canPauseSession = Boolean(
+    currentChat.pendingRequestID ||
+    sessionHasRunningAgent ||
+    currentChat.messages.some(
+      (m) =>
+        (m.role === "assistant" && (m.status === "streaming" || m.status === "tool_running")) ||
+        (m.role === "tool_call" && m.status === "tool_running"),
+    ),
+  );
+
   return (
     <MobileScreenShell
       bottomDock={
@@ -934,6 +987,7 @@ export function MobileAppScreen() {
           attachedFiles={attachedFiles}
           bottomPadding={bottomSafePadding}
           buttonFeedback={buttonFeedback}
+          canPause={canPauseSession}
           changesActive={changesTabActive}
           messageInput={messageInput}
           onChangeMessage={setMessageInput}
@@ -1087,6 +1141,7 @@ export function MobileAppScreen() {
           onRefreshDeletedSessions: requestDeletedSessions,
           onRestoreSession: restoreSession,
           onSelectSession: selectSession,
+          unreadSessionIDs,
         }}
         settings={{
           activeModel,
@@ -1195,6 +1250,7 @@ export function MobileAppScreen() {
           subagentEvents,
           subagentMessage,
           subagentTasks,
+          unreadSessionIDs,
           userID,
         }}
       />

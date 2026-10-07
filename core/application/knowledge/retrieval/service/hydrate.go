@@ -31,7 +31,6 @@ func (service *RetrievalService) hydrate(ctx context.Context, query domainknowle
 	}
 	documents := make(map[string]domainknowledge.Document)
 	documentFailures := make(map[string]struct{})
-	invalidDocuments := make(map[string]struct{})
 	warnings := make([]string, 0)
 	hits := make([]domainknowledge.RetrievalHit, 0, query.TopK)
 	selectedChunks := make(map[string]domainknowledge.Chunk)
@@ -52,7 +51,7 @@ func (service *RetrievalService) hydrate(ctx context.Context, query domainknowle
 		if chunk.ParsingProfileID != indexProfile.ParsingProfileID || chunk.ChunkingProfileID != indexProfile.ChunkingProfileID || !containsString(chunk.EmbeddingProfileIDs, query.EmbeddingProfileID) {
 			continue
 		}
-		if _, invalid := invalidDocuments[chunk.DocumentID]; invalid {
+		if _, failed := documentFailures[chunk.DocumentID]; failed {
 			continue
 		}
 		document, exists := documents[chunk.DocumentID]
@@ -62,16 +61,17 @@ func (service *RetrievalService) hydrate(ctx context.Context, query domainknowle
 				if err != nil {
 					documentFailures[chunk.DocumentID] = struct{}{}
 					warnings = append(warnings, fmt.Sprintf("load source document %q: %v", chunk.DocumentID, err))
+					continue
 				} else {
-					if err := loaded.Validate(); err != nil || loaded.Deletion.Deleted || loaded.Status != domainknowledge.DocumentStatusReady || loaded.KnowledgeBaseID != chunk.KnowledgeBaseID || loaded.Version != chunk.DocumentVersion {
-						invalidDocuments[chunk.DocumentID] = struct{}{}
-						warnings = append(warnings, fmt.Sprintf("source document %q is not valid for retrieval", chunk.DocumentID))
-						continue
-					}
 					document = loaded
 					documents[chunk.DocumentID] = loaded
 				}
 			}
+		}
+		// Validate every chunk, including chunks sharing a cached document.
+		if err := document.Validate(); err != nil || document.Deletion.Deleted || document.Status != domainknowledge.DocumentStatusReady || document.KnowledgeBaseID != chunk.KnowledgeBaseID || document.Version != chunk.DocumentVersion {
+			warnings = append(warnings, fmt.Sprintf("source document %q is not valid for retrieval", chunk.DocumentID))
+			continue
 		}
 		sourceName := chunk.DocumentID
 		if strings.TrimSpace(document.FileName) != "" {

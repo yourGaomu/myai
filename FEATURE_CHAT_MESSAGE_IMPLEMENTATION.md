@@ -925,18 +925,18 @@ totalUsage = totalUsage.Add(result.Usage)
 ExecutionService
 -> stream.OnToolAsk
 -> Agent.askToolPermission
--> permissionWaiters.register(mobile request_id)
+-> permissionWaiters.register(mobile request_id + approval_id)
 -> permission_ask 发给手机
 -> 等待 permission_result / 60 秒 / ctx canceled
 ```
 
-手机返回时必须复用原聊天的 `request_id`：
+手机返回时必须复用原聊天的 `request_id`，并原样回传对应 `permission_ask.payload.approval_id`：
 
 ```json
 {
   "type": "permission_result",
   "request_id": "原聊天request_id",
-  "payload": { "allowed": true }
+  "payload": { "approval_id": "对应授权弹窗的唯一ID", "allowed": true }
 }
 ```
 

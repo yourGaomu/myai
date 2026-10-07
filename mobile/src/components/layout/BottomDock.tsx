@@ -10,6 +10,7 @@ type Props = {
   attachedFiles: ChatAttachment[];
   bottomPadding: number;
   buttonFeedback: ButtonFeedback;
+  canPause?: boolean;
   changesActive: boolean;
   messageInput: string;
   onChangeMessage: (value: string) => void;
@@ -33,6 +34,7 @@ export function BottomDock({
   attachedFiles,
   bottomPadding,
   buttonFeedback,
+  canPause,
   changesActive,
   messageInput,
   onChangeMessage,
@@ -57,7 +59,7 @@ export function BottomDock({
         <Composer
           attachedFiles={attachedFiles}
           buttonFeedback={buttonFeedback}
-          canPause={pendingSend}
+          canPause={canPause !== undefined ? canPause : pendingSend}
           messageInput={messageInput}
           onChangeMessage={onChangeMessage}
           onPause={onPause}
