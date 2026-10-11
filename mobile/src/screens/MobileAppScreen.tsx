@@ -3,7 +3,7 @@ import { AppState, Platform, type AppStateStatus, type ScrollView } from "react-
 
 import { AppHeader } from "../components/layout/AppHeader";
 import { BottomDock } from "../components/layout/BottomDock";
-import { SessionModeSwitch } from "../components/session/SessionModeSwitch";
+import { SideDrawer } from "../components/navigation/SideDrawer";
 import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
 import { useAssetState } from "../hooks/useAssetState";
 import { useAgentRunState } from "../hooks/useAgentRunState";
@@ -231,6 +231,7 @@ export function MobileAppScreen() {
     startBackgroundAssistant,
   } = useChatMessages();
   const [unreadSessionIDs, setUnreadSessionIDs] = useState<Record<string, boolean>>({});
+  const [drawerVisible, setDrawerVisible] = useState(false);
 
   useEffect(() => {
     if (sessionID) {
@@ -1059,21 +1060,16 @@ export function MobileAppScreen() {
         connected={connected}
         deviceID={deviceID}
         isBusy={uiBusy}
+        mode={activeSession?.agent_mode === "plan" ? "plan" : "chat"}
+        modePending={pendingActions.settings}
+        onOpenMenu={() => setDrawerVisible(true)}
+        onQuickNew={newSession}
+        onToggleMode={setAgentMode}
         onToggleSettings={toggleSettings}
         status={status}
         userID={userID}
         viewMode={viewMode}
       />
-
-      {viewMode === "chat" ? (
-        <SessionModeSwitch
-          buttonFeedback={buttonFeedback}
-          disabled={!connected || !sessionID}
-          mode={activeSession?.agent_mode === "plan" ? "plan" : "chat"}
-          onChange={setAgentMode}
-          pending={pendingActions.settings}
-        />
-      ) : null}
 
       <MobileMainContent
         changes={{
@@ -1321,6 +1317,39 @@ export function MobileAppScreen() {
         task={inspectedTask}
         taskEvents={inspectionTaskEvents}
         visible={Boolean(inspectedTaskID)}
+      />
+
+      {/* 3.0 全局收纳抽屉（收纳工作区文件、变更历史、知识库、会话列表与设置中心） */}
+      <SideDrawer
+        activeSessionID={sessionID}
+        buttonFeedback={buttonFeedback}
+        connected={connected}
+        deviceID={deviceID}
+        onClose={() => setDrawerVisible(false)}
+        onNewSession={() => {
+          setDrawerVisible(false);
+          newSession();
+        }}
+        onOpenSettings={() => {
+          setDrawerVisible(false);
+          toggleSettings();
+        }}
+        onSelectSession={(targetSessionID) => {
+          setDrawerVisible(false);
+          handleLoadSession(targetSessionID);
+        }}
+        onSelectViewMode={(mode) => {
+          setDrawerVisible(false);
+          if (mode === "chat") openChat();
+          else if (mode === "files") openFiles();
+          else if (mode === "changes") openChanges();
+          else if (mode === "knowledge") openKnowledge();
+          else if (mode === "settings") toggleSettings();
+        }}
+        sessions={sessions}
+        userID={userID}
+        viewMode={viewMode}
+        visible={drawerVisible}
       />
     </MobileScreenShell>
   );

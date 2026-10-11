@@ -1,7 +1,7 @@
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useEffect, useState } from "react";
 
-import type { ViewMode } from "../../types/app";
+import type { SessionAgentMode, ViewMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { AgentActivity } from "../../utils/agentActivity";
 
@@ -11,6 +11,11 @@ type Props = {
   connected: boolean;
   deviceID: string;
   isBusy: boolean;
+  mode?: SessionAgentMode;
+  modePending?: boolean;
+  onOpenMenu?: () => void;
+  onQuickNew?: () => void;
+  onToggleMode?: (nextMode: SessionAgentMode) => void;
   onToggleSettings: () => void;
   status: string;
   userID: string;
@@ -23,6 +28,11 @@ export function AppHeader({
   connected,
   deviceID,
   isBusy,
+  mode = "chat",
+  modePending = false,
+  onOpenMenu,
+  onQuickNew,
+  onToggleMode,
   onToggleSettings,
   status,
   userID,
@@ -42,52 +52,112 @@ export function AppHeader({
   }, [animated, frames.length]);
 
   const activityText = activityLabel(activity);
-  const connectionText = connected ? `手机控制电脑 / ${userID.trim() || "本地用户"} / ${deviceID.trim() || "本地设备"}` : disconnectedLabel(status);
   const statusText = activityText || (isBusy ? "处理中" : connected ? "在线" : "离线");
+
+  const handleToggleMode = () => {
+    if (onToggleMode && !modePending) {
+      onToggleMode(mode === "chat" ? "plan" : "chat");
+    }
+  };
 
   return (
     <View style={styles.header}>
-      <View style={styles.brand}>
-        <View style={styles.brandMark}>
+      {/* 左侧：菜单按钮，呼出侧边抽屉（收纳设置与工作区，借鉴图四） */}
+      <Pressable
+        accessibilityLabel="打开导航菜单"
+        onPress={onOpenMenu}
+        style={({ pressed }) =>
+          buttonFeedback(styles.actionButton, pressed)
+        }
+      >
+        <Text style={styles.actionButtonText}>☰</Text>
+      </Pressable>
+
+      {/* 中上方：动作角色与状态浮岛（半透明玻璃拟态，借鉴图三 Muse） */}
+      <View style={styles.characterIsland}>
+        {/* 头像突出在上 */}
+        <View style={styles.avatarWrap}>
           <Image
-            accessibilityLabel={activityText ? `MYAI ${activityText}` : "MYAI 图标"}
+            accessibilityLabel={activityText ? `MYAI ${activityText}` : "MYAI 头像"}
             source={animated ? frames[frame] : require("../../../assets/icon.png")}
-            style={[styles.brandImage, animated && styles.motionImage]}
+            style={[styles.avatarImage, animated && styles.motionImage]}
           />
         </View>
-        <View style={styles.headerText}>
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>MYAI</Text>
-            {connected ? (
-              <View style={styles.devicePill}>
-                <Text numberOfLines={1} style={styles.devicePillText}>
-                  {deviceID.trim() || "pc-local"}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={styles.contextRow}>
-            <Text numberOfLines={1} style={styles.subtitle}>
-              {activityText || (connected ? `📁 ${userID.trim() || "local"} · 电脑已连接` : disconnectedLabel(status))}
-            </Text>
-          </View>
+
+        {/* 角色名与设备徽章 */}
+        <View style={styles.identityRow}>
+          <Text style={styles.identityName}>MYAI</Text>
+          {connected ? (
+            <View style={styles.deviceBadge}>
+              <Text numberOfLines={1} style={styles.deviceBadgeText}>
+                {deviceID.trim() || "pc-local"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* 状态与紧凑模式切换胶囊 (将原占地巨大的模式条缩进此处) */}
+        <View style={styles.statusModeCapsule}>
+          {animated || isBusy ? (
+            <ActivityIndicator color="#12100e" size="small" style={styles.inlineSpinner} />
+          ) : (
+            <View
+              style={[
+                styles.statusDot,
+                connected ? styles.statusDotOnline : styles.statusDotOffline,
+              ]}
+            />
+          )}
+          <Text style={styles.statusLabel}>{statusText}</Text>
+
+          {/* 模式切换药丸 */}
+          {connected ? (
+            <>
+              <Text style={styles.dotDivider}>·</Text>
+              <Pressable
+                accessibilityLabel="切换会话模式"
+                disabled={modePending}
+                onPress={handleToggleMode}
+                style={({ pressed }) =>
+                  buttonFeedback(
+                    [
+                      styles.modePill,
+                      mode === "plan" && styles.modePillPlan,
+                    ],
+                    pressed,
+                  )
+                }
+              >
+                {modePending ? (
+                  <ActivityIndicator color="#12100e" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.modePillText}>
+                      {mode === "plan" ? "🎯 规划模式" : "💬 对话模式"}
+                    </Text>
+                    <Text style={styles.modeDropdownArrow}>▾</Text>
+                  </>
+                )}
+              </Pressable>
+            </>
+          ) : null}
         </View>
       </View>
-      <View style={styles.headerActions}>
+
+      {/* 右侧：快速设置或新会话按钮 */}
+      <View style={styles.rightActions}>
         <Pressable
+          accessibilityLabel="打开设置"
           onPress={onToggleSettings}
-          style={({ pressed }) => buttonFeedback([styles.ghostButton, viewMode === "settings" && styles.ghostButtonActive], pressed)}
+          style={({ pressed }) =>
+            buttonFeedback(
+              [styles.actionButton, viewMode === "settings" && styles.actionButtonActive],
+              pressed,
+            )
+          }
         >
-          <Text style={styles.ghostButtonText}>⚙</Text>
+          <Text style={styles.actionButtonText}>⚙</Text>
         </Pressable>
-        <View style={[styles.statusPill, connected ? styles.statusPillOnline : styles.statusPillOffline]}>
-          {animated || isBusy ? (
-            <ActivityIndicator color="#12100e" size="small" />
-          ) : (
-            <View style={[styles.statusDot, connected && styles.statusDotOnline]} />
-          )}
-          <Text style={styles.statusPillText}>{statusText}</Text>
-        </View>
       </View>
     </View>
   );
@@ -122,165 +192,172 @@ const thinkingFrames = [
 function activityLabel(activity: AgentActivity) {
   switch (activity) {
     case "thinking": return "正在思考...";
-    case "tool": return "正在调用工具...";
-    case "permission": return "等待操作确认...";
-    case "uploading": return "正在上传文件...";
+    case "tool": return "调用工具...";
+    case "permission": return "等待确认...";
+    case "uploading": return "上传中...";
     default: return "";
-  }
-}
-
-function disconnectedLabel(status: string) {
-  switch (status) {
-    case "Connecting": return "正在连接 Relay...";
-    case "Pairing": return "正在配对...";
-    case "Connection timeout": return "Relay 连接超时";
-    case "WebSocket error": return "Relay 连接异常";
-    default: return "未连接 Relay";
   }
 }
 
 const styles = StyleSheet.create({
   header: {
-    alignItems: "center",
-    backgroundColor: "#f4f5f7",
-    borderBottomColor: "#25231f",
-    borderBottomWidth: 2,
+    alignItems: "flex-start",
     flexDirection: "row",
-    gap: 8,
-    minHeight: 60,
-    paddingBottom: 11,
-    paddingTop: 7,
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    zIndex: 30,
   },
-  brand: {
+  actionButton: {
     alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-    minWidth: 0,
-  },
-  brandMark: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
+    backgroundColor: "rgba(255, 253, 247, 0.9)",
     borderColor: "#12100e",
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 2,
-    height: 42,
+    elevation: 3,
+    height: 40,
     justifyContent: "center",
-    overflow: "hidden",
-    width: 42,
+    shadowColor: "#12100e",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    width: 40,
   },
-  brandImage: {
-    height: 38,
-    resizeMode: "contain",
-    width: 38,
+  actionButtonActive: {
+    backgroundColor: "#ffd84f",
   },
-  motionImage: {
-    height: 38,
-    resizeMode: "contain",
-    width: 32,
-  },
-  headerText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  headerActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexShrink: 0,
-    gap: 8,
-  },
-  titleRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  title: {
+  actionButtonText: {
     color: "#12100e",
     fontSize: 17,
     fontWeight: "900",
-    letterSpacing: -0.2,
-    lineHeight: 22,
   },
-  devicePill: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    maxWidth: 90,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+  rightActions: {
+    flexDirection: "row",
+    gap: 6,
   },
-  devicePillText: {
-    color: "#12100e",
-    fontSize: 9.5,
-    fontWeight: "900",
-  },
-  contextRow: {
-    marginTop: 1,
-  },
-  subtitle: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  ghostButton: {
+  characterIsland: {
     alignItems: "center",
-    backgroundColor: "#4fd7ee",
+    backgroundColor: "rgba(255, 253, 247, 0.92)",
     borderColor: "#12100e",
-    borderRadius: 10,
+    borderRadius: 24,
     borderWidth: 2,
-    elevation: 2,
-    height: 34,
-    justifyContent: "center",
-    minWidth: 34,
-    paddingHorizontal: 8,
+    elevation: 3,
+    flexShrink: 1,
+    paddingBottom: 6,
+    paddingHorizontal: 14,
+    paddingTop: 4,
     shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 0,
   },
-  ghostButtonActive: {
+  avatarWrap: {
     backgroundColor: "#ffd84f",
-  },
-  ghostButtonText: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  statusPill: {
-    alignItems: "center",
     borderColor: "#12100e",
-    borderRadius: 999,
+    borderRadius: 18,
     borderWidth: 2,
     elevation: 2,
+    height: 36,
+    marginTop: -14,
+    overflow: "hidden",
+    shadowColor: "#12100e",
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    width: 36,
+  },
+  avatarImage: {
+    height: "100%",
+    width: "100%",
+  },
+  motionImage: {
+    transform: [{ scale: 1.05 }],
+  },
+  identityRow: {
+    alignItems: "center",
     flexDirection: "row",
     gap: 5,
-    minHeight: 34,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    marginTop: 2,
   },
-  statusPillOnline: {
-    backgroundColor: "#b9e9b0",
+  identityName: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: -0.2,
   },
-  statusPillOffline: {
-    backgroundColor: "#ff7f68",
+  deviceBadge: {
+    backgroundColor: "#f0ebe1",
+    borderColor: "#12100e",
+    borderRadius: 5,
+    borderWidth: 1,
+    maxWidth: 95,
+    paddingHorizontal: 4,
+    paddingVertical: 0.5,
+  },
+  deviceBadgeText: {
+    color: "#12100e",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  statusModeCapsule: {
+    alignItems: "center",
+    backgroundColor: "#f5eee2",
+    borderColor: "#d8cfbf",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  inlineSpinner: {
+    marginRight: 2,
   },
   statusDot: {
-    backgroundColor: "#12100e",
     borderRadius: 4,
-    height: 7,
-    width: 7,
+    height: 6,
+    width: 6,
   },
   statusDotOnline: {
-    backgroundColor: "#0e4e16",
+    backgroundColor: "#2e8b38",
   },
-  statusPillText: {
+  statusDotOffline: {
+    backgroundColor: "#ff7f68",
+  },
+  statusLabel: {
     color: "#12100e",
-    fontSize: 11.5,
+    fontSize: 10.5,
+    fontWeight: "800",
+  },
+  dotDivider: {
+    color: "#999083",
+    fontSize: 10,
     fontWeight: "900",
+  },
+  modePill: {
+    alignItems: "center",
+    backgroundColor: "#ffd84f",
+    borderColor: "#12100e",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  modePillPlan: {
+    backgroundColor: "#4fd7ee",
+  },
+  modePillText: {
+    color: "#12100e",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  modeDropdownArrow: {
+    color: "#12100e",
+    fontSize: 8,
+    fontWeight: "900",
+    marginTop: -1,
   },
 });

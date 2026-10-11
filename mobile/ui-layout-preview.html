@@ -3,565 +3,1330 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>MYAI Mobile Layout Preview</title>
+    <title>MYAI 移动端宽屏沉浸式原型预览 (Redesign Prototype)</title>
     <style>
       :root {
-        --ink: #171613;
-        --muted: #777269;
-        --paper: #f3ead9;
-        --surface: #fffdf7;
-        --surface-2: #f8f1e5;
-        --line: #25231f;
-        --yellow: #ffd84d;
-        --cyan: #42cfe7;
-        --green: #bde6ab;
-        --coral: #ff806c;
-        --purple: #6741c8;
-        --shadow: 0 8px 0 rgba(23, 22, 19, 0.12);
+        --ink: #12100e;
+        --ink-soft: #25231f;
+        --paper: #f4eee2;
+        --paper-light: #faf5ec;
+        --surface: #ffffff;
+        --surface-glass: rgba(255, 252, 245, 0.88);
+        --line: #12100e;
+        --yellow: #ffd84f;
+        --cyan: #4fd7ee;
+        --green: #b9e9b0;
+        --coral: #ff7f68;
+        --purple: #8762d6;
+        --muted: #726c62;
+        --shadow-solid: 0 4px 0 #12100e;
+        --shadow-solid-sm: 0 2px 0 #12100e;
+        --shadow-float: 0 12px 28px rgba(18, 16, 14, 0.12);
+        --radius: 16px;
       }
 
-      * { box-sizing: border-box; }
-
-      html, body { min-height: 100%; }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
 
       body {
-        margin: 0;
-        background: #d8d1c5;
+        background: #e6dfd3;
         color: var(--ink);
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      button, input { font: inherit; }
-      button { color: inherit; }
-
-      .preview-note {
-        max-width: 860px;
-        margin: 28px auto 14px;
-        padding: 0 18px;
-        color: #514d46;
-        font-size: 13px;
-      }
-
-      .preview-note strong { color: var(--ink); }
-
-      .phone {
-        position: relative;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        min-height: 100vh;
         display: flex;
         flex-direction: column;
-        width: min(100%, 430px);
-        min-height: 860px;
-        margin: 0 auto 34px;
-        overflow: hidden;
-        background: var(--paper);
-        box-shadow: 0 18px 50px rgba(23, 22, 19, 0.2);
+        align-items: center;
+        padding: 20px 14px 40px;
       }
 
-      .status-bar {
+      /* 顶部交互控制器与设计说明 */
+      .control-panel {
+        max-width: 440px;
+        width: 100%;
+        background: var(--surface);
+        border: 2.5px solid var(--line);
+        box-shadow: 4px 4px 0 var(--line);
+        border-radius: 14px;
+        padding: 14px 16px;
+        margin-bottom: 20px;
+      }
+
+      .control-title {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        min-height: 34px;
-        padding: 10px 22px 4px;
-        font-size: 12px;
-        font-weight: 800;
+        margin-bottom: 10px;
       }
 
-      .status-icons { display: flex; align-items: center; gap: 8px; color: #3f3c37; }
-
-      .app-header {
-        display: flex;
-        align-items: center;
-        gap: 11px;
-        padding: 12px 18px 14px;
-        border-bottom: 2px solid var(--line);
-        background: var(--paper);
-      }
-
-      .brand-mark {
-        display: grid;
-        place-items: center;
-        width: 44px;
-        height: 44px;
-        flex: 0 0 auto;
-        overflow: hidden;
-        border: 2px solid var(--line);
-        border-radius: 13px;
-        background: var(--yellow);
-      }
-
-      .brand-mark img { width: 42px; height: 42px; object-fit: cover; object-position: center 17%; }
-
-      .identity { min-width: 0; flex: 1; }
-      .identity h1 { margin: 0; font-size: 18px; line-height: 1.1; }
-      .identity p { margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-
-      .header-actions { display: flex; align-items: center; gap: 8px; }
-
-      .icon-button, .status-pill, .mode-button, .send-button, .nav-button, .action-button {
-        border: 2px solid var(--line);
-        cursor: pointer;
-        transition: transform 140ms ease, filter 140ms ease, background 140ms ease;
-      }
-
-      .icon-button:active, .status-pill:active, .mode-button:active, .send-button:active, .nav-button:active, .action-button:active { transform: translateY(2px); }
-
-      .icon-button {
-        display: grid;
-        place-items: center;
-        width: 40px;
-        height: 40px;
-        border-radius: 12px;
-        background: var(--cyan);
-        font-size: 20px;
-      }
-
-      .status-pill {
+      .control-title h1 {
+        font-size: 15px;
+        font-weight: 900;
         display: flex;
         align-items: center;
         gap: 6px;
-        min-height: 34px;
-        padding: 0 11px;
+      }
+
+      .badge-tag {
+        font-size: 11px;
+        font-weight: 800;
+        background: var(--yellow);
+        border: 1.5px solid var(--line);
+        padding: 2px 7px;
         border-radius: 999px;
-        background: var(--green);
+      }
+
+      .control-desc {
         font-size: 12px;
-        font-weight: 900;
-        white-space: nowrap;
-      }
-
-      .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #2e8b38; }
-
-      .workspace {
-        display: flex;
-        flex: 1;
-        flex-direction: column;
-        gap: 12px;
-        min-height: 0;
-        padding: 14px 14px 10px;
-      }
-
-      .mode-switch {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-      }
-
-      .mode-switch h2 { margin: 0; font-size: 15px; }
-      .mode-switch p { margin: 3px 0 0; color: var(--muted); font-size: 11px; font-weight: 700; }
-
-      .mode-control {
-        display: flex;
-        padding: 3px;
-        border: 2px solid var(--line);
-        border-radius: 999px;
-        background: #ded7cc;
-      }
-
-      .mode-button {
-        min-width: 63px;
-        padding: 7px 12px;
-        border: 0;
-        border-radius: 999px;
-        background: transparent;
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .mode-button.active { background: var(--surface); box-shadow: 0 1px 4px rgba(23, 22, 19, 0.16); }
-
-      .chat-surface {
-        display: flex;
-        flex: 1;
-        flex-direction: column;
-        min-height: 430px;
-        overflow: hidden;
-        border: 2px solid var(--line);
-        border-radius: 20px;
-        background: var(--surface);
-        box-shadow: var(--shadow);
-      }
-
-      .surface-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 14px 15px 12px;
-        border-bottom: 1px solid #ddd5c8;
-      }
-
-      .surface-header h3 { margin: 0; font-size: 14px; }
-      .surface-header span { color: var(--muted); font-size: 11px; font-weight: 800; }
-
-      .thread {
-        display: flex;
-        flex: 1;
-        flex-direction: column;
-        gap: 12px;
-        min-height: 0;
-        overflow-y: auto;
-        padding: 14px 13px 16px;
-      }
-
-      .message { max-width: 88%; }
-      .message.user { align-self: flex-end; }
-      .message.assistant { align-self: flex-start; }
-
-      .message-label { margin: 0 0 5px 3px; color: var(--muted); font-size: 10px; font-weight: 900; }
-
-      .message-bubble {
-        padding: 11px 13px;
-        border: 2px solid var(--line);
-        border-radius: 14px;
-        font-size: 13px;
+        color: #555047;
         line-height: 1.55;
+        margin-bottom: 12px;
       }
 
-      .message.user .message-bubble { background: var(--green); border-bottom-right-radius: 5px; }
-      .message.assistant .message-bubble { background: var(--surface-2); border-bottom-left-radius: 5px; }
-
-      .run-card {
-        border: 2px solid var(--line);
-        border-radius: 14px;
-        background: #f1eee7;
-      }
-
-      .run-summary {
+      .design-toggles {
         display: flex;
-        align-items: center;
-        gap: 9px;
-        width: 100%;
-        padding: 11px 12px;
-        border: 0;
-        background: transparent;
-        cursor: pointer;
-        text-align: left;
-      }
-
-      .run-summary strong { display: block; font-size: 12px; }
-      .run-summary small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 800; }
-      .run-summary .chevron { margin-left: auto; font-size: 19px; }
-      .run-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #63b85b; }
-
-      .run-details { display: none; padding: 0 12px 12px 30px; color: #5b554d; font-size: 11px; line-height: 1.55; }
-      .run-card.open .run-details { display: block; }
-      .run-card.open .chevron { transform: rotate(45deg); }
-
-      .plan-card {
-        display: none;
-        padding: 11px 12px;
-        border: 2px solid var(--line);
-        border-radius: 14px;
-        background: #e8f6f3;
-      }
-
-      .plan-card.visible { display: block; }
-      .plan-card strong { font-size: 12px; }
-      .plan-card p { margin: 5px 0 0; color: #5a625f; font-size: 11px; line-height: 1.5; }
-
-      .composer {
-        padding: 10px 12px 12px;
-        border-top: 1px solid #d9d0c4;
-        background: var(--paper);
-      }
-
-      .composer-box {
-        overflow: hidden;
-        border: 2px solid var(--line);
-        border-radius: 17px;
-        background: var(--surface);
-        box-shadow: 0 4px 0 rgba(23, 22, 19, 0.1);
-      }
-
-      .composer-input {
-        width: 100%;
-        min-height: 52px;
-        padding: 13px 14px 7px;
-        border: 0;
-        outline: 0;
-        resize: none;
-        background: transparent;
-        color: var(--ink);
-        font-size: 13px;
-      }
-
-      .composer-input::placeholder { color: #9b9489; }
-
-      .composer-toolbar {
-        display: flex;
-        align-items: center;
         gap: 8px;
-        padding: 5px 7px 7px;
+        flex-wrap: wrap;
       }
 
-      .toolbar-button {
-        display: grid;
-        place-items: center;
-        width: 32px;
-        height: 32px;
-        border: 0;
-        border-radius: 50%;
-        background: #eeeae2;
+      .toggle-btn {
+        flex: 1;
+        min-width: 120px;
+        padding: 8px 10px;
+        background: #efe9dc;
+        border: 2px solid var(--line);
+        box-shadow: var(--shadow-solid-sm);
+        border-radius: 9px;
+        font-size: 12px;
+        font-weight: 800;
         cursor: pointer;
-        font-size: 18px;
-      }
-
-      .model-chip { padding: 7px 10px; border-radius: 999px; background: #eeeae2; color: #4f4a42; font-size: 11px; font-weight: 900; }
-      .send-button { margin-left: auto; min-width: 72px; padding: 8px 13px; border-radius: 11px; background: var(--coral); font-size: 12px; font-weight: 900; }
-
-      .bottom-nav {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 4px;
-        padding: 9px 10px max(10px, env(safe-area-inset-bottom));
-        border-top: 2px solid var(--line);
-        background: var(--surface);
-      }
-
-      .nav-button {
+        transition: all 120ms ease;
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 43px;
-        border: 0;
-        border-radius: 11px;
-        background: transparent;
-        color: #716b62;
+        gap: 6px;
+      }
+
+      .toggle-btn.active {
+        background: var(--yellow);
+        box-shadow: 2px 2px 0 var(--line);
+        transform: translate(1px, 1px);
+      }
+
+      .toggle-btn:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+      }
+
+      /* 手机机身模拟器 */
+      .phone-shell {
+        width: 100%;
+        max-width: 412px;
+        height: 852px;
+        background: var(--paper);
+        border: 4px solid var(--line);
+        border-radius: 40px;
+        box-shadow: 12px 14px 0 rgba(18, 16, 14, 0.25), 0 24px 60px rgba(0, 0, 0, 0.15);
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* 顶部状态栏 */
+      .status-bar {
+        height: 38px;
+        padding: 8px 24px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: -0.2px;
+        z-index: 30;
+      }
+
+      .status-icons {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+      }
+
+      /* 模式一：全新沉浸式宽屏顶部（学习图三） */
+      .floating-top-header {
+        position: absolute;
+        top: 38px;
+        left: 0;
+        right: 0;
+        padding: 8px 16px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        z-index: 25;
+        pointer-events: none; /* 让穿透区域点击对话 */
+      }
+
+      .floating-btn {
+        pointer-events: auto;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--surface-glass);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 2px solid var(--line);
+        box-shadow: var(--shadow-solid-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 19px;
+        cursor: pointer;
+        transition: transform 120ms ease, background 120ms ease;
+      }
+
+      .floating-btn:active {
+        transform: translate(1.5px, 1.5px);
+        box-shadow: none;
+      }
+
+      /* 中上方半透明角色与状态岛 (图三精髓) */
+      .character-island {
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: var(--surface-glass);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 2px solid var(--line);
+        box-shadow: 0 4px 12px rgba(18, 16, 14, 0.08), var(--shadow-solid-sm);
+        border-radius: 24px;
+        padding: 5px 14px 6px;
+        cursor: pointer;
+        transition: all 180ms ease;
+      }
+
+      .character-island:active {
+        transform: scale(0.98);
+      }
+
+      .character-avatar-wrap {
+        position: relative;
+        margin-top: -14px; /* 向上突出的萌趣层次 */
+        margin-bottom: 2px;
+      }
+
+      .character-avatar {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        border: 2px solid var(--line);
+        background: var(--yellow);
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      }
+
+      .character-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .island-identity {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-bottom: 3px;
+      }
+
+      .island-name {
+        font-size: 12px;
+        font-weight: 900;
+        color: var(--ink);
+      }
+
+      .island-device {
+        font-size: 9px;
+        font-weight: 800;
+        background: #e9e2d3;
+        border: 1px solid var(--line);
+        padding: 0 4px;
+        border-radius: 4px;
+        color: #4a453e;
+      }
+
+      /* 紧凑模式切换药丸（将原占地巨大的模式切换收纳在此） */
+      .mode-status-pill {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: #f0f7ed;
+        border: 1.5px solid #2e8b38;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #176020;
+      }
+
+      .status-pulse {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #2e8b38;
+        animation: pulseDot 2s infinite ease-in-out;
+      }
+
+      @keyframes pulseDot {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(0.8); }
+      }
+
+      .mode-tag-btn {
+        background: var(--yellow);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 1px 7px;
+        font-size: 10px;
+        font-weight: 900;
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        cursor: pointer;
+      }
+
+      /* 旧版顶部（用于对比） */
+      .legacy-header-container {
+        display: none;
+        flex-direction: column;
+        border-bottom: 2px solid var(--line);
+        background: var(--surface);
+      }
+
+      .legacy-header-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 14px;
+      }
+
+      .legacy-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .legacy-mode-bar {
+        display: flex;
+        justify-content: center;
+        padding: 6px 14px 10px;
+        background: #f7f1e5;
+        border-top: 1px dashed #d5ccbd;
+      }
+
+      .legacy-mode-switch {
+        display: flex;
+        background: #ded5c5;
+        border: 2px solid var(--line);
+        border-radius: 999px;
+        padding: 2px;
+        width: 220px;
+      }
+
+      .legacy-mode-item {
+        flex: 1;
+        padding: 5px 0;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 800;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+
+      .legacy-mode-item.active {
+        background: var(--surface);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+
+      /* 宽阔对话主舞台 (Super Wide Chat Flow) */
+      .chat-stage {
+        flex: 1;
+        overflow-y: auto;
+        padding: 70px 14px 12px; /* 为顶部悬浮岛留出呼吸空间 */
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        scroll-behavior: smooth;
+      }
+
+      .phone-shell.legacy-mode .chat-stage {
+        padding-top: 12px;
+      }
+
+      /* 气泡美化：Neo-Brutalist 风格 */
+      .bubble-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-width: 90%;
+      }
+
+      .bubble-group.user {
+        align-self: flex-end;
+      }
+
+      .bubble-group.assistant {
+        align-self: flex-start;
+      }
+
+      .bubble-meta {
+        font-size: 10px;
+        font-weight: 800;
+        color: var(--muted);
+        padding: 0 4px;
+      }
+
+      .bubble-content {
+        border: 2px solid var(--line);
+        border-radius: 18px;
+        padding: 12px 14px;
+        font-size: 13.5px;
+        line-height: 1.6;
+        box-shadow: var(--shadow-solid-sm);
+        position: relative;
+        word-break: break-word;
+      }
+
+      .bubble-group.user .bubble-content {
+        background: #d8f5cb;
+        border-bottom-right-radius: 4px;
+      }
+
+      .bubble-group.assistant .bubble-content {
+        background: var(--surface);
+        border-bottom-left-radius: 4px;
+      }
+
+      /* 结构化卡片（子代理、工具与代码） */
+      .agent-task-card {
+        background: #fffef8;
+        border: 2px solid var(--line);
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin-top: 6px;
+        box-shadow: 2px 2px 0 var(--line);
+      }
+
+      .agent-task-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+
+      .agent-task-tag {
+        display: flex;
+        align-items: center;
+        gap: 4px;
         font-size: 11px;
         font-weight: 900;
       }
 
-      .nav-button.active { background: var(--yellow); color: var(--ink); }
+      .agent-task-body {
+        font-size: 12px;
+        color: #4b463e;
+        line-height: 1.5;
+        background: #f7f2e7;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #dfd7c8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      }
 
-      .toast {
-        position: absolute;
-        right: 14px;
-        bottom: 86px;
-        left: 14px;
-        display: none;
-        padding: 10px 12px;
-        border: 2px solid var(--line);
-        border-radius: 12px;
-        background: var(--ink);
-        color: white;
+      .bubble-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px dashed #e2dad0;
+        font-size: 10.5px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .token-pill {
+        background: var(--yellow);
+        border: 1.5px solid var(--line);
+        border-radius: 6px;
+        padding: 1px 6px;
+        color: var(--ink);
+        font-weight: 800;
+      }
+
+      /* 底部精简输入区 (Minimal Floating Composer) */
+      .composer-section {
+        padding: 6px 12px 14px;
+        background: var(--paper);
+        position: relative;
+        z-index: 20;
+      }
+
+      .composer-status-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 6px 6px;
         font-size: 11px;
         font-weight: 800;
+        color: #2b6e1e;
+      }
+
+      .composer-box {
+        background: var(--surface);
+        border: 2.5px solid var(--line);
+        border-radius: 20px;
+        box-shadow: var(--shadow-solid-sm);
+        display: flex;
+        align-items: center;
+        padding: 5px 6px 5px 12px;
+        gap: 8px;
+      }
+
+      .attach-btn {
+        background: #f0ebe0;
+        border: 2px solid var(--line);
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        font-size: 16px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .composer-input {
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 13.5px;
+        color: var(--ink);
+        padding: 6px 0;
+      }
+
+      .composer-input::placeholder {
+        color: #8c8579;
+      }
+
+      .send-btn {
+        width: 40px;
+        height: 36px;
+        background: var(--yellow);
+        border: 2px solid var(--line);
+        box-shadow: 2px 2px 0 var(--line);
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        font-size: 16px;
+        font-weight: 900;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 100ms ease;
+      }
+
+      .send-btn:active {
+        transform: translate(1.5px, 1.5px);
+        box-shadow: none;
+      }
+
+      /* 旧版底部导航栏（对比用） */
+      .legacy-bottom-nav {
+        display: none;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+        padding: 8px 10px 14px;
+        border-top: 2px solid var(--line);
+        background: var(--surface);
+      }
+
+      .legacy-nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 0;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #726b60;
+        cursor: pointer;
+      }
+
+      .legacy-nav-item.active {
+        background: var(--yellow);
+        border: 2px solid var(--line);
+        color: var(--ink);
+        box-shadow: 1.5px 1.5px 0 var(--line);
+      }
+
+      /* 侧边功能抽屉 (Sliding Drawer - 借鉴图四精髓) */
+      .drawer-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(18, 16, 14, 0.45);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        z-index: 50;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 240ms ease;
+      }
+
+      .drawer-backdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .side-drawer {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 82%;
+        max-width: 320px;
+        background: var(--paper-light);
+        border-right: 3px solid var(--line);
+        box-shadow: 8px 0 24px rgba(0, 0, 0, 0.2);
+        z-index: 51;
+        transform: translateX(-102%);
+        transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        flex-direction: column;
+        padding: 44px 16px 20px;
+      }
+
+      .side-drawer.open {
+        transform: translateX(0);
+      }
+
+      .drawer-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--line);
+      }
+
+      .drawer-title-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .drawer-avatar {
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        background: var(--yellow);
+        border: 2px solid var(--line);
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        box-shadow: 2px 2px 0 var(--line);
+      }
+
+      .drawer-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .drawer-brand h2 {
+        font-size: 17px;
+        font-weight: 900;
+        line-height: 1.1;
+      }
+
+      .drawer-brand p {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 800;
+        margin-top: 3px;
+      }
+
+      .drawer-close-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #efe7d8;
+        border: 2px solid var(--line);
+        display: grid;
+        place-items: center;
+        font-size: 16px;
+        cursor: pointer;
+      }
+
+      .drawer-section-title {
+        font-size: 11px;
+        font-weight: 900;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 12px 6px 8px;
+      }
+
+      .drawer-nav-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .drawer-nav-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-radius: 14px;
+        border: 2px solid transparent;
+        background: transparent;
+        font-size: 13.5px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 120ms ease;
+      }
+
+      .drawer-nav-item:hover, .drawer-nav-item:active {
+        background: #f0e8d9;
+      }
+
+      .drawer-nav-item.active {
+        background: var(--surface);
+        border: 2px solid var(--line);
+        box-shadow: 2px 2px 0 var(--line);
+      }
+
+      .drawer-nav-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .drawer-nav-icon {
+        font-size: 16px;
+        width: 22px;
         text-align: center;
       }
 
-      .toast.show { display: block; }
-
-      .sheet-backdrop { position: absolute; inset: 0; display: none; background: rgba(23, 22, 19, 0.38); z-index: 5; }
-      .sheet-backdrop.open { display: block; }
-
-      .settings-sheet {
-        position: absolute;
-        right: 0;
-        bottom: 0;
-        left: 0;
-        z-index: 6;
-        padding: 9px 15px 22px;
-        border-top: 2px solid var(--line);
-        border-radius: 23px 23px 0 0;
-        background: var(--surface);
-        transform: translateY(105%);
-        transition: transform 220ms ease;
+      .drawer-nav-badge {
+        font-size: 10px;
+        background: var(--yellow);
+        border: 1.5px solid var(--line);
+        padding: 1px 6px;
+        border-radius: 999px;
       }
 
-      .settings-sheet.open { transform: translateY(0); }
-      .sheet-handle { width: 42px; height: 4px; margin: 0 auto 12px; border-radius: 4px; background: #bcb4a7; }
-      .sheet-heading { display: flex; align-items: center; justify-content: space-between; }
-      .sheet-heading h2 { margin: 0; font-size: 18px; }
-      .sheet-heading button { border: 0; background: transparent; font-size: 24px; cursor: pointer; }
+      /* 抽屉内历史会话（旁聊区） */
+      .drawer-session-list {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+      }
 
-      .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid #e3dbcf; }
-      .setting-row strong { display: block; font-size: 13px; }
-      .setting-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
-      .setting-value { color: #575149; font-size: 12px; font-weight: 900; }
-      .action-button { padding: 8px 12px; border-radius: 10px; background: var(--cyan); font-size: 11px; font-weight: 900; }
+      .session-card {
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1.5px solid #ded5c4;
+        background: #fdfaf3;
+        cursor: pointer;
+      }
 
-      @media (min-width: 600px) {
-        .phone { min-height: 900px; border-radius: 28px; }
+      .session-card.active {
+        border-color: var(--line);
+        background: var(--yellow);
+        font-weight: 800;
+      }
+
+      .session-title {
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .session-time {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      /* 抽屉底部快捷工具栏（图四底部） */
+      .drawer-bottom-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 14px;
+        border-top: 2px solid var(--line);
+        margin-top: auto;
+      }
+
+      .drawer-icon-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        border: 2px solid var(--line);
+        background: var(--surface);
+        box-shadow: 2px 2px 0 var(--line);
+        display: grid;
+        place-items: center;
+        font-size: 18px;
+        cursor: pointer;
+      }
+
+      .drawer-icon-btn:active {
+        transform: translate(1px, 1px);
+        box-shadow: none;
+      }
+
+      .drawer-search-bar {
+        flex: 1;
+        margin: 0 10px;
+        height: 40px;
+        border-radius: 12px;
+        border: 2px solid var(--line);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      /* 模式切换弹层菜单 */
+      .mode-popover {
+        position: absolute;
+        top: 96px;
+        left: 50%;
+        transform: translateX(-50%) scale(0.95);
+        background: var(--surface);
+        border: 2.5px solid var(--line);
+        box-shadow: 4px 6px 0 var(--line);
+        border-radius: 16px;
+        padding: 6px;
+        width: 190px;
+        z-index: 40;
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+        transition: all 140ms ease;
+      }
+
+      .mode-popover.show {
+        display: flex;
+        transform: translateX(-50%) scale(1);
+      }
+
+      .mode-option {
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1.5px solid transparent;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .mode-option.active {
+        background: #fcf4dd;
+        border-color: var(--line);
+      }
+
+      /* 提示 Toast */
+      .toast-bubble {
+        position: absolute;
+        bottom: 84px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--ink);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 8px 16px;
+        border-radius: 999px;
+        border: 2px solid var(--line);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        display: none;
+        z-index: 60;
+        white-space: nowrap;
+      }
+
+      .toast-bubble.show {
+        display: block;
+        animation: fadeIn 150ms ease;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translate(-50%, 6px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
       }
     </style>
   </head>
   <body>
-    <p class="preview-note"><strong>MYAI 手机端布局预览</strong>　这是独立原型，点击顶部模式、执行记录、设置和发送按钮查看状态变化。</p>
 
-    <main class="phone" aria-label="MYAI 手机端布局预览">
+    <!-- 顶部排版对比与交互控制器 -->
+    <section class="control-panel">
+      <div class="control-title">
+        <h1>✨ 界面空间优化原型</h1>
+        <span class="badge-tag">原型已更新</span>
+      </div>
+      <p class="control-desc">
+        根据你的要求进行了深度优化：<br>
+        1. <b>对话模式/规划模式</b> 移入顶部角色状态岛，不再挤占对话流顶部。<br>
+        2. <b>动作图标/角色卡</b> 借鉴 Muse 悬浮居中，半透明毛玻璃优雅漂浮。<br>
+        3. <b>底部 Tabbar 收纳</b> 学习侧边抽屉（点击左上角 <b>☰</b> 滑出），界面视野开阔 <b>+50%</b>。
+      </p>
+      <div class="design-toggles">
+        <button class="toggle-btn active" id="btn-toggle-new">
+          🌟 新版极宽沉浸流 (推荐)
+        </button>
+        <button class="toggle-btn" id="btn-toggle-legacy">
+          ⏪ 原版 (对比占地)
+        </button>
+      </div>
+    </section>
+
+    <!-- 手机屏幕模拟容器 -->
+    <main class="phone-shell" id="phone-shell">
+
+      <!-- 手机原生状态栏 -->
       <div class="status-bar">
-        <span>1:43</span>
-        <div class="status-icons"><span>26.9 KB/s</span><span>◐</span><span>5G</span><span>▮▮▮</span><span>20%</span></div>
+        <span>2:45</span>
+        <div class="status-icons">
+          <span>5G</span>
+          <span>●●●</span>
+          <span>52%</span>
+        </div>
       </div>
 
-      <header class="app-header">
-        <div class="brand-mark"><img src="assets/icon.png" alt="MYAI" /></div>
-        <div class="identity">
-          <h1>MYAI</h1>
-          <p>手机控制电脑 / Mikasa / server-agent</p>
-        </div>
-        <div class="header-actions">
-          <button class="icon-button" id="open-settings" aria-label="打开设置">⚙</button>
-          <button class="status-pill" id="connection-status" aria-label="连接状态"><span class="status-dot"></span><span>在线</span></button>
-        </div>
-      </header>
+      <!-- ====================== 新版架构：中上方半透明角色岛 + 悬浮动作钮 ====================== -->
+      <div class="floating-top-header" id="floating-header">
+        <!-- 左侧：侧边抽屉呼出按钮（收纳设置与导航） -->
+        <button class="floating-btn" id="btn-open-drawer" aria-label="打开菜单">
+          ☰
+        </button>
 
-      <section class="workspace">
-        <div class="mode-switch">
+        <!-- 中上方：角色与状态悬浮岛（图三精髓，半透明玻璃） -->
+        <div class="character-island" id="character-island" title="点击切换执行模式">
+          <div class="character-avatar-wrap">
+            <div class="character-avatar">
+              <img src="assets/icon.png" alt="MYAI" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" />
+            </div>
+          </div>
+          <div class="island-identity">
+            <span class="island-name">MYAI</span>
+            <span class="island-device">server-agent</span>
+          </div>
+          <!-- 模式与在线状态胶囊 (将原本占地巨大的模式条缩进此处) -->
+          <div class="mode-status-pill">
+            <span class="status-pulse"></span>
+            <span id="label-status">在线</span>
+            <span style="color:#888;">·</span>
+            <button class="mode-tag-btn" id="btn-toggle-mode">
+              <span id="current-mode-text">💬 对话模式</span>
+              <span style="font-size:9px;">▾</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 右侧：快捷会话/设置按钮 -->
+        <button class="floating-btn" id="btn-quick-new" aria-label="新建会话" title="新建会话">
+          ✏️
+        </button>
+      </div>
+
+      <!-- 模式选择小弹窗 -->
+      <div class="mode-popover" id="mode-popover">
+        <div class="mode-option active" data-mode="chat">
+          <span>💬</span>
           <div>
-            <h2 id="view-title">当前会话</h2>
-            <p id="view-hint">集中处理一件事，执行记录保持可见</p>
+            <div>对话模式</div>
+            <div style="font-size:10px;color:#777;font-weight:normal;">常规自由交互与执行</div>
           </div>
-          <div class="mode-control" role="tablist" aria-label="会话模式">
-            <button class="mode-button active" data-mode="Chat" role="tab">Chat</button>
-            <button class="mode-button" data-mode="Plan" role="tab">Plan</button>
+        </div>
+        <div class="mode-option" data-mode="plan">
+          <span>🎯</span>
+          <div>
+            <div>规划模式</div>
+            <div style="font-size:10px;color:#777;font-weight:normal;">只读规划与大纲审阅</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================== 旧版架构（对比用）：占地巨大的头部与模式条 ====================== -->
+      <div class="legacy-header-container" id="legacy-header">
+        <div class="legacy-header-top">
+          <div class="legacy-brand">
+            <div class="character-avatar" style="width:34px;height:34px;">
+              <img src="assets/icon.png" alt="MYAI" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" />
+            </div>
+            <div>
+              <div style="font-weight:900;font-size:14px;">MYAI <span style="font-size:10px;background:#ddd;padding:1px 4px;border-radius:4px;">server-agent</span></div>
+              <div style="font-size:10px;color:#666;">📁 Mikasa · 电脑已连接</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <div style="background:#4fd7ee;border:2px solid #000;border-radius:8px;padding:4px 8px;font-size:12px;">⚙</div>
+            <div style="background:#b9e9b0;border:2px solid #000;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:900;">● 在线</div>
+          </div>
+        </div>
+        <!-- 红色圈起来的占地模式栏 -->
+        <div class="legacy-mode-bar">
+          <div class="legacy-mode-switch">
+            <div class="legacy-mode-item active">💬 对话模式</div>
+            <div class="legacy-mode-item">🎯 规划模式</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================== 超宽阔对话流 (Huge Chat Stream) ====================== -->
+      <div class="chat-stage" id="chat-stage">
+        <!-- 用户提问 -->
+        <div class="bubble-group user">
+          <span class="bubble-meta">你 · 14:38</span>
+          <div class="bubble-content">
+            帮我整理一下整个系统现在的架构分工和核心关键点，尤其是前后端协议和扩展机制。
           </div>
         </div>
 
-        <section class="chat-surface" aria-label="对话内容">
-          <div class="surface-header">
-            <h3>你好</h3>
-            <span id="message-count">2 条消息</span>
-          </div>
-          <div class="thread" id="thread">
-            <article class="message user">
-              <p class="message-label">你 · 现在</p>
-              <div class="message-bubble">你好，帮我检查一下项目当前的启动流程。</div>
-            </article>
+        <!-- 助手详细回复（能够一眼展示大量长内容） -->
+        <div class="bubble-group assistant">
+          <span class="bubble-meta">MYAI · 刚刚</span>
+          <div class="bubble-content">
+            <div style="font-weight:900;font-size:14.5px;margin-bottom:8px;">系统核心关键点梳理：</div>
+            <p>1. <b>不是单体文件</b>：Go backend、relay 协议、agent runtime、local tools、storage、mobile 完全分层。</p>
+            <p style="margin-top:5px;">2. <b>Skill 不是执行器</b>：扫描 <code>skills/&lt;name&gt;/SKILL.md</code>，按最新用户指令匹配 trigger，把全文合并进本轮 system prompt。</p>
+            <p style="margin-top:5px;">3. <b>会话按 session_id 走</b>：tool / reasoning / usage / permission 走结构化记录，不当纯文本拼接。</p>
+            <p style="margin-top:5px;">4. <b>MCP 独立 Provider 层</b>：支持运行时重载，后端安全加锁。</p>
+            <p style="margin-top:5px;">5. <b>移动端界面升级</b>：采用更轻量的无界流式排版，大幅提升小屏信息阅读密度。</p>
 
-            <article class="message assistant">
-              <p class="message-label">MYAI · 已完成</p>
-              <div class="run-card" id="run-card">
-                <button class="run-summary" id="run-summary" aria-expanded="false">
-                  <span class="run-dot"></span>
-                  <span><strong>启动流程检查完成</strong><small>1 个执行记录 · 4 秒</small></span>
-                  <span class="chevron">+</span>
-                </button>
-                <div class="run-details">已检查 Relay 连接、Agent 初始化、会话恢复和消息发送入口。没有阻塞当前界面的错误。</div>
+            <!-- 子智能体任务卡演示 -->
+            <div class="agent-task-card">
+              <div class="agent-task-header">
+                <span class="agent-task-tag">🤖 代码检索子任务</span>
+                <span class="badge-tag" style="background:#b9e9b0;">已完成</span>
               </div>
-              <div class="message-bubble">启动流程已经准备好。你可以继续发送任务，我会把执行过程集中展示在这里。</div>
-            </article>
-
-            <div class="plan-card" id="plan-card">
-              <strong>Plan 草案</strong>
-              <p>1. 读取项目状态　·　2. 检查相关文件　·　3. 汇总结果</p>
+              <div class="agent-task-body">
+                > 已检索 17 个文件 · 索引完毕
+              </div>
             </div>
-          </div>
-        </section>
 
-        <div class="composer">
-          <div class="composer-box">
-            <input class="composer-input" id="composer-input" placeholder="输入消息，描述你要完成的任务" />
-            <div class="composer-toolbar">
-              <button class="toolbar-button" aria-label="添加文件">＋</button>
-              <span class="model-chip">当前模型 · gpt-5.5</span>
-              <button class="toolbar-button" aria-label="语音输入">♩</button>
-              <button class="send-button" id="send-button">发送</button>
+            <div class="bubble-footer">
+              <span>📋 已复制</span>
+              <span class="token-pill">264.5k tokens (入 262.8k · 出 1.6k)</span>
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <nav class="bottom-nav" aria-label="主导航">
-        <button class="nav-button active" data-section="对话">对话</button>
-        <button class="nav-button" data-section="文件">文件</button>
-        <button class="nav-button" data-section="变更">变更</button>
-        <button class="nav-button" data-section="知识">知识</button>
-        <button class="nav-button" data-section="设置">设置</button>
+      <!-- ====================== 底部精简输入栏 ====================== -->
+      <footer class="composer-section">
+        <div class="composer-status-bar">
+          <span class="status-pulse"></span>
+          <span>Agent 任务执行就绪 · 点击发送直接控制电脑</span>
+        </div>
+        <div class="composer-box">
+          <button class="attach-btn" id="btn-attach" title="添加文件">📎</button>
+          <input type="text" class="composer-input" id="composer-input" placeholder="输入需求，AI 将控制电脑执行..." />
+          <button class="send-btn" id="btn-send" title="发送">▶</button>
+        </div>
+      </footer>
+
+      <!-- 旧版常驻底部导航栏（对比用，占地巨大） -->
+      <nav class="legacy-bottom-nav" id="legacy-nav">
+        <div class="legacy-nav-item active">对话</div>
+        <div class="legacy-nav-item">文件</div>
+        <div class="legacy-nav-item">变更</div>
+        <div class="legacy-nav-item">知识</div>
+        <div class="legacy-nav-item">设置</div>
       </nav>
 
-      <div class="toast" id="toast" role="status"></div>
-      <div class="sheet-backdrop" id="sheet-backdrop"></div>
-      <aside class="settings-sheet" id="settings-sheet" aria-label="快速设置">
-        <div class="sheet-handle"></div>
-        <div class="sheet-heading"><h2>快速设置</h2><button id="close-settings" aria-label="关闭设置">×</button></div>
-        <div class="setting-row"><span><strong>模型</strong><small>本会话的生成模型</small></span><span class="setting-value">gpt-5.5</span></div>
-        <div class="setting-row"><span><strong>权限模式</strong><small>工具调用前需要确认</small></span><span class="setting-value">询问</span></div>
-        <div class="setting-row"><span><strong>上下文</strong><small>当前会话压缩与历史消息</small></span><button class="action-button" id="context-button">查看</button></div>
+      <!-- ====================== 侧边收纳抽屉 (借鉴图四) ====================== -->
+      <div class="drawer-backdrop" id="drawer-backdrop"></div>
+      <aside class="side-drawer" id="side-drawer">
+        <!-- 抽屉头部 -->
+        <div class="drawer-header">
+          <div class="drawer-title-group">
+            <div class="drawer-avatar">
+              <img src="assets/icon.png" alt="MYAI" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" />
+            </div>
+            <div class="drawer-brand">
+              <h2>MYAI Studio</h2>
+              <p>Mikasa · 电脑已连接</p>
+            </div>
+          </div>
+          <button class="drawer-close-btn" id="btn-close-drawer">✕</button>
+        </div>
+
+        <!-- 收纳原底部导航的核心工作区 -->
+        <div class="drawer-section-title">功能工作区</div>
+        <nav class="drawer-nav-list">
+          <button class="drawer-nav-item active" data-tab="chat">
+            <div class="drawer-nav-left">
+              <span class="drawer-nav-icon">💬</span>
+              <span>主对话流</span>
+            </div>
+            <span class="drawer-nav-badge">当前</span>
+          </button>
+          <button class="drawer-nav-item" data-tab="files">
+            <div class="drawer-nav-left">
+              <span class="drawer-nav-icon">📁</span>
+              <span>工作区文件</span>
+            </div>
+          </button>
+          <button class="drawer-nav-item" data-tab="changes">
+            <div class="drawer-nav-left">
+              <span class="drawer-nav-icon">⚡</span>
+              <span>代码变更 (Git)</span>
+            </div>
+          </button>
+          <button class="drawer-nav-item" data-tab="knowledge">
+            <div class="drawer-nav-left">
+              <span class="drawer-nav-icon">📚</span>
+              <span>知识库与记忆</span>
+            </div>
+          </button>
+          <button class="drawer-nav-item" data-tab="subagents">
+            <div class="drawer-nav-left">
+              <span class="drawer-nav-icon">🤖</span>
+              <span>子智能体管理</span>
+            </div>
+          </button>
+        </nav>
+
+        <!-- 历史旁聊区（会话管理） -->
+        <div class="drawer-section-title" style="margin-top:16px;">最近会话 (旁聊)</div>
+        <div class="drawer-session-list">
+          <div class="session-card active">
+            <div class="session-title">检查项目启动流程与协议</div>
+            <div class="session-time">刚刚 · 4 条消息</div>
+          </div>
+          <div class="session-card">
+            <div class="session-title">子代理实时查看功能联调</div>
+            <div class="session-time">上午 11:20 · 28 条消息</div>
+          </div>
+          <div class="session-card">
+            <div class="session-title">前端页面失真修复与布局</div>
+            <div class="session-time">昨天 · 14 条消息</div>
+          </div>
+        </div>
+
+        <!-- 抽屉底部工具栏（图四设置收纳） -->
+        <div class="drawer-bottom-bar">
+          <button class="drawer-icon-btn" id="drawer-btn-settings" title="设置中心">⚙️</button>
+          <div class="drawer-search-bar" id="drawer-btn-search">
+            <span>🔍</span>
+            <span>搜索历史与记忆...</span>
+          </div>
+          <button class="drawer-icon-btn" id="drawer-btn-new" title="新建会话">✏️</button>
+        </div>
       </aside>
+
+      <!-- 提示气泡 -->
+      <div class="toast-bubble" id="toast-bubble"></div>
     </main>
 
     <script>
-      const phone = document.querySelector(".phone");
-      const toast = document.querySelector("#toast");
-      const input = document.querySelector("#composer-input");
-      const thread = document.querySelector("#thread");
-      const planCard = document.querySelector("#plan-card");
-      let toastTimer;
+      // 交互逻辑绑定
+      const phoneShell = document.getElementById("phone-shell");
+      const floatingHeader = document.getElementById("floating-header");
+      const legacyHeader = document.getElementById("legacy-header");
+      const legacyNav = document.getElementById("legacy-nav");
 
-      function showToast(message) {
-        toast.textContent = message;
-        toast.classList.add("show");
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+      const btnToggleNew = document.getElementById("btn-toggle-new");
+      const btnToggleLegacy = document.getElementById("btn-toggle-legacy");
+
+      const drawerBackdrop = document.getElementById("drawer-backdrop");
+      const sideDrawer = document.getElementById("side-drawer");
+      const btnOpenDrawer = document.getElementById("btn-open-drawer");
+      const btnCloseDrawer = document.getElementById("btn-close-drawer");
+
+      const btnToggleMode = document.getElementById("btn-toggle-mode");
+      const currentModeText = document.getElementById("current-mode-text");
+      const modePopover = document.getElementById("mode-popover");
+      const modeOptions = document.querySelectorAll(".mode-option");
+
+      const toastBubble = document.getElementById("toast-bubble");
+      const composerInput = document.getElementById("composer-input");
+      const btnSend = document.getElementById("btn-send");
+      const chatStage = document.getElementById("chat-stage");
+
+      function showToast(msg) {
+        toastBubble.textContent = msg;
+        toastBubble.classList.add("show");
+        setTimeout(() => toastBubble.classList.remove("show"), 1800);
       }
 
-      document.querySelectorAll(".mode-button").forEach((button) => {
-        button.addEventListener("click", () => {
-          document.querySelectorAll(".mode-button").forEach((item) => item.classList.remove("active"));
-          button.classList.add("active");
-          const isPlan = button.dataset.mode === "Plan";
-          planCard.classList.toggle("visible", isPlan);
-          document.querySelector("#view-hint").textContent = isPlan ? "先确认计划，再执行文件变更" : "集中处理一件事，执行记录保持可见";
-          showToast(isPlan ? "已切换到 Plan 模式" : "已切换到 Chat 模式");
+      // 切换新旧设计
+      btnToggleNew.addEventListener("click", () => {
+        btnToggleNew.classList.add("active");
+        btnToggleLegacy.classList.remove("active");
+        phoneShell.classList.remove("legacy-mode");
+        floatingHeader.style.display = "flex";
+        legacyHeader.style.display = "none";
+        legacyNav.style.display = "none";
+        showToast("已切换到新版：宽大沉浸对话流");
+      });
+
+      btnToggleLegacy.addEventListener("click", () => {
+        btnToggleLegacy.classList.add("active");
+        btnToggleNew.classList.remove("active");
+        phoneShell.classList.add("legacy-mode");
+        floatingHeader.style.display = "none";
+        legacyHeader.style.display = "flex";
+        legacyNav.style.display = "grid";
+        showToast("已切换到原版：查看受限的对话空间");
+      });
+
+      // 抽屉开关
+      function setDrawer(open) {
+        if (open) {
+          drawerBackdrop.classList.add("open");
+          sideDrawer.classList.add("open");
+        } else {
+          drawerBackdrop.classList.remove("open");
+          sideDrawer.classList.remove("open");
+        }
+      }
+
+      btnOpenDrawer.addEventListener("click", () => setDrawer(true));
+      btnCloseDrawer.addEventListener("click", () => setDrawer(false));
+      drawerBackdrop.addEventListener("click", () => setDrawer(false));
+
+      // 抽屉内部功能导航点击
+      document.querySelectorAll(".drawer-nav-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          document.querySelectorAll(".drawer-nav-item").forEach((n) => n.classList.remove("active"));
+          item.classList.add("active");
+          const tab = item.dataset.tab;
+          if (tab === "chat") {
+            setDrawer(false);
+            showToast("已返回主对话流");
+          } else {
+            setDrawer(false);
+            showToast(`已打开【${item.querySelector("span:last-child").textContent}】工作区`);
+          }
         });
       });
 
-      document.querySelector("#run-summary").addEventListener("click", () => {
-        const card = document.querySelector("#run-card");
-        const open = card.classList.toggle("open");
-        document.querySelector("#run-summary").setAttribute("aria-expanded", String(open));
+      // 抽屉底部设置
+      document.getElementById("drawer-btn-settings").addEventListener("click", () => {
+        setDrawer(false);
+        showToast("进入设置中心：中继连接、模型配置、MCP状态");
       });
 
-      const sheet = document.querySelector("#settings-sheet");
-      const backdrop = document.querySelector("#sheet-backdrop");
-      function toggleSheet(open) {
-        sheet.classList.toggle("open", open);
-        backdrop.classList.toggle("open", open);
-      }
-      document.querySelector("#open-settings").addEventListener("click", () => toggleSheet(true));
-      document.querySelector("#close-settings").addEventListener("click", () => toggleSheet(false));
-      backdrop.addEventListener("click", () => toggleSheet(false));
-      document.querySelector("#context-button").addEventListener("click", () => showToast("上下文详情将在这里打开"));
+      document.getElementById("drawer-btn-search").addEventListener("click", () => {
+        showToast("打开全局检索");
+      });
 
-      document.querySelectorAll(".nav-button").forEach((button) => {
-        button.addEventListener("click", () => {
-          document.querySelectorAll(".nav-button").forEach((item) => item.classList.remove("active"));
-          button.classList.add("active");
-          const section = button.dataset.section;
-          if (section !== "对话") showToast(`${section}面板保持为独立工作区`);
+      document.getElementById("drawer-btn-new").addEventListener("click", () => {
+        setDrawer(false);
+        showToast("已创建新会话");
+      });
+
+      document.getElementById("btn-quick-new").addEventListener("click", () => {
+        showToast("已快速开启新对话");
+      });
+
+      // 模式切换菜单
+      btnToggleMode.addEventListener("click", (e) => {
+        e.stopPropagation();
+        modePopover.classList.toggle("show");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!modePopover.contains(e.target) && e.target !== btnToggleMode) {
+          modePopover.classList.remove("show");
+        }
+      });
+
+      modeOptions.forEach((opt) => {
+        opt.addEventListener("click", () => {
+          modeOptions.forEach((o) => o.classList.remove("active"));
+          opt.classList.add("active");
+          const mode = opt.dataset.mode;
+          if (mode === "chat") {
+            currentModeText.textContent = "💬 对话模式";
+            showToast("已切换为：对话模式 (正常执行)");
+          } else {
+            currentModeText.textContent = "🎯 规划模式";
+            showToast("已切换为：规划模式 (只读计划)");
+          }
+          modePopover.classList.remove("show");
         });
       });
 
-      document.querySelector("#send-button").addEventListener("click", () => {
-        const text = input.value.trim();
+      // 发送消息演示
+      function handleSend() {
+        const text = composerInput.value.trim();
         if (!text) {
-          showToast("先输入一条消息");
-          input.focus();
+          showToast("请输入消息内容");
           return;
         }
-        const message = document.createElement("article");
-        message.className = "message user";
-        message.innerHTML = `<p class="message-label">你 · 现在</p><div class="message-bubble"></div>`;
-        message.querySelector(".message-bubble").textContent = text;
-        thread.appendChild(message);
-        input.value = "";
-        thread.scrollTop = thread.scrollHeight;
-        showToast("消息已进入执行队列");
+
+        // 添加用户气泡
+        const userBubble = document.createElement("div");
+        userBubble.className = "bubble-group user";
+        userBubble.innerHTML = `
+          <span class="bubble-meta">你 · 刚刚</span>
+          <div class="bubble-content">${escapeHTML(text)}</div>
+        `;
+        chatStage.appendChild(userBubble);
+        composerInput.value = "";
+        chatStage.scrollTop = chatStage.scrollHeight;
+
+        // 模拟 AI 回复
         setTimeout(() => {
-          const reply = document.createElement("article");
-          reply.className = "message assistant";
-          reply.innerHTML = `<p class="message-label">MYAI · 刚刚</p><div class="message-bubble">已收到这条任务。后续的计划、工具调用和结果会按时间顺序显示在当前会话中。</div>`;
-          thread.appendChild(reply);
-          thread.scrollTop = thread.scrollHeight;
-        }, 700);
+          const aiBubble = document.createElement("div");
+          aiBubble.className = "bubble-group assistant";
+          aiBubble.innerHTML = `
+            <span class="bubble-meta">MYAI · 刚刚</span>
+            <div class="bubble-content">
+              已收到你的指令："${escapeHTML(text)}"，在新的宽屏视窗下，即使输出大量代码或多步思考过程，也能轻松滚屏浏览！
+            </div>
+          `;
+          chatStage.appendChild(aiBubble);
+          chatStage.scrollTop = chatStage.scrollHeight;
+        }, 600);
+      }
+
+      btnSend.addEventListener("click", handleSend);
+      composerInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleSend();
       });
 
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          document.querySelector("#send-button").click();
-        }
-      });
+      function escapeHTML(str) {
+        return str.replace(/[&<>'"]/g, 
+          tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+        );
+      }
     </script>
   </body>
 </html>

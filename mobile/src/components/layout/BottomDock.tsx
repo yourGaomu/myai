@@ -71,16 +71,18 @@ export function BottomDock({
           pendingUpload={pendingUpload}
         />
       ) : null}
-      <BottomTabs
-        buttonFeedback={buttonFeedback}
-        changesActive={changesActive}
-        onChangesPress={onChangesPress}
-        onChatPress={onChatPress}
-        onFilesPress={onFilesPress}
-        onKnowledgePress={onKnowledgePress}
-        onSettingsPress={onSettingsPress}
-        viewMode={viewMode}
-      />
+      {viewMode !== "chat" ? (
+        <BottomTabs
+          buttonFeedback={buttonFeedback}
+          changesActive={changesActive}
+          onChangesPress={onChangesPress}
+          onChatPress={onChatPress}
+          onFilesPress={onFilesPress}
+          onKnowledgePress={onKnowledgePress}
+          onSettingsPress={onSettingsPress}
+          viewMode={viewMode}
+        />
+      ) : null}
     </View>
   );
 }
