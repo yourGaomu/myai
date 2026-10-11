@@ -36,12 +36,15 @@ export function useSubagentState() {
   }, []);
 
   const applyTaskResult = useCallback((payload?: SubagentTaskResultPayload) => {
+    // 1.0 若携带事件序列和类型，记录子代理实时事件
     if (payload?.task && payload.sequence && payload.kind) {
       const runtimeEvent: SubagentTaskEvent = {
         task_id: payload.task.id,
         sequence: payload.sequence,
         kind: payload.kind,
         run_id: payload.run_id,
+        tool_call_id: payload.tool_call_id,
+        assets: payload.assets,
         content: payload.content,
         tool_name: payload.tool_name,
         arguments: payload.arguments,
@@ -54,6 +57,8 @@ export function useSubagentState() {
       };
       setEvents((current) => appendTaskEvent(current, runtimeEvent));
     }
+
+    // 2.0 更新子任务快照状态
     if (payload?.task) {
       const task = payload.sequence
         ? { ...payload.task, event_sequence: payload.sequence, event_kind: payload.kind }
@@ -95,14 +100,24 @@ function upsertDefinition(current: SubagentDefinition[], value: SubagentDefiniti
   return next.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+// 3.0 任务快照更新：比较 task.updated_at，避免旧事件或迟到响应覆盖新状态
 function upsertTask(current: SubagentTask[], value: SubagentTask) {
   const existing = current.find((item) => item.id === value.id);
-  if (
-    existing?.event_sequence !== undefined &&
-    value.event_sequence !== undefined &&
-    value.event_sequence < existing.event_sequence
-  ) {
-    return current;
+  if (existing) {
+    if (existing.updated_at && value.updated_at) {
+      const existingTime = Date.parse(existing.updated_at);
+      const valueTime = Date.parse(value.updated_at);
+      if (Number.isFinite(existingTime) && Number.isFinite(valueTime) && valueTime < existingTime) {
+        return current;
+      }
+    }
+    if (
+      existing.event_sequence !== undefined &&
+      value.event_sequence !== undefined &&
+      value.event_sequence < existing.event_sequence
+    ) {
+      return current;
+    }
   }
   const next = current.filter((item) => item.id !== value.id);
   next.push(existing ? { ...existing, ...value } : value);

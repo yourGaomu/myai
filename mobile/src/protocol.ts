@@ -152,6 +152,10 @@ export type MessageType =
   | "subagent_task_resume_result"
   | "subagent_task_result"
   | "subagent_task_event"
+  | "subagent_task_detail"
+  | "subagent_task_detail_result"
+  | "subagent_task_events"
+  | "subagent_task_events_result"
   | "file_list"
   | "file_list_result"
   | "file_read"
@@ -235,6 +239,9 @@ export type SubagentTask = {
   parent_session_id: string;
   parent_task_id?: string;
   parent_run_id?: string;
+  parent_tool_call_id?: string;
+  child_session_id?: string;
+  current_run_id?: string;
   plan_id?: string;
   step_id?: string;
   agent_path?: string;
@@ -246,6 +253,7 @@ export type SubagentTask = {
   status: "queued" | "running" | "waiting_subagents" | "waiting_permission" | "succeeded" | "failed" | "canceled";
   unread: boolean;
   result?: string;
+  reasoning?: string;
   usage?: TokenUsage;
   error_message?: string;
   change_set: SubagentChangeSet;
@@ -271,6 +279,8 @@ export type SubagentTaskResultPayload = {
   kind?: string;
   emitted_at?: string;
   run_id?: string;
+  tool_call_id?: string;
+  assets?: AssetSummary[];
   content?: string;
   tool_name?: string;
   arguments?: string;
@@ -292,6 +302,8 @@ export type SubagentTaskEvent = {
   sequence: number;
   kind: string;
   run_id?: string;
+  tool_call_id?: string;
+  assets?: AssetSummary[];
   content?: string;
   tool_name?: string;
   arguments?: string;
@@ -301,6 +313,56 @@ export type SubagentTaskEvent = {
   truncated?: boolean;
   delta?: boolean;
   emitted_at?: string;
+};
+
+export type SubagentRunSummary = {
+  id: string;
+  sequence: number;
+  instruction: string;
+  status: string;
+  result?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+};
+
+export type SubagentTaskDetailPayload = {
+  task_id: string;
+  after_message_id?: string;
+  message_limit?: number;
+};
+
+export type SubagentTaskDetailResultPayload = {
+  task: SubagentTask;
+  read_only: boolean;
+  session_ready: boolean;
+  event_sequence: number;
+  messages: SessionHistoryMessage[];
+  next_message_id?: string;
+  has_more_messages: boolean;
+  full_sync_required: boolean;
+  runs: SubagentRunSummary[];
+  agent_runs: AgentRunSnapshot[];
+  assets: AssetSummary[];
+};
+
+export type SubagentTaskEventsPayload = {
+  task_id?: string;
+  run_id?: string;
+  after_sequence?: number;
+  through_sequence?: number;
+  limit?: number;
+};
+
+export type SubagentTaskEventsResultPayload = {
+  session_id: string;
+  task_id?: string;
+  run_id?: string;
+  events: SubagentTaskResultPayload[];
+  next_sequence: number;
+  through_sequence: number;
+  has_more: boolean;
 };
 
 export type SubagentTaskWaitResultPayload = {
@@ -379,6 +441,7 @@ export type AgentRunEvent = {
   title?: string;
   content?: string;
   tool_name?: string;
+  tool_call_id?: string;
   arguments?: string;
   status?: string;
   error_code?: string;
@@ -440,6 +503,7 @@ export type ErrorPayload = {
 export type ToolCallPayload = {
   name?: string;
   arguments?: string;
+  tool_call_id?: string;
 };
 
 export type ToolResultPayload = {
@@ -451,6 +515,7 @@ export type ToolResultPayload = {
   error_code?: string;
   error_message?: string;
   truncated?: boolean;
+  tool_call_id?: string;
 };
 
 export type PermissionAskPayload = {

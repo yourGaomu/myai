@@ -123,6 +123,7 @@ type Props = {
   onFollowupSubagentTask: (taskID: string, message: string) => boolean;
   onMessageSubagentTask: (taskID: string, message: string) => boolean;
   onResumeSubagentTask: (taskID: string) => void;
+  onInspectSubagentTask?: (taskID: string) => void;
   onRefreshSubagents: () => void;
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
@@ -295,6 +296,7 @@ export function SettingsPanel({
   onFollowupSubagentTask,
   onMessageSubagentTask,
   onResumeSubagentTask,
+  onInspectSubagentTask,
   onRefreshSubagents,
   onUpdateSubagentDefinition,
   onUserIDChange,
@@ -2606,6 +2608,7 @@ export function SettingsPanel({
       onDeleteDefinition={onDeleteSubagentDefinition}
           onDiscardTask={onDiscardSubagentTask}
           onFollowupTask={onFollowupSubagentTask}
+          onInspectTask={onInspectSubagentTask}
           onMessageTask={onMessageSubagentTask}
       onResumeTask={onResumeSubagentTask}
       onRefresh={onRefreshSubagents}

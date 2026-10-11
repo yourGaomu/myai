@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { AgentTurnItem, AgentTurnTimelineStep, ToolCallStep } from "../../utils/chatRenderItems";
+import type { SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageBreakdown } from "../../utils/tokenUsage";
@@ -195,9 +196,17 @@ type Props = {
   buttonFeedback: ButtonFeedback;
   onRegenerate?: () => void;
   turn: AgentTurnItem;
+  subagentTasks?: SubagentTask[];
+  onInspectSubagent?: (taskID: string) => void;
 };
 
-export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
+export function AgentTurnCard({
+  buttonFeedback,
+  onRegenerate,
+  turn,
+  subagentTasks,
+  onInspectSubagent,
+}: Props) {
   const isRunning = turn.status === "running";
   const timeline = useMemo<AgentTurnTimelineStep[]>(() => {
     if (turn.timeline && turn.timeline.length > 0) {
@@ -329,6 +338,8 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
                     <InterleavedToolGroup
                       buttonFeedback={buttonFeedback}
                       key={step.id}
+                      onInspectSubagent={onInspectSubagent}
+                      subagentTasks={subagentTasks}
                       tools={step.tools}
                     />
                   );
@@ -431,14 +442,25 @@ export function AgentTurnCard({ buttonFeedback, onRegenerate, turn }: Props) {
 function InterleavedToolGroup({
   buttonFeedback,
   tools,
+  subagentTasks,
+  onInspectSubagent,
 }: {
   buttonFeedback: ButtonFeedback;
   tools: ToolCallStep[];
+  subagentTasks?: SubagentTask[];
+  onInspectSubagent?: (taskID: string) => void;
 }) {
   const [groupOpen, setGroupOpen] = useState(true);
 
   if (tools.length === 1) {
-    return <InterleavedToolRow buttonFeedback={buttonFeedback} tool={tools[0]} />;
+    return (
+      <InterleavedToolRow
+        buttonFeedback={buttonFeedback}
+        onInspectSubagent={onInspectSubagent}
+        subagentTasks={subagentTasks}
+        tool={tools[0]}
+      />
+    );
   }
 
   const runningCount = tools.filter((t) => t.status === "running").length;
@@ -471,6 +493,8 @@ function InterleavedToolGroup({
             <InterleavedToolRow
               buttonFeedback={buttonFeedback}
               key={tool.id || `${tool.name}-${index}`}
+              onInspectSubagent={onInspectSubagent}
+              subagentTasks={subagentTasks}
               tool={tool}
             />
           ))}
@@ -483,9 +507,13 @@ function InterleavedToolGroup({
 function InterleavedToolRow({
   buttonFeedback,
   tool,
+  subagentTasks,
+  onInspectSubagent,
 }: {
   buttonFeedback: ButtonFeedback;
   tool: ToolCallStep;
+  subagentTasks?: SubagentTask[];
+  onInspectSubagent?: (taskID: string) => void;
 }) {
   const isFailed = Boolean(tool.error || tool.status === "error");
   const isRunning = tool.status === "running";
@@ -494,6 +522,17 @@ function InterleavedToolRow({
   const requestText = useMemo(() => formatToolRequestText(tool), [tool]);
   const rowTitle = useMemo(() => formatToolActionRowTitle(tool), [tool]);
   const outputText = tool.error || tool.result || "";
+
+  // 1.0 按 parent_tool_call_id 精确配对子代理任务（并发任务不按顺序或工具名配对）
+  const matchingSubagentTask = useMemo(() => {
+    if (!subagentTasks || subagentTasks.length === 0) return undefined;
+    const currentToolCallID = tool.toolCallID || tool.id;
+    return subagentTasks.find(
+      (t) =>
+        t.parent_tool_call_id &&
+        (t.parent_tool_call_id === currentToolCallID || t.parent_tool_call_id === tool.id),
+    );
+  }, [subagentTasks, tool.id, tool.toolCallID]);
 
   return (
     <View style={styles.toolStepContainer}>
@@ -527,6 +566,53 @@ function InterleavedToolRow({
         {tool.duration ? <Text style={styles.toolInlineDuration}>{tool.duration}</Text> : null}
         <Text style={styles.toolInlineChevron}>{expanded ? "⌄" : "›"}</Text>
       </Pressable>
+
+      {/* 2.0 主聊天子代理摘要入口：按 parent_tool_call_id 匹配，显示状态与最近输出 */}
+      {matchingSubagentTask ? (
+        <View style={styles.subagentSummaryCard}>
+          <View style={styles.subagentSummaryHeader}>
+            <View style={styles.subagentSummaryTitleRow}>
+              <Text style={styles.subagentIcon}>🤖</Text>
+              <Text numberOfLines={1} style={styles.subagentSummaryName}>
+                {matchingSubagentTask.agent_nickname || matchingSubagentTask.title || "子代理"}
+              </Text>
+              <View
+                style={[
+                  styles.subagentStatusPill,
+                  matchingSubagentTask.status === "running" && styles.subagentStatusRunning,
+                  matchingSubagentTask.status === "succeeded" && styles.subagentStatusSucceeded,
+                  matchingSubagentTask.status === "failed" && styles.subagentStatusFailed,
+                  (matchingSubagentTask.status === "waiting_subagents" ||
+                    matchingSubagentTask.status === "waiting_permission") &&
+                    styles.subagentStatusWaiting,
+                ]}
+              >
+                <Text style={styles.subagentStatusPillText}>
+                  {formatSubagentStatus(matchingSubagentTask.status)}
+                </Text>
+              </View>
+            </View>
+            {onInspectSubagent ? (
+              <Pressable
+                onPress={() => onInspectSubagent(matchingSubagentTask.id)}
+                style={({ pressed }) => buttonFeedback(styles.inspectSubagentBtn, pressed)}
+              >
+                <Text style={styles.inspectSubagentBtnText}>🔍 实时详情 ❯</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {matchingSubagentTask.result || matchingSubagentTask.reasoning || matchingSubagentTask.instruction ? (
+            <Text numberOfLines={2} style={styles.subagentSummarySnippet}>
+              {matchingSubagentTask.result || matchingSubagentTask.reasoning || matchingSubagentTask.instruction}
+            </Text>
+          ) : null}
+        </View>
+      ) : (tool.name === "spawn_agent" || tool.name === "start_async_task") && isRunning ? (
+        <View style={styles.subagentSpawningCard}>
+          <ActivityIndicator color="#0f766e" size="small" />
+          <Text style={styles.subagentSpawningText}>子代理启动中...</Text>
+        </View>
+      ) : null}
 
       {expanded ? (
         <View style={styles.shellBox}>
@@ -1148,4 +1234,111 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
+  subagentSummaryCard: {
+    backgroundColor: "#f4fbf7",
+    borderColor: "#12100e",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    gap: 6,
+    marginTop: 4,
+    padding: 10,
+  },
+  subagentSummaryHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  subagentSummaryTitleRow: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+  },
+  subagentIcon: {
+    fontSize: 14,
+  },
+  subagentSummaryName: {
+    color: "#12100e",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  subagentStatusPill: {
+    backgroundColor: "#e7e5e4",
+    borderColor: "#12100e",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  subagentStatusPillText: {
+    color: "#12100e",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  subagentStatusRunning: {
+    backgroundColor: "#cffafe",
+  },
+  subagentStatusSucceeded: {
+    backgroundColor: "#dcfce7",
+  },
+  subagentStatusFailed: {
+    backgroundColor: "#fee2e2",
+  },
+  subagentStatusWaiting: {
+    backgroundColor: "#fef3c7",
+  },
+  inspectSubagentBtn: {
+    backgroundColor: "#12100e",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  inspectSubagentBtnText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  subagentSummarySnippet: {
+    color: "#44403c",
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  subagentSpawningCard: {
+    alignItems: "center",
+    backgroundColor: "#f0fdfa",
+    borderColor: "#0f766e",
+    borderRadius: 6,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+    padding: 8,
+  },
+  subagentSpawningText: {
+    color: "#0f766e",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });
+
+function formatSubagentStatus(status?: string): string {
+  switch (status) {
+    case "queued":
+      return "排队中";
+    case "running":
+      return "执行中";
+    case "waiting_subagents":
+      return "等待子任务";
+    case "waiting_permission":
+      return "等待授权";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "canceled":
+      return "已取消";
+    default:
+      return status || "运行中";
+  }
+}

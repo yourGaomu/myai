@@ -56,6 +56,8 @@ import type {
   SkillListResultPayload,
   SubagentDefinitionListResultPayload,
   SubagentDefinitionMutationResultPayload,
+  SubagentTaskDetailResultPayload,
+  SubagentTaskEventsResultPayload,
   SubagentTaskListResultPayload,
   SubagentTaskResultPayload,
   TokenUsage,
@@ -74,6 +76,7 @@ type Args = {
     name: string,
     argumentsText: string,
     requestID?: string,
+    toolCallID?: string,
   ) => void;
   addToolResult: (
     sessionID: string,
@@ -83,6 +86,7 @@ type Args = {
     failed: boolean,
     requestID?: string,
     details?: ToolResultPayload,
+    toolCallID?: string,
   ) => void;
   applyRunCompleted: (payload?: AgentRunCompletedPayload) => void;
   applyRunEvent: (payload?: AgentRunEventPayload) => void;
@@ -151,6 +155,17 @@ type Args = {
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
   applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
   applySubagentTaskResult: (payload?: SubagentTaskResultPayload) => void;
+  applySubagentTaskDetailResult?: (
+    payload?: SubagentTaskDetailResultPayload,
+    requestID?: string,
+  ) => void;
+  applySubagentTaskEventsResult?: (
+    payload?: SubagentTaskEventsResultPayload,
+    requestID?: string,
+  ) => void;
+  applyRealtimeSubagentTaskEvent?: (
+    payload?: SubagentTaskResultPayload,
+  ) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
   completeAssistant: (
     sessionID: string,
@@ -274,6 +289,9 @@ export function useRemoteMessageHandler({
   applySubagentDefinitionMutation,
   applySubagentTaskList,
   applySubagentTaskResult,
+  applySubagentTaskDetailResult,
+  applySubagentTaskEventsResult,
+  applyRealtimeSubagentTaskEvent,
   clearSessionPendingRequest,
   completeAssistant,
   currentFilePath,
@@ -576,6 +594,7 @@ export function useRemoteMessageHandler({
             payload.name || "tool",
             payload.arguments || "",
             message.request_id,
+            payload.tool_call_id,
           );
           break;
         }
@@ -591,6 +610,7 @@ export function useRemoteMessageHandler({
               Boolean(payload.status && payload.status !== "success"),
             message.request_id,
             payload,
+            payload.tool_call_id,
           );
           break;
         }
@@ -868,6 +888,19 @@ export function useRemoteMessageHandler({
           break;
         case "subagent_task_event":
           applySubagentTaskResult(message.payload as SubagentTaskResultPayload | undefined);
+          applyRealtimeSubagentTaskEvent?.(message.payload as SubagentTaskResultPayload | undefined);
+          break;
+        case "subagent_task_detail_result":
+          applySubagentTaskDetailResult?.(
+            message.payload as SubagentTaskDetailResultPayload | undefined,
+            message.request_id,
+          );
+          break;
+        case "subagent_task_events_result":
+          applySubagentTaskEventsResult?.(
+            message.payload as SubagentTaskEventsResultPayload | undefined,
+            message.request_id,
+          );
           break;
         case "file_list_result":
           stopPending("files");

@@ -219,6 +219,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
     } else if (ev.type === "tool_call") {
       const step: ToolCallStep = {
         id: ev.id,
+        toolCallID: ev.tool_call_id || ev.id,
         name: ev.tool_name || ev.title || "tool",
         arguments: ev.arguments,
         status: "running",
@@ -232,7 +233,8 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
       const failed =
         Boolean(ev.error_message || ev.error_code) ||
         Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded");
-      const existing = findMatchingPendingToolStep(tools, toolName, undefined, ev.arguments);
+      // 1.0 优先依据 tool_call_id 精确配对工具开始与结束事件
+      const existing = findMatchingPendingToolStep(tools, toolName, ev.tool_call_id, ev.arguments);
       if (existing) {
         existing.result = ev.content || ev.error_message || "";
         existing.error = failed ? ev.error_message || ev.content || ev.error_code : undefined;
@@ -253,6 +255,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
       } else {
         const step: ToolCallStep = {
           id: ev.id,
+          toolCallID: ev.tool_call_id || ev.id,
           name: toolName,
           arguments: ev.arguments,
           result: ev.content || ev.error_message || "",

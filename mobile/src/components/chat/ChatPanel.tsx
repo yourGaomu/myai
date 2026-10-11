@@ -8,7 +8,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 
-import type { AgentRunSnapshot } from "../../protocol";
+import type { AgentRunSnapshot, SubagentTask } from "../../protocol";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { buildChatTurns, groupToolActivity, type ChatRenderItem } from "../../utils/chatRenderItems";
@@ -28,6 +28,8 @@ type Props = {
   pendingRequestID: string;
   runs: AgentRunSnapshot[];
   sessionID: string;
+  subagentTasks?: SubagentTask[];
+  onInspectSubagent?: (taskID: string) => void;
   onRegenerate: () => void;
 };
 
@@ -40,6 +42,8 @@ export function ChatPanel({
   pendingRequestID,
   runs,
   sessionID,
+  subagentTasks,
+  onInspectSubagent,
   onRegenerate,
 }: Props) {
   const renderItems = useMemo(() => {
@@ -119,7 +123,9 @@ export function ChatPanel({
                 >
                   <AgentTurnCard
                     buttonFeedback={buttonFeedback}
+                    onInspectSubagent={onInspectSubagent}
                     onRegenerate={onRegenerate}
+                    subagentTasks={subagentTasks}
                     turn={item}
                   />
                 </View>

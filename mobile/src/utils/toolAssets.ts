@@ -1,3 +1,5 @@
+import type { AssetSummary } from "../protocol";
+
 export type SharedAsset = {
   code?: string;
   contentType?: string;
@@ -7,6 +9,18 @@ export type SharedAsset = {
   shortURL: string;
   size?: number;
 };
+
+export function assetSummaryToSharedAsset(summary: AssetSummary): SharedAsset {
+  return {
+    code: summary.code,
+    contentType: summary.content_type,
+    expiresAt: summary.expires_at,
+    fileName: summary.file_name,
+    path: summary.path,
+    shortURL: summary.short_url,
+    size: summary.size,
+  };
+}
 
 type RawSharedAsset = {
   code?: unknown;

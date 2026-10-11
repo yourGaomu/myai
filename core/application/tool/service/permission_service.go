@@ -19,19 +19,23 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	permission := tooldef.NormalizePermission(command.Permission)
 	mode := session.NormalizePermissionMode(command.Mode)
 	switch mode {
+	//拒绝写入、执行类工具
 	case session.PermissionModeReadonly:
 		if permission != tooldef.PermissionRead {
 			return deniedByCapability(command, mode, permission)
 		}
+		//允许读取和写入，拒绝执行类工具
 	case session.PermissionModeReadWrite:
 		if permission == tooldef.PermissionExecute {
 			return deniedByCapability(command, mode, permission)
 		}
+		//允许读取和执行，拒绝直接写入类工具
 	case session.PermissionModeExecute:
 		if permission == tooldef.PermissionWrite {
 			return deniedByCapability(command, mode, permission)
 		}
 	}
+	//如果 Hook 明确要求确认
 	if command.RequireConfirmation {
 		return askForPermission(command, permission, mode, "hook requires confirmation")
 	}

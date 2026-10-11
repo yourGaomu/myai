@@ -139,6 +139,7 @@ export type SettingsContentProps = {
   onFollowupSubagentTask: (taskID: string, message: string) => boolean;
   onMessageSubagentTask: (taskID: string, message: string) => boolean;
   onResumeSubagentTask: (taskID: string) => void;
+  onInspectSubagentTask?: (taskID: string) => void;
   onRefreshSubagents: () => void;
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
   onUserIDChange: (value: string) => void;
@@ -176,6 +177,8 @@ export type ChatContentProps = {
   pendingHistorySessionID: string;
   pendingRequestID: string;
   sessionID: string;
+  subagentTasks?: SubagentTask[];
+  onInspectSubagent?: (taskID: string) => void;
 };
 
 export type FilesContentProps = {

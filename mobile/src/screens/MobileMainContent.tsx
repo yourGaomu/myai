@@ -112,6 +112,7 @@ export function MobileMainContent({
           onFollowupSubagentTask={settings.onFollowupSubagentTask}
           onMessageSubagentTask={settings.onMessageSubagentTask}
           onResumeSubagentTask={settings.onResumeSubagentTask}
+          onInspectSubagentTask={settings.onInspectSubagentTask}
           onRefreshSubagents={settings.onRefreshSubagents}
           onUpdateSubagentDefinition={settings.onUpdateSubagentDefinition}
           onUserIDChange={settings.onUserIDChange}
@@ -145,10 +146,12 @@ export function MobileMainContent({
             (!chat.sessionID || chat.pendingHistorySessionID === chat.sessionID)
           }
           messages={chat.messages}
+          onInspectSubagent={chat.onInspectSubagent}
           onRegenerate={chat.onRegenerate}
           pendingRequestID={chat.pendingRequestID}
           runs={chat.runs}
           sessionID={chat.sessionID}
+          subagentTasks={chat.subagentTasks}
         />
       ) : null}
 

@@ -125,6 +125,69 @@ export function useSubagentActions({
     stopPending,
   ]);
 
+  // 1.0 查询子任务详情（只读，不改变当前主会话，信封携带直接父会话 ID）
+  const requestTaskDetail = useCallback(
+    (taskID: string, afterMessageID = "", messageLimit = 100, targetSessionID = sessionID) => {
+      if (!clientToken) {
+        onError("请先完成配对");
+        return "";
+      }
+      const requestID = newRequestID();
+      const sent = sendEnvelope("subagent_task_detail", {
+        request_id: requestID,
+        session_id: targetSessionID,
+        payload: {
+          task_id: taskID,
+          after_message_id: afterMessageID,
+          message_limit: messageLimit,
+        },
+      });
+      if (!sent) {
+        onError("详情请求未发送，请检查 Relay 连接");
+        return "";
+      }
+      return requestID;
+    },
+    [clientToken, onError, sendEnvelope, sessionID],
+  );
+
+  // 2.0 回放子任务事件（支持固定水位与分页补取，信封携带直接父会话 ID）
+  const requestTaskEvents = useCallback(
+    (
+      options: {
+        taskID?: string;
+        runID?: string;
+        afterSequence?: number;
+        throughSequence?: number;
+        limit?: number;
+      },
+      targetSessionID = sessionID,
+    ) => {
+      if (!clientToken) {
+        onError("请先完成配对");
+        return "";
+      }
+      const requestID = newRequestID();
+      const sent = sendEnvelope("subagent_task_events", {
+        request_id: requestID,
+        session_id: targetSessionID,
+        payload: {
+          task_id: options.taskID,
+          run_id: options.runID,
+          after_sequence: options.afterSequence ?? 0,
+          through_sequence: options.throughSequence ?? 0,
+          limit: options.limit ?? 100,
+        },
+      });
+      if (!sent) {
+        onError("事件回放请求未发送，请检查 Relay 连接");
+        return "";
+      }
+      return requestID;
+    },
+    [clientToken, onError, sendEnvelope, sessionID],
+  );
+
   return {
     applyTask,
     cancelTask,
@@ -135,6 +198,8 @@ export function useSubagentActions({
     followupTask,
     messageTask,
     requestDefinitions,
+    requestTaskDetail,
+    requestTaskEvents,
     requestTasks,
     resumeTask,
     waitTask,

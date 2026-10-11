@@ -75,12 +75,14 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  // 1.0 记录工具调用开始：若包含 toolCallID 则明确保存，为并发子任务及子代理任务提供精确关联标识
   const addToolCall = useCallback(
     (
       sessionID: string,
       name: string,
       argumentsText: string,
       requestID?: string,
+      toolCallID?: string,
     ) => {
       updateSessionChat(sessionID, (current) => ({
         ...current,
@@ -101,6 +103,7 @@ export function useChatMessages() {
             status: "tool_running",
             text: "",
             toolName: name,
+            toolCallID: toolCallID || undefined,
             toolArguments: argumentsText,
           },
         ],
@@ -109,6 +112,7 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  // 2.0 记录工具执行返回：优先通过 toolCallID 精确匹配对应调用，防止多并发任务/工具错配
   const addToolResult = useCallback(
     (
       sessionID: string,
@@ -118,20 +122,42 @@ export function useChatMessages() {
       failed: boolean,
       requestID?: string,
       details?: ToolResultPayload,
+      toolCallID?: string,
     ) => {
       updateSessionChat(sessionID, (current) => {
+        const targetToolCallID = toolCallID || details?.tool_call_id;
         let matchedToolCallID = "";
-        for (const item of current.messages) {
-          if (
-            item.role === "tool_call" &&
-            item.status === "tool_running" &&
-            item.toolName === name &&
-            (!argumentsText || (item.toolArguments || "").trim() === argumentsText.trim())
-          ) {
-            matchedToolCallID = item.id;
-            break;
+
+        // 2.1 优先依据 toolCallID 精确查找运行中的工具调用
+        if (targetToolCallID) {
+          for (const item of current.messages) {
+            if (
+              item.role === "tool_call" &&
+              item.status === "tool_running" &&
+              item.toolCallID === targetToolCallID
+            ) {
+              matchedToolCallID = item.id;
+              break;
+            }
           }
         }
+
+        // 2.2 兼容兜底：若未提供 toolCallID 或未找到，按名称与入参匹配
+        if (!matchedToolCallID) {
+          for (const item of current.messages) {
+            if (
+              item.role === "tool_call" &&
+              item.status === "tool_running" &&
+              item.toolName === name &&
+              (!argumentsText || (item.toolArguments || "").trim() === argumentsText.trim())
+            ) {
+              matchedToolCallID = item.id;
+              break;
+            }
+          }
+        }
+
+        // 2.3 二次兜底：按同名运行中工具调用匹配
         if (!matchedToolCallID) {
           for (const item of current.messages) {
             if (item.role === "tool_call" && item.status === "tool_running" && item.toolName === name) {
@@ -165,6 +191,7 @@ export function useChatMessages() {
               role: "tool",
               text: result,
               toolName: name,
+              toolCallID: targetToolCallID || undefined,
               toolArguments: argumentsText,
               toolError: failed ? details?.error_message || result : "",
               toolStatus: details?.status,

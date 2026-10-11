@@ -18,6 +18,7 @@ type Props = {
   onDeleteDefinition: (definitionID: string) => void;
   onDiscardTask: (taskID: string) => void;
   onFollowupTask: (taskID: string, message: string) => boolean;
+  onInspectTask?: (taskID: string) => void;
   onMessageTask: (taskID: string, message: string) => boolean;
   onResumeTask: (taskID: string) => void;
   onWaitTask: (taskID: string) => void;
@@ -82,6 +83,7 @@ export function SubagentPanel({
   onDeleteDefinition,
   onDiscardTask,
   onFollowupTask,
+  onInspectTask,
   onMessageTask,
   onResumeTask,
   onWaitTask,
@@ -132,6 +134,7 @@ export function SubagentPanel({
         onCheck={() => onCheckTask(task.id)}
         onDiscard={() => onDiscardTask(task.id)}
         onFollowup={(message) => onFollowupTask(task.id, message)}
+        onInspect={onInspectTask ? () => onInspectTask(task.id) : undefined}
         onMessage={(message) => onMessageTask(task.id, message)}
         onResume={() => onResumeTask(task.id)}
         onWait={() => onWaitTask(task.id)}
@@ -291,7 +294,7 @@ function Segment({ label, onPress, selected }: { label: string; onPress: () => v
   return <Pressable onPress={onPress} style={[styles.segment, selected && styles.segmentActive]}><Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{label}</Text></Pressable>;
 }
 
-function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, onDiscard, onFollowup, onMessage, onResume, onWait, pending, task }: {
+function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, onDiscard, onFollowup, onInspect, onMessage, onResume, onWait, pending, task }: {
   buttonFeedback: ButtonFeedback;
   depth: number;
   events: SubagentTaskEvent[];
@@ -300,6 +303,7 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
   onCheck: () => void;
   onDiscard: () => void;
   onFollowup: (message: string) => boolean;
+  onInspect?: () => void;
   onMessage: (message: string) => boolean;
   onResume: () => void;
   onWait: () => void;
@@ -389,6 +393,7 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
             </View>
           ) : null}
           <View style={styles.actionRow}>
+            {onInspect ? <Pressable disabled={pending} onPress={onInspect} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent text="🔍 实时详情" /></Pressable> : null}
             {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
             <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
             {running ? <Pressable disabled={pending} onPress={onWait} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="等待完成" /></Pressable> : null}

@@ -42,9 +42,11 @@ import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
 import { useSessionGenerationState } from "../hooks/useSessionGenerationState";
 import { useSkillState } from "../hooks/useSkillState";
 import { useSubagentActions } from "../hooks/useSubagentActions";
+import { useSubagentInspection } from "../hooks/useSubagentInspection";
 import { useSubagentState } from "../hooks/useSubagentState";
 import { useIntentSettings } from "../hooks/useIntentSettings";
 import { useMCPState } from "../hooks/useMCPState";
+import { SubagentInspectionModal } from "../components/subagents/SubagentInspectionModal";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -326,6 +328,8 @@ export function MobileAppScreen() {
     followupTask: followupSubagentTask,
     messageTask: messageSubagentTask,
     requestDefinitions: requestSubagentDefinitions,
+    requestTaskDetail,
+    requestTaskEvents,
     requestTasks: requestSubagentTasks,
     resumeTask: resumeSubagentTask,
     updateDefinition: updateSubagentDefinition,
@@ -346,6 +350,38 @@ export function MobileAppScreen() {
     setSessionPendingRequest,
     startPending,
     stopPending,
+  });
+
+  // 1.0 初始化子代理实时查看 Hook：管理只读详情、事件回放分页、实时缓冲与多 Run 状态
+  const {
+    agentRuns: inspectionAgentRuns,
+    assets: inspectionAssets,
+    closeInspection,
+    error: inspectionError,
+    handleDetailResult: applySubagentTaskDetailResult,
+    handleEventsResult: applySubagentTaskEventsResult,
+    handleRealtimeTaskEvent: applyRealtimeSubagentTaskEvent,
+    hasMoreMessages: inspectionHasMoreMessages,
+    inspectedTask,
+    inspectedTaskID,
+    loadingDetail: inspectionLoadingDetail,
+    loadingEvents: inspectionLoadingEvents,
+    loadingMoreMessages: inspectionLoadingMoreMessages,
+    loadMoreMessages: loadMoreInspectionMessages,
+    messages: inspectionMessages,
+    openInspection,
+    readOnly: inspectionReadOnly,
+    refreshInspection,
+    runs: inspectionRuns,
+    selectedRunID: inspectionSelectedRunID,
+    selectRun: selectInspectionRun,
+    sessionReady: inspectionSessionReady,
+    taskEvents: inspectionTaskEvents,
+  } = useSubagentInspection({
+    currentSessionID: sessionID,
+    requestTaskDetail,
+    requestTaskEvents,
+    tasks: subagentTasks,
   });
 
   const { setPluginEnabled } = usePluginActions({
@@ -734,6 +770,9 @@ export function MobileAppScreen() {
     applySubagentDefinitionMutation,
     applySubagentTaskList,
     applySubagentTaskResult,
+    applyRealtimeSubagentTaskEvent,
+    applySubagentTaskDetailResult,
+    applySubagentTaskEventsResult,
     applySessionChanged,
     applySessionHistoryDelta,
     applySessionHistoryMeta,
@@ -795,7 +834,10 @@ export function MobileAppScreen() {
     requestAIMemoryDreamRuns();
     requestSubagentDefinitions();
     requestSubagentTasks();
-  }, [refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, requestSubagentTasks, sessionID]);
+    if (inspectedTaskID) {
+      refreshInspection();
+    }
+  }, [inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, requestSubagentTasks, sessionID]);
 
   const scheduleReconnect = useCallback(() => {
     if (!clientToken) {
@@ -1058,11 +1100,13 @@ export function MobileAppScreen() {
           activeAssistantID: currentChat.activeAssistantID,
           chatScrollRef,
           messages: currentChat.messages,
+          onInspectSubagent: openInspection,
           onRegenerate: regenerateSession,
           pendingHistorySessionID: pendingHistorySessionIDRef.current,
           pendingRequestID: currentChat.pendingRequestID,
           runs: currentRuns,
           sessionID,
+          subagentTasks,
         }}
         common={{
           buttonFeedback,
@@ -1233,6 +1277,7 @@ export function MobileAppScreen() {
           onFollowupSubagentTask: followupSubagentTask,
           onMessageSubagentTask: messageSubagentTask,
           onResumeSubagentTask: resumeSubagentTask,
+          onInspectSubagentTask: openInspection,
           onRefreshSubagents: () => { requestSubagentDefinitions(); requestSubagentTasks(); },
           onUpdateSubagentDefinition: updateSubagentDefinition,
           onUserIDChange: setUserID,
@@ -1253,6 +1298,29 @@ export function MobileAppScreen() {
           unreadSessionIDs,
           userID,
         }}
+      />
+
+      {/* 2.0 子代理只读实时查看面板（不调用 LoadSession，不改变主会话 ID） */}
+      <SubagentInspectionModal
+        agentRuns={inspectionAgentRuns}
+        assets={inspectionAssets}
+        buttonFeedback={buttonFeedback}
+        hasMoreMessages={inspectionHasMoreMessages}
+        loadingDetail={inspectionLoadingDetail}
+        loadingEvents={inspectionLoadingEvents}
+        loadingMoreMessages={inspectionLoadingMoreMessages}
+        messages={inspectionMessages}
+        onClose={closeInspection}
+        onLoadMoreMessages={loadMoreInspectionMessages}
+        onRefresh={refreshInspection}
+        onSelectRun={selectInspectionRun}
+        readOnly={inspectionReadOnly}
+        runs={inspectionRuns}
+        selectedRunID={inspectionSelectedRunID}
+        sessionReady={inspectionSessionReady}
+        task={inspectedTask}
+        taskEvents={inspectionTaskEvents}
+        visible={Boolean(inspectedTaskID)}
       />
     </MobileScreenShell>
   );
