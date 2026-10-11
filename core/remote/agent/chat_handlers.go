@@ -13,6 +13,7 @@ import (
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	intentport "myai/core/port/intent"
+	modelport "myai/core/port/model"
 	"myai/core/remote/protocol"
 	"myai/core/service"
 )
@@ -155,15 +156,17 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 		OnAnswer: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Content: text})
 		},
-		OnToolCall: func(name string, arguments string) {
+		OnToolCallEvent: func(event modelport.ToolCallEvent) {
 			send(protocol.TypeToolCall, protocol.ToolCallPayload{
-				Name:      name,
-				Arguments: arguments,
+				ToolCallID: event.ToolCallID,
+				Name:       event.Name,
+				Arguments:  event.Arguments,
 			})
 		},
 		OnToolResult: func(event llm.ToolResultEvent) {
 			output := event.Output.Normalized()
 			send(protocol.TypeToolResult, protocol.ToolResultPayload{
+				ToolCallID:   event.ToolCallID,
 				Name:         event.Name,
 				Arguments:    event.Arguments,
 				Result:       output.Content,

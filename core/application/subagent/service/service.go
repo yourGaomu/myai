@@ -30,6 +30,8 @@ type Service struct {
 	ParentNotifier       subagentport.ParentCompletionNotifier
 	IDs                  subagentport.IDGenerator
 	Events               subagentport.EventPublisher
+	EventHistory         subagentport.TaskEventHistoryRepository
+	SessionRecords       subagentport.SessionRecordReader
 	Workspaces           workspaceport.Manager
 	DefaultWorkspaceRoot string
 	Now                  func() time.Time

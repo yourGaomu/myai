@@ -32,7 +32,7 @@ func (r Recorder) RecordToolExecution(ctx context.Context, command generationcom
 	}
 
 	entries := append([]domaintool.ExecutionEntry(nil), command.Entries...)
-	assets := append([]domaintool.SharedAsset(nil), command.Assets...)
+	assets := domaintool.CloneSharedAssets(command.Assets)
 	sessionID := toolSessionID(entries, assets)
 	r.run(sessionID, func() {
 		saveCtx, cancel := context.WithTimeout(context.Background(), r.timeout())

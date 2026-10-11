@@ -4,6 +4,7 @@ import (
 	"time"
 
 	domainsubagent "myai/core/domain/subagent"
+	domaintool "myai/core/domain/tool"
 )
 
 const (
@@ -14,6 +15,8 @@ const (
 	TaskEventKindToolCall   = "task.tool_call"
 	TaskEventKindToolResult = "task.tool_result"
 	TaskEventKindPermission = "task.permission"
+	TaskEventKindWaiting    = "task.waiting"
+	TaskEventKindAsset      = "task.asset_created"
 	TaskEventKindCompleted  = "task.completed"
 	TaskEventKindCanceled   = "task.canceled"
 	TaskEventKindFailed     = "task.failed"
@@ -26,6 +29,8 @@ type TaskEvent struct {
 	Kind         string
 	Task         domainsubagent.Task
 	RunID        string
+	ToolCallID   string
+	Assets       []domaintool.SharedAsset
 	Content      string
 	ToolName     string
 	Arguments    string
@@ -35,4 +40,10 @@ type TaskEvent struct {
 	Truncated    bool
 	Delta        bool
 	EmittedAt    time.Time
+}
+
+func CloneTaskEvent(event TaskEvent) TaskEvent {
+	event.Task = domainsubagent.CloneTask(event.Task)
+	event.Assets = domaintool.CloneSharedAssets(event.Assets)
+	return event
 }

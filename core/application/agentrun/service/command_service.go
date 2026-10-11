@@ -84,7 +84,8 @@ func (s CommandService) append(ctx context.Context, command agentruncommand.Appe
 		ID: s.IDs.NewID(), RunID: run.ID, SessionID: run.SessionID, Sequence: sequence,
 		Type: command.Type, Title: strings.TrimSpace(command.Title), Content: command.Content,
 		ToolName: command.ToolName, Arguments: command.Arguments, Status: command.Status,
-		ErrorCode: command.ErrorCode, ErrorMessage: command.ErrorMessage, Truncated: command.Truncated,
+		ToolCallID: command.ToolCallID,
+		ErrorCode:  command.ErrorCode, ErrorMessage: command.ErrorMessage, Truncated: command.Truncated,
 		CurrentStep: command.CurrentStep, TotalSteps: command.TotalSteps, CreatedAt: s.now(),
 	}
 	if err := event.Validate(); err != nil {

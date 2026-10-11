@@ -9,6 +9,7 @@ import (
 	"myai/core/session"
 )
 
+type callIDKey struct{}
 type ragSettingsKey struct{}
 type executionKey struct{}
 type knowledgeSearchBudgetKey struct{}
@@ -54,6 +55,7 @@ func (budget *KnowledgeSearchBudget) Reserve(query string) error {
 }
 
 type Execution struct {
+	ToolCallID    string
 	SessionID     string
 	TaskID        string
 	RequestID     string
@@ -64,6 +66,16 @@ type Execution struct {
 	WorkspaceRoot string
 	SandboxID     string
 	ModelID       string
+}
+
+// WithCallID 为每个工具调用保留稳定身份，嵌套 spawn_agent 可以关联父调用。
+func WithCallID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, callIDKey{}, id)
+}
+
+func CallID(ctx context.Context) string {
+	id, _ := ctx.Value(callIDKey{}).(string)
+	return id
 }
 
 func WithRAGSettings(ctx context.Context, settings session.RAGSettings) context.Context {
@@ -139,6 +151,8 @@ func WithExecution(ctx context.Context, execution Execution) context.Context {
 
 func CurrentExecution(ctx context.Context) (Execution, bool) {
 	execution, ok := ctx.Value(executionKey{}).(Execution)
+	// 1. 批次共享会话信息；调用 ID 从执行器派生的上下文读取。
+	execution.ToolCallID = CallID(ctx)
 	return execution, ok
 }
 

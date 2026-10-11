@@ -16,6 +16,7 @@ import (
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/session"
+	executioncontext "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -100,6 +101,8 @@ func (s ExecutionService) lookupPermission(name string) tooldef.Permission {
 }
 
 func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Execution, call domainmessage.ToolCall, index int, createdAt time.Time) callExecution {
+	// 1. 每次调用独立绑定 ToolCallID，子代理创建时可准确记录父工具调用。
+	ctx = executioncontext.WithCallID(ctx, call.ID)
 	callCreatedAt := createdAt.Add(time.Duration(index*2) * time.Nanosecond)
 	resultCreatedAt := createdAt.Add(time.Duration(index*2+1) * time.Nanosecond)
 	registeredTool, err := s.Registry.GetTool(call.Name)
@@ -115,32 +118,47 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 	if strings.TrimSpace(hookResult.Arguments) != "" {
 		call.Arguments = hookResult.Arguments
 	}
+	//往回调函数写信息
 	if command.Callbacks.OnToolCall != nil {
 		command.Callbacks.OnToolCall(call.Name, call.Arguments)
 	}
+	if command.Callbacks.OnToolCallIdentified != nil {
+		command.Callbacks.OnToolCallIdentified(call)
+	}
 	entries := []domaintool.ExecutionEntry{ToolCallEntry(toolcommand.ToolCallEntry{SessionID: command.SessionID, Call: call, CreatedAt: callCreatedAt})}
+	//再次检测工具调用是否合理
 	if !toolAllowed(command.AllowedTools, command.EnforceToolAllowlist, call.Name) {
 		message := fmt.Sprintf("tool %s is not allowed for this subagent", call.Name)
 		output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "subagent_tool_denied", message)
 		return s.finishedCall(ctx, command, call, permission, output, nil, entries, resultCreatedAt)
 	}
-
+	//如果工具调用的意见是Defind
 	if hookResult.Decision == toolresult.HookDecisionDeny {
 		err = fmt.Errorf("tool denied by hook: %s", hookResult.Message)
 		output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "hook_denied", "tool error: "+err.Error())
 		return s.finishedCall(ctx, command, call, permission, output, err, entries, resultCreatedAt)
 	}
+	//如果是子代理
 	if !allowsExecutionInMode(permission, command.AgentMode, command.ForceChatMode) {
 		message := fmt.Sprintf("permission denied: plan mode does not allow tool %s requiring %s", call.Name, permission)
 		output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "plan_mode_denied", message)
 		return s.finishedCall(ctx, command, call, permission, output, nil, entries, resultCreatedAt)
 	}
 
+	// 1.1 权限服务保持通用；在调用边界补充身份，避免同名工具的询问混淆。
+	ask := command.Callbacks.OnToolAsk
+	if ask != nil {
+		baseAsk := ask
+		ask = func(request toolcommand.PermissionRequest) bool {
+			request.ToolCallID = call.ID
+			return baseAsk(request)
+		}
+	}
 	permissionDecision := s.permissionService().Allow(toolcommand.Permission{
 		Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode,
 		WorkspaceRoot: command.WorkspaceRoot, Isolated: command.Isolated,
 		RequireConfirmation: hookResult.Decision == toolresult.HookDecisionAsk,
-		Ask:                 command.Callbacks.OnToolAsk,
+		Ask:                 ask,
 	})
 	output := domaintool.ToolOutput{}
 	var toolErr error
@@ -160,8 +178,14 @@ func (s ExecutionService) failedCall(command toolcommand.Execution, call domainm
 	if command.Callbacks.OnToolCall != nil {
 		command.Callbacks.OnToolCall(call.Name, call.Arguments)
 	}
+	if command.Callbacks.OnToolCallIdentified != nil {
+		command.Callbacks.OnToolCallIdentified(call)
+	}
 	if command.Callbacks.OnToolResult != nil {
 		command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
+	}
+	if command.Callbacks.OnToolResultIdentified != nil {
+		command.Callbacks.OnToolResultIdentified(call, output)
 	}
 	return callExecution{
 		call:    call,
@@ -178,6 +202,9 @@ func (s ExecutionService) finishedCall(ctx context.Context, command toolcommand.
 	if command.Callbacks.OnToolResult != nil {
 		command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
 	}
+	if command.Callbacks.OnToolResultIdentified != nil {
+		command.Callbacks.OnToolResultIdentified(call, output)
+	}
 	s.afterToolUse(ctx, toolcommand.HookEvent{SessionID: command.SessionID, Name: call.Name, Arguments: call.Arguments, Permission: permission, Result: output.Content, Err: outputError(output, toolErr)})
 	result := callExecution{
 		call:    call,
@@ -188,6 +215,10 @@ func (s ExecutionService) finishedCall(ctx context.Context, command toolcommand.
 		if asset, ok := s.Assets.Extract(toolcommand.AssetExtraction{SessionID: command.SessionID, RequestID: command.RequestID, Call: call, Output: output, CreatedAt: resultCreatedAt}); ok {
 			result.asset = asset
 			result.hasAsset = true
+			// 2. 文件已由工具发布，立即通知订阅者；持久化仍由批次记录器负责。
+			if command.Callbacks.OnAsset != nil {
+				command.Callbacks.OnAsset(domaintool.CloneSharedAssets([]domaintool.SharedAsset{asset})[0])
+			}
 		}
 	}
 	return result

@@ -808,6 +808,10 @@ func (app *Application) InitSubagents() {
 	var taskEvents subagentport.TaskEventRepository
 	if app.mongoDb != nil {
 		repository := subagentmongo.New(app.mongoDb, app.properties.Mongo.Database)
+		if err := repository.EnsureInspectionIndexes(context.Background()); err != nil {
+			scheduler.Close()
+			panic(fmt.Errorf("init subagent inspection indexes failed: %w", err))
+		}
 		definitions = repository
 		tasks = repository
 		runs = repository
@@ -830,6 +834,8 @@ func (app *Application) InitSubagents() {
 		Definitions:      definitions,
 		Registry:         registry,
 		Tasks:            tasks,
+		EventHistory:     taskEvents.(subagentport.TaskEventHistoryRepository),
+		SessionRecords:   app.store,
 		Runs:             runs,
 		TaskRuns:         tasks.(subagentport.TaskRunRepository),
 		ExecutionLease:   tasks.(subagentport.AgentExecutionLeaseStore),

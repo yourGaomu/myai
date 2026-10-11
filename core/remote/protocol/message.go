@@ -167,6 +167,10 @@ const (
 	TypeSubagentTaskResumeResult         MessageType = "subagent_task_resume_result"
 	TypeSubagentTaskResult               MessageType = "subagent_task_result"
 	TypeSubagentTaskEvent                MessageType = "subagent_task_event"
+	TypeSubagentTaskDetail               MessageType = "subagent_task_detail"
+	TypeSubagentTaskDetailResult         MessageType = "subagent_task_detail_result"
+	TypeSubagentTaskEvents               MessageType = "subagent_task_events"
+	TypeSubagentTaskEventsResult         MessageType = "subagent_task_events_result"
 	TypeFileList                         MessageType = "file_list"
 	TypeFileListResult                   MessageType = "file_list_result"
 	TypeFileRead                         MessageType = "file_read"
@@ -260,6 +264,9 @@ type SubagentTaskSummary struct {
 	ParentSessionID   string            `json:"parent_session_id"`
 	ParentTaskID      string            `json:"parent_task_id,omitempty"`
 	ParentRunID       string            `json:"parent_run_id,omitempty"`
+	ParentToolCallID  string            `json:"parent_tool_call_id,omitempty"`
+	ChildSessionID    string            `json:"child_session_id"`
+	CurrentRunID      string            `json:"current_run_id,omitempty"`
 	PlanID            string            `json:"plan_id,omitempty"`
 	StepID            string            `json:"step_id,omitempty"`
 	AgentPath         string            `json:"agent_path,omitempty"`
@@ -271,6 +278,7 @@ type SubagentTaskSummary struct {
 	Status            string            `json:"status"`
 	Unread            bool              `json:"unread"`
 	Result            string            `json:"result,omitempty"`
+	Reasoning         string            `json:"reasoning,omitempty"`
 	Usage             *TokenUsage       `json:"usage,omitempty"`
 	ErrorMessage      string            `json:"error_message,omitempty"`
 	ChangeSet         SubagentChangeSet `json:"change_set"`
@@ -313,6 +321,8 @@ type SubagentTaskResultPayload struct {
 	Kind         string              `json:"kind,omitempty"`
 	EmittedAt    time.Time           `json:"emitted_at,omitempty"`
 	RunID        string              `json:"run_id,omitempty"`
+	ToolCallID   string              `json:"tool_call_id,omitempty"`
+	Assets       []AssetSummary      `json:"assets,omitempty"`
 	Content      string              `json:"content,omitempty"`
 	ToolName     string              `json:"tool_name,omitempty"`
 	Arguments    string              `json:"arguments,omitempty"`
@@ -384,6 +394,7 @@ type AgentRun struct {
 }
 
 type AgentRunEvent struct {
+	ToolCallID   string    `json:"tool_call_id,omitempty"`
 	ID           string    `json:"id"`
 	RunID        string    `json:"run_id"`
 	SessionID    string    `json:"session_id"`
@@ -456,11 +467,13 @@ type TokenUsage struct {
 }
 
 type ToolCallPayload struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name"`
+	Arguments  string `json:"arguments"`
 }
 
 type ToolResultPayload struct {
+	ToolCallID   string `json:"tool_call_id,omitempty"`
 	Name         string `json:"name"`
 	Arguments    string `json:"arguments,omitempty"`
 	Result       string `json:"result"`

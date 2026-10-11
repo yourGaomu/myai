@@ -27,8 +27,12 @@ func (m Mapper) MessageRecords(entries []domaintool.ExecutionEntry) []repository
 func (m Mapper) AssetRecords(assets []domaintool.SharedAsset) []repository.AssetRecord {
 	records := make([]repository.AssetRecord, 0, len(assets))
 	for _, asset := range assets {
+		id := asset.ID
+		if id == "" {
+			id = m.newID()
+		}
 		records = append(records, repository.AssetRecord{
-			ID:          m.newID(),
+			ID:          id,
 			SessionID:   asset.SessionID,
 			RequestID:   asset.RequestID,
 			ToolCallID:  asset.ToolCallID,

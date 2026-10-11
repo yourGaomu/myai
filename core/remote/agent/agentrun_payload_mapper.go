@@ -19,7 +19,8 @@ func agentRunEventPayload(event domainagentrun.Event) protocol.AgentRunEvent {
 	return protocol.AgentRunEvent{
 		ID: event.ID, RunID: event.RunID, SessionID: event.SessionID, Sequence: event.Sequence,
 		Type: string(event.Type), Title: event.Title, Content: event.Content, ToolName: event.ToolName,
-		Arguments: event.Arguments, Status: event.Status, ErrorCode: event.ErrorCode,
+		ToolCallID: event.ToolCallID,
+		Arguments:  event.Arguments, Status: event.Status, ErrorCode: event.ErrorCode,
 		ErrorMessage: event.ErrorMessage, Truncated: event.Truncated, Delta: event.Delta,
 		CurrentStep: event.CurrentStep, TotalSteps: event.TotalSteps, CreatedAt: event.CreatedAt,
 	}

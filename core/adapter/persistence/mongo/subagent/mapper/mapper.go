@@ -15,6 +15,7 @@ func TaskEventDocumentFromDomain(event subagentport.TaskEvent) po.TaskEventDocum
 	return po.TaskEventDocument{
 		ID: fmt.Sprintf("%020d", event.Sequence), Sequence: event.Sequence, Kind: event.Kind,
 		Task: TaskDocumentFromDomain(event.Task), RunID: event.RunID, Content: event.Content,
+		ToolCallID: event.ToolCallID, Assets: taskAssetDocuments(event.Assets),
 		ToolName: event.ToolName, Arguments: event.Arguments, Status: event.Status,
 		ErrorCode: event.ErrorCode, ErrorMessage: event.ErrorMessage, Truncated: event.Truncated,
 		Delta: event.Delta, EmittedAt: event.EmittedAt,
@@ -24,6 +25,7 @@ func TaskEventDocumentFromDomain(event subagentport.TaskEvent) po.TaskEventDocum
 func TaskEventDomainFromDocument(document po.TaskEventDocument) subagentport.TaskEvent {
 	return subagentport.TaskEvent{
 		Sequence: document.Sequence, Kind: document.Kind, Task: TaskDomainFromDocument(document.Task), RunID: document.RunID,
+		ToolCallID: document.ToolCallID, Assets: taskAssetDomains(document.Assets),
 		Content: document.Content, ToolName: document.ToolName, Arguments: document.Arguments, Status: document.Status,
 		ErrorCode: document.ErrorCode, ErrorMessage: document.ErrorMessage, Truncated: document.Truncated,
 		Delta: document.Delta, EmittedAt: document.EmittedAt,
@@ -95,6 +97,7 @@ func TaskDocumentFromDomain(task domainsubagent.Task) po.TaskDocument {
 	return po.TaskDocument{
 		ID: task.ID, ParentSessionID: task.ParentSessionID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID,
 		ChildSessionID: task.ChildSessionID, AgentPath: task.AgentPath, AgentNickname: task.AgentNickname,
+		ParentToolCallID: task.ParentToolCallID,
 		CreatedRequestID: task.CreatedRequestID, DefinitionID: task.DefinitionID,
 		DefinitionVersion: task.DefinitionVersion, Definition: snapshotDocument(task.Definition),
 		Instruction: task.Instruction, Title: task.Title, Status: string(task.Status), CurrentRunID: task.CurrentRunID,
@@ -128,6 +131,7 @@ func TaskDomainFromDocument(document po.TaskDocument) domainsubagent.Task {
 	return domainsubagent.Task{
 		ID: document.ID, ParentSessionID: document.ParentSessionID, ParentTaskID: document.ParentTaskID, ParentRunID: document.ParentRunID, PlanID: document.PlanID, StepID: document.StepID,
 		ChildSessionID: document.ChildSessionID, AgentPath: document.AgentPath, AgentNickname: document.AgentNickname,
+		ParentToolCallID: document.ParentToolCallID,
 		CreatedRequestID: document.CreatedRequestID, DefinitionID: document.DefinitionID,
 		DefinitionVersion: document.DefinitionVersion, Definition: snapshotDomain(document.Definition),
 		Instruction: document.Instruction, Title: document.Title, Status: domainsubagent.TaskStatus(document.Status),

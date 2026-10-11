@@ -12,6 +12,7 @@ import (
 	toolport "myai/core/application/tool/port"
 	toolresult "myai/core/application/tool/result"
 	toolservice "myai/core/application/tool/service"
+	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/hook"
 	modelport "myai/core/port/model"
@@ -78,19 +79,25 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 }
 
 func callbacksFromStream(stream modelport.ChatStreamHandler) toolcommand.ExecutionCallbacks {
+	// 1. 优先使用带 ID 的回调；一次调用只发布一次开始通知。
+	legacyCall := stream.OnToolCall
+	if stream.OnToolCallEvent != nil {
+		legacyCall = nil
+	}
 	return toolcommand.ExecutionCallbacks{
-		OnToolCall:   stream.OnToolCall,
-		OnToolResult: toolResultFromStream(stream),
-		OnToolAsk:    permissionAskFromStream(stream),
-	}
-}
-
-func toolResultFromStream(stream modelport.ChatStreamHandler) func(string, string, domaintool.ToolOutput) {
-	if stream.OnToolResult == nil {
-		return nil
-	}
-	return func(name string, arguments string, output domaintool.ToolOutput) {
-		stream.OnToolResult(modelport.ToolResultEvent{Name: name, Arguments: arguments, Output: output.Normalized()})
+		OnToolCall: legacyCall,
+		OnToolCallIdentified: func(call domainmessage.ToolCall) {
+			if stream.OnToolCallEvent != nil {
+				stream.OnToolCallEvent(modelport.ToolCallEvent{ToolCallID: call.ID, Name: call.Name, Arguments: call.Arguments})
+			}
+		},
+		OnToolResultIdentified: func(call domainmessage.ToolCall, output domaintool.ToolOutput) {
+			if stream.OnToolResult != nil {
+				stream.OnToolResult(modelport.ToolResultEvent{ToolCallID: call.ID, Name: call.Name, Arguments: call.Arguments, Output: output.Normalized()})
+			}
+		},
+		OnAsset:   stream.OnAsset,
+		OnToolAsk: permissionAskFromStream(stream),
 	}
 }
 
@@ -100,6 +107,7 @@ func permissionAskFromStream(stream modelport.ChatStreamHandler) toolcommand.Per
 	}
 	return func(request toolcommand.PermissionRequest) bool {
 		return stream.OnToolAsk(modelport.ToolPermissionRequest{
+			ToolCallID: request.ToolCallID,
 			Name:       request.Name,
 			Arguments:  request.Arguments,
 			Permission: request.Permission,

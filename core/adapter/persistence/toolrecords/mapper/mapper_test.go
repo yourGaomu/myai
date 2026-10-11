@@ -84,4 +84,9 @@ func TestMapperConvertsSharedAssetToAssetRecord(t *testing.T) {
 	if records[0].SessionID != "session-1" || records[0].ShortCode != "abc" || records[0].ExpiresAt != &expiresAt {
 		t.Fatalf("unexpected asset record: %#v", records[0])
 	}
+	// 1. 实时通知已经分配身份时，落库必须沿用，不能让前端得到第二个资源。
+	identified := mapper.AssetRecords([]domaintool.SharedAsset{{ID: "live-asset", SessionID: "child", ToolCallID: "share-call"}})
+	if len(identified) != 1 || identified[0].ID != "live-asset" || identified[0].ToolCallID != "share-call" {
+		t.Fatalf("live asset identity changed during persistence: %#v", identified)
+	}
 }

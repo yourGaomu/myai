@@ -372,6 +372,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		return s.forwardToClient(message)
 	case protocol.TypeIntentConfigQueryResult, protocol.TypeIntentConfigSetResult, protocol.TypeIntentConfigTestResult, protocol.TypeIntentTraceListResult, protocol.TypeIntentTraceGetResult, protocol.TypeIntentTraceClearResult:
 		return s.forwardToClient(message)
+	case protocol.TypeSubagentTaskDetailResult, protocol.TypeSubagentTaskEventsResult:
+		return s.forwardToClient(message)
 	default:
 		return fmt.Errorf("unsupported agent message type: %s", message.Type)
 	}
@@ -402,7 +404,7 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
-	case protocol.TypeIntentConfigQuery, protocol.TypeIntentConfigSet, protocol.TypeIntentConfigTest, protocol.TypeIntentTraceList, protocol.TypeIntentTraceGet, protocol.TypeIntentTraceClear:
+	case protocol.TypeIntentConfigQuery, protocol.TypeIntentConfigSet, protocol.TypeIntentConfigTest, protocol.TypeIntentTraceList, protocol.TypeIntentTraceGet, protocol.TypeIntentTraceClear, protocol.TypeSubagentTaskDetail, protocol.TypeSubagentTaskEvents:
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
 			return fmt.Errorf("client token is invalid or expired")
 		}
@@ -614,6 +616,10 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeSubagentDefinitionMutationResult
 	case protocol.TypeSubagentTaskList:
 		return responseType == protocol.TypeSubagentTaskListResult
+	case protocol.TypeSubagentTaskDetail:
+		return responseType == protocol.TypeSubagentTaskDetailResult
+	case protocol.TypeSubagentTaskEvents:
+		return responseType == protocol.TypeSubagentTaskEventsResult
 	case protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard:
 		return responseType == protocol.TypeSubagentTaskResult
 	case protocol.TypeSubagentTaskMessage:

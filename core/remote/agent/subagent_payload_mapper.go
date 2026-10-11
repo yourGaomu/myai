@@ -3,6 +3,7 @@ package agent
 import (
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
+	subagentport "myai/core/port/subagent"
 	"myai/core/remote/protocol"
 )
 
@@ -58,6 +59,7 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 	return protocol.SubagentTaskSummary{
 		ID: task.ID, ParentSessionID: task.ParentSessionID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID,
 		AgentPath: task.AgentPath, AgentNickname: task.AgentNickname, DefinitionID: task.DefinitionID,
+		ParentToolCallID: task.ParentToolCallID, ChildSessionID: task.ChildSessionID, CurrentRunID: task.CurrentRunID, Reasoning: task.Reasoning,
 		DefinitionVersion: task.DefinitionVersion, Title: task.Title, Instruction: task.Instruction,
 		Status: string(task.Status), Unread: task.Unread, Result: task.Result, Usage: usage, ErrorMessage: task.ErrorMessage,
 		CanFollowup: task.CanFollowup(),
@@ -68,6 +70,24 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 		},
 		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, StartedAt: task.StartedAt, CompletedAt: task.CompletedAt,
 	}
+}
+
+func subagentEventPayload(event subagentport.TaskEvent) protocol.SubagentTaskResultPayload {
+	payload := protocol.SubagentTaskResultPayload{
+		Task: subagentTaskPayload(event.Task), Sequence: event.Sequence, Kind: event.Kind, EmittedAt: event.EmittedAt,
+		RunID: event.RunID, ToolCallID: event.ToolCallID, Content: event.Content,
+		ToolName: event.ToolName, Arguments: event.Arguments, Status: event.Status,
+		ErrorCode: event.ErrorCode, ErrorMessage: event.ErrorMessage, Truncated: event.Truncated, Delta: event.Delta,
+	}
+	for _, asset := range event.Assets {
+		payload.Assets = append(payload.Assets, protocol.AssetSummary{
+			ID: asset.ID, SessionID: asset.SessionID, RequestID: asset.RequestID,
+			ToolCallID: asset.ToolCallID, ToolName: asset.ToolName, Path: asset.LocalPath,
+			FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
+			ShortURL: asset.ShortURL, Code: asset.ShortCode, ExpiresAt: asset.ExpiresAt, CreatedAt: asset.CreatedAt,
+		})
+	}
+	return payload
 }
 
 func subagentTaskPayloads(tasks []domainsubagent.Task) []protocol.SubagentTaskSummary {

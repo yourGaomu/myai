@@ -232,7 +232,7 @@ func (a *Agent) forwardSubagentEvents(ctx context.Context, conn *websocket.Conn,
 				return
 			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), task.ParentSessionID, protocol.SubagentTaskResultPayload{
-				Task: subagentTaskPayload(task),
+				Task: subagentTaskPayload(task), RunID: task.CurrentRunID,
 			}); err != nil {
 				log.Printf("send subagent task event failed: %v", err)
 				return
@@ -265,12 +265,7 @@ func (a *Agent) forwardSubagentTaskEventBatch(ctx context.Context, conn *websock
 			if !ok {
 				return true
 			}
-			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), event.Task.ParentSessionID, protocol.SubagentTaskResultPayload{
-				Task: subagentTaskPayload(event.Task), Sequence: event.Sequence, Kind: event.Kind, EmittedAt: event.EmittedAt,
-				RunID: event.RunID, Content: event.Content, ToolName: event.ToolName, Arguments: event.Arguments,
-				Status: event.Status, ErrorCode: event.ErrorCode, ErrorMessage: event.ErrorMessage,
-				Truncated: event.Truncated, Delta: event.Delta,
-			}); err != nil {
+			if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), event.Task.ParentSessionID, subagentEventPayload(event)); err != nil {
 				log.Printf("send subagent task event failed: %v", err)
 				return false
 			}
@@ -296,7 +291,7 @@ func (a *Agent) forwardSubagentTaskSnapshot(ctx context.Context, conn *websocket
 	}
 	for _, task := range result.Items {
 		if err := a.writeRemoteMessage(conn, protocol.TypeSubagentTaskEvent, newRequestID(), task.ParentSessionID, protocol.SubagentTaskResultPayload{
-			Task: subagentTaskPayload(task), Kind: "task.snapshot", Message: "subagent task snapshot",
+			Task: subagentTaskPayload(task), RunID: task.CurrentRunID, Kind: "task.snapshot", Message: "subagent task snapshot",
 		}); err != nil {
 			return err
 		}
@@ -528,6 +523,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSubagentTaskList(ctx, conn, message)
 	case protocol.TypeSubagentTaskCheck:
 		return a.handleSubagentTaskCheck(ctx, conn, message)
+	case protocol.TypeSubagentTaskDetail:
+		return a.handleSubagentTaskDetail(ctx, conn, message)
+	case protocol.TypeSubagentTaskEvents:
+		return a.handleSubagentTaskEvents(ctx, conn, message)
 	case protocol.TypeSubagentTaskMessage:
 		return a.handleSubagentTaskMessage(ctx, conn, message)
 	case protocol.TypeSubagentTaskFollowup:

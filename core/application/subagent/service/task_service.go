@@ -71,11 +71,12 @@ func (service *Service) Start(ctx context.Context, command subagentcommand.Start
 	}
 	task := domainsubagent.Task{
 		ID: service.IDs.NewID(), ParentSessionID: strings.TrimSpace(command.ParentSessionID),
-		ParentTaskID:   strings.TrimSpace(command.ParentTaskID),
-		ParentRunID:    strings.TrimSpace(command.ParentRunID),
-		PlanID:         strings.TrimSpace(command.PlanID),
-		StepID:         strings.TrimSpace(command.StepID),
-		ChildSessionID: service.IDs.NewID(), CreatedRequestID: strings.TrimSpace(command.CreatedRequestID),
+		ParentTaskID:     strings.TrimSpace(command.ParentTaskID),
+		ParentRunID:      strings.TrimSpace(command.ParentRunID),
+		ParentToolCallID: strings.TrimSpace(command.ParentToolCallID),
+		PlanID:           strings.TrimSpace(command.PlanID),
+		StepID:           strings.TrimSpace(command.StepID),
+		ChildSessionID:   service.IDs.NewID(), CreatedRequestID: strings.TrimSpace(command.CreatedRequestID),
 		AgentPath: strings.TrimSpace(command.AgentPath), AgentNickname: strings.TrimSpace(command.AgentNickname),
 		DefinitionID: definition.ID, DefinitionVersion: definition.Version, Definition: definition.Snapshot(),
 		Instruction: strings.TrimSpace(command.Instruction), Title: strings.TrimSpace(command.Title),

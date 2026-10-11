@@ -43,6 +43,7 @@ type Task struct {
 	ParentSessionID   string
 	ParentTaskID      string
 	ParentRunID       string
+	ParentToolCallID  string
 	PlanID            string
 	StepID            string
 	ChildSessionID    string

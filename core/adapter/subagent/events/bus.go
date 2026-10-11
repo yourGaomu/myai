@@ -94,7 +94,11 @@ func (bus *Bus) PublishTaskEvent(ctx context.Context, event subagentport.TaskEve
 	if event.Kind == "" {
 		event.Kind = taskEventKind(event.Task.Status)
 	}
-	event.Task = domainsubagent.CloneTask(event.Task)
+	event = subagentport.CloneTaskEvent(event)
+	// 1. 状态通知也保留运行身份，历史回放才能区分同一任务的多次执行。
+	if event.RunID == "" {
+		event.RunID = event.Task.CurrentRunID
+	}
 	if event.EmittedAt.IsZero() {
 		event.EmittedAt = time.Now().UTC()
 	}
@@ -293,6 +297,8 @@ func (bus *Bus) Subscribe(buffer int) (<-chan domainsubagent.Task, func()) {
 
 func taskEventKind(status domainsubagent.TaskStatus) string {
 	switch status {
+	case domainsubagent.TaskStatusWaitingSubagents, domainsubagent.TaskStatusWaitingPermission:
+		return subagentport.TaskEventKindWaiting
 	case domainsubagent.TaskStatusSucceeded:
 		return TaskEventKindCompleted
 	case domainsubagent.TaskStatusFailed:
@@ -305,6 +311,5 @@ func taskEventKind(status domainsubagent.TaskStatus) string {
 }
 
 func cloneTaskEvent(event subagentport.TaskEvent) subagentport.TaskEvent {
-	event.Task = domainsubagent.CloneTask(event.Task)
-	return event
+	return subagentport.CloneTaskEvent(event)
 }

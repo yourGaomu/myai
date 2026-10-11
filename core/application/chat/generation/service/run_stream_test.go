@@ -10,6 +10,7 @@ import (
 	agentruncommand "myai/core/application/agentrun/command"
 	agentrunservice "myai/core/application/agentrun/service"
 	domainagentrun "myai/core/domain/agentrun"
+	domaintool "myai/core/domain/tool"
 	modelport "myai/core/port/model"
 )
 
@@ -64,6 +65,30 @@ func TestRunStreamRecorderBoundsReasoningBuffer(t *testing.T) {
 }
 
 type runStreamIDs struct{ next int }
+
+func TestRunRecorderPreservesToolAndAssetIdentity(t *testing.T) {
+	repository := agentrunmemory.New()
+	commands := agentrunservice.CommandService{Repository: repository, IDs: &runStreamIDs{}}
+	run, err := commands.Start(context.Background(), agentruncommand.Start{SessionID: "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	var assets []string
+	recorder := newRunStreamRecorder(context.Background(), run.ID, commands, modelport.ChatStreamHandler{
+		OnToolCallEvent: func(event modelport.ToolCallEvent) { calls = append(calls, event.ToolCallID) },
+		OnAsset:         func(asset domaintool.SharedAsset) { assets = append(assets, asset.ID) },
+	}, func(err error) { t.Fatal(err) })
+	handler := recorder.Handler()
+	handler.OnToolCallEvent(modelport.ToolCallEvent{ToolCallID: "call", Name: "share_file"})
+	handler.OnToolResult(modelport.ToolResultEvent{ToolCallID: "call", Name: "share_file"})
+	handler.OnAsset(domaintool.SharedAsset{ID: "image", ToolCallID: "call"})
+	recorder.Close()
+	events, err := repository.ListEvents(context.Background(), []string{run.ID})
+	if err != nil || len(events) != 2 || events[0].ToolCallID != "call" || events[1].ToolCallID != "call" || len(calls) != 1 || calls[0] != "call" || len(assets) != 1 || assets[0] != "image" {
+		t.Fatalf("identity lost: %#v %v %v %v", events, calls, assets, err)
+	}
+}
 
 func TestRunStreamWaitReportsWaitingWithoutCompletingRun(t *testing.T) {
 	repository := agentrunmemory.New()

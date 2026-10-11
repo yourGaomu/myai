@@ -8,6 +8,7 @@ import (
 type ToolCall = domainmessage.ToolCall
 
 type ToolPermissionRequest struct {
+	ToolCallID string
 	Name       string
 	Arguments  string
 	Permission tooldef.Permission

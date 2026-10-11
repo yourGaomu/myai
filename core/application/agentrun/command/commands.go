@@ -22,6 +22,7 @@ type Append struct {
 	Title        string
 	Content      string
 	ToolName     string
+	ToolCallID   string
 	Arguments    string
 	Status       string
 	ErrorCode    string

@@ -1,6 +1,9 @@
 package po
 
-import "time"
+import (
+	sharedpo "myai/core/adapter/persistence/mongo/po"
+	"time"
+)
 
 type DefinitionDocument struct {
 	ID             string     `bson:"_id"`
@@ -68,6 +71,7 @@ type TaskDocument struct {
 	ParentSessionID   string                     `bson:"parent_session_id"`
 	ParentTaskID      string                     `bson:"parent_task_id,omitempty"`
 	ParentRunID       string                     `bson:"parent_run_id,omitempty"`
+	ParentToolCallID  string                     `bson:"parent_tool_call_id,omitempty"`
 	PlanID            string                     `bson:"plan_id,omitempty"`
 	StepID            string                     `bson:"step_id,omitempty"`
 	ChildSessionID    string                     `bson:"child_session_id"`
@@ -135,20 +139,22 @@ type TokenUsageDocument struct {
 // reconnecting clients useful even when they missed intermediate state
 // updates; runtime fields carry reasoning/tool deltas for live rendering.
 type TaskEventDocument struct {
-	ID           string       `bson:"_id"`
-	Sequence     uint64       `bson:"sequence"`
-	Kind         string       `bson:"kind"`
-	Task         TaskDocument `bson:"task"`
-	RunID        string       `bson:"run_id,omitempty"`
-	Content      string       `bson:"content,omitempty"`
-	ToolName     string       `bson:"tool_name,omitempty"`
-	Arguments    string       `bson:"arguments,omitempty"`
-	Status       string       `bson:"status,omitempty"`
-	ErrorCode    string       `bson:"error_code,omitempty"`
-	ErrorMessage string       `bson:"error_message,omitempty"`
-	Truncated    bool         `bson:"truncated,omitempty"`
-	Delta        bool         `bson:"delta,omitempty"`
-	EmittedAt    time.Time    `bson:"emitted_at"`
+	ID           string                   `bson:"_id"`
+	Sequence     uint64                   `bson:"sequence"`
+	Kind         string                   `bson:"kind"`
+	Task         TaskDocument             `bson:"task"`
+	RunID        string                   `bson:"run_id,omitempty"`
+	ToolCallID   string                   `bson:"tool_call_id,omitempty"`
+	Assets       []sharedpo.AssetDocument `bson:"assets,omitempty"`
+	Content      string                   `bson:"content,omitempty"`
+	ToolName     string                   `bson:"tool_name,omitempty"`
+	Arguments    string                   `bson:"arguments,omitempty"`
+	Status       string                   `bson:"status,omitempty"`
+	ErrorCode    string                   `bson:"error_code,omitempty"`
+	ErrorMessage string                   `bson:"error_message,omitempty"`
+	Truncated    bool                     `bson:"truncated,omitempty"`
+	Delta        bool                     `bson:"delta,omitempty"`
+	EmittedAt    time.Time                `bson:"emitted_at"`
 }
 
 type AgentMessageDocument struct {

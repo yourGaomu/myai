@@ -666,6 +666,5 @@ func (repository *Repository) LatestTaskEventSequence(_ context.Context) (uint64
 }
 
 func cloneTaskEvent(event subagentport.TaskEvent) subagentport.TaskEvent {
-	event.Task = domainsubagent.CloneTask(event.Task)
-	return event
+	return subagentport.CloneTaskEvent(event)
 }

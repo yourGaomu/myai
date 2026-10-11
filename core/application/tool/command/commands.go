@@ -10,6 +10,7 @@ import (
 )
 
 type PermissionRequest struct {
+	ToolCallID string
 	Name       string
 	Arguments  string
 	Permission tooldef.Permission
@@ -19,9 +20,12 @@ type PermissionRequest struct {
 type PermissionAskFunc func(PermissionRequest) bool
 
 type ExecutionCallbacks struct {
-	OnToolCall   func(name string, arguments string)
-	OnToolResult func(name string, arguments string, output domaintool.ToolOutput)
-	OnToolAsk    PermissionAskFunc
+	OnToolCall             func(name string, arguments string)
+	OnToolCallIdentified   func(call domainmessage.ToolCall)
+	OnToolResult           func(name string, arguments string, output domaintool.ToolOutput)
+	OnToolResultIdentified func(call domainmessage.ToolCall, output domaintool.ToolOutput)
+	OnAsset                func(asset domaintool.SharedAsset)
+	OnToolAsk              PermissionAskFunc
 }
 
 type Execution struct {

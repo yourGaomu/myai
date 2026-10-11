@@ -36,16 +36,18 @@ func newRunStreamRecorder(ctx context.Context, runID string, runs agentrunapi.Co
 
 func (r *runStreamRecorder) Handler() modelport.ChatStreamHandler {
 	return modelport.ChatStreamHandler{
-		CorrelationID:  r.base.CorrelationID,
-		OnReasoning:    r.onReasoning,
-		OnAnswer:       r.onAnswer,
-		OnToolCall:     r.onToolCall,
-		OnToolResult:   r.onToolResult,
-		OnToolAsk:      r.onToolAsk,
-		OnRunStarted:   r.base.OnRunStarted,
-		OnRunEvent:     r.base.OnRunEvent,
-		OnRunCompleted: r.base.OnRunCompleted,
-		OnPlanUpdate:   r.base.OnPlanUpdate,
+		CorrelationID:   r.base.CorrelationID,
+		OnReasoning:     r.onReasoning,
+		OnAnswer:        r.onAnswer,
+		OnToolCall:      r.onToolCall,
+		OnToolCallEvent: r.onToolCallEvent,
+		OnToolResult:    r.onToolResult,
+		OnAsset:         r.base.OnAsset,
+		OnToolAsk:       r.onToolAsk,
+		OnRunStarted:    r.base.OnRunStarted,
+		OnRunEvent:      r.base.OnRunEvent,
+		OnRunCompleted:  r.base.OnRunCompleted,
+		OnPlanUpdate:    r.base.OnPlanUpdate,
 	}
 }
 
@@ -92,18 +94,25 @@ func (r *runStreamRecorder) onAnswer(text string) {
 }
 
 func (r *runStreamRecorder) onToolCall(name string, arguments string) {
+	r.onToolCallEvent(modelport.ToolCallEvent{Name: name, Arguments: arguments})
+}
+
+func (r *runStreamRecorder) onToolCallEvent(event modelport.ToolCallEvent) {
 	r.flushReasoning()
-	boundedArguments, truncated := boundedText(arguments, maxToolArgumentBytes)
+	boundedArguments, truncated := boundedText(event.Arguments, maxToolArgumentBytes)
 	status, title := "running", "Tool started"
-	if name == "wait_agent" {
+	if event.Name == "wait_agent" {
 		status, title = "waiting", "Waiting for subagent results"
 	}
 	r.record(agentruncommand.Append{
 		RunID: r.runID, Type: domainagentrun.EventTypeToolCall, Title: title,
-		ToolName: name, Arguments: boundedArguments, Status: status, Truncated: truncated,
+		ToolCallID: event.ToolCallID, ToolName: event.Name, Arguments: boundedArguments, Status: status, Truncated: truncated,
 	})
+	if r.base.OnToolCallEvent != nil {
+		r.base.OnToolCallEvent(event)
+	}
 	if r.base.OnToolCall != nil {
-		r.base.OnToolCall(name, arguments)
+		r.base.OnToolCall(event.Name, event.Arguments)
 	}
 }
 
@@ -114,7 +123,8 @@ func (r *runStreamRecorder) onToolResult(result modelport.ToolResultEvent) {
 	arguments, argumentsTruncated := boundedText(result.Arguments, maxToolArgumentBytes)
 	r.record(agentruncommand.Append{
 		RunID: r.runID, Type: domainagentrun.EventTypeToolResult, Title: "Tool finished",
-		ToolName: result.Name, Arguments: arguments, Content: content, Status: string(output.Status),
+		ToolCallID: result.ToolCallID,
+		ToolName:   result.Name, Arguments: arguments, Content: content, Status: string(output.Status),
 		ErrorCode: output.ErrorCode, ErrorMessage: output.ErrorMessage,
 		Truncated: output.Truncated || contentTruncated || argumentsTruncated,
 	})
@@ -128,7 +138,8 @@ func (r *runStreamRecorder) onToolAsk(request modelport.ToolPermissionRequest) b
 	arguments, truncated := boundedText(request.Arguments, maxToolArgumentBytes)
 	r.record(agentruncommand.Append{
 		RunID: r.runID, Type: domainagentrun.EventTypePermission, Title: "Permission required",
-		ToolName: request.Name, Arguments: arguments, Status: "waiting", Truncated: truncated,
+		ToolCallID: request.ToolCallID,
+		ToolName:   request.Name, Arguments: arguments, Status: "waiting", Truncated: truncated,
 	})
 	allowed := false
 	if r.base.OnToolAsk != nil {
@@ -140,7 +151,8 @@ func (r *runStreamRecorder) onToolAsk(request modelport.ToolPermissionRequest) b
 	}
 	r.record(agentruncommand.Append{
 		RunID: r.runID, Type: domainagentrun.EventTypePermission, Title: "Permission resolved",
-		ToolName: request.Name, Arguments: arguments, Status: status, Truncated: truncated,
+		ToolCallID: request.ToolCallID,
+		ToolName:   request.Name, Arguments: arguments, Status: status, Truncated: truncated,
 	})
 	return allowed
 }

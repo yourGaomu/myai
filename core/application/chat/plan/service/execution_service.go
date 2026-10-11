@@ -26,6 +26,7 @@ import (
 	messagecommand "myai/core/application/session/message/command"
 	domainagentrun "myai/core/domain/agentrun"
 	domainmessage "myai/core/domain/message"
+	domaintool "myai/core/domain/tool"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
 	"myai/core/session"
@@ -405,6 +406,13 @@ func (s *synchronizedStream) Handler() modelport.ChatStreamHandler {
 		return modelport.ChatStreamHandler{}
 	}
 	handler := s.base
+	// 1. 新增的工具身份与资源回调同样串行转发，避免并行计划步骤争用前端流。
+	if s.base.OnToolCallEvent != nil {
+		handler.OnToolCallEvent = func(event modelport.ToolCallEvent) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnToolCallEvent(event) }
+	}
+	if s.base.OnAsset != nil {
+		handler.OnAsset = func(asset domaintool.SharedAsset) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnAsset(asset) }
+	}
 	if s.base.OnReasoning != nil {
 		handler.OnReasoning = func(text string) { s.mu.Lock(); defer s.mu.Unlock(); s.base.OnReasoning(text) }
 	}

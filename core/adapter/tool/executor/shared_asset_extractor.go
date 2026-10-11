@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	uuidadapter "myai/core/adapter/id/uuid"
 	toolcommand "myai/core/application/tool/command"
 	domaintool "myai/core/domain/tool"
 )
@@ -34,6 +35,8 @@ func (SharedAssetExtractor) Extract(command toolcommand.AssetExtraction) (domain
 	}
 
 	return domaintool.SharedAsset{
+		// 1. 实时事件和后续落库使用同一个资源 ID，历史刷新时可以去重。
+		ID:          (uuidadapter.Generator{}).NewID(),
 		SessionID:   command.SessionID,
 		RequestID:   command.RequestID,
 		ToolCallID:  command.Call.ID,

@@ -108,9 +108,10 @@ func (tool *StartAsyncTaskTool) Call(ctx context.Context, args json.RawMessage) 
 	}
 	result, err := tool.service.Start(ctx, subagentcommand.StartTask{
 		ParentSessionID: execution.SessionID, CreatedRequestID: execution.RequestID,
-		ParentTaskID: execution.TaskID,
-		ParentRunID:  execution.RunID,
-		PlanID:       execution.PlanID, StepID: execution.StepID,
+		ParentTaskID:     execution.TaskID,
+		ParentRunID:      execution.RunID,
+		ParentToolCallID: execution.ToolCallID,
+		PlanID:           execution.PlanID, StepID: execution.StepID,
 		DefinitionID: input.DefinitionID, Instruction: input.Instruction, Title: input.Title,
 		FallbackModelID: execution.ModelID, WorkspaceRoot: execution.WorkspaceRoot,
 	})
@@ -179,9 +180,10 @@ func (tool *SpawnAgentTool) Call(ctx context.Context, args json.RawMessage) (too
 	}
 	result, err := tool.service.Start(ctx, subagentcommand.StartTask{
 		ParentSessionID: execution.SessionID, CreatedRequestID: execution.RequestID,
-		ParentTaskID: execution.TaskID,
-		ParentRunID:  execution.RunID,
-		PlanID:       execution.PlanID, StepID: execution.StepID,
+		ParentTaskID:     execution.TaskID,
+		ParentRunID:      execution.RunID,
+		ParentToolCallID: execution.ToolCallID,
+		PlanID:           execution.PlanID, StepID: execution.StepID,
 		DefinitionID: definitionID, Instruction: input.Message, Title: input.TaskName,
 		TaskName: input.TaskName, AgentNickname: strings.TrimSpace(input.AgentType),
 		ModelID:         modelID,
@@ -567,6 +569,8 @@ type taskToolView struct {
 	TaskID              string     `json:"task_id"`
 	ParentTaskID        string     `json:"parent_task_id,omitempty"`
 	ParentRunID         string     `json:"parent_run_id,omitempty"`
+	ParentToolCallID    string     `json:"parent_tool_call_id,omitempty"`
+	CurrentRunID        string     `json:"current_run_id,omitempty"`
 	PlanID              string     `json:"plan_id,omitempty"`
 	StepID              string     `json:"step_id,omitempty"`
 	AgentPath           string     `json:"agent_path,omitempty"`
@@ -595,6 +599,7 @@ func definitionView(definition domainsubagent.Definition) definitionToolView {
 func taskView(task domainsubagent.Task, includeResult bool) taskToolView {
 	view := taskToolView{
 		TaskID: task.ID, ParentTaskID: task.ParentTaskID, ParentRunID: task.ParentRunID, PlanID: task.PlanID, StepID: task.StepID, AgentPath: task.AgentPath, AgentNickname: task.AgentNickname,
+		ParentToolCallID: task.ParentToolCallID, CurrentRunID: task.CurrentRunID,
 		Title: task.Title, DefinitionID: task.DefinitionID,
 		ChildSessionID: task.ChildSessionID, Status: string(task.Status), Error: task.ErrorMessage,
 		CanFollowup: task.CanFollowup(),
