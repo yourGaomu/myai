@@ -37,6 +37,28 @@ func TestBuildSnapshotKeepsStableSummaryPrefix(t *testing.T) {
 	}
 }
 
+func TestTurnContextsStayWithTheirUserTurnUnderBudget(t *testing.T) {
+	current := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "system"),
+		domainmessage.RuntimeInstruction("runtime"),
+		domainmessage.Text(domainmessage.RoleUser, strings.Repeat("问题", 1300)),
+		domainmessage.EnvironmentContext("time: 12:00"),
+		domainmessage.SyntheticUserText(domainmessage.SyntheticReasonPlanContext, "plan"),
+		domainmessage.Assistant("working", "thinking", nil),
+	}
+	chunks := MessageChunks(current[1:])
+	if len(chunks) != 1 || len(chunks[0]) != 5 {
+		t.Fatalf("context facts split the current user turn: %v", chunks)
+	}
+	snapshot := BuildSnapshotWithBudget(current, compaction.Checkpoint{}, 0, 4, 2000)
+	if len(snapshot.Messages) != len(current) || !snapshot.Info.Truncated {
+		t.Fatal("oversized current turn must remain whole so generation can reject it")
+	}
+	if len(snapshot.Prefix) != 1 || CurrentTurnTokens(current) != EstimateMessagesTokens(current[1:]) {
+		t.Fatal("turn contexts were mistaken for the latest user request")
+	}
+}
+
 func TestShouldCompactAtThreshold(t *testing.T) {
 	info := Info{
 		WindowK:        1,

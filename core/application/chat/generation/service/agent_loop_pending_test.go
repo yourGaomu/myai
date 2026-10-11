@@ -145,6 +145,9 @@ func TestAgentLoopQueueMailboxWaitsForAnswerBoundary(t *testing.T) {
 	if !requestContainsText(model.requests[2], "queued result") {
 		t.Fatal("queue-only mailbox message was not injected on the next model turn")
 	}
+	if !requestContainsText(model.requests[2], "first answer") {
+		t.Fatal("answer before queued mailbox input was lost")
+	}
 }
 
 func TestAgentLoopSteerMailboxReopensCurrentTurn(t *testing.T) {

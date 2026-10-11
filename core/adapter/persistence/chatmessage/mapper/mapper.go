@@ -102,6 +102,9 @@ func (m Mapper) AssistantMessageFromSession(current *session.Session, result mod
 	record := m.AssistantMessage(sessionID, result, createdAt)
 	if message, ok := latestSnapshotMessage(current, domainmessage.RoleAssistant, result.Content, ""); ok {
 		record.ID = messageRecordID(message, 0, 1)
+		record.MessageID = message.ID
+		// 1. 数据库存原始单条推理；result.Reasoning 可能是多轮展示用的汇总。
+		record.Reasoning = message.Reasoning
 		if message.Sequence > 0 {
 			record.Sequence = message.Sequence
 		}
@@ -175,7 +178,7 @@ func messageRecordCount(message domainmessage.Message) int {
 		return 1
 	case domainmessage.RoleAssistant:
 		count := 0
-		if message.Text() != "" {
+		if message.Text() != "" || message.Reasoning != "" {
 			count++
 		}
 		for _, part := range message.Parts {
@@ -208,6 +211,7 @@ func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Me
 	for _, message := range messages {
 		mapped := m.messageRecords(sessionID, message)
 		for partIndex := range mapped {
+			mapped[partIndex].MessageID = message.ID
 			if id := messageRecordID(message, partIndex, len(mapped)); id != "" {
 				mapped[partIndex].ID = id
 			}
@@ -283,9 +287,10 @@ func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) 
 		return []repository.MessageRecord{record}
 	case domainmessage.RoleAssistant:
 		records := make([]repository.MessageRecord, 0, len(message.Parts)+1)
-		if text := message.Text(); text != "" {
+		if text := message.Text(); text != "" || message.Reasoning != "" {
 			record := newRecord(repository.RoleAssistant)
 			record.Content = text
+			record.Reasoning = message.Reasoning
 			records = append(records, record)
 		}
 		for _, part := range message.Parts {

@@ -31,6 +31,9 @@ type ToolExecution struct {
 }
 
 type ToolExecutionRecord struct {
-	Entries []domaintool.ExecutionEntry
-	Assets  []domaintool.SharedAsset
+	// 1. Messages 是实际进入会话的完整消息；Entries 保留执行审计信息。
+	SessionID string
+	Messages  []domainmessage.Message
+	Entries   []domaintool.ExecutionEntry
+	Assets    []domaintool.SharedAsset
 }

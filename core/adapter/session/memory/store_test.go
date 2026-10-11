@@ -35,6 +35,27 @@ func TestStoreCreatesAndUpdatesCurrentSession(t *testing.T) {
 	}
 }
 
+func TestRegenerateSkipsTrailingEnvironmentAndPlanContext(t *testing.T) {
+	store := NewStore("model")
+	if err := store.NewSession(); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.AppendMessages(
+		domainmessage.Text(domainmessage.RoleUser, "真实问题"),
+		domainmessage.EnvironmentContext("time: 12:00"),
+		domainmessage.SyntheticUserText(domainmessage.SyntheticReasonPlanContext, "plan state"),
+		domainmessage.Assistant("answer", "reasoning", nil),
+	)
+	input, err := store.TrimAfterLastUserMessage(current.ID)
+	if err != nil || input != "真实问题" || len(current.Messages) != 2 {
+		t.Fatalf("regenerated contextual facts instead of user input: input=%q err=%v history=%+v", input, err, current.Messages)
+	}
+}
+
 func TestStoreHydratesWithoutChangingCurrentSession(t *testing.T) {
 	store := NewStore("gpt-default")
 	if err := store.PutSessionWithModeUsage(

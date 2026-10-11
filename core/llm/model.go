@@ -29,7 +29,7 @@ type GenerateRequest = modelport.GenerateRequest
 
 func (m *Model) Generate(ctx context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
 	return m.chatWithStreamToolsHandlerCtx(
-		ctx,
+		llmmapper.WithRequest(ctx, request),
 		llmmapper.ToLLMS(request.Messages),
 		llmmapper.ToLLMTools(request.Tools),
 		request.Stream,
@@ -123,19 +123,14 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 	}
 
 	toolCalls := toolCallsFromResponse(resp)
-	if len(toolCalls) > 0 {
-		return ChatResult{
-			Content:   builder.String(),
-			Reasoning: reasoningBuilder.String(),
-			Usage:     tokenUsageFromResponse(resp),
-			ToolCalls: toolCalls,
-		}, nil
-	}
-
 	if streamed {
+		// 1. SDK 可能用工具增量覆盖同一帧的正文回调；完整响应仍保存该正文。
+		// 1.1 优先使用完整响应回放历史，仅向界面补发尚未送出的尾部。
+		content := completeStreamText(builder.String(), contentFromResponse(resp), handler.OnAnswer)
+		reasoning := completeStreamText(reasoningBuilder.String(), reasoningFromResponse(resp), handler.OnReasoning)
 		return ChatResult{
-			Content:   builder.String(),
-			Reasoning: reasoningBuilder.String(),
+			Content:   content,
+			Reasoning: reasoning,
 			Usage:     tokenUsageFromResponse(resp),
 			ToolCalls: toolCalls,
 		}, nil
@@ -165,6 +160,16 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 		Usage:     tokenUsageFromResponse(resp),
 		ToolCalls: toolCallsFromResponse(resp),
 	}, nil
+}
+
+func completeStreamText(streamed, complete string, emit func(string)) string {
+	if complete == "" {
+		return streamed
+	}
+	if emit != nil && len(complete) > len(streamed) && strings.HasPrefix(complete, streamed) {
+		emit(complete[len(streamed):])
+	}
+	return complete
 }
 
 func (m *Model) Chat(mes []llms.MessageContent) (ChatResult, error) {

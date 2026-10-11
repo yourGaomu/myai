@@ -10,7 +10,6 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
-	"myai/core/contextmgr"
 	domaingeneration "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
@@ -53,9 +52,8 @@ type AgentLoopService struct {
 	TurnHooks           generationport.TurnLifecycleHooks
 	PendingInput        generationport.PendingTurnInput
 	OnPendingInputError func(error)
-	// OnPendingInputAppended persists structured mailbox messages consumed while
-	// a turn is already running. The callback is optional for isolated tests.
-	OnPendingInputAppended  func(current *session.Session, messages []domainmessage.Message)
+	// 1. 持久化运行期间追加的上下文、mailbox 与中间回答，保持恢复后的消息顺序。
+	OnMessagesAppended      func(current *session.Session, messages []domainmessage.Message)
 	MaxToolRounds           int
 	MaxKnowledgeSearchCalls int
 	MaxMemorySearchCalls    int
@@ -110,6 +108,10 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	// mirrors Codex mailbox semantics: tool execution keeps its current context
 	// stable, while the next model turn sees the completed mailbox batch.
 	mailboxPhase := MailboxDeferred
+	// 2. 环境信息只追加一次，后续工具轮次与子代理消息不会移动它的位置。
+	if environment := domainmessage.EnvironmentContext(command.EnvironmentContext); environment.IsSynthetic() {
+		s.appendMessages(command.Session, environment)
+	}
 	for round := 0; round < maxToolRounds; round++ {
 		if err := runCtx.Err(); err != nil {
 			return modelport.ChatResult{}, err
@@ -124,17 +126,15 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 				return modelport.ChatResult{}, drainErr
 			}
 		}
-		if err := s.compactIfNeeded(runCtx, command); err != nil {
-			return modelport.ChatResult{}, err
-		}
-		snapshot := s.Contexts.Snapshot(command.Session)
-		if err := validateContextWindow(snapshot); err != nil {
+		tools := s.toolsForSession(command.Session, command.ForceChatMode)
+		snapshot, err := s.prepareSnapshot(runCtx, command, tools)
+		if err != nil {
 			return modelport.ChatResult{}, err
 		}
 		// 每轮都重新构建快照，因为上一轮可能追加了 tool call 和 tool result。
 		result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
-			Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext),
-			Tools:    s.toolsForSession(command.Session, command.ForceChatMode),
+			Messages: snapshot.Messages,
+			Tools:    tools,
 			Stream:   command.Stream,
 			Settings: command.Settings,
 		})
@@ -145,7 +145,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		totalUsage = totalUsage.Add(result.Usage)
 		reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 		if len(result.ToolCalls) == 0 {
-			continued, hookErr := s.continueAfterStopHook(runCtx, command, result.Content, &stopContinuations)
+			continued, hookErr := s.continueAfterStopHook(runCtx, command, result, &stopContinuations)
 			if hookErr != nil {
 				return modelport.ChatResult{}, hookErr
 			}
@@ -153,6 +153,8 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 				continue
 			}
 			if s.hasPendingInput(command.Session) {
+				// 5.1 回答边界也属于历史，必须先保留回答，再领取下一批输入。
+				s.appendMessages(command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil))
 				// 5. 回答边界后迁移到 next_turn，下一轮再把 queue 消息加入上下文。
 				// The current answer is complete; consume queued mailbox messages
 				// only on the following model round.
@@ -167,7 +169,6 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			Session: command.Session, Calls: result.ToolCalls, Stream: command.Stream, RequestID: command.RequestID,
 			ForceChatMode: command.ForceChatMode,
 		})
-		s.recordToolExecution(ctx, toolResult)
 		// 工具调用与结果都进入会话，下一轮模型才能基于真实执行结果继续推理。
 		// Calls 来自执行层，Hook 改写参数后的值与真实调用、持久化记录完全一致。
 		calls := toolResult.Calls
@@ -175,10 +176,20 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		if calls == nil {
 			calls = result.ToolCalls
 		}
-		if len(calls) > 0 {
-			command.Session.AppendMessage(domainmessage.ToolCallMessage(calls))
+		messageStart := len(command.Session.Messages)
+		if len(calls) > 0 || result.Content != "" || result.Reasoning != "" {
+			command.Session.AppendMessage(domainmessage.Assistant(result.Content, result.Reasoning, calls))
 		}
 		command.Session.AppendMessages(toolResult.Messages...)
+		// 5.2 持久化与下一轮模型读取同一批消息，不再从工具日志重建另一份历史。
+		if s.ToolRecords != nil {
+			s.ToolRecords.RecordToolExecution(ctx, generationcommand.ToolExecutionRecord{
+				SessionID: command.Session.ID, Messages: domainmessage.CloneAll(command.Session.Messages[messageStart:]),
+				Entries: toolResult.Entries, Assets: toolResult.Assets,
+			})
+		} else {
+			s.persistMessages(command.Session, command.Session.Messages[messageStart:])
+		}
 		if err != nil {
 			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
 			return modelport.ChatResult{}, err
@@ -213,17 +224,14 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	if drainErr != nil {
 		return modelport.ChatResult{}, drainErr
 	}
-	if err := s.compactIfNeeded(runCtx, command); err != nil {
-		return modelport.ChatResult{}, err
-	}
-	snapshot := s.Contexts.Snapshot(command.Session)
-	if err := validateContextWindow(snapshot); err != nil {
+	snapshot, err := s.prepareSnapshot(runCtx, command, nil)
+	if err != nil {
 		return modelport.ChatResult{}, err
 	}
 
 	// 达到工具轮数上限后进行一次无工具生成，避免模型无限调用工具。
 	result, err := command.Model.Generate(runCtx, modelport.GenerateRequest{
-		Messages: withTurnContexts(snapshot.Messages, command.EnvironmentContext),
+		Messages: snapshot.Messages,
 		Stream:   command.Stream,
 		Settings: command.Settings,
 	})
@@ -233,38 +241,6 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	totalUsage = totalUsage.Add(result.Usage)
 	reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 	return finalizeResult(result, totalUsage, reasoningParts), nil
-}
-
-func withTurnContexts(messages []domainmessage.Message, environmentPrompt string) []domainmessage.Message {
-	extras := make([]domainmessage.Message, 0, 1)
-	if environment := domainmessage.EnvironmentContext(environmentPrompt); environment.IsSynthetic() {
-		extras = append(extras, environment)
-	}
-	if len(extras) == 0 {
-		return messages
-	}
-	insertAt := len(messages)
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == domainmessage.RoleUser {
-			insertAt = index
-			break
-		}
-	}
-	result := make([]domainmessage.Message, 0, len(messages)+len(extras))
-	result = append(result, messages[:insertAt]...)
-	result = append(result, extras...)
-	result = append(result, messages[insertAt:]...)
-	return result
-}
-
-func validateContextWindow(snapshot contextmgr.Snapshot) error {
-	if snapshot.Info.WindowK <= 0 {
-		return nil
-	}
-	if snapshot.Info.SelectedTokens <= snapshot.Info.WindowK*1000 {
-		return nil
-	}
-	return errors.New("current conversation turn exceeds the configured context window; shorten the request or tool output, or increase the session context window")
 }
 
 func (s AgentLoopService) maxToolRounds(current *session.Session) int {
@@ -336,23 +312,18 @@ func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaing
 			message.SourceKind = item.SourceKind
 			message.SourceTaskID = item.SourceTaskID
 			current.AppendMessage(message)
-			appended = append(appended, domainmessage.Clone(message))
+			appended = append(appended, current.Messages[len(current.Messages)-1])
 		}
-		if len(appended) > 0 && s.OnPendingInputAppended != nil {
-			// 3. 先把新增消息交给持久化适配器，再等待本轮最终回答完成确认。
-			s.OnPendingInputAppended(current, domainmessage.CloneAll(appended))
-		}
+		s.persistMessages(current, appended)
 		return items, conflictErr
 	}
 	for _, content := range s.PendingInput.Drain(current.ID) {
 		message := domainmessage.Text(domainmessage.RoleUser, content)
 		current.AppendMessage(message)
-		appended = append(appended, domainmessage.Clone(message))
+		appended = append(appended, current.Messages[len(current.Messages)-1])
 		items = append(items, domaingeneration.PendingTurnInputItem{Content: content})
 	}
-	if len(appended) > 0 && s.OnPendingInputAppended != nil {
-		s.OnPendingInputAppended(current, domainmessage.CloneAll(appended))
-	}
+	s.persistMessages(current, appended)
 	return items, nil
 }
 
@@ -410,11 +381,16 @@ func (s AgentLoopService) hasImmediatePendingInput(current *session.Session) boo
 	return s.PendingInput.HasPending(current.ID)
 }
 
-func (s AgentLoopService) compactIfNeeded(ctx context.Context, command generationcommand.Run) error {
+func (s AgentLoopService) compactIfNeeded(ctx context.Context, command generationcommand.Run, reservedTokens int) error {
 	if s.Compactor == nil || command.Session == nil || command.Model == nil {
 		return nil
 	}
-	_, err := s.Compactor.CompactIfNeeded(ctx, command.Session, command.Model)
+	var err error
+	if budgeted, ok := s.Compactor.(generationport.BudgetedAutoCompactor); ok {
+		_, err = budgeted.CompactIfNeededWithBudget(ctx, command.Session, command.Model, reservedTokens)
+	} else {
+		_, err = s.Compactor.CompactIfNeeded(ctx, command.Session, command.Model)
+	}
 	if err == nil {
 		return nil
 	}
@@ -424,14 +400,14 @@ func (s AgentLoopService) compactIfNeeded(ctx context.Context, command generatio
 	return nil
 }
 
-func (s AgentLoopService) continueAfterStopHook(ctx context.Context, command generationcommand.Run, lastAssistant string, stopContinuations *int) (bool, error) {
+func (s AgentLoopService) continueAfterStopHook(ctx context.Context, command generationcommand.Run, result modelport.ChatResult, stopContinuations *int) (bool, error) {
 	if s.TurnHooks == nil || command.Session == nil || stopContinuations == nil || *stopContinuations >= maxStopHookContinuations {
 		return false, nil
 	}
 	outcome, err := s.TurnHooks.Handle(ctx, generationcommand.TurnHook{
 		Kind:          generationcommand.TurnHookStop,
 		SessionID:     command.Session.ID,
-		LastAssistant: lastAssistant,
+		LastAssistant: result.Content,
 	})
 	if err != nil {
 		return false, err
@@ -443,7 +419,8 @@ func (s AgentLoopService) continueAfterStopHook(ctx context.Context, command gen
 	if !message.IsSynthetic() {
 		return false, nil
 	}
-	command.Session.AppendMessage(message)
+	// 1. Hook 要求继续时，先记录已完成回答，再追加 Hook 的补充输入。
+	s.appendMessages(command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil), message)
 	*stopContinuations++
 	return true, nil
 }
@@ -467,6 +444,9 @@ func (s AgentLoopService) RecordToolExecution(ctx context.Context, result genera
 }
 
 func finalizeResult(result modelport.ChatResult, usage modelport.TokenUsage, reasoningParts []string) modelport.ChatResult {
+	// 1. 汇总供界面展示；协议回放保留最后一次采样的原始内容，避免重复推理。
+	message := domainmessage.Assistant(result.Content, result.Reasoning, result.ToolCalls)
+	result.Message = &message
 	result.Usage = usage
 	result.Reasoning = strings.Join(reasoningParts, "\n")
 	return result

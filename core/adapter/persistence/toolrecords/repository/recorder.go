@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
 	toolrecordsmapper "myai/core/adapter/persistence/toolrecords/mapper"
 	toolrecordsport "myai/core/adapter/persistence/toolrecords/port"
 	generationcommand "myai/core/application/chat/generation/command"
+	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
+	portrepository "myai/core/port/repository"
 )
 
 const defaultTimeout = 10 * time.Second
@@ -24,7 +27,7 @@ type Recorder struct {
 }
 
 func (r Recorder) RecordToolExecution(ctx context.Context, command generationcommand.ToolExecutionRecord) {
-	if len(command.Entries) == 0 && len(command.Assets) == 0 {
+	if len(command.Entries) == 0 && len(command.Assets) == 0 && len(command.Messages) == 0 {
 		return
 	}
 	if r.Persistence == nil {
@@ -33,12 +36,16 @@ func (r Recorder) RecordToolExecution(ctx context.Context, command generationcom
 
 	entries := append([]domaintool.ExecutionEntry(nil), command.Entries...)
 	assets := domaintool.CloneSharedAssets(command.Assets)
-	sessionID := toolSessionID(entries, assets)
+	messages := domainmessage.CloneAll(command.Messages)
+	sessionID := command.SessionID
+	if sessionID == "" {
+		sessionID = toolSessionID(entries, assets)
+	}
 	r.run(sessionID, func() {
 		saveCtx, cancel := context.WithTimeout(context.Background(), r.timeout())
 		defer cancel()
 
-		if err := r.saveRecords(saveCtx, entries, assets); err != nil {
+		if err := r.saveRecords(saveCtx, sessionID, messages, entries, assets); err != nil {
 			r.report(err)
 		}
 	})
@@ -74,9 +81,17 @@ func toolSessionID(entries []domaintool.ExecutionEntry, assets []domaintool.Shar
 	return ""
 }
 
-func (r Recorder) saveRecords(ctx context.Context, entries []domaintool.ExecutionEntry, assets []domaintool.SharedAsset) error {
+func (r Recorder) saveRecords(ctx context.Context, sessionID string, messages []domainmessage.Message, entries []domaintool.ExecutionEntry, assets []domaintool.SharedAsset) error {
 	mapper := toolrecordsmapper.Mapper{IDs: r.IDs}
-	messageRecords := mapper.MessageRecords(entries)
+	var messageRecords []portrepository.MessageRecord
+	if messages != nil {
+		// 1. 使用实际会话消息的 ID、顺序和原始推理，避免恢复时拆散 assistant。
+		messageRecords = (chatmessagemapper.Mapper{}).UserTurn(generationcommand.PersistUserMessage{
+			SessionID: sessionID, AppendedMessages: messages,
+		}, time.Now())
+	} else {
+		messageRecords = mapper.MessageRecords(entries)
+	}
 	assetRecords := mapper.AssetRecords(assets)
 	var errs []error
 	for _, record := range messageRecords {

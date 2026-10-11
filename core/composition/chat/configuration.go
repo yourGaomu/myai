@@ -227,12 +227,12 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Compactor:    compactor,
 		TurnHooks:    turnHooks,
 		PendingInput: turnInputQueue,
-		OnPendingInputAppended: func(current *session.Session, messages []domainmessage.Message) {
-			// 1. AgentLoop 领取 mailbox 后先把新增消息写入持久化队列，避免只留在内存。
+		OnMessagesAppended: func(current *session.Session, messages []domainmessage.Message) {
+			// 1. 将环境、计划、mailbox 和中间回答写入同一持久化队列，保持会话顺序。
 			if current == nil || len(messages) == 0 {
 				return
 			}
-			// 2. 运行中的 turn 也可能收到子代理消息，按会话顺序写入增量消息。
+			// 2. 增量消息映射支持所有角色，复用现有会话持久化入口。
 			userMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 				SessionID: current.ID, Model: current.Model, Input: messages[len(messages)-1].Text(),
 				AppendedMessages: domainmessage.CloneAll(messages), SessionSnapshot: session.Clone(current),

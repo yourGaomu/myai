@@ -9,6 +9,7 @@ import (
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
 	planservice "myai/core/application/plan/service"
+	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	"myai/core/session"
 )
@@ -30,7 +31,12 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 		return generationresult.Commit{}, errors.New("session memory is nil")
 	}
 	if !command.Internal {
-		if err := s.Memory.AddAssistantMessageTo(command.Session.ID, command.Result.Content); err != nil {
+		// 1. 提交最终采样原文，避免把多轮汇总的 reasoning 写回单条历史。
+		message := domainmessage.Assistant(command.Result.Content, command.Result.Reasoning, command.Result.ToolCalls)
+		if command.Result.Message != nil {
+			message = domainmessage.Clone(*command.Result.Message)
+		}
+		if err := s.Memory.AppendAssistantMessageTo(command.Session.ID, message); err != nil {
 			return generationresult.Commit{}, err
 		}
 	}

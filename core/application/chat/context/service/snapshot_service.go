@@ -1,12 +1,9 @@
 package service
 
 import (
-	"fmt"
-	"strings"
-
 	chatcontextapi "myai/core/application/chat/context/api"
 	"myai/core/contextmgr"
-	agentplan "myai/core/plan"
+	compaction "myai/core/domain/compaction"
 	"myai/core/session"
 )
 
@@ -15,6 +12,10 @@ type SnapshotService struct{}
 var _ chatcontextapi.SnapshotService = SnapshotService{}
 
 func (SnapshotService) Snapshot(current *session.Session) contextmgr.Snapshot {
+	return (SnapshotService{}).SnapshotWithBudget(current, 0)
+}
+
+func (SnapshotService) SnapshotWithBudget(current *session.Session, reservedTokens int) contextmgr.Snapshot {
 	if current == nil {
 		return contextmgr.Snapshot{}
 	}
@@ -38,36 +39,19 @@ func (SnapshotService) Snapshot(current *session.Session) contextmgr.Snapshot {
 		compactedMessages = checkpoint.SourceEndMessage
 	}
 	if checkpoint != nil {
-		return contextmgr.BuildSnapshotWithCheckpoint(
+		return contextmgr.BuildSnapshotWithBudget(
 			current.Messages,
 			*checkpoint,
 			compactedMessages,
 			current.ContextWindowK,
-			planSnapshot(current.CurrentPlan),
+			reservedTokens,
 		)
 	}
-	return contextmgr.BuildSnapshot(
+	return contextmgr.BuildSnapshotWithBudget(
 		current.Messages,
-		summary,
+		compaction.LegacyCheckpoint(summary, compactedMessages, ""),
 		compactedMessages,
 		current.ContextWindowK,
-		planSnapshot(current.CurrentPlan),
+		reservedTokens,
 	)
-}
-
-func planSnapshot(current *agentplan.Plan) string {
-	if current == nil {
-		return ""
-	}
-	var builder strings.Builder
-	builder.WriteString("Current execution plan snapshot:\n")
-	fmt.Fprintf(&builder, "plan_id: %s\nstatus: %s\ngoal: %s\nsteps:\n", current.ID, current.Status, current.Goal)
-	for _, step := range current.Steps {
-		fmt.Fprintf(&builder, "- order: %d; status: %s; title: %s", step.Order, step.Status, step.Title)
-		if description := strings.TrimSpace(step.Description); description != "" {
-			fmt.Fprintf(&builder, "; description: %s", description)
-		}
-		builder.WriteByte('\n')
-	}
-	return contextmgr.TruncateTextToTokens(builder.String(), 512)
 }

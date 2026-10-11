@@ -34,11 +34,11 @@ func (OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig)
 		openai.WithBaseURL(config.BaseURL),
 		openai.WithModel(config.ModelName),
 	}
+	var transport http.RoundTripper = assistantReplayTransport{base: http.DefaultTransport}
 	if domainmodel.NormalizeAuthType(config.AuthType) == domainmodel.AuthTypeNone {
-		options = append(options, openai.WithHTTPClient(&http.Client{
-			Transport: stripAuthorizationTransport{base: http.DefaultTransport},
-		}))
+		transport = stripAuthorizationTransport{base: transport}
 	}
+	options = append(options, openai.WithHTTPClient(&http.Client{Transport: transport}))
 
 	model, err := openai.New(options...)
 	if err != nil {

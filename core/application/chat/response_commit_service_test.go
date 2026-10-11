@@ -126,11 +126,11 @@ type responseMemoryRecorder struct {
 	planErr          error
 }
 
-func (m *responseMemoryRecorder) AddAssistantMessageTo(sessionID string, content string) error {
+func (m *responseMemoryRecorder) AppendAssistantMessageTo(sessionID string, message domainmessage.Message) error {
 	if m.assistantErr != nil {
 		return m.assistantErr
 	}
-	m.assistantContent = content
+	m.assistantContent = message.Text()
 	return nil
 }
 

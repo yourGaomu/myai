@@ -731,9 +731,19 @@ SnapshotService.Snapshot
 [history] 已有历史消息                    <- 稳定
 [system] Runtime instructions: Plan rules <- 已持久化 Synthetic Message
 [user]   本轮输入                          <- 动态
+[user]   本轮环境事实                      <- 追加并持久化，工具轮次不移动
+[user]   最新计划状态（需要时）            <- 状态变化时追加，不改写历史
 ```
 
-runtime instruction 与对应 user message 同时进入历史。下一轮请求的 cacheable prefix 会包含已经完成的旧 turn，而当前 turn 的 runtime message 位于未缓存尾部；切换模式不会重写固定 system prompt 或旧历史。`ContextInfo.PrefixHash` 和 `CacheableTokens` 可用于观察这一前缀。
+runtime instruction 与对应 user message 同时进入历史。下一轮请求的 cacheable prefix 会包含已经完成的旧 turn；切换模式不会重写固定 system prompt 或旧历史。`ContextInfo.PrefixHash` 和 `CacheableTokens` 是本地消息前缀的指纹与 token 估算，不等于服务商报告的缓存命中量，也不涵盖工具定义。
+
+1. `AgentLoopService.Run` 每次生成开始时将环境事实追加到会话尾部并持久化。工具循环、mailbox 子代理消息和下一条用户输入都会保留旧环境消息。环境、计划上下文不单独划分用户回合，重新生成时也不会被当成用户问题。
+2. 计划快照由 `appendPlanContext` 追加。计划推进时保留旧快照，新增最新状态；压缩或预算裁剪移除快照后，再补充当前计划。`SnapshotService` 只读取已记录的消息，不再把可变计划插入 System Prompt 后面。
+3. 工具调用前的 assistant 正文、原始 reasoning 和 tool calls 保留为同一条领域消息。等待队列消息或 Stop Hook 要求继续时，先保存已完成的回答。数据库中的正文、工具调用记录共用 `message_id`，加载时恢复原消息组合；最终消息只保存最终采样的原始 reasoning，多轮汇总仍用于实时响应展示。
+4. OpenAI Chat Completions 适配层通过请求级元数据回放 `reasoning_content` 与 assistant 正文；不使用共享客户端状态，也不增加渠道专有缓存参数。其他协议仍按各自适配器支持的字段发送。
+5. 请求预算估算包含消息（环境、计划、工具结果与推理）、本次工具定义、最大输出 token 和协议预留。压缩触发也考虑工具与输出预留；选择完整消息块后仍超限时，不发送模型请求。这里使用本地估算，并非服务商 tokenizer 的精确计数。
+
+未触发压缩、历史裁剪或工具配置变更时，追加消息保留已有请求前缀。压缩和裁剪仍会合理地改变前缀；最终缓存命中还取决于服务商的缓存条件。已有记录中缺失的正文或 reasoning 无法自动恢复；旧压缩来源指纹不匹配时会弃用 checkpoint，按原始历史重建。
 
 每条 runtime message 都声明其规则只适用于紧随的 user message，因此旧 Plan/Style runtime 虽然保留用于缓存和审计，也不会成为后续 Chat turn 的持续规则。
 

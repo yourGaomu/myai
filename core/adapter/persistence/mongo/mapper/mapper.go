@@ -140,6 +140,7 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 	// 1. 写入 Mongo 前把领域记录的来源身份映射到 BSON 文档。
 	return po.MessageDocument{
 		ID:                  record.ID,
+		MessageID:           record.MessageID,
 		SessionID:           record.SessionID,
 		Role:                record.Role,
 		Content:             record.Content,
@@ -172,6 +173,7 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 	// 2. 读取 Mongo 时恢复来源身份，供会话层继续执行幂等判断。
 	return repository.MessageRecord{
 		ID:                  document.ID,
+		MessageID:           document.MessageID,
 		SessionID:           document.SessionID,
 		Role:                document.Role,
 		Content:             document.Content,

@@ -63,6 +63,7 @@ type CompactionSummaryDocument struct {
 
 type MessageDocument struct {
 	ID                  string    `bson:"_id"`
+	MessageID           string    `bson:"message_id,omitempty"`
 	SessionID           string    `bson:"session_id"`
 	Role                string    `bson:"role"`
 	Content             string    `bson:"content"`

@@ -41,13 +41,20 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 				message = domainmessage.SyntheticUserText(reason, record.Content)
 			}
 			messages = append(messages, messageWithRecord(message, record))
-		case repository.RoleAssistant:
-			messages = append(messages, messageWithRecord(domainmessage.Text(domainmessage.RoleAssistant, record.Content), record))
-		case repository.RoleToolCall:
+		case repository.RoleAssistant, repository.RoleToolCall:
 			calls := make([]domainmessage.ToolCall, 0, 1)
 			recordIDs := make([]string, 0, 1)
 			firstRecord := record
-			for index < len(records) && records[index].Role == repository.RoleToolCall {
+			content, reasoning := "", ""
+			if record.Role == repository.RoleAssistant {
+				content, reasoning = record.Content, record.Reasoning
+				recordIDs = append(recordIDs, record.ID)
+				index++
+			}
+			// 2. 只合并同一次采样的正文与调用；不同消息即使相邻也不合并。
+			for index < len(records) && records[index].Role == repository.RoleToolCall &&
+				((firstRecord.MessageID != "" && records[index].MessageID == firstRecord.MessageID) ||
+					(firstRecord.MessageID == "" && firstRecord.Role == repository.RoleToolCall && records[index].MessageID == "")) {
 				callRecord := records[index]
 				recordIDs = append(recordIDs, callRecord.ID)
 				calls = append(calls, domainmessage.ToolCall{
@@ -56,7 +63,7 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 				index++
 			}
 			index--
-			message := messageWithRecord(domainmessage.ToolCallMessage(calls), firstRecord)
+			message := messageWithRecord(domainmessage.Assistant(content, reasoning, calls), firstRecord)
 			message.RecordIDs = recordIDs
 			messages = append(messages, message)
 		case repository.RoleTool:
@@ -82,6 +89,9 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 func messageWithRecord(message domainmessage.Message, record repository.MessageRecord) domainmessage.Message {
 	// 1. 从持久化记录恢复来源身份，进程重启后仍可按 SourceID 做幂等判断。
 	message.ID = record.ID
+	if record.MessageID != "" {
+		message.ID = record.MessageID
+	}
 	message.RecordIDs = []string{record.ID}
 	message.SourceID = record.SourceID
 	message.SourceKind = record.SourceKind

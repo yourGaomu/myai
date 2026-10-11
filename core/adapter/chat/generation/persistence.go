@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimeservice "myai/core/application/runtime/service"
+	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
@@ -28,6 +29,10 @@ func (p Persistence) PersistAssistant(current *session.Session, result modelport
 	}
 	createdAt := p.now()
 	result.ToolCalls = append([]modelport.ToolCall(nil), result.ToolCalls...)
+	if result.Message != nil {
+		message := domainmessage.Clone(*result.Message)
+		result.Message = &message
+	}
 	p.submit(snapshot.ID, func(ctx context.Context) error {
 		if p.Messages == nil {
 			return nil

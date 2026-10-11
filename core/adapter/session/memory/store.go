@@ -211,16 +211,15 @@ func (sm *Store) AddAssistantMessage(content string) error {
 }
 
 func (sm *Store) AddAssistantMessageTo(sessionID string, content string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	return sm.AppendAssistantMessageTo(sessionID, domainmessage.Assistant(content, "", nil))
+}
 
-	session, err := sm.sessionByIDLocked(sessionID)
-	if err != nil {
-		return err
+func (sm *Store) AppendAssistantMessageTo(sessionID string, message domainmessage.Message) error {
+	// 1. 提交完整模型消息，保留正文、推理与工具调用的归属关系。
+	if message.Role != domainmessage.RoleAssistant {
+		return errors.New("expected assistant message")
 	}
-
-	session.AddAssistantMessage(content)
-	return nil
+	return sm.AppendMessageTo(sessionID, domainmessage.Clone(message))
 }
 
 func (sm *Store) TrimAfterLastUserMessage(sessionID string) (string, error) {
@@ -234,7 +233,7 @@ func (sm *Store) TrimAfterLastUserMessage(sessionID string) (string, error) {
 
 	lastUserIndex := -1
 	for index := len(session.Messages) - 1; index >= 0; index-- {
-		if session.Messages[index].Role == domainmessage.RoleUser {
+		if session.Messages[index].Role == domainmessage.RoleUser && !session.Messages[index].IsTurnContext() {
 			lastUserIndex = index
 			break
 		}

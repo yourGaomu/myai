@@ -63,6 +63,10 @@ func BuildSnapshot(messages []domainmessage.Message, summary string, compactedMe
 }
 
 func BuildSnapshotWithCheckpoint(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, windowK int, fixedContext ...string) Snapshot {
+	return BuildSnapshotWithBudget(messages, checkpoint, compactedMessages, windowK, 0, fixedContext...)
+}
+
+func BuildSnapshotWithBudget(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, windowK, reservedTokens int, fixedContext ...string) Snapshot {
 	if !CompactionCheckpointMatchesCheckpoint(messages, &checkpoint) {
 		checkpoint = compaction.Checkpoint{}
 		compactedMessages = 0
@@ -74,7 +78,7 @@ func BuildSnapshotWithCheckpoint(messages []domainmessage.Message, checkpoint co
 	}
 	summary = summaryForWindow(summary, windowK)
 	base, recent := buildBaseAndRecent(messages, summary, compactedMessages, fixedContext...)
-	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
+	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages), reservedTokens)
 	info.SummaryVersion = info.CompactedMessages
 	info.SummaryHash = StableTextHash(summary)
 	cacheablePrefix := stableCacheablePrefix(selected)
@@ -95,7 +99,7 @@ func BuildSnapshotWithCheckpoint(messages []domainmessage.Message, checkpoint co
 func stableCacheablePrefix(messages []domainmessage.Message) []domainmessage.Message {
 	lastUserIndex := -1
 	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == domainmessage.RoleUser {
+		if messages[index].Role == domainmessage.RoleUser && !messages[index].IsTurnContext() {
 			lastUserIndex = index
 			break
 		}
@@ -104,7 +108,7 @@ func stableCacheablePrefix(messages []domainmessage.Message) []domainmessage.Mes
 		return messages
 	}
 	turnStart := lastUserIndex
-	for turnStart > 0 && messages[turnStart-1].IsSynthetic() {
+	for turnStart > 0 && messages[turnStart-1].IsSynthetic() && !messages[turnStart-1].IsTurnContext() {
 		turnStart--
 	}
 	return messages[:turnStart]
@@ -193,14 +197,15 @@ func buildBaseAndRecent(messages []domainmessage.Message, summary string, compac
 	return base, rest
 }
 
-func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Message, fullMessages []domainmessage.Message, windowK int, hasSummary bool, summaryTokens int, compactedMessages int) (Info, []domainmessage.Message) {
+func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Message, fullMessages []domainmessage.Message, windowK int, hasSummary bool, summaryTokens int, compactedMessages int, reservedTokens int) (Info, []domainmessage.Message) {
 	windowK = NormalizeWindowK(windowK)
 	if len(base) == 0 && len(recent) == 0 {
 		return Info{WindowK: windowK, SummaryTokens: summaryTokens, CompactedMessages: compactedMessages, HasSummary: hasSummary}, nil
 	}
 
 	fullTokens := EstimateMessagesTokens(fullMessages)
-	budget := windowK * 1000
+	// 1. 工具定义与输出预留共享上下文窗口，历史只能使用剩余预算。
+	budget := max(0, windowK*1000-max(0, reservedTokens))
 	baseTokens := EstimateMessagesTokens(base)
 
 	chunks := messageChunks(recent)
@@ -262,6 +267,7 @@ func EstimateMessagesTokens(messages []domainmessage.Message) int {
 	total := 0
 	for _, message := range messages {
 		total += 4
+		total += EstimateTextTokens(message.Reasoning)
 		for _, part := range message.Parts {
 			total += estimatePartTokens(part)
 		}
@@ -274,7 +280,7 @@ func EstimateMessagesTokens(messages []domainmessage.Message) int {
 func CurrentTurnTokens(messages []domainmessage.Message) int {
 	lastUserIndex := -1
 	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == domainmessage.RoleUser {
+		if messages[index].Role == domainmessage.RoleUser && !messages[index].IsTurnContext() {
 			lastUserIndex = index
 			break
 		}
@@ -283,7 +289,7 @@ func CurrentTurnTokens(messages []domainmessage.Message) int {
 		return 0
 	}
 	turnStart := lastUserIndex
-	for turnStart > 0 && messages[turnStart-1].IsSynthetic() {
+	for turnStart > 0 && messages[turnStart-1].IsSynthetic() && !messages[turnStart-1].IsTurnContext() {
 		turnStart--
 	}
 	return EstimateMessagesTokens(messages[turnStart:])
@@ -294,6 +300,9 @@ func StableMessagesHash(messages []domainmessage.Message) string {
 	for _, message := range messages {
 		builder.WriteString(string(message.Role))
 		builder.WriteString("\n")
+		if message.Reasoning != "" {
+			fmt.Fprintf(&builder, "reasoning:%q\n", message.Reasoning)
+		}
 		if message.SyntheticReason != "" {
 			builder.WriteString("synthetic:")
 			builder.WriteString(string(message.SyntheticReason))
@@ -388,18 +397,18 @@ func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
 	chunks := make([][]domainmessage.Message, 0, len(messages))
 	for start := 0; start < len(messages); {
 		end := start + 1
-		if messages[start].IsSynthetic() {
-			for end < len(messages) && messages[end].IsSynthetic() {
+		if messages[start].IsSynthetic() && !messages[start].IsTurnContext() {
+			for end < len(messages) && messages[end].IsSynthetic() && !messages[end].IsTurnContext() {
 				end++
 			}
 			if end < len(messages) && messages[end].Role == domainmessage.RoleUser {
 				end++
 			}
-			for end < len(messages) && !messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser {
+			for end < len(messages) && (messages[end].IsTurnContext() || (!messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser)) {
 				end++
 			}
 		} else if messages[start].Role == domainmessage.RoleUser {
-			for end < len(messages) && !messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser {
+			for end < len(messages) && (messages[end].IsTurnContext() || (!messages[end].IsSynthetic() && messages[end].Role != domainmessage.RoleUser)) {
 				end++
 			}
 		} else if messages[start].Role == domainmessage.RoleAssistant && messages[start].HasToolCall() {
@@ -520,7 +529,7 @@ func writeStablePart(builder *strings.Builder, part domainmessage.Part) {
 		builder.WriteString(":")
 		builder.WriteString(part.ToolResult.Name)
 		builder.WriteString(":")
-		builder.WriteString(part.ToolResult.Content)
+		builder.WriteString(part.ToolResult.PromptContent())
 	default:
 		builder.WriteString(fmt.Sprint(part))
 	}

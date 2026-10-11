@@ -63,6 +63,19 @@ func TestCompactServiceCompactIfNeededSkipsBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestCompactServiceCountsReservedRequestTokens(t *testing.T) {
+	summarizer := &compactSummarizer{summary: "new summary"}
+	info, err := (CompactService{
+		Contexts: &compactContextProvider{infos: []contextmgr.Info{
+			{WindowK: 16, SelectedTokens: 9000}, {WindowK: 16, SelectedTokens: 100},
+		}},
+		Summarizer: summarizer, Summaries: &compactStore{}, KeepChunks: 2,
+	}).CompactIfNeededWithBudget(context.Background(), compactTestSession(), compactModel{}, 3000)
+	if err != nil || !info.Triggered || !summarizer.called {
+		t.Fatalf("tools/output reservation did not trigger compaction: info=%+v err=%v", info, err)
+	}
+}
+
 func TestCompactServiceCompactIfNeededReturnsCompactInfo(t *testing.T) {
 	contexts := &compactContextProvider{infos: []contextmgr.Info{
 		{WindowK: 16, SelectedTokens: 12000, Truncated: true},

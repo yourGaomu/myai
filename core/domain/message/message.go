@@ -28,6 +28,7 @@ const (
 	SyntheticReasonRAGContext         SyntheticReason = "rag_context"
 	SyntheticReasonMemoryContext      SyntheticReason = "memory_context"
 	SyntheticReasonEnvironmentContext SyntheticReason = "environment_context"
+	SyntheticReasonPlanContext        SyntheticReason = "plan_context"
 	SyntheticReasonHookContext        SyntheticReason = "hook_context"
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 	SyntheticReasonInterAgentMessage  SyntheticReason = "inter_agent_message"
@@ -53,12 +54,14 @@ const (
 type Message struct {
 	// ID, Sequence and CreatedAt are assigned when a message enters a Session.
 	// They let live history and durable history expose the same cursor.
-	ID              string
-	RecordIDs       []string
-	Sequence        int64
-	CreatedAt       time.Time
-	Role            Role
-	Parts           []Part
+	ID        string
+	RecordIDs []string
+	Sequence  int64
+	CreatedAt time.Time
+	Role      Role
+	Parts     []Part
+	// 1. 保留单次模型响应的推理字段，用于协议回放；不得写入多轮汇总文本。
+	Reasoning       string
 	SyntheticReason SyntheticReason
 	// 1. SourceID 标识产生本消息的外部事件；它不同于消息自身 ID，专门用于投递幂等。
 	SourceID     string
@@ -216,6 +219,20 @@ func ToolCallMessage(calls []ToolCall) Message {
 		parts = append(parts, Part{Type: PartToolCall, ToolCall: &item})
 	}
 	return Message{Role: RoleAssistant, Parts: parts}
+}
+
+func Assistant(content, reasoning string, calls []ToolCall) Message {
+	// 1. 正文、推理与工具调用属于同一条 assistant 消息，不能拆成不同模型回合。
+	message := ToolCallMessage(calls)
+	message.Reasoning = reasoning
+	if content != "" {
+		message.Parts = append([]Part{{Type: PartText, Text: content}}, message.Parts...)
+	}
+	return message
+}
+
+func (m Message) IsTurnContext() bool {
+	return m.SyntheticReason == SyntheticReasonEnvironmentContext || m.SyntheticReason == SyntheticReasonPlanContext
 }
 
 func ToolResultMessage(result ToolResult) Message {

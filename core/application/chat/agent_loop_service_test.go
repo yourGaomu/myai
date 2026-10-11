@@ -206,7 +206,7 @@ func TestAgentLoopServiceDoesNotInjectMemoryContextBeforeToolUse(t *testing.T) {
 	}
 }
 
-func TestAgentLoopServiceReusesEnvironmentContextWithoutPersistingIt(t *testing.T) {
+func TestAgentLoopServiceReusesPersistedEnvironmentContext(t *testing.T) {
 	current := testSession()
 	call := domainmessage.ToolCall{ID: "call-1", Type: "function", Name: "read_file", Arguments: `{}`}
 	model := &scriptedModel{results: []modelport.ChatResult{
@@ -246,14 +246,18 @@ func TestAgentLoopServiceReusesEnvironmentContextWithoutPersistingIt(t *testing.
 		if environmentMessages != 1 {
 			t.Fatalf("request %d expected one environment context, got %d", index, environmentMessages)
 		}
-		if lastUser >= 0 && environmentAt >= lastUser {
-			t.Fatalf("request %d expected environment before last user message", index)
+		if lastUser >= 0 && environmentAt != lastUser+1 {
+			t.Fatalf("request %d expected environment appended after user message", index)
 		}
 	}
+	count := 0
 	for _, message := range current.Messages {
 		if message.IsSyntheticReason(domainmessage.SyntheticReasonEnvironmentContext) {
-			t.Fatalf("environment context was persisted in the session: %#v", current.Messages)
+			count++
 		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one durable environment message, got %d", count)
 	}
 }
 
@@ -459,6 +463,10 @@ func TestAgentLoopServiceContinuesAfterStopHook(t *testing.T) {
 	}
 	if len(model.requests) != 2 || len(hooks.kinds) != 2 {
 		t.Fatalf("expected two samples and two stop hooks, requests=%d hooks=%v", len(model.requests), hooks.kinds)
+	}
+	request := model.requests[1].Messages
+	if len(request) < 2 || request[len(request)-2].Role != domainmessage.RoleAssistant || request[len(request)-2].Text() != "first draft" {
+		t.Fatalf("answer must precede hook continuation: %#v", request)
 	}
 	found := false
 	for _, message := range current.Messages {

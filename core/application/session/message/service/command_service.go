@@ -101,7 +101,7 @@ func (s CommandService) runtimeInstruction(ctx context.Context, current *session
 
 func latestRuntimeInstruction(messages []domainmessage.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role != domainmessage.RoleUser {
+		if messages[index].Role != domainmessage.RoleUser || messages[index].IsTurnContext() {
 			continue
 		}
 		for previous := index - 1; previous >= 0 && messages[previous].IsSynthetic(); previous-- {

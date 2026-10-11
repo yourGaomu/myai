@@ -54,7 +54,7 @@ func TestContextSnapshotServiceNilSessionReturnsEmptySnapshot(t *testing.T) {
 	}
 }
 
-func TestContextSnapshotServiceIncludesCurrentPlanState(t *testing.T) {
+func TestContextSnapshotServiceDoesNotInjectMutablePlanBeforeHistory(t *testing.T) {
 	current := &session.Session{
 		ContextWindowK: 16,
 		CurrentPlan: &agentplan.Plan{
@@ -71,10 +71,8 @@ func TestContextSnapshotServiceIncludesCurrentPlanState(t *testing.T) {
 	for _, message := range snapshot.Messages {
 		joined += message.Text() + "\n"
 	}
-	for _, expected := range []string{"Current execution plan snapshot", "plan_id: plan-1", "status: running", "title: Fix"} {
-		if !strings.Contains(joined, expected) {
-			t.Fatalf("expected snapshot to contain %q, got:\n%s", expected, joined)
-		}
+	if strings.Contains(joined, "Current execution plan snapshot") || len(snapshot.Messages) != len(current.Messages) {
+		t.Fatalf("snapshot must read recorded history without inserting mutable plan: %s", joined)
 	}
 }
 

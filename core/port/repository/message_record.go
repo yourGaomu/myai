@@ -11,7 +11,9 @@ const (
 )
 
 type MessageRecord struct {
-	ID                  string
+	ID string
+	// 1. 同一模型消息拆成多条记录时共用 MessageID，恢复时据此合并。
+	MessageID           string
 	SessionID           string
 	Role                string
 	Content             string

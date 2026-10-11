@@ -72,6 +72,10 @@ func (s CompactService) CompactSession(ctx context.Context, current *session.Ses
 }
 
 func (s CompactService) CompactIfNeeded(ctx context.Context, current *session.Session, model modelport.ChatModelPort) (compactionresult.CompactInfo, error) {
+	return s.CompactIfNeededWithBudget(ctx, current, model, 0)
+}
+
+func (s CompactService) CompactIfNeededWithBudget(ctx context.Context, current *session.Session, model modelport.ChatModelPort, reservedTokens int) (compactionresult.CompactInfo, error) {
 	if current == nil || model == nil {
 		return compactionresult.CompactInfo{}, nil
 	}
@@ -79,7 +83,10 @@ func (s CompactService) CompactIfNeeded(ctx context.Context, current *session.Se
 		return compactionresult.CompactInfo{}, errors.New("context provider is nil")
 	}
 	before := s.Contexts.Snapshot(current).Info
-	if !contextmgr.ShouldCompact(before, contextmgr.DefaultCompactTriggerRatio) {
+	// 1. 工具定义与输出预留也参与压缩触发，避免仅看聊天文本低估请求大小。
+	trigger := before
+	trigger.SelectedTokens += max(0, reservedTokens)
+	if !contextmgr.ShouldCompact(trigger, contextmgr.DefaultCompactTriggerRatio) {
 		return compactionresult.CompactInfo{}, nil
 	}
 	if err := s.CompactSession(ctx, current, model); errors.Is(err, ErrNotEnoughHistory) {
