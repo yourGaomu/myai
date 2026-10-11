@@ -320,7 +320,19 @@ func CompactionSourceHash(messages []domainmessage.Message, compactedMessages in
 	if cutoff > len(messages) {
 		cutoff = len(messages)
 	}
-	return StableMessagesHash(messages[:cutoff])
+	prefixHash := StableMessagesHash(messages[:cutoff])
+	var sources strings.Builder
+	// 1. 摘要保留代理来源，checkpoint 也必须校验这些字段，避免沿用归属错误的旧结论。
+	// 1.1 仅扩展压缩来源哈希；模型缓存前缀仍使用原来的消息文本哈希。
+	for index, message := range messages[:cutoff] {
+		if message.SourceID != "" || message.SourceKind != "" || message.SourceTaskID != "" {
+			fmt.Fprintf(&sources, "%d source_id=%q source_kind=%q source_task_id=%q\n", index, message.SourceID, message.SourceKind, message.SourceTaskID)
+		}
+	}
+	if sources.Len() == 0 {
+		return prefixHash
+	}
+	return StableTextHash(prefixHash + "\n" + sources.String())
 }
 
 // CompactionCheckpointMatches accepts old sessions without a source hash for

@@ -953,7 +953,11 @@ CompactService.CompactIfNeeded
   -> Session.Summary / CompactedMessages 更新
 ```
 
-`tool call` 与 `tool result` 被视为同一消息块，不会被摘要算法拆开。
+`CompactSplit` 按完整消息块选择历史，避免在 checkpoint 边界拆开 `tool call` 与 `tool result`。`SummaryService` 优先整块组装请求；单块超预算时才按消息和 UTF-8 字符分段，按顺序合并上一批摘要，不再通过裁剪头尾丢弃中间内容。每批历史按实际投影文本限制为 1,800 估算 tokens，同时限制 7,200 字节；分段的工具结果保留调用 ID、名称、状态和错误码。
+
+摘要按消息用途选择输入：普通对话、工具调用及结果正常保留；`subagent_result`、`inter_agent_message` 和明确标记 `source_kind=plan_recovery` 的计划恢复消息作为内部证据保留，携带 `SourceID`、`SourceKind`、`SourceTaskID`。固定 system、临时运行时/环境/检索提示及未知内部消息仍排除；旧摘要通过 `existingSummary` 合并一次。代理报告中的命令不升级为用户要求，未测试、失败、变更待应用等状态需要保留。
+
+摘要只接受完整且符合字段约束的 JSON；模型返回工具调用、取消或任一批次失败时，不提交新的 checkpoint。来源哈希包含上述代理来源字段，修改来源后旧 checkpoint 失效并按原始历史重建。此变化不修改模型缓存前缀哈希，不需要数据库迁移；已经遗漏且没有被重新摘要的旧结论不会凭空恢复。
 
 Mobile 打开“上下文”设置时会发送 `session_context_query` 主动查询当前 Session，查询期间显示加载状态。上下文面板会展示 token 数、消息数、版本、哈希和后端实际保存的完整 `Session.Summary` 字符串，但不会展示模型请求的全部正文：固定 system prompt、被选中的消息正文、cacheable prefix 正文和 Plan snapshot 当前只参与后端快照构建。
 
