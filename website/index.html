@@ -407,142 +407,481 @@
       user-select: none;
     }
 
-    /* 2. AppHeader (Exact to mobile/src/components/layout/AppHeader.tsx) */
+    /* 2. AppHeader (AppHeader.tsx: 顶部半透明灵动岛、抽屉与快捷操作) */
     .p-app-header {
-      padding: 8px 16px 10px 16px;
+      padding: 6px 12px;
       background: #f4f5f7;
       border-bottom: 2px solid var(--ink);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-    }
-    .p-brand-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .p-avatar-box {
-      width: 42px;
-      height: 42px;
-      background: #ffd84f;
-      border: 2px solid var(--ink);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      box-shadow: 0 1.5px 0 var(--ink);
-      cursor: pointer;
-    }
-    .p-header-titles {
-      display: flex;
-      flex-direction: column;
-    }
-    .p-title-row {
-      display: flex;
-      align-items: center;
+      position: relative;
+      z-index: 30;
       gap: 6px;
     }
-    .p-title-main {
-      font-size: 17px;
-      font-weight: 900;
-      color: #12100e;
-      line-height: 22px;
-    }
-    .p-device-pill {
-      background: #fffdf7;
-      border: 1.5px solid var(--ink);
-      border-radius: 6px;
-      padding: 1px 5px;
-      font-size: 9.5px;
-      font-weight: 900;
-      color: #12100e;
-    }
-    .p-subtitle {
-      color: #6c665f;
-      font-size: 11px;
-      font-weight: 700;
-      margin-top: 1px;
-    }
-    .p-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .p-ghost-settings-btn {
-      width: 34px;
-      height: 34px;
-      background: #4fd7ee;
+    .p-header-icon-btn {
+      width: 38px;
+      height: 38px;
+      background: rgba(255, 253, 247, 0.9);
       border: 2px solid var(--ink);
-      border-radius: 10px;
-      box-shadow: 0 1.5px 0 var(--ink);
+      border-radius: 19px;
+      box-shadow: 0 2px 0 var(--ink);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 16px;
+      font-weight: 900;
+      color: var(--ink);
       cursor: pointer;
-      transition: all 0.1s;
+      transition: all 0.12s;
+      flex-shrink: 0;
     }
-    .p-ghost-settings-btn:active {
+    .p-header-icon-btn:hover {
+      background: var(--yellow);
+      transform: translateY(-1px);
+    }
+    .p-header-icon-btn:active {
       transform: translateY(1px);
       box-shadow: none;
     }
-    .p-status-online-pill {
-      background: #b9e9b0;
+    .p-header-right-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .p-character-island {
+      background: rgba(255, 253, 247, 0.95);
       border: 2px solid var(--ink);
-      border-radius: 999px;
-      box-shadow: 0 1.5px 0 var(--ink);
+      border-radius: 20px;
+      box-shadow: 0 2px 0 var(--ink);
+      padding: 3px 12px 5px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 1;
+      margin-top: 2px;
+    }
+    .p-island-avatar-wrap {
+      width: 34px;
       height: 34px;
-      padding: 0 10px;
+      border-radius: 17px;
+      background: var(--yellow);
+      border: 2px solid var(--ink);
+      box-shadow: 1px 1px 0 var(--ink);
+      margin-top: -12px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .p-island-avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .p-island-identity-row {
       display: flex;
       align-items: center;
       gap: 5px;
-      font-size: 11.5px;
-      font-weight: 900;
-      color: #12100e;
+      margin-top: 2px;
     }
-    .p-status-dot {
-      width: 7px;
-      height: 7px;
+    .p-island-title {
+      font-size: 12.5px;
+      font-weight: 900;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+    }
+    .p-island-device-badge {
+      background: #f0ebe1;
+      border: 1px solid var(--ink);
       border-radius: 4px;
-      background: #0e4e16;
+      padding: 0.5px 4px;
+      font-size: 9px;
+      font-weight: 900;
+      color: var(--ink);
+    }
+    .p-island-status-capsule {
+      background: #f5eee2;
+      border: 1px solid #d8cfbf;
+      border-radius: 999px;
+      padding: 1.5px 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 3px;
+    }
+    .p-status-dot-pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: #2e8b38;
+      box-shadow: 0 0 0 2px rgba(46, 139, 56, 0.2);
+    }
+    .p-island-status-text {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+    .p-island-mode-pill {
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-size: 9.5px;
+      font-weight: 900;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      cursor: pointer;
+      background: var(--yellow);
+      transition: all 0.12s;
+    }
+    .p-island-mode-pill.plan-mode {
+      background: var(--cyan);
+    }
+    .p-island-mode-pill:hover {
+      transform: scale(1.04);
     }
 
-    /* 3. SessionModeSwitch (ONLY shown on chat tab) */
-    .p-mode-switch-wrapper {
-      padding: 8px 16px;
-      background: #f4f5f7;
+    /* 3. Chat Jump Rail (ChatJumpNav.tsx: 右上角历史提问快捷定位导轨) */
+    .p-chat-jump-nav {
+      position: absolute;
+      right: 8px;
+      top: 10px;
+      z-index: 25;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: flex-end;
     }
-    .p-mode-control {
-      background: #ded7cc;
-      border: 2px solid #25231f;
-      border-radius: 999px;
-      padding: 3px;
+    .p-jump-rail-btn {
+      width: 26px;
+      max-height: 110px;
+      background: rgba(255, 250, 240, 0.92);
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      padding: 6px 3px;
       display: flex;
-      gap: 2px;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: all 0.12s;
     }
-    .p-mode-btn {
-      height: 32px;
-      padding: 0 16px;
-      border-radius: 999px;
-      border: none;
-      background: transparent;
+    .p-jump-rail-btn:hover {
+      background: var(--yellow);
+    }
+    .p-jump-rail-track {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: center;
+    }
+    .p-jump-marker {
+      width: 10px;
+      height: 2.5px;
+      border-radius: 2px;
+      background: #6c665f;
+    }
+    .p-jump-rail-count {
+      font-size: 9.5px;
+      font-weight: 900;
+      color: var(--ink);
+    }
+    .p-jump-popover {
+      display: none;
+      position: absolute;
+      right: 32px;
+      top: 0;
+      width: 210px;
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 10px;
+      box-shadow: 0 3px 0 var(--ink);
+      padding: 8px;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 30;
+    }
+    .p-jump-popover.show {
+      display: flex;
+    }
+    .p-jump-popover-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 900;
+      color: var(--ink);
+      padding-bottom: 4px;
+      border-bottom: 1px solid #ded7cc;
+    }
+    .p-jump-close-btn {
+      background: #f5eefc;
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 9px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .p-jump-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .p-jump-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #f5f4ef;
+      border: 1px solid var(--ink);
+      border-radius: 6px;
+      padding: 4px 6px;
+      cursor: pointer;
+      font-size: 10.5px;
+      transition: background 0.1s;
+    }
+    .p-jump-item:hover {
+      background: var(--yellow);
+    }
+    .p-jump-badge {
+      background: var(--yellow);
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 9px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .p-jump-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    /* 4. SideDrawer (SideDrawer.tsx: 侧滑收纳抽屉) */
+    .p-drawer-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      display: none;
+    }
+    .p-drawer-overlay.open {
+      display: block;
+    }
+    .p-drawer-backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(18, 16, 14, 0.45);
+      animation: fadeIn 0.2s ease;
+    }
+    .p-drawer-sheet {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 82%;
+      max-width: 310px;
+      background: #fffdf7;
+      border-right: 2.5px solid var(--ink);
+      box-shadow: 4px 0 0 rgba(18, 16, 14, 0.15);
+      display: flex;
+      flex-direction: column;
+      animation: slideInLeft 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 101;
+    }
+    @keyframes slideInLeft {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(0); }
+    }
+    .p-drawer-header {
+      padding: 24px 12px 10px 12px;
+      border-bottom: 2px solid var(--ink);
+      background: #f5f4ef;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .p-drawer-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .p-drawer-avatar-box {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 2px solid var(--ink);
+      overflow: hidden;
+      background: var(--yellow);
+    }
+    .p-drawer-brand-title {
+      font-size: 13.5px;
+      font-weight: 900;
+      color: var(--ink);
+      line-height: 1.2;
+    }
+    .p-drawer-brand-sub {
+      font-size: 10px;
+      font-weight: 700;
+      color: #6c665f;
+    }
+    .p-drawer-close-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
       font-size: 12px;
       font-weight: 900;
-      color: #6c665f;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 5px;
-      transition: all 0.15s;
+      justify-content: center;
+      transition: all 0.1s;
     }
-    .p-mode-btn.active {
-      background: #fffdf7;
-      border: 1.5px solid #12100e;
-      color: #12100e;
-      box-shadow: 0 1px 0 rgba(18, 16, 14, 0.2);
+    .p-drawer-close-btn:hover { background: var(--coral); color: #fff; }
+    .p-drawer-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .p-drawer-section-title {
+      font-size: 10.5px;
+      font-weight: 900;
+      color: #78716c;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .p-drawer-nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .p-drawer-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      transition: all 0.1s;
+    }
+    .p-drawer-nav-item:hover { background: #fef9c3; }
+    .p-drawer-nav-item.active {
+      background: var(--yellow);
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .p-drawer-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .p-drawer-badge {
+      background: var(--ink);
+      color: var(--yellow);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 900;
+    }
+    .p-drawer-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+    }
+    .p-drawer-link-btn {
+      background: none;
+      border: none;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--green-dark);
+      cursor: pointer;
+    }
+    .p-drawer-sessions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .p-drawer-session-card {
+      padding: 7px 9px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      transition: all 0.1s;
+    }
+    .p-drawer-session-card:hover { background: #fef08a; }
+    .p-drawer-session-card.active {
+      background: var(--yellow);
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+    .p-drawer-session-name {
+      font-weight: 800;
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .p-drawer-session-time {
+      font-size: 9.5px;
+      color: #78716c;
+      font-family: var(--font-mono);
+      margin-left: 6px;
+    }
+    .p-drawer-bottom-bar {
+      padding: 10px 12px 18px 12px;
+      border-top: 2px solid var(--ink);
+      background: #f5eee2;
+      display: flex;
+      gap: 8px;
+    }
+    .p-drawer-tool-btn {
+      flex: 1;
+      height: 36px;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 1.5px 0 var(--ink);
+      font-size: 11.5px;
+      font-weight: 900;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.1s;
+    }
+    .p-drawer-tool-btn:hover { background: #fef9c3; }
+    .p-drawer-tool-primary {
+      background: var(--yellow);
     }
 
     /* 4. Scrollable Screen Stage */
@@ -554,6 +893,7 @@
       flex-direction: column;
       gap: 12px;
       background: #f4f5f7;
+      position: relative;
     }
 
     /* --- REAL CHAT VIEW: AGENT TURN CARD --- */
@@ -1696,37 +2036,40 @@
             </div>
           </div>
 
-          <!-- 2. AppHeader (AppHeader.tsx) -->
+          <!-- 2. AppHeader (AppHeader.tsx: 顶部灵动状态岛、抽屉与快捷操作) -->
           <div class="p-app-header">
-            <div class="p-brand-group">
-              <div class="p-avatar-box" title="Mikasa Avatar">🤖</div>
-              <div class="p-header-titles">
-                <div class="p-title-row">
-                  <span class="p-title-main">MYAI</span>
-                  <span class="p-device-pill">server:agent</span>
-                </div>
-                <span class="p-subtitle">Mikasa · 俄罗斯远东</span>
-              </div>
-            </div>
-            <div class="p-header-actions">
-              <button class="p-ghost-settings-btn" id="header-settings-btn" title="打开设置中心">⚙</button>
-              <div class="p-status-online-pill">
-                <div class="p-status-dot"></div>
-                <span>在线</span>
-              </div>
-            </div>
-          </div>
+            <!-- 左侧：全局收纳抽屉按钮 -->
+            <button class="p-header-icon-btn" id="btn-open-drawer" title="打开导航与会话抽屉" aria-label="打开菜单">
+              ☰
+            </button>
 
-          <!-- 3. SessionModeSwitch (ONLY shown on chat tab! Exact to MobileAppScreen.tsx line 962) -->
-          <div class="p-mode-switch-wrapper" id="p-mode-switch-container">
-            <div class="p-mode-control">
-              <button class="p-mode-btn active" id="mode-btn-chat">
-                <span>💬</span>
-                <span>对话模式</span>
+            <!-- 中间：中上方半透明角色浮岛 (动作图标、状态与模式药丸) -->
+            <div class="p-character-island">
+              <div class="p-island-avatar-wrap" title="MYAI 动效形象">
+                <img src="../mobile/assets/icon.png" alt="MYAI" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" class="p-island-avatar-img">
+              </div>
+              <div class="p-island-identity-row">
+                <span class="p-island-title">MYAI</span>
+                <span class="p-island-device-badge">server-agent</span>
+              </div>
+              <div class="p-island-status-capsule">
+                <div class="p-status-dot-pulse"></div>
+                <span class="p-island-status-text" id="p-island-status-text">在线</span>
+                <span style="color:#999083; font-size:10px; font-weight:900;">·</span>
+                <button class="p-island-mode-pill" id="btn-island-mode-toggle" title="点击切换对话/规划模式">
+                  <span id="p-mode-pill-label">💬 对话模式</span>
+                  <span style="font-size:8px;">▾</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 右侧：对话历史快捷跳转与设置中心 -->
+            <div class="p-header-right-actions">
+              <button class="p-header-icon-btn" id="btn-quick-history" title="对话历史 (旁聊切换)" aria-label="对话历史">
+                🕒
               </button>
-              <button class="p-mode-btn" id="mode-btn-plan">
-                <span>🎯</span>
-                <span>规划模式</span>
+              <button class="p-header-icon-btn" id="header-settings-btn" title="打开设置中心" aria-label="设置中心">
+                ⚙
               </button>
             </div>
           </div>
@@ -1735,6 +2078,37 @@
           <div class="p-screen-scroll-stage" id="screen-stage">
             <!-- TAB 1: CHAT VIEW (EXACT TO USER'S REAL PROTOTYPE SCREENSHOTS) -->
             <div id="view-chat" class="p-turn-wrapper">
+              <!-- 快捷历史消息跳转导轨 (ChatJumpNav: 右上角 Q1/Q2/Q3 快速定位) -->
+              <div class="p-chat-jump-nav" id="p-chat-jump-nav">
+                <button class="p-jump-rail-btn" id="btn-toggle-jump" title="跳转提问历史">
+                  <div class="p-jump-rail-track">
+                    <span class="p-jump-marker"></span>
+                    <span class="p-jump-marker"></span>
+                    <span class="p-jump-marker"></span>
+                  </div>
+                  <span class="p-jump-rail-count">3</span>
+                </button>
+                <div class="p-jump-popover" id="p-jump-popover">
+                  <div class="p-jump-popover-head">
+                    <span>跳转消息</span>
+                    <button class="p-jump-close-btn" id="btn-close-jump">隐藏</button>
+                  </div>
+                  <div class="p-jump-list">
+                    <div class="p-jump-item" data-jump="p-turn-card-box">
+                      <span class="p-jump-badge">Q1</span>
+                      <span class="p-jump-text">定时任务配置与 Docker 日志写入</span>
+                    </div>
+                    <div class="p-jump-item" data-jump="p-duration-header">
+                      <span class="p-jump-badge">Q2</span>
+                      <span class="p-jump-text">检查 Relay 协议与心跳断线重连</span>
+                    </div>
+                    <div class="p-jump-item" data-jump="p-final-answer-body">
+                      <span class="p-jump-badge">Q3</span>
+                      <span class="p-jump-text">子代理实时查看与产物回放</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div class="p-turn-top-row">
                 <div class="p-turn-agent-info">
                   <span>🤖 MyAI Agent</span>
@@ -2304,8 +2678,8 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
               </div>
             </div>
 
-            <!-- Floating Segmented BottomTabs -->
-            <div class="p-bottom-tabs-segmented">
+            <!-- Floating Segmented BottomTabs (在非 chat 视图展示，在主 chat 视图隐藏以最大化阅读面积) -->
+            <div class="p-bottom-tabs-segmented" id="p-bottom-tabs-segmented" style="display:none;">
               <button class="p-tab-btn active" data-tab="chat">对话</button>
               <button class="p-tab-btn" data-tab="files">文件</button>
               <button class="p-tab-btn" data-tab="changes">变更</button>
@@ -2313,11 +2687,98 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
               <button class="p-tab-btn" data-tab="settings">设置</button>
             </div>
 
-            <!-- Android 3-Button Navigation Bar -->
+            <!-- Android 3-Button Navigation Bar (安全边距垫起，杜绝遮挡) -->
             <div class="p-android-nav-bar">
               <span>≡</span>
               <span>□</span>
               <span>&lt;</span>
+            </div>
+          </div>
+
+          <!-- 6. 全局收纳侧滑抽屉 (SideDrawer) -->
+          <div class="p-drawer-overlay" id="p-drawer-overlay">
+            <div class="p-drawer-backdrop" id="p-drawer-backdrop"></div>
+            <div class="p-drawer-sheet" id="p-drawer-sheet">
+              <!-- 抽屉头部 -->
+              <div class="p-drawer-header">
+                <div class="p-drawer-brand">
+                  <div class="p-drawer-avatar-box">
+                    <img src="../mobile/assets/icon.png" alt="MYAI" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" style="width:100%;height:100%;object-fit:cover;">
+                  </div>
+                  <div class="p-drawer-brand-info">
+                    <div class="p-drawer-brand-title">MYAI Studio</div>
+                    <div class="p-drawer-brand-sub">Mikasa · server-agent</div>
+                  </div>
+                </div>
+                <button class="p-drawer-close-btn" id="btn-close-drawer">✕</button>
+              </div>
+
+              <!-- 抽屉滚动内容 -->
+              <div class="p-drawer-scroll">
+                <div class="p-drawer-section-title">功能工作区</div>
+                <div class="p-drawer-nav-group">
+                  <div class="p-drawer-nav-item active" data-drawer-tab="chat">
+                    <div class="p-drawer-nav-left">
+                      <span>💬</span>
+                      <span>主对话流</span>
+                    </div>
+                    <span class="p-drawer-badge">当前</span>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="files">
+                    <div class="p-drawer-nav-left">
+                      <span>📁</span>
+                      <span>工作区文件</span>
+                    </div>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="changes">
+                    <div class="p-drawer-nav-left">
+                      <span>⚡</span>
+                      <span>代码变更 (Git)</span>
+                    </div>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="knowledge">
+                    <div class="p-drawer-nav-left">
+                      <span>📚</span>
+                      <span>知识库与记忆</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-drawer-section-header">
+                  <span class="p-drawer-section-title">最近会话 (旁聊)</span>
+                  <button class="p-drawer-link-btn" id="btn-drawer-new-session">+ 新建</button>
+                </div>
+                <div class="p-drawer-sessions-list">
+                  <div class="p-drawer-session-card active" data-session-id="s-current">
+                    <div class="p-drawer-session-name">定时任务与系统状态监控</div>
+                    <div class="p-drawer-session-time">刚刚</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-1">
+                    <div class="p-drawer-session-name">子代理只读实时查看落地</div>
+                    <div class="p-drawer-session-time">10/11</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-2">
+                    <div class="p-drawer-session-name">QQ 群聊与 NAPCAT 对接</div>
+                    <div class="p-drawer-session-time">10/04</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-3">
+                    <div class="p-drawer-session-name">移动端无界流式排版优化</div>
+                    <div class="p-drawer-session-time">09/27</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 抽屉底部工具栏 (安全边距垫起，杜绝遮挡) -->
+              <div class="p-drawer-bottom-bar">
+                <button class="p-drawer-tool-btn" id="btn-drawer-settings">
+                  <span>⚙️</span>
+                  <span>设置中心</span>
+                </button>
+                <button class="p-drawer-tool-btn p-drawer-tool-primary" id="btn-drawer-quick-new">
+                  <span>✏️</span>
+                  <span>新对话</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2626,7 +3087,7 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       knowledge: document.getElementById('view-knowledge'),
       settings: document.getElementById('view-settings')
     };
-    const pModeSwitchContainer = document.getElementById('p-mode-switch-container');
+    const pBottomTabsSegmented = document.getElementById('p-bottom-tabs-segmented');
     const pComposerSection = document.getElementById('p-composer-section');
 
     function switchTab(tabKey) {
@@ -2634,16 +3095,22 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       document.querySelectorAll('.p-tab-btn').forEach((btn) => {
         btn.classList.toggle('active', btn.getAttribute('data-tab') === tabKey);
       });
+      document.querySelectorAll('.p-drawer-nav-item').forEach((item) => {
+        item.classList.toggle('active', item.getAttribute('data-drawer-tab') === tabKey);
+      });
       Object.keys(views).forEach((k) => {
         views[k].style.display = k === tabKey ? 'flex' : 'none';
       });
 
-      // KEY FIX: SessionModeSwitch is ONLY shown when viewMode === "chat"!
-      // (Matching MobileAppScreen.tsx line 962: {viewMode === "chat" ? <SessionModeSwitch /> : null})
-      pModeSwitchContainer.style.display = tabKey === 'chat' ? 'flex' : 'none';
+      // 核心交互：主 chat 视图隐藏底部 5 键 Tab 栏，释放高达 55px+ 垂直高度；其他视图正常展示导航
+      if (pBottomTabsSegmented) {
+        pBottomTabsSegmented.style.display = tabKey === 'chat' ? 'none' : 'flex';
+      }
 
-      // Composer is ONLY shown when viewMode === "chat"!
-      pComposerSection.style.display = tabKey === 'chat' ? 'block' : 'none';
+      // Composer 仅在主 chat 视图展示
+      if (pComposerSection) {
+        pComposerSection.style.display = tabKey === 'chat' ? 'block' : 'none';
+      }
     }
 
     document.querySelectorAll('.p-tab-btn').forEach((btn) => {
@@ -2652,28 +3119,138 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       });
     });
 
-    document.getElementById('header-settings-btn').addEventListener('click', () => {
-      switchTab('settings');
-    });
-    document.getElementById('btn-close-settings').addEventListener('click', () => {
-      switchTab('chat');
+    const headerSettingsBtn = document.getElementById('header-settings-btn');
+    if (headerSettingsBtn) {
+      headerSettingsBtn.addEventListener('click', () => {
+        switchTab('settings');
+      });
+    }
+    const btnCloseSettings = document.getElementById('btn-close-settings');
+    if (btnCloseSettings) {
+      btnCloseSettings.addEventListener('click', () => {
+        switchTab('chat');
+      });
+    }
+
+    // --- 顶部灵动岛模式快速切换 (AppHeader 药丸) ---
+    let currentAgentMode = 'chat';
+    const btnIslandModeToggle = document.getElementById('btn-island-mode-toggle');
+    const pModePillLabel = document.getElementById('p-mode-pill-label');
+
+    if (btnIslandModeToggle) {
+      btnIslandModeToggle.addEventListener('click', () => {
+        if (currentAgentMode === 'chat') {
+          currentAgentMode = 'plan';
+          btnIslandModeToggle.classList.add('plan-mode');
+          if (pModePillLabel) pModePillLabel.textContent = '🎯 规划模式';
+          playPop(720);
+          showToast('已切换至「两阶段规划模式 (Plan)」');
+        } else {
+          currentAgentMode = 'chat';
+          btnIslandModeToggle.classList.remove('plan-mode');
+          if (pModePillLabel) pModePillLabel.textContent = '💬 对话模式';
+          playPop(520);
+          showToast('已切换至「对话模式」');
+        }
+      });
+    }
+
+    // --- 全局收纳侧滑抽屉 (SideDrawer) 交互 ---
+    const pDrawerOverlay = document.getElementById('p-drawer-overlay');
+    const btnOpenDrawer = document.getElementById('btn-open-drawer');
+    const btnQuickHistory = document.getElementById('btn-quick-history');
+    const btnCloseDrawer = document.getElementById('btn-close-drawer');
+    const pDrawerBackdrop = document.getElementById('p-drawer-backdrop');
+
+    function setPhoneDrawer(open) {
+      if (pDrawerOverlay) {
+        pDrawerOverlay.classList.toggle('open', open);
+        if (open) playPop(480);
+      }
+    }
+
+    if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', () => setPhoneDrawer(true));
+    if (btnQuickHistory) btnQuickHistory.addEventListener('click', () => setPhoneDrawer(true));
+    if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', () => setPhoneDrawer(false));
+    if (pDrawerBackdrop) pDrawerBackdrop.addEventListener('click', () => setPhoneDrawer(false));
+
+    document.querySelectorAll('.p-drawer-nav-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const tab = item.getAttribute('data-drawer-tab');
+        if (tab) {
+          switchTab(tab);
+          setPhoneDrawer(false);
+        }
+      });
     });
 
-    // --- MODE SWITCHER (SessionModeSwitch.tsx) ---
-    const modeBtnChat = document.getElementById('mode-btn-chat');
-    const modeBtnPlan = document.getElementById('mode-btn-plan');
+    const btnDrawerSettings = document.getElementById('btn-drawer-settings');
+    if (btnDrawerSettings) {
+      btnDrawerSettings.addEventListener('click', () => {
+        switchTab('settings');
+        setPhoneDrawer(false);
+      });
+    }
 
-    modeBtnChat.addEventListener('click', () => {
-      playPop(520);
-      modeBtnChat.classList.add('active');
-      modeBtnPlan.classList.remove('active');
-      showToast('已切换至「对话模式」');
+    const btnDrawerQuickNew = document.getElementById('btn-drawer-quick-new');
+    if (btnDrawerQuickNew) {
+      btnDrawerQuickNew.addEventListener('click', () => {
+        switchTab('chat');
+        setPhoneDrawer(false);
+        showToast('已开启新对话');
+      });
+    }
+
+    const btnDrawerNewSession = document.getElementById('btn-drawer-new-session');
+    if (btnDrawerNewSession) {
+      btnDrawerNewSession.addEventListener('click', () => {
+        switchTab('chat');
+        setPhoneDrawer(false);
+        showToast('已创建新会话');
+      });
+    }
+
+    document.querySelectorAll('.p-drawer-session-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.p-drawer-session-card').forEach((c) => c.classList.remove('active'));
+        card.classList.add('active');
+        switchTab('chat');
+        setPhoneDrawer(false);
+        const nameEl = card.querySelector('.p-drawer-session-name');
+        showToast(`已载入会话: ${nameEl ? nameEl.textContent : '会话'}`);
+      });
     });
-    modeBtnPlan.addEventListener('click', () => {
-      playPop(720);
-      modeBtnPlan.classList.add('active');
-      modeBtnChat.classList.remove('active');
-      showToast('已切换至「两阶段规划模式 (Plan)」');
+
+    // --- 历史提问快捷定位导轨 (ChatJumpNav) 交互 ---
+    const btnToggleJump = document.getElementById('btn-toggle-jump');
+    const pJumpPopover = document.getElementById('p-jump-popover');
+    const btnCloseJump = document.getElementById('btn-close-jump');
+
+    if (btnToggleJump && pJumpPopover) {
+      btnToggleJump.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pJumpPopover.classList.toggle('show');
+        playPop(560);
+      });
+    }
+    if (btnCloseJump && pJumpPopover) {
+      btnCloseJump.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pJumpPopover.classList.remove('show');
+      });
+    }
+    document.querySelectorAll('.p-jump-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const targetClass = item.getAttribute('data-jump');
+        if (targetClass) {
+          const targetEl = document.querySelector(`.${targetClass}`);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            playPop(640);
+          }
+        }
+        if (pJumpPopover) pJumpPopover.classList.remove('show');
+      });
     });
 
     // --- REASONING ACCORDION ---

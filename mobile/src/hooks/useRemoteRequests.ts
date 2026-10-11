@@ -23,6 +23,7 @@ type Args = {
   currentSessionID: string;
   pendingHistorySessionIDRef: RefObject<string>;
   replaceHistoryMessages: (sessionID: string, messages: SessionHistoryMessage[]) => void;
+  requestSubagentTasks: (sessionID: string) => boolean;
   sendEnvelope: SendEnvelope;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
@@ -43,6 +44,7 @@ export function useRemoteRequests({
   currentSessionID,
   pendingHistorySessionIDRef,
   replaceHistoryMessages,
+  requestSubagentTasks,
   sendEnvelope,
   startPending,
   stopPending,
@@ -279,6 +281,8 @@ export function useRemoteRequests({
       startPending("sessions");
       pendingHistorySessionIDRef.current = targetSessionID;
       requestAgentRuns(targetSessionID);
+      // 1.0 主会话历史只包含工具调用；同步补取对应任务索引，历史子代理卡片才可恢复。
+      requestSubagentTasks(targetSessionID);
       void loadCachedSessionHistory(targetSessionID)
         .then(({ messages, meta }) => {
           if (messages.length > 0) {
@@ -296,7 +300,7 @@ export function useRemoteRequests({
         });
       return true;
     },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, requestSessionHistoryFull, sendHistoryMeta, startPending, stopPending],
+    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, requestSessionHistoryFull, requestSubagentTasks, sendHistoryMeta, startPending, stopPending],
   );
 
   const requestAssets = useCallback(

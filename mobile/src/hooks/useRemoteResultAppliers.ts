@@ -58,6 +58,7 @@ type Args = {
   requestSessionHistoryDelta: (sessionID?: string) => boolean;
   requestSessionHistoryFull: (sessionID?: string) => boolean;
   requestSessionHistory: (sessionID?: string) => boolean;
+  requestSubagentTasks: (sessionID?: string) => boolean;
   resetActiveAssistant: (sessionID: string) => void;
   selectedChange: string;
   sessionIDRef: RefObject<string>;
@@ -109,6 +110,7 @@ export function useRemoteResultAppliers({
   requestSessionHistoryDelta,
   requestSessionHistoryFull,
   requestSessionHistory,
+  requestSubagentTasks,
   resetActiveAssistant,
   selectedChange,
   sessionIDRef,
@@ -171,6 +173,8 @@ export function useRemoteResultAppliers({
   requestSessionHistoryFullRef.current = requestSessionHistoryFull;
   const requestSessionHistoryRef = useRef(requestSessionHistory);
   requestSessionHistoryRef.current = requestSessionHistory;
+  const requestSubagentTasksRef = useRef(requestSubagentTasks);
+  requestSubagentTasksRef.current = requestSubagentTasks;
   const resetActiveAssistantRef = useRef(resetActiveAssistant);
   resetActiveAssistantRef.current = resetActiveAssistant;
 
@@ -216,6 +220,8 @@ export function useRemoteResultAppliers({
         requestAssetsRef.current(currentSessionID);
       }
       setSessionLastUsage(currentSessionID, findSessionUsage(nextSessions, currentSessionID));
+      // 1.0 本地聊天缓存可能使历史请求提前结束，任务索引仍需按会话恢复。
+      requestSubagentTasksRef.current(currentSessionID);
       if (hasSessionMessagesRef.current(currentSessionID)) {
         historySessionIDRef.current = currentSessionID;
         return;
@@ -243,6 +249,7 @@ export function useRemoteResultAppliers({
         : payload?.session?.last_usage || null;
       setSessionLastUsage(targetSessionID, usage);
       setSessionPendingPermission(targetSessionID, null);
+      requestSubagentTasksRef.current(targetSessionID);
       if (
         historySessionIDRef.current !== targetSessionID &&
         pendingHistorySessionIDRef.current !== targetSessionID
@@ -268,6 +275,7 @@ export function useRemoteResultAppliers({
         setSessionID(nextSessionID);
         sessionIDRef.current = nextSessionID;
         setSessionLastUsage(nextSessionID, payload.session?.last_usage || findSessionUsage(payload.sessions || [], nextSessionID));
+        requestSubagentTasksRef.current(nextSessionID);
         if (payload.context) {
           setSessionContext(nextSessionID, payload.context);
         }

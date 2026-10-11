@@ -174,7 +174,7 @@ export function MobileAppScreen() {
     message: subagentMessage,
     setMessage: setSubagentMessage,
     tasks: subagentTasks,
-  } = useSubagentState();
+  } = useSubagentState(sessionID);
   const {
     changeDiff,
     changes,
@@ -309,9 +309,13 @@ export function MobileAppScreen() {
   const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
   // 从这里开始组装传输能力：Sender 只发送，Requests/Actions 表达命令，Handler 消费响应。
+  const addRelayErrorMessage = useCallback(
+    (message: string) => addMessage(sessionID, "error", message),
+    [addMessage, sessionID],
+  );
   const sendEnvelope = useRelaySender({
     activeRequestIDRef,
-    addErrorMessage: (message) => addMessage(sessionID, "error", message),
+    addErrorMessage: addRelayErrorMessage,
     clientToken,
     deviceID,
     sessionID,
@@ -475,6 +479,7 @@ export function MobileAppScreen() {
     currentSessionID: sessionID,
     pendingHistorySessionIDRef,
     replaceHistoryMessages,
+    requestSubagentTasks,
     sendEnvelope,
     startPending,
     stopPending,
@@ -683,6 +688,7 @@ export function MobileAppScreen() {
     requestSessionHistoryDelta,
     requestSessionHistoryFull,
     requestSessionHistory,
+    requestSubagentTasks,
     resetActiveAssistant,
     selectedChange,
     sessionIDRef,
@@ -834,11 +840,10 @@ export function MobileAppScreen() {
     requestAIMemoryExtractionJobs();
     requestAIMemoryDreamRuns();
     requestSubagentDefinitions();
-    requestSubagentTasks();
     if (inspectedTaskID) {
       refreshInspection();
     }
-  }, [inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, requestSubagentTasks, sessionID]);
+  }, [inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, sessionID]);
 
   const scheduleReconnect = useCallback(() => {
     if (!clientToken) {

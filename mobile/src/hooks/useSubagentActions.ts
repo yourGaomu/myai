@@ -67,7 +67,7 @@ export function useSubagentActions({
   const deleteDefinition = useCallback((definitionID: string) =>
     send("subagent_definition_delete", { definition_id: definitionID }), [send]);
   const requestTasks = useCallback((targetSessionID = sessionID) =>
-    send("subagent_task_list", { session_id: targetSessionID, limit: 100 }, targetSessionID), [send, sessionID]);
+    send("subagent_task_list", { session_id: targetSessionID, limit: 500 }, targetSessionID), [send, sessionID]);
   const checkTask = useCallback((taskID: string) => send("subagent_task_check", { task_id: taskID }), [send]);
   const messageTask = useCallback((taskID: string, message: string, trigger?: "queue" | "trigger_turn" | "steer_current_turn") =>
     send("subagent_task_message", { task_id: taskID, message, ...(trigger ? { trigger } : {}) }), [send]);

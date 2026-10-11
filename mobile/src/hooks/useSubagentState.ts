@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type {
   SubagentDefinition,
@@ -10,9 +10,16 @@ import type {
   SubagentTaskResultPayload,
 } from "../protocol";
 
-export function useSubagentState() {
+const emptyTasks: SubagentTask[] = [];
+
+export function useSubagentState(currentSessionID: string) {
   const [definitions, setDefinitions] = useState<SubagentDefinition[]>([]);
-  const [tasks, setTasks] = useState<SubagentTask[]>([]);
+  // 1.0 按直接父会话归档任务；当前会话沿子会话 ID 构建完整任务树。
+  const [tasksBySession, setTasksBySession] = useState<Record<string, SubagentTask[]>>({});
+  const tasks = useMemo(
+    () => tasksForSession(tasksBySession, currentSessionID),
+    [tasksBySession, currentSessionID],
+  );
   const [message, setMessage] = useState("");
   const [events, setEvents] = useState<Record<string, SubagentTaskEvent[]>>({});
 
@@ -32,7 +39,25 @@ export function useSubagentState() {
   }, []);
 
   const applyTaskList = useCallback((payload?: SubagentTaskListResultPayload) => {
-    setTasks(payload?.tasks || []);
+    const sessionID = payload?.session_id?.trim();
+    if (!sessionID) return;
+    const incoming = payload?.tasks || emptyTasks;
+    setTasksBySession((current) => {
+      const next = { ...current };
+      if (!next[sessionID]) next[sessionID] = emptyTasks;
+      const grouped = new Map<string, SubagentTask[]>();
+      for (const task of incoming) {
+        const parentSessionID = task.parent_session_id?.trim();
+        if (!parentSessionID) continue;
+        grouped.set(parentSessionID, [...(grouped.get(parentSessionID) || emptyTasks), task]);
+      }
+      // 1.1 列表含嵌套任务，但每个任务只在自己的直接父会话存一份。
+      // 1.2 合并列表与已到达的实时事件，避免旧快照覆盖新状态。
+      for (const [parentSessionID, items] of grouped) {
+        next[parentSessionID] = mergeTaskList(next[parentSessionID] || emptyTasks, items);
+      }
+      return next;
+    });
   }, []);
 
   const applyTaskResult = useCallback((payload?: SubagentTaskResultPayload) => {
@@ -63,7 +88,15 @@ export function useSubagentState() {
       const task = payload.sequence
         ? { ...payload.task, event_sequence: payload.sequence, event_kind: payload.kind }
         : payload.task;
-      setTasks((current) => upsertTask(current, task));
+      setTasksBySession((current) => {
+        const parentSessionID = task.parent_session_id?.trim();
+        if (!parentSessionID) return current;
+        // 2.1 实时更新只写直接父会话；祖先会话从同一任务树读取，不存副本。
+        return {
+          ...current,
+          [parentSessionID]: upsertTask(current[parentSessionID] || emptyTasks, task),
+        };
+      });
     }
     setMessage(
       payload?.message
@@ -75,7 +108,7 @@ export function useSubagentState() {
 
   const clear = useCallback(() => {
     setDefinitions([]);
-    setTasks([]);
+    setTasksBySession({});
     setMessage("");
     setEvents({});
   }, []);
@@ -100,6 +133,27 @@ function upsertDefinition(current: SubagentDefinition[], value: SubagentDefiniti
   return next.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function tasksForSession(tasksBySession: Record<string, SubagentTask[]>, sessionID: string) {
+  if (!sessionID) return emptyTasks;
+  const tasks: SubagentTask[] = [];
+  const pending = [sessionID];
+  const visitedSessions = new Set<string>();
+  const visitedTasks = new Set<string>();
+  while (pending.length > 0 && tasks.length < 500) {
+    const parentSessionID = pending.shift()!;
+    if (visitedSessions.has(parentSessionID)) continue;
+    visitedSessions.add(parentSessionID);
+    for (const task of tasksBySession[parentSessionID] || emptyTasks) {
+      if (visitedTasks.has(task.id)) continue;
+      visitedTasks.add(task.id);
+      tasks.push(task);
+      if (task.child_session_id) pending.push(task.child_session_id);
+      if (tasks.length >= 500) break;
+    }
+  }
+  return tasks.length > 0 ? tasks : emptyTasks;
+}
+
 // 3.0 任务快照更新：比较 task.updated_at，避免旧事件或迟到响应覆盖新状态
 function upsertTask(current: SubagentTask[], value: SubagentTask) {
   const existing = current.find((item) => item.id === value.id);
@@ -122,7 +176,33 @@ function upsertTask(current: SubagentTask[], value: SubagentTask) {
   const next = current.filter((item) => item.id !== value.id);
   next.push(existing ? { ...existing, ...value } : value);
   const sorted = next.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
-  return sorted.slice(0, 64);
+  // 3.1 历史任务不能在一次实时更新后被截成 64 条；服务端列表上限为 500。
+  return sorted.slice(0, 500);
+}
+
+function mergeTaskList(current: SubagentTask[], incoming: SubagentTask[]) {
+  // 4.0 列表响应可能早于实时事件生成、却晚于事件到达；合并而非整份覆盖。
+  const merged = new Map(current.map((task) => [task.id, task]));
+  for (const task of incoming) {
+    const existing = merged.get(task.id);
+    if (existing && isOlderTask(task, existing)) continue;
+    merged.set(task.id, existing ? { ...existing, ...task } : task);
+  }
+  return [...merged.values()]
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+    .slice(0, 500);
+}
+
+function isOlderTask(value: SubagentTask, existing: SubagentTask) {
+  const valueTime = Date.parse(value.updated_at);
+  const existingTime = Date.parse(existing.updated_at);
+  if (Number.isFinite(valueTime) && Number.isFinite(existingTime)) {
+    if (valueTime < existingTime) return true;
+    if (valueTime > existingTime) return false;
+  }
+  // 4.1 同一更新时间内，列表快照不携带事件序号，保留已收到的实时事件。
+  return existing.event_sequence !== undefined
+    && (value.event_sequence === undefined || value.event_sequence < existing.event_sequence);
 }
 
 function appendTaskEvent(current: Record<string, SubagentTaskEvent[]>, value: SubagentTaskEvent) {
