@@ -956,10 +956,15 @@
           </div>
         </div>
 
-        <!-- 右侧：快捷会话/设置按钮 -->
-        <button class="floating-btn" id="btn-quick-new" aria-label="新建会话" title="新建会话">
-          ✏️
-        </button>
+        <!-- 右侧：快捷历史与设置按钮 -->
+        <div style="display:flex;gap:6px;">
+          <button class="floating-btn" id="btn-quick-history" aria-label="对话历史快捷跳转" title="对话历史快捷跳转">
+            🕒
+          </button>
+          <button class="floating-btn" id="btn-quick-settings" aria-label="设置中心" title="设置中心">
+            ⚙️
+          </button>
+        </div>
       </div>
 
       <!-- 模式选择小弹窗 -->
@@ -1251,9 +1256,14 @@
         showToast("已创建新会话");
       });
 
-      document.getElementById("btn-quick-new").addEventListener("click", () => {
-        showToast("已快速开启新对话");
-      });
+      const btnQuickHistory = document.getElementById("btn-quick-history");
+      if (btnQuickHistory) {
+        btnQuickHistory.addEventListener("click", () => setDrawer(true));
+      }
+      const btnQuickSettings = document.getElementById("btn-quick-settings");
+      if (btnQuickSettings) {
+        btnQuickSettings.addEventListener("click", () => showToast("打开设置中心"));
+      }
 
       // 模式切换菜单
       btnToggleMode.addEventListener("click", (e) => {

@@ -8,7 +8,11 @@ export function useAndroidNavigationBar() {
       return;
     }
 
-    NavigationBar.NavigationBar.setStyle("dark");
-    NavigationBar.setVisibilityAsync("visible").catch(() => undefined);
+    try {
+      NavigationBar.setStyle?.("dark");
+      NavigationBar.setVisibilityAsync?.("visible").catch(() => undefined);
+    } catch {
+      // ignore
+    }
   }, []);
 }

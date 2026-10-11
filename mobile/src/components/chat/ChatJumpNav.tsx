@@ -19,7 +19,7 @@ type Props = {
 const maxRailMarkers = 12;
 
 export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }: Props) {
-  if (anchors.length < 8) {
+  if (anchors.length < 2) {
     return null;
   }
 
@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     position: "absolute",
     right: 8,
-    top: 52,
+    top: 10,
     zIndex: 20,
   },
   railButton: {

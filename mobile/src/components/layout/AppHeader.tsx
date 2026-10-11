@@ -13,6 +13,7 @@ type Props = {
   isBusy: boolean;
   mode?: SessionAgentMode;
   modePending?: boolean;
+  onOpenHistory?: () => void;
   onOpenMenu?: () => void;
   onQuickNew?: () => void;
   onToggleMode?: (nextMode: SessionAgentMode) => void;
@@ -30,6 +31,7 @@ export function AppHeader({
   isBusy,
   mode = "chat",
   modePending = false,
+  onOpenHistory,
   onOpenMenu,
   onQuickNew,
   onToggleMode,
@@ -144,8 +146,17 @@ export function AppHeader({
         </View>
       </View>
 
-      {/* 右侧：快速设置或新会话按钮 */}
+      {/* 右侧：对话历史快捷跳转与设置按钮 */}
       <View style={styles.rightActions}>
+        {onOpenHistory ? (
+          <Pressable
+            accessibilityLabel="对话历史快捷跳转"
+            onPress={onOpenHistory}
+            style={({ pressed }) => buttonFeedback(styles.actionButton, pressed)}
+          >
+            <Text style={styles.actionButtonText}>🕒</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityLabel="打开设置"
           onPress={onToggleSettings}

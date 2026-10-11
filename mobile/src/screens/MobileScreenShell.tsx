@@ -28,7 +28,7 @@ export function MobileScreenShell({
     <SafeAreaView edges={["left", "right"]} style={styles.safe}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >

@@ -4,12 +4,14 @@ import {
   Dimensions,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { SessionSummary } from "../../protocol";
 import type { ViewMode } from "../../types/app";
@@ -49,6 +51,9 @@ export function SideDrawer({
   viewMode,
   visible,
 }: Props) {
+  const insets = useSafeAreaInsets();
+  const topSafe = Math.max(insets.top, Platform.OS === "android" ? 24 : 16);
+  const bottomSafe = Math.max(insets.bottom, Platform.OS === "android" ? 28 : 16);
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -131,7 +136,7 @@ export function SideDrawer({
           ]}
         >
           {/* 抽屉头部 */}
-          <View style={styles.drawerHeader}>
+          <View style={[styles.drawerHeader, { paddingTop: topSafe + 8 }]}>
             <View style={styles.brandGroup}>
               <View style={styles.avatarBox}>
                 <Image
@@ -321,7 +326,7 @@ export function SideDrawer({
           </ScrollView>
 
           {/* 抽屉底部工具栏 (图四风格) */}
-          <View style={styles.bottomBar}>
+          <View style={[styles.bottomBar, { paddingBottom: bottomSafe + 8 }]}>
             <Pressable
               accessibilityLabel="设置中心"
               onPress={handleOpenSettings}

@@ -6,4 +6,4 @@ export const mobileSettingsKey = "myai.mobile.settings.v1";
 export const mobileAppVersion = "1.0.4";
 export const mobileAndroidVersionCode = 8;
 export const maxAttachedFiles = 5;
-export const androidBottomInsetFallback = 16;
+export const androidBottomInsetFallback = 26;

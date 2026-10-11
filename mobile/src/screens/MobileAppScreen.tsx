@@ -1062,6 +1062,7 @@ export function MobileAppScreen() {
         isBusy={uiBusy}
         mode={activeSession?.agent_mode === "plan" ? "plan" : "chat"}
         modePending={pendingActions.settings}
+        onOpenHistory={() => setDrawerVisible(true)}
         onOpenMenu={() => setDrawerVisible(true)}
         onQuickNew={newSession}
         onToggleMode={setAgentMode}
