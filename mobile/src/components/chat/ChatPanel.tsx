@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -52,10 +54,20 @@ export function ChatPanel({
   const [jumpOpen, setJumpOpen] = useState(false);
   const itemOffsetsRef = useRef<Record<string, number>>({});
   const followTailRef = useRef(true);
+  const lastViewportHeightRef = useRef<number>(0);
   const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
   const assistantLoadingLabel = useMemo(
     () => loadingLabel(pendingRequestID, activeAssistantID, messages, runs),
     [activeAssistantID, messages, pendingRequestID, runs],
+  );
+
+  const scrollToTail = useCallback(
+    (animated = true) => {
+      requestAnimationFrame(() => {
+        chatScrollRef.current?.scrollToEnd({ animated });
+      });
+    },
+    [chatScrollRef],
   );
 
   useEffect(() => {
@@ -63,6 +75,20 @@ export function ChatPanel({
     itemOffsetsRef.current = {};
     setJumpOpen(false);
   }, [sessionID]);
+
+  // 软键盘弹起时，强制重置 followTail 并平滑滚动到底部，把最新的对话记录“顶”到输入框正上方
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const sub = Keyboard.addListener(showEvent, () => {
+      followTailRef.current = true;
+      scrollToTail(true);
+      const timer = setTimeout(() => scrollToTail(false), 90);
+      return () => clearTimeout(timer);
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [scrollToTail]);
 
   const rememberItemOffset = useCallback((id: string, event: LayoutChangeEvent) => {
     itemOffsetsRef.current[id] = event.nativeEvent.layout.y;
@@ -87,8 +113,18 @@ export function ChatPanel({
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => {
           if (followTailRef.current) {
-            chatScrollRef.current?.scrollToEnd({ animated: true });
+            scrollToTail(true);
           }
+        }}
+        onLayout={(event) => {
+          const currentHeight = event.nativeEvent.layout.height;
+          if (lastViewportHeightRef.current > 0 && currentHeight < lastViewportHeightRef.current) {
+            // 视口变小（键盘弹起挤压空间），若处于追随底部状态则立即顶起最新记录
+            if (followTailRef.current) {
+              scrollToTail(true);
+            }
+          }
+          lastViewportHeightRef.current = currentHeight;
         }}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;

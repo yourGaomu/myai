@@ -10,6 +10,7 @@ type Props = {
   canPause: boolean;
   messageInput: string;
   onChangeMessage: (value: string) => void;
+  onFocus?: () => void;
   onPause: () => void;
   onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
@@ -25,6 +26,7 @@ export function Composer({
   canPause,
   messageInput,
   onChangeMessage,
+  onFocus,
   onPause,
   onRemoveAttachedFile,
   onSend,
@@ -132,6 +134,7 @@ export function Composer({
           accessibilityLabel="输入需求"
           multiline
           onChangeText={onChangeMessage}
+          onFocus={onFocus}
           onKeyPress={(e: any) => {
             if (
               Platform.OS === "web" &&

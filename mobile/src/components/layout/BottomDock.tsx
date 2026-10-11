@@ -17,6 +17,7 @@ type Props = {
   onChangesPress: () => void;
   onChatPress: () => void;
   onFilesPress: () => void;
+  onFocusInput?: () => void;
   onPause: () => void;
   onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
@@ -41,6 +42,7 @@ export function BottomDock({
   onChangesPress,
   onChatPress,
   onFilesPress,
+  onFocusInput,
   onPause,
   onRemoveAttachedFile,
   onSend,
@@ -62,6 +64,7 @@ export function BottomDock({
           canPause={canPause !== undefined ? canPause : pendingSend}
           messageInput={messageInput}
           onChangeMessage={onChangeMessage}
+          onFocus={onFocusInput}
           onPause={onPause}
           onRemoveAttachedFile={onRemoveAttachedFile}
           onSend={onSend}

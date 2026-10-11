@@ -1042,6 +1042,11 @@ export function MobileAppScreen() {
           onChangesPress={openChanges}
           onChatPress={openChat}
           onFilesPress={openFiles}
+          onFocusInput={() => {
+            requestAnimationFrame(() => {
+              chatScrollRef.current?.scrollToEnd({ animated: true });
+            });
+          }}
           onPause={pauseSession}
           onRemoveAttachedFile={removeAttachedFile}
           onSend={sendUserMessage}

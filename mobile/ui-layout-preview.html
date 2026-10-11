@@ -1328,6 +1328,9 @@
       }
 
       btnSend.addEventListener("click", handleSend);
+      composerInput.addEventListener("focus", () => {
+        chatStage.scrollTop = chatStage.scrollHeight;
+      });
       composerInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") handleSend();
       });
