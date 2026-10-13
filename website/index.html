@@ -1113,6 +1113,246 @@
       font-weight: 600;
     }
 
+    /* User Message Bubble in Phone */
+    .p-user-msg-bubble {
+      align-self: flex-end;
+      background: var(--yellow);
+      border: 2px solid var(--ink);
+      border-radius: 14px 14px 2px 14px;
+      padding: 10px 14px;
+      font-weight: 800;
+      font-size: 12.5px;
+      box-shadow: 0 2px 0 var(--ink);
+      max-width: 88%;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 8px;
+    }
+    .p-user-msg-meta {
+      font-size: 9.5px;
+      color: #645f55;
+      font-weight: 700;
+      align-self: flex-end;
+    }
+
+    /* Subagent Swarm Task Tree in Chat */
+    .p-subagent-tree-card {
+      background: #faf8f2;
+      border: 1.5px solid var(--ink);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin: 6px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .p-subagent-tree-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 900;
+      color: #12100e;
+    }
+    .p-subagent-tree-badge {
+      background: #b9e9b0;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 9.5px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .p-subagent-item {
+      background: #ffffff;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      box-shadow: 0 1px 0 var(--ink);
+      transition: all 0.1s ease;
+    }
+    .p-subagent-item:hover {
+      background: #fffdf5;
+      transform: translateY(-1px);
+    }
+    .p-subagent-item-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 800;
+    }
+    .p-subagent-item-role {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #12100e;
+    }
+    .p-subagent-item-tag {
+      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #e0f2fe;
+      border: 1px solid #7dd3fc;
+      color: #0369a1;
+      font-weight: 800;
+    }
+    .p-subagent-item-body {
+      font-size: 11px;
+      color: #3f3c37;
+      line-height: 1.5;
+    }
+
+    /* Prompt Suggestion Capsules inside Chat */
+    .p-prompt-capsules-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed rgba(18, 16, 14, 0.15);
+    }
+    .p-prompt-capsule-btn {
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #12100e;
+      cursor: pointer;
+      box-shadow: 0 1.5px 0 var(--ink);
+      transition: all 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .p-prompt-capsule-btn:hover {
+      background: #ffd84f;
+      transform: translateY(-1px);
+    }
+    .p-prompt-capsule-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+
+    /* -------------------------------------------------------------
+       BENTO GRID FEATURE MATRIX (官网级现代特性便当盒)
+       ------------------------------------------------------------- */
+    .bento-section {
+      max-width: 1400px;
+      margin: 80px auto;
+      padding: 0 24px;
+    }
+    .bento-header {
+      text-align: center;
+      margin-bottom: 46px;
+    }
+    .bento-title-main {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 3.8vw, 44px);
+      font-weight: 900;
+      letter-spacing: -1px;
+      margin-top: 8px;
+    }
+    .bento-subtitle {
+      font-size: 16px;
+      color: #555047;
+      max-width: 680px;
+      margin: 10px auto 0;
+      font-weight: 600;
+    }
+    .bento-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 24px;
+    }
+    .bento-card {
+      background: var(--surface);
+      border: var(--border-thick);
+      border-radius: 24px;
+      box-shadow: var(--shadow-md);
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .bento-card:hover {
+      transform: translate(-3px, -3px);
+      box-shadow: var(--shadow-xl);
+    }
+    .bento-col-8 { grid-column: span 8; }
+    .bento-col-4 { grid-column: span 4; }
+    .bento-col-6 { grid-column: span 6; }
+    .bento-col-12 { grid-column: span 12; }
+
+    @media (max-width: 990px) {
+      .bento-col-8, .bento-col-4, .bento-col-6 {
+        grid-column: span 12;
+      }
+    }
+
+    .bento-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 800;
+      padding: 3px 10px;
+      border: var(--border-thin);
+      border-radius: var(--radius-pill);
+      box-shadow: var(--shadow-xs);
+      margin-bottom: 14px;
+      width: fit-content;
+    }
+    .bento-title {
+      font-family: var(--font-display);
+      font-size: 23px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+      color: var(--ink);
+    }
+    .bento-desc {
+      font-size: 14px;
+      color: #555047;
+      line-height: 1.65;
+      margin-bottom: 20px;
+    }
+    .bento-visual {
+      margin-top: auto;
+      background: #f7f5ed;
+      border: 2px solid var(--ink);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .bento-subagent-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bento-flow-node {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 800;
+      box-shadow: 0 1px 0 var(--ink);
+    }
+
     /* -------------------------------------------------------------
        TAB 2: REAL FILES PANEL (Exact to FilesPanel.tsx)
        ------------------------------------------------------------- */
@@ -2046,22 +2286,27 @@
         <div class="brand-icon-box">🤖</div>
         <div class="brand-title">
           MYAI
-          <span class="neo-pill" style="background:var(--yellow); font-size:10px;">v1.0.4 PRO</span>
+          <span class="neo-pill" style="background:var(--yellow); font-size:10px;">v2.0 PRO</span>
         </div>
       </a>
 
       <ul class="nav-menu">
-        <li><a href="#interactive-app">实机体验</a></li>
+        <li><a href="#interactive-app">实机实验室</a></li>
+        <li><a href="#features">特性便当盒</a></li>
         <li><a href="#compare">对比矩阵</a></li>
         <li><a href="#quickstart">快速接入</a></li>
       </ul>
 
       <div class="nav-actions">
+        <a href="https://github.com/myai/core" target="_blank" class="neo-btn" style="padding: 6px 12px; font-size:12px; text-decoration:none; display:inline-flex; align-items:center; gap:5px;">
+          <span>★</span>
+          <span>GitHub 1.2k</span>
+        </a>
         <button class="neo-btn" id="audio-btn" style="padding: 6px 12px; font-size:12px;">
           <span>🔊</span>
           <span id="audio-txt">音效: 开</span>
         </button>
-        <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding: 8px 16px; font-size:13px;">
+        <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding: 8px 16px; font-size:13px; text-decoration:none;">
           <span>试玩真机</span>
           <span>⚡</span>
         </a>
@@ -2071,26 +2316,26 @@
 
   <!-- HERO -->
   <section class="hero-wrap">
-    <div class="floating-sticker st-left">⚡ 方案 A 分离式工具调用</div>
-    <div class="floating-sticker st-right">🛡️ 原子快照无损回滚</div>
+    <div class="floating-sticker st-left">🌿 自主子代理群并发协同</div>
+    <div class="floating-sticker st-right">🛡️ 原子快照与安全审批</div>
 
     <div class="hero-badge-pill">
-      <span>🟡</span>
-      <span>真实移动客户端 1:1 像素级交互实机展示</span>
+      <span>🚀</span>
+      <span>MyAI 2.0 发布：首创移动端子代理群并发调度与 Git 原子时光机</span>
     </div>
 
     <h1 class="hero-headline">
       手机上的全域自主编程智能体<br>
-      <span class="highlight-tag">随时随地，掌控代码</span>
+      <span class="highlight-tag">离开工位，代码工程依旧在指尖运转</span>
     </h1>
 
     <p class="hero-subtitle">
-      无需一直端坐电脑前。在手机端即可进行 <strong>Codex 式两阶段规划</strong>、<strong>分离式工具审批</strong> 与 <strong>Git 原子时光机回滚</strong>。
+      告别端坐电脑前的束缚。在手机端即可<strong>派遣多子代理并发探查代码库</strong>、进行<strong>两阶段规划审批</strong>、核对 <strong>代码 Diff</strong> 与执行 <strong>Git 原子时光机回滚</strong>。
     </p>
 
     <div class="hero-cta-group">
-      <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding:14px 30px; font-size:16px;">
-        <span>立即试玩 5 大核心标签页</span>
+      <a href="#interactive-app" class="neo-btn neo-btn-yellow" style="padding:14px 30px; font-size:16px; text-decoration:none;">
+        <span>立即在下方体验真机实验室</span>
         <span>➔</span>
       </a>
       <button class="neo-btn" onclick="copyText('go install github.com/myai/core@latest')" style="padding:14px 24px; font-size:14px; font-family:var(--font-mono);">
@@ -2106,16 +2351,16 @@
         <span class="proof-label">GitHub Stars</span>
       </div>
       <div class="proof-item">
-        <span class="proof-number">500+</span>
-        <span class="proof-label">生产部署</span>
-      </div>
-      <div class="proof-item">
-        <span class="proof-number">99.8%</span>
-        <span class="proof-label">稳定性</span>
+        <span class="proof-number">10+</span>
+        <span class="proof-label">并发子代理协同</span>
       </div>
       <div class="proof-item">
         <span class="proof-number">14ms</span>
-        <span class="proof-label">平均延迟</span>
+        <span class="proof-label">Go 中继极速延迟</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">0 侵入</span>
+        <span class="proof-label">Git 原子无损回滚</span>
       </div>
     </div>
   </section>
@@ -2127,8 +2372,8 @@
       <div style="display: flex; align-items: center; gap: 12px;">
         <span style="font-size: 28px;">👆</span>
         <div>
-          <div style="font-weight: 900; font-size: 15px;">这是一个完全可交互的真机模拟器！</div>
-          <div style="font-size: 12px; font-weight: 700; color: #4a453e;">点击底部 5 个标签页，输入消息，查看文件，体验完整功能</div>
+          <div style="font-weight: 900; font-size: 15px;">MyAI 在线真机交互实验室 (Live Interactive Rig)</div>
+          <div style="font-size: 12px; font-weight: 700; color: #4a453e;">点击下方剧本或虚拟键盘，体验子代理并发排查、软键盘智能顶起与 5 大原生工作台</div>
         </div>
       </div>
       <button class="demo-guide-close" onclick="document.getElementById('demo-guide').style.display='none'">✕</button>
@@ -2147,12 +2392,12 @@
       </div>
 
       <div class="preset-scenarios-group">
-        <span style="font-size:12px; font-weight:800; color:#666;">试玩剧本:</span>
-        <button class="preset-chip" id="chip-cron">⏱️ 原型图定时任务</button>
-        <button class="preset-chip" id="chip-files">📁 文件浏览器</button>
-        <button class="preset-chip" id="chip-diff">🔀 代码变更 Diff</button>
-        <button class="preset-chip" id="chip-knowledge">🧠 知识库 & AI 记忆</button>
-        <button class="preset-chip" id="chip-jev">⚙️ Jev 决策配置</button>
+        <span style="font-size:12px; font-weight:800; color:#666;">高频核心场景:</span>
+        <button class="preset-chip active" id="chip-subagent">🌿 派遣子代理深度检索</button>
+        <button class="preset-chip" id="chip-diff">🔀 全域代码修改与 Diff</button>
+        <button class="preset-chip" id="chip-cron">⏱️ 后台运维巡检与 Cron</button>
+        <button class="preset-chip" id="chip-knowledge">🧠 知识库与自进化记忆</button>
+        <button class="preset-chip" id="chip-files">📁 跨端工作区文件浏览</button>
       </div>
     </div>
 
@@ -2215,7 +2460,7 @@
 
           <!-- 4. Scrollable Screen Stage -->
           <div class="p-screen-scroll-stage" id="screen-stage">
-            <!-- TAB 1: CHAT VIEW (EXACT TO USER'S REAL PROTOTYPE SCREENSHOTS) -->
+            <!-- TAB 1: CHAT VIEW (AUTHENTIC SUBAGENT SWARM & MOBILE-FIRST WORKBENCH) -->
             <div id="view-chat" class="p-turn-wrapper">
               <!-- 快捷历史消息跳转导轨 (ChatJumpNav: 右上角 Q1/Q2/Q3 快速定位) -->
               <div class="p-chat-jump-nav" id="p-chat-jump-nav">
@@ -2233,84 +2478,110 @@
                     <button class="p-jump-close-btn" id="btn-close-jump">隐藏</button>
                   </div>
                   <div class="p-jump-list">
-                    <div class="p-jump-item" data-jump="p-turn-card-box">
+                    <div class="p-jump-item" data-jump="p-user-msg-bubble">
                       <span class="p-jump-badge">Q1</span>
-                      <span class="p-jump-text">定时任务配置与 Docker 日志写入</span>
+                      <span class="p-jump-text">🌿 派遣子代理检索 Relay 握手协议</span>
                     </div>
-                    <div class="p-jump-item" data-jump="p-duration-header">
+                    <div class="p-jump-item" data-jump="p-subagent-tree-card">
                       <span class="p-jump-badge">Q2</span>
-                      <span class="p-jump-text">检查 Relay 协议与心跳断线重连</span>
+                      <span class="p-jump-text">🔍 检查子代理协同产出与沙箱</span>
                     </div>
                     <div class="p-jump-item" data-jump="p-final-answer-body">
                       <span class="p-jump-badge">Q3</span>
-                      <span class="p-jump-text">子代理实时查看与产物回放</span>
+                      <span class="p-jump-text">⚡ 握手核心实现与试玩胶囊</span>
                     </div>
                   </div>
                 </div>
               </div>
+
+              <!-- 1. Real User Intent Message Bubble -->
+              <div class="p-user-msg-bubble">
+                <div>帮我派遣子代理深入检索 docs/ 与 core/ 目录中的 Relay 握手协议，并让安全分析子代理核查 Token 鉴权边界与心跳机制</div>
+                <div class="p-user-msg-meta">11:48 · 移动端语音输入转写</div>
+              </div>
+
+              <!-- 2. Agent Top Row -->
               <div class="p-turn-top-row">
                 <div class="p-turn-agent-info">
                   <span>🤖 MyAI Agent</span>
-                  <span class="p-turn-model-pill">v2.4 Auto</span>
+                  <span class="p-turn-model-pill">v2.4 Swarm Auto</span>
                 </div>
                 <span class="p-turn-status-badge">✓ 完成</span>
               </div>
 
-              <!-- Unified Turn Card Box -->
+              <!-- 3. Unified Turn Card Box with Subagent Tree -->
               <div class="p-turn-card-box">
                 <!-- Elapsed Duration Header -->
                 <div class="p-duration-header" id="duration-toggle">
-                  <span>用时 34分钟 57秒</span>
+                  <span>用时 12.4秒 · 派遣 2 个子代理并发探查</span>
                   <span id="duration-chevron" style="font-size:11px;">⌄</span>
                 </div>
 
                 <!-- Interleaved Process Body -->
                 <div class="p-interleaved-body" id="duration-body">
                   <div class="p-thought-text">
-                    我会只落地后端：策略配置（Jev / 内置 / 关闭）、Jev 调用、Plan/执行分流、请求响应记录，以及 Agent/Relay 的远程接口。先确认现有配置持久化和消息协议边界，再实现并跑针对性测试。完成后我会给你一段可直接交给前端的页面实现提示词。
+                    已将复杂排查需求拆解为两个专业子任务：分别指派 <span class="p-code-tag">Researcher</span> 与 <span class="p-code-tag">SecurityInspector</span> 子代理并发探查当前代码库与文档，核验 Relay 握手协议与安全鉴权边界。
                   </div>
 
-                  <!-- Tool 1: 运行了命令 -->
-                  <div class="p-tool-call-group">
-                    <div class="p-tool-call-row">
-                      <span class="p-tool-term-icon">>_</span>
-                      <span>运行了命令</span>
+                  <!-- 🌿 Subagent Swarm Task Tree -->
+                  <div class="p-subagent-tree-card">
+                    <div class="p-subagent-tree-head">
+                      <span>🌿 并发子代理任务群 (Subagent Swarm)</span>
+                      <span class="p-subagent-tree-badge">2/2 已完成</span>
+                    </div>
+
+                    <!-- Subagent 1 -->
+                    <div class="p-subagent-item">
+                      <div class="p-subagent-item-head">
+                        <span class="p-subagent-item-role">🔍 Researcher (代码检索子代理)</span>
+                        <span class="p-subagent-item-tag">core/remote</span>
+                      </div>
+                      <div class="p-subagent-item-body">
+                        深入检索了 <span class="p-code-tag">core/remote/relay/server.go</span> 与 <span class="p-code-tag">docs/protocol.md</span>，定位到 WebSocket 协议升级、心跳双向 ping/pong 与动态客户端会话路由。
+                      </div>
+                    </div>
+
+                    <!-- Subagent 2 -->
+                    <div class="p-subagent-item">
+                      <div class="p-subagent-item-head">
+                        <span class="p-subagent-item-role">🛡️ SecurityInspector (安全审查子代理)</span>
+                        <span class="p-subagent-item-tag">Auth & Sandbox</span>
+                      </div>
+                      <div class="p-subagent-item-body">
+                        审计了 <span class="p-code-tag">Authorization: Bearer</span> 鉴权与只读沙箱，非授权握手将直接返回 HTTP 401，危险写指令受两阶段 Plan 拦截保护。
+                      </div>
                     </div>
                   </div>
 
-                  <div class="p-thought-text">
-                    当前工作区已有其他文件的未提交修改，我会保持不动。架构上需要处理一个关键点：现有聊天模型配置仓储与 <span class="p-code-tag">Generate</span> 接口绑定，Jev 必须有独立配置和判断记录；同时策略切换要在运行时生效，不能只在启动时读一次。
+                  <!-- Tool 1: Subagent Invoke -->
+                  <div class="p-tool-call-group">
+                    <div class="p-tool-call-row">
+                      <span class="p-tool-term-icon">>_</span>
+                      <span>已运行 Subagent.Invoke(Researcher, SecurityInspector) [并发完成 耗时4.2s]</span>
+                    </div>
                   </div>
 
-                  <!-- Tool 2: 已运行 Get-Content with Shell Box -->
+                  <!-- Tool 2: Shell Inspection -->
                   <div class="p-tool-call-group">
                     <div class="p-tool-call-row" id="shell-tool-toggle">
                       <span class="p-tool-term-icon">>_</span>
-                      <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">已运行 Get-Content -Encoding UTF8 core\remote\relay\server.go | Select-Object -Skip 475 -First 150...</span>
+                      <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">已运行 Get-Content core/remote/relay/server.go | Select-Object -Skip 40 -First 30...</span>
                       <span id="shell-tool-chevron">⌄</span>
                     </div>
 
                     <div class="p-tool-shell-card" id="shell-tool-content">
-                      <div class="p-shell-label">Shell</div>
-                      <div class="p-shell-cmd">$ Get-Content -Encoding UTF8 core\remote\relay\server.go | Select-Object -Skip 475 -First 150; Get-Content -Encoding UTF8 core\remote\protocol\message.go | Select-Object -First 115; Get-...</div>
-                      <div class="p-shell-output">    execution, err := s.dependencies.PlanExecution.Execute(ctx, plancommand.Execute{
-        SessionID: sessionID,
-        Stream:    stream,
-    }, nil)</div>
+                      <div class="p-shell-label">Shell Output</div>
+                      <div class="p-shell-cmd">$ Get-Content core/remote/relay/server.go | Select-Object -Skip 40 -First 30</div>
+                      <div class="p-shell-output">func (s *RelayServer) HandleConnection(ws *websocket.Conn) {
+    token := ws.Request().Header.Get("Authorization")
+    if !s.auth.Validate(token) {
+        ws.WriteJSON(protocol.ErrUnauthorized)
+        ws.Close()
+        return
+    }
+    go s.startHeartbeatWatcher(ws, 30*time.Second)
+}</div>
                     </div>
-                  </div>
-
-                  <!-- Tool 3: 运行了命令 -->
-                  <div class="p-tool-call-group">
-                    <div class="p-tool-call-row">
-                      <span class="p-tool-term-icon">>_</span>
-                      <span>运行了命令</span>
-                    </div>
-                  </div>
-
-                  <!-- Thought Summary & Centered Dots -->
-                  <div class="p-thought-text">
-                    实现方案已经收敛：策略默认保留当前“内置判断”，避免升级后行为突变；用户切到 Jev 或关闭后，新请求立即按新策略走。Jev 的中置信度只生成 Plan，高置信度才执行；配置和判断记录独立于聊天模型，记录持久化在 Agent 侧。接下来先落实核心分类与存储，再接远程协议并补测试。
                   </div>
 
                   <div class="p-centered-dots">
@@ -2320,28 +2591,26 @@
 
                 <!-- Final Answer Body -->
                 <div class="p-final-answer-body">
-                  <strong>定时任务已经加上了。</strong><br><br>
-                  <strong>做了什么：</strong><br>
-                  • 在宿主机写入 <span class="p-code-tag">/etc/cron.d/docker-ps-log</span><br>
-                  • 每 30 分钟执行一次 <span class="p-code-tag">docker ps -a</span><br>
-                  • 输出追加到 <span class="p-code-tag">/docker/nginx/log.txt</span><br>
-                  • 已经先跑了一次，确认日志能写进去。<br><br>
+                  <strong>两个子代理已完成深度探查，核心协议与安全机制核验通过：</strong><br><br>
+                  <strong>1. Relay 握手流程：</strong><br>
+                  • 客户端发起 <span class="p-code-tag">/ws/agent</span> 握手，请求头强校验 <span class="p-code-tag">Authorization: Bearer &lt;Token&gt;</span><br>
+                  • 握手成功后升级为双向事件总线，单连接并发多路复用<br><br>
 
-                  <strong>任务内容：</strong>
+                  <strong>2. 心跳保活与超时控制：</strong><br>
+                  • 服务端每 30 秒广播一次 Ping，客户端自动回复 Pong<br>
+                  • 超过 90 秒无心跳自动断开并清理内存连接槽，防止连接泄漏<br><br>
+
+                  <strong>3. 安全执行边界：</strong><br>
+                  • 智能体处于安全沙箱，所有写文件/执行命令必须在手机端由工程师显式审批！<br><br>
+
+                  <strong>核心握手实现节选：</strong>
                   <div class="p-code-preview-block">
-                    <div class="p-code-tag-head">CRON</div>
-                    */30 * * * * root { date --iso-8601; /usr/bin/docker ps -a; } >> /docker/nginx/log.txt 2>&1
-                  </div>
-
-                  <strong>说明：</strong><br>
-                  • 会在每小时的 :00 和 :30 执行（例如 17:30、18:00）<br>
-                  • 每次都会带时间戳，方便区分<br>
-                  • 日志会持续追加，不会覆盖旧记录<br><br>
-
-                  <strong>查看日志：</strong>
-                  <div class="p-code-preview-block">
-                    <div class="p-code-tag-head">BASH</div>
-                    tail -f /docker/nginx/log.txt
+                    <div class="p-code-tag-head">GO (RELAY SERVER)</div>
+func (s *RelayServer) HandleConnection(ws *websocket.Conn) {
+    token := ws.Request().Header.Get("Authorization")
+    if !s.auth.Validate(token) { return }
+    go s.startHeartbeatWatcher(ws, 30*time.Second)
+}
                   </div>
                 </div>
 
@@ -2355,6 +2624,13 @@
                     <div class="p-token-badge">146.4k tokens</div>
                     <span class="p-token-breakdown">(入 140.9k · 出 5.5k)</span>
                   </div>
+                </div>
+
+                <!-- 快捷试玩胶囊行 (Prompt Suggestion Capsules) -->
+                <div class="p-prompt-capsules-row">
+                  <button class="p-prompt-capsule-btn" id="capsule-subagent-refactor">🌿 派遣架构重构子代理</button>
+                  <button class="p-prompt-capsule-btn" id="capsule-gen-diff">⚡ 生成 Relay 自动重连 Diff</button>
+                  <button class="p-prompt-capsule-btn" id="capsule-cron-demo">⏱️ 查看后台健康检查 Cron</button>
                 </div>
               </div>
             </div>
@@ -3001,6 +3277,157 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
     </div>
   </section>
 
+  <!-- BENTO GRID FEATURES SECTION -->
+  <section class="bento-section" id="features">
+    <div class="bento-header">
+      <span class="neo-pill" style="background:var(--yellow); margin-bottom:12px;">Next-Gen Architecture</span>
+      <h2 class="bento-title-main">为复杂工程与移动场景打造的智能体矩阵</h2>
+      <p class="bento-subtitle">告别单线程黑盒对话。从子代理群并发调度到分离式工具审批，重新定义移动端自主编程的标准。</p>
+    </div>
+
+    <div class="bento-grid">
+      <!-- 1. SUBAGENT SWARM (Big Card - span 8) -->
+      <div class="bento-card bento-col-8" style="background:#fffdf7;">
+        <div class="bento-tag" style="background:#b9e9b0;">🌿 Multi-Agent Architecture</div>
+        <div class="bento-title">自主子代理群并发协同 (Subagent Swarms)</div>
+        <div class="bento-desc">
+          面对庞大仓库与未知架构，主 Agent 自动拆解复杂意图，并发派发 <strong>Researcher</strong> (查文档/协议)、<strong>SecurityInspector</strong> (审计鉴权边界)、<strong>Coder</strong> (改代码) 多个专属子代理。并行探查无锁读写，成果秒级汇总回传。
+        </div>
+
+        <div class="bento-visual">
+          <div class="bento-subagent-flow">
+            <div class="bento-flow-node" style="border-left: 5px solid #12100e;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span>🤖</span>
+                <span>主 Agent 意图拆解器 (Intent Parser & Planner)</span>
+              </div>
+              <span class="neo-pill" style="font-size:10px; background:#ffd84f;">Orchestrator</span>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+              <div class="bento-flow-node" style="border-left: 5px solid #38bdf8;">
+                <div>
+                  <div style="color:#0369a1; font-size:11px;">🔍 子代理 1: Researcher</div>
+                  <div style="font-size:11.5px; margin-top:2px;">探查 core/ 与 docs/ 协议握手</div>
+                </div>
+                <span style="font-size:10px; color:#15803d; font-weight:900;">✓ 4.2s 完成</span>
+              </div>
+              <div class="bento-flow-node" style="border-left: 5px solid #a855f7;">
+                <div>
+                  <div style="color:#7e22ce; font-size:11px;">🛡️ 子代理 2: SecurityInspector</div>
+                  <div style="font-size:11.5px; margin-top:2px;">审计 Bearer 鉴权与只读沙箱</div>
+                </div>
+                <span style="font-size:10px; color:#15803d; font-weight:900;">✓ 3.8s 完成</span>
+              </div>
+            </div>
+            <div class="bento-flow-node" style="background:#faf8f2; border: 1.5px dashed var(--ink);">
+              <div style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:#4a453e;">
+                <span>⚡</span>
+                <span>多子代理无冲突结果汇聚：生成可落地的结构化结论与精准代码变更</span>
+              </div>
+              <span class="neo-pill" style="font-size:10px; background:#b9e9b0;">Ready</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. MOBILE-FIRST CANVAS (span 4) -->
+      <div class="bento-card bento-col-4">
+        <div class="bento-tag" style="background:#ffd84f;">📱 Mobile Ergonomics</div>
+        <div class="bento-title">移动原生人机工学工作台</div>
+        <div class="bento-desc">
+          告别在手机上捏拉缩放普通 Web 页面。针对触控量身定制的 5 大标签页、<strong>虚拟输入法无缝顶起对话</strong>、侧滑手势抽屉与历史消息快速定位导轨，随时单手掌控。
+        </div>
+        <div style="margin-top:auto; background:#f4f1ea; border:1.5px solid var(--ink); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800;">
+            <span>💬 自动避让键盘遮挡</span>
+            <span style="color:#15803d;">100% 顶起</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800;">
+            <span>📁 原生树状文件浏览器</span>
+            <span style="color:#0284c7;">实时高亮</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:800;">
+            <span>⚡ 底部 5 键分段导航</span>
+            <span style="color:#b45309;">随心切换</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. SEPARATED APPROVAL (span 4) -->
+      <div class="bento-card bento-col-4">
+        <div class="bento-tag" style="background:#ffb3ba;">🛡️ Zero Surprise Policy</div>
+        <div class="bento-title">方案 A 分离式安全审批</div>
+        <div class="bento-desc">
+          思考推理与高危工具执行完全解耦。代码覆写、系统 Shell 指令必须经由手机端显式核验，杜绝 Agent 失控风险。
+        </div>
+        <div style="margin-top:auto; background:#fff; border:1.5px solid var(--ink); border-radius:12px; padding:10px; font-size:11.5px; font-weight:800; display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span style="color:#dc2626;">⚠ 待审批: 写文件</span>
+            <span class="neo-pill" style="font-size:9px; background:#fee2e2;">两阶段 Plan</span>
+          </div>
+          <div style="font-size:10.5px; color:#666; font-family:var(--font-mono);">core/remote/relay/server.go</div>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <div style="flex:1; background:#ffd84f; border:1px solid var(--ink); border-radius:6px; padding:4px 0; text-align:center; font-size:10px;">通过执行</div>
+            <div style="flex:1; background:#f4f4f4; border:1px solid var(--ink); border-radius:6px; padding:4px 0; text-align:center; font-size:10px;">拒绝修改</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. ATOMIC TIME MACHINE (span 4) -->
+      <div class="bento-card bento-col-4">
+        <div class="bento-tag" style="background:#bbf2f6;">⏪ Instant Rollback</div>
+        <div class="bento-title">Git 原子时光机与无损快照</div>
+        <div class="bento-desc">
+          每次执行或修改前，底层系统自动创建隐式轻量 Git 快照。无论智能体做出了怎样的实验，手机端一键即可 100% 恢复初始状态。
+        </div>
+        <div style="margin-top:auto; background:#1c1b18; color:#fff; border-radius:12px; padding:10px 12px; font-family:var(--font-mono); font-size:11px; display:flex; flex-direction:column; gap:4px;">
+          <div style="color:#86efac;">● commit b7a01d (当前工作区)</div>
+          <div style="color:#94a3b8;">○ commit e3f802 (快照: 修改前)</div>
+          <div style="color:#ffd84f; font-size:10px; margin-top:2px;">$ git reset --hard snapshot-auto ✔</div>
+        </div>
+      </div>
+
+      <!-- 5. ADAPTIVE MEMORY & RAG (span 4) -->
+      <div class="bento-card bento-col-4">
+        <div class="bento-tag" style="background:#d8b4fe;">🧠 Nightly Dream RAG</div>
+        <div class="bento-title">自进化记忆网络与知识库</div>
+        <div class="bento-desc">
+          融合项目 Markdown 规则与向量知识库。夜间自动进行经验沉淀与 Nightly Dream 萃取，越用越熟悉你的代码风格与工程惯例。
+        </div>
+        <div style="margin-top:auto; background:#faf5ff; border:1.5px solid #c084fc; border-radius:12px; padding:10px; display:flex; align-items:center; justify-content:space-between;">
+          <div>
+            <div style="font-size:11.5px; font-weight:800; color:#6b21a8;">已沉淀 12 条工程经验</div>
+            <div style="font-size:10px; color:#9333ea;">Top K 8 · 自动按需语义召回</div>
+          </div>
+          <span style="font-size:20px;">💡</span>
+        </div>
+      </div>
+
+      <!-- 6. HIGH PERFORMANCE RELAY (span 12) -->
+      <div class="bento-card bento-col-12" style="background:linear-gradient(135deg, #fffdf7 0%, #fff7db 100%);">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px;">
+          <div style="max-width:720px;">
+            <div class="bento-tag" style="background:#ffd84f;">⚡ Go High Performance Hub</div>
+            <div class="bento-title">毫秒级双向加密中继通道 (Sub-millisecond Relay)</div>
+            <div class="bento-desc" style="margin-bottom:0;">
+              基于 Go 语言构建的极轻量单二进制中继服务，通过双向 WebSocket 跨越复杂 NAT 与移动蜂窝网络。端到端中继延迟低至 <strong>14ms</strong>，内存占用不足 <strong>25MB</strong>，即使在弱网环境下也能稳定重连。
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; background:#fff; border:2px solid var(--ink); border-radius:14px; padding:14px 18px; box-shadow:0 2px 0 var(--ink);">
+            <div style="font-size:12px; font-weight:800; color:#555;">端到端全链路拓扑</div>
+            <div style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:900;">
+              <span>📱 手机客户端</span>
+              <span style="color:#0284c7;">──(TLS)──></span>
+              <span class="neo-pill" style="font-size:10px; background:#ffd84f;">Go Relay (14ms)</span>
+              <span style="color:#0284c7;">──(WS)──></span>
+              <span>💻 本地工作机</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- USE CASES SECTION -->
   <section class="use-cases-section" style="max-width: 1400px; margin: 60px auto; padding: 0 24px;">
     <div style="text-align: center; margin-bottom: 40px;">
@@ -3171,38 +3598,98 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
   </section>
 
   <!-- QUICKSTART -->
-  <section class="compare-section" id="quickstart" style="padding-top:0;">
-    <div style="background:#141413; border:var(--border-thick); border-radius:20px; box-shadow:var(--shadow-lg); padding:28px; color:#fff;">
-      <div style="font-weight:900; font-size:16px; margin-bottom:12px; color:var(--yellow);">
-        1. 启动轻量级高并发 Relay 中继服务:
-      </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:10px 14px; font-family:var(--font-mono); font-size:12.5px;">
-        <span>$ go run . relay --addr 0.0.0.0:18080 --agent-token "secret"</span>
-        <button class="neo-btn" onclick="copyText('go run . relay --addr 0.0.0.0:18080 --agent-token &quot;secret&quot;')" style="padding:3px 8px; font-size:11px;">复制</button>
+  <section class="compare-section" id="quickstart" style="padding-top:20px; max-width:1400px; margin:0 auto 80px auto; padding-left:24px; padding-right:24px;">
+    <div style="text-align:center; margin-bottom:30px;">
+      <span class="neo-pill" style="background:var(--yellow); margin-bottom:10px;">Developer Quickstart</span>
+      <h2 style="font-family:var(--font-display); font-size:32px; font-weight:900;">2 分钟极速接入生产环境</h2>
+      <p style="font-size:14px; color:#666; margin-top:6px;">单二进制即开即用，或通过 Docker Compose 一键拉起生产集群。</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:20px;">
+      <!-- Option 1: Docker Compose -->
+      <div style="background:#141413; border:var(--border-thick); border-radius:20px; box-shadow:var(--shadow-lg); padding:24px; color:#fff; display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <div style="font-weight:900; font-size:16px; color:var(--yellow); display:flex; align-items:center; gap:8px;">
+            <span>🐳</span>
+            <span>生产级 Docker Compose 一键启动</span>
+          </div>
+          <span class="neo-pill" style="font-size:10px; background:#38bdf8; color:#0369a1;">推荐部署</span>
+        </div>
+        <div style="font-size:12.5px; color:#aaa;">包含高可用 Relay 中继与 Agent 容器网络自动握手：</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:10px 14px; font-family:var(--font-mono); font-size:12px;">
+          <span style="color:#86efac;">$ docker compose -f compose.prod.yaml up -d</span>
+          <button class="neo-btn" onclick="copyText('docker compose -f compose.prod.yaml up -d')" style="padding:3px 8px; font-size:11px;">复制</button>
+        </div>
+        <div style="font-size:11.5px; color:#888;">环境变量请在 <span style="color:#ffd84f; font-family:var(--font-mono);">.env</span> 配置 <span style="font-family:var(--font-mono);">MYAI_RELAY_TOKEN</span> 与大模型 API 密钥。</div>
       </div>
 
-      <div style="font-weight:900; font-size:16px; margin:18px 0 12px 0; color:var(--yellow);">
-        2. 在工作机挂载代码库启动 Core Agent:
-      </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:10px 14px; font-family:var(--font-mono); font-size:12.5px;">
-        <span>$ go run . agent --server ws://relay:18080/ws/agent --workspace d:\Go_All\myai</span>
-        <button class="neo-btn" onclick="copyText('go run . agent --server ws://relay:18080/ws/agent --workspace d:\\Go_All\\myai')" style="padding:3px 8px; font-size:11px;">复制</button>
+      <!-- Option 2: Go CLI -->
+      <div style="background:#141413; border:var(--border-thick); border-radius:20px; box-shadow:var(--shadow-lg); padding:24px; color:#fff; display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <div style="font-weight:900; font-size:16px; color:var(--yellow); display:flex; align-items:center; gap:8px;">
+            <span>⚡</span>
+            <span>原生 Go CLI 单二进制启动</span>
+          </div>
+          <span class="neo-pill" style="font-size:10px; background:#b9e9b0; color:#14532d;">开发调试</span>
+        </div>
+        <div style="font-size:12.5px; color:#aaa;">1. 启动轻量级高并发 Relay 中继服务 (端到端延迟 14ms):</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:8px 12px; font-family:var(--font-mono); font-size:11.5px;">
+          <span style="color:#86efac;">$ go run . relay --addr 0.0.0.0:18080 --agent-token "secret"</span>
+          <button class="neo-btn" onclick="copyText('go run . relay --addr 0.0.0.0:18080 --agent-token &quot;secret&quot;')" style="padding:2px 6px; font-size:10px;">复制</button>
+        </div>
+        <div style="font-size:12.5px; color:#aaa; margin-top:2px;">2. 在工作机挂载本地代码库启动 Core Agent:</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e1c; border:1.5px solid #333; border-radius:10px; padding:8px 12px; font-family:var(--font-mono); font-size:11.5px;">
+          <span style="color:#86efac;">$ go run . agent --server ws://relay:18080/ws/agent --workspace .</span>
+          <button class="neo-btn" onclick="copyText('go run . agent --server ws://relay:18080/ws/agent --workspace .')" style="padding:2px 6px; font-size:10px;">复制</button>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- FOOTER -->
   <footer class="site-footer">
-    <div class="footer-inner">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <span style="font-size:24px;">🤖</span>
-        <div>
-          <div style="font-weight:900; font-size:17px;">MyAI Framework</div>
-          <div style="font-size:12px; color:#666;">下一代分布式全域自主智能体系统</div>
+    <div class="footer-inner" style="flex-direction:column; gap:30px;">
+      <div style="width:100%; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:24px;">
+        <div style="max-width:380px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+            <span style="font-size:28px;">🤖</span>
+            <span style="font-family:var(--font-display); font-weight:900; font-size:22px;">MyAI Framework</span>
+            <span class="neo-pill" style="font-size:10px; background:var(--yellow);">v2.0 PRO</span>
+          </div>
+          <p style="font-size:13px; color:#555047; line-height:1.6;">
+            手机上的全域自主编程智能体系统。支持多子代理群并发调度、方案 A 分离式安全审批、Git 原子时光机回滚与毫秒级 Go WebSocket 神经中继通道。
+          </p>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:40px;">
+          <div>
+            <div style="font-weight:900; font-size:13px; margin-bottom:10px; color:#12100e;">导航索引</div>
+            <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; font-size:12.5px; font-weight:700;">
+              <li><a href="#interactive-app" style="color:#555; text-decoration:none;">真机实验室</a></li>
+              <li><a href="#features" style="color:#555; text-decoration:none;">特性便当盒</a></li>
+              <li><a href="#compare" style="color:#555; text-decoration:none;">与传统 Agent 对比</a></li>
+              <li><a href="#quickstart" style="color:#555; text-decoration:none;">生产部署指南</a></li>
+            </ul>
+          </div>
+          <div>
+            <div style="font-weight:900; font-size:13px; margin-bottom:10px; color:#12100e;">开源生态</div>
+            <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; font-size:12.5px; font-weight:700;">
+              <li><a href="https://github.com/myai/core" target="_blank" style="color:#555; text-decoration:none;">GitHub 仓库 (1.2k ★)</a></li>
+              <li><a href="#" style="color:#555; text-decoration:none;">协议与安全标准</a></li>
+              <li><a href="#" style="color:#555; text-decoration:none;">Nightly Dream 记忆规范</a></li>
+              <li><a href="#" style="color:#555; text-decoration:none;">Subagent Swarm 接口</a></li>
+            </ul>
+          </div>
         </div>
       </div>
-      <div style="font-size:12.5px; font-weight:700; color:#555;">
-        © 2026 MyAI. All rights reserved. Built with Neo-Brutalism & Go.
+
+      <div style="width:100%; border-top:1px dashed rgba(18, 16, 14, 0.2); padding-top:20px; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; font-size:12px; font-weight:700; color:#666;">
+        <div>© 2026 MyAI Framework. Released under Apache 2.0 License.</div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span>Designed with Neo-Brutalism</span>
+          <span>·</span>
+          <span>Powered by Go 1.24 & WebSocket</span>
+        </div>
       </div>
     </div>
   </footer>
@@ -3590,43 +4077,209 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       });
     }
 
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function sendChat(msg) {
-      if (!msg.trim()) return;
+      if (!msg || !msg.trim()) return;
       playPop(900);
 
+      // 1. User Message Bubble
       const userBubble = document.createElement('div');
-      userBubble.style.cssText = 'align-self:flex-end; background:#ffd84f; border:2px solid #12100e; border-radius:14px 14px 2px 14px; padding:9px 13px; font-weight:700; font-size:12.5px; box-shadow:0 1.5px 0 #12100e; max-width:85%;';
-      userBubble.textContent = msg;
+      userBubble.className = 'p-user-msg-bubble';
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      userBubble.innerHTML = `
+        <div>${escapeHtml(msg)}</div>
+        <div class="p-user-msg-meta">${timeStr} · 移动端</div>
+      `;
       views.chat.appendChild(userBubble);
-      pUserInput.value = '';
+      if (pUserInput) pUserInput.value = '';
 
+      // 2. Typing Indicator
       const typingBubble = document.createElement('div');
-      typingBubble.style.cssText = 'align-self:flex-start; background:#fffdf7; border:2px solid #12100e; border-radius:14px 14px 14px 2px; padding:8px 12px; font-size:12px; box-shadow:0 1.5px 0 #12100e; font-weight:800;';
-      typingBubble.textContent = '🤖 Agent 正在思考与探查工作区...';
+      typingBubble.style.cssText = 'align-self:flex-start; background:#fffdf7; border:2px solid #12100e; border-radius:14px 14px 14px 2px; padding:10px 14px; font-size:12px; box-shadow:0 1.5px 0 #12100e; font-weight:800; display:flex; align-items:center; gap:8px; margin-bottom:8px;';
+      typingBubble.innerHTML = '<span class="p-status-dot-pulse"></span><span>🤖 正在拆解意图，调度工具与并发子代理...</span>';
       views.chat.appendChild(typingBubble);
 
       closePhoneKeyboard();
       screenStage.scrollTop = screenStage.scrollHeight;
 
+      // Dual Console Logging
       const dualConsole = document.getElementById('dual-console');
       if (dualConsole) {
         const line = document.createElement('div');
         line.style.color = '#ffd84f';
         line.textContent = `[MOBILE INTENT] "${msg}"`;
         dualConsole.appendChild(line);
+        dualConsole.scrollTop = dualConsole.scrollHeight;
       }
 
+      // 3. Scenario Routing
+      const lower = msg.toLowerCase();
       setTimeout(() => {
         playPop(720);
-        typingBubble.innerHTML = `<strong>✔ 已执行对应探查与规划：</strong><br>已匹配到上下文规则，并在只读沙箱生成了对应 Diff。可通过下方【变更】标签核对并一键提交。`;
+        typingBubble.remove();
+
+        const agentCard = document.createElement('div');
+        agentCard.className = 'p-turn-card-box';
+        agentCard.style.marginBottom = '12px';
+
+        if (lower.includes('你好') || lower.includes('hi') || lower.includes('hello') || lower.includes('在吗')) {
+          agentCard.innerHTML = `
+            <div class="p-duration-header">
+              <span>🤖 MyAI 全域编程助手已就绪 · 延迟 14ms</span>
+            </div>
+            <div class="p-final-answer-body">
+              <strong>你好！我是连接你本地工作区的全域自主编程智能体。</strong><br><br>
+              在手机上你可以随时指挥我完成日常开发任务，告别端坐电脑前的束缚：<br>
+              • <strong>🌿 派遣多子代理</strong>：并发深入探索未知代码库与架构<br>
+              • <strong>⚡ 规划代码变更</strong>：只读沙箱审查安全 Diff 并一键提交<br>
+              • <strong>⏱️ 自动化运维</strong>：配置定时 Cron 脚本与健康巡检<br><br>
+              试试点击下方快捷场景开始体验：
+              <div class="p-prompt-capsules-row" style="margin-top:8px;">
+                <button class="p-prompt-capsule-btn" onclick="sendChat('帮我派遣子代理深入检索 docs/ 与 core/ 目录中的 Relay 握手协议')">🌿 派遣子代理检索</button>
+                <button class="p-prompt-capsule-btn" onclick="sendChat('在 server.go 中添加断线指数退避重连 Diff')">⚡ 生成重连 Diff</button>
+                <button class="p-prompt-capsule-btn" onclick="sendChat('配置每 30 分钟检查一次 Docker 容器运行状态')">⏱️ 配置定时任务</button>
+              </div>
+            </div>
+          `;
+        } else if (lower.includes('子代理') || lower.includes('检索') || lower.includes('查询') || lower.includes('探查') || lower.includes('重构') || lower.includes('inspect')) {
+          agentCard.innerHTML = `
+            <div class="p-duration-header">
+              <span>用时 3.9秒 · 派遣 2 个并发子代理</span>
+            </div>
+            <div class="p-interleaved-body">
+              <div class="p-thought-text">
+                已将任务拆解为子任务并并发派发：代码库探查子代理负责分析实现，测试子代理核验行为边界。
+              </div>
+              <div class="p-subagent-tree-card">
+                <div class="p-subagent-tree-head">
+                  <span>🌿 并发子代理任务群 (Subagent Swarm)</span>
+                  <span class="p-subagent-tree-badge">2/2 已完成</span>
+                </div>
+                <div class="p-subagent-item">
+                  <div class="p-subagent-item-head">
+                    <span class="p-subagent-item-role">🔍 Codebase Researcher</span>
+                    <span class="p-subagent-item-tag">core/remote</span>
+                  </div>
+                  <div class="p-subagent-item-body">
+                    定位到 <span class="p-code-tag">server.go</span> 的连接处理循环，重构点集中于心跳保活和错误恢复链路。
+                  </div>
+                </div>
+                <div class="p-subagent-item">
+                  <div class="p-subagent-item-head">
+                    <span class="p-subagent-item-role">🧪 Test & Security Analyzer</span>
+                    <span class="p-subagent-item-tag">tests/</span>
+                  </div>
+                  <div class="p-subagent-item-body">
+                    核验了 Mock WebSocket 断线测试用例，确认无并发竞态死锁风险。
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="p-final-answer-body">
+              <strong>已完成多子代理探查与分析：</strong><br>
+              • 模块实现与接口契约吻合，已输出针对性重构建议<br>
+              • 可点击下方标签切换至【变更】页审查自动生成的代码 Diff！
+            </div>
+            <div class="p-prompt-capsules-row">
+              <button class="p-prompt-capsule-btn" onclick="switchTab('changes')">🔀 立即查看代码 Diff</button>
+              <button class="p-prompt-capsule-btn" onclick="switchTab('files')">📁 打开源文件验证</button>
+            </div>
+          `;
+          if (dualConsole) {
+            const line = document.createElement('div');
+            line.style.color = '#86efac';
+            line.textContent = `[SWARM] 2 subagents finished in 3.9s. Results merged.`;
+            dualConsole.appendChild(line);
+          }
+        } else if (lower.includes('diff') || lower.includes('修改') || lower.includes('代码') || lower.includes('重连') || lower.includes('退避')) {
+          agentCard.innerHTML = `
+            <div class="p-duration-header">
+              <span>用时 6.1秒 · 已在只读沙箱生成 Diff</span>
+            </div>
+            <div class="p-final-answer-body">
+              <strong>已完成方案 A 分离式规划：</strong><br><br>
+              • 目标文件：<span class="p-code-tag">core/remote/relay/server.go</span><br>
+              • 变更摘要：增加 Exponential Backoff 指数退避重连算法与原子快照<br>
+              • 当前状态：<strong>待人工审批 (Pending Approval)</strong><br><br>
+              <div class="p-code-preview-block">
+                <div class="p-code-tag-head">DIFF PREVIEW</div>
++ func (s *RelayServer) reconnectWithBackoff(attempt int) time.Duration {
++     base := 500 * time.Millisecond
++     return min(base * (1 << attempt), 30 * time.Second)
++ }
+              </div>
+            </div>
+            <div class="p-prompt-capsules-row">
+              <button class="p-prompt-capsule-btn" onclick="switchTab('changes')">🔀 点击前往审批并一键提交</button>
+            </div>
+          `;
+        } else if (lower.includes('定时') || lower.includes('cron') || lower.includes('docker') || lower.includes('运维') || lower.includes('巡检')) {
+          agentCard.innerHTML = `
+            <div class="p-duration-header">
+              <span>用时 4.5秒 · 定时任务配置完成</span>
+            </div>
+            <div class="p-final-answer-body">
+              <strong>后台健康巡检 Cron 已就绪：</strong><br><br>
+              • 写入路径：<span class="p-code-tag">/etc/cron.d/docker-ps-log</span><br>
+              • 执行周期：每 30 分钟自动执行一次容器存活扫描<br>
+              • 日志流向：<span class="p-code-tag">/docker/nginx/log.txt</span>（带 ISO 时间戳追加）<br>
+              • 已经预先触发一次测试执行，状态：<strong>200 OK</strong>。
+            </div>
+          `;
+        } else {
+          agentCard.innerHTML = `
+            <div class="p-duration-header">
+              <span>用时 5.2秒 · 意图处理完成</span>
+            </div>
+            <div class="p-final-answer-body">
+              <strong>已解析并完成执行意图：</strong><br><br>
+              已检索当前上下文与规则，已在沙箱中准备好相应方案。你可以点击下方标签核对工作区文件或代码变更：
+            </div>
+            <div class="p-prompt-capsules-row">
+              <button class="p-prompt-capsule-btn" onclick="switchTab('files')">📁 查看工作区文件</button>
+              <button class="p-prompt-capsule-btn" onclick="switchTab('changes')">🔀 查看代码 Diff</button>
+            </div>
+          `;
+        }
+
+        views.chat.appendChild(agentCard);
         screenStage.scrollTop = screenStage.scrollHeight;
-      }, 900);
+        showToast('Agent 已生成最新回复');
+      }, 750);
     }
 
     pSendBtn.addEventListener('click', () => sendChat(pUserInput.value));
     pUserInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendChat(pUserInput.value);
     });
+
+    // Prompt capsules click handlers
+    const capsuleSubagent = document.getElementById('capsule-subagent-refactor');
+    if (capsuleSubagent) {
+      capsuleSubagent.addEventListener('click', () => {
+        sendChat('帮我派遣子代理深入重构 WebSocket 自动重连逻辑，并补充单元测试');
+      });
+    }
+    const capsuleDiff = document.getElementById('capsule-gen-diff');
+    if (capsuleDiff) {
+      capsuleDiff.addEventListener('click', () => {
+        sendChat('在 core/remote/relay/server.go 中添加断线指数退避重连 Diff');
+      });
+    }
+    const capsuleCron = document.getElementById('capsule-cron-demo');
+    if (capsuleCron) {
+      capsuleCron.addEventListener('click', () => {
+        sendChat('配置每 30 分钟检查一次 Docker 容器运行状态');
+      });
+    }
 
     // --- TAB 2: FILES PANEL INTERACTIONS ---
     const fileData = {
@@ -3975,26 +4628,57 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
     });
 
     // Preset chips
-    document.getElementById('chip-cron').addEventListener('click', () => {
-      switchTab('chat');
-      showToast('已载入原型图经典场景：定时任务添加');
-    });
-    document.getElementById('chip-files').addEventListener('click', () => {
-      switchTab('files');
-      showToast('已切换至真实工作区文件浏览器');
-    });
-    document.getElementById('chip-diff').addEventListener('click', () => {
-      switchTab('changes');
-      showToast('已切换至代码 Diff 审查与快照');
-    });
-    document.getElementById('chip-knowledge').addEventListener('click', () => {
-      switchTab('knowledge');
-      showToast('已切换至知识库与 AI 记忆');
-    });
-    document.getElementById('chip-jev').addEventListener('click', () => {
-      switchTab('settings');
-      selectStrategy('jev');
-    });
+    const chipSubagent = document.getElementById('chip-subagent');
+    if (chipSubagent) {
+      chipSubagent.addEventListener('click', () => {
+        document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+        chipSubagent.classList.add('active');
+        switchTab('chat');
+        sendChat('帮我派遣子代理深入检索 docs/ 与 core/ 目录中的 Relay 握手协议');
+        showToast('已派遣 2 个子代理并发探查 Relay 握手与鉴权');
+      });
+    }
+
+    const chipDiff = document.getElementById('chip-diff');
+    if (chipDiff) {
+      chipDiff.addEventListener('click', () => {
+        document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+        chipDiff.classList.add('active');
+        switchTab('changes');
+        showToast('已切换至代码 Diff 审查与 Git 原子快照');
+      });
+    }
+
+    const chipCron = document.getElementById('chip-cron');
+    if (chipCron) {
+      chipCron.addEventListener('click', () => {
+        document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+        chipCron.classList.add('active');
+        switchTab('chat');
+        sendChat('配置每 30 分钟检查一次 Docker 容器运行状态');
+        showToast('已载入后台运维巡检与 Cron 任务场景');
+      });
+    }
+
+    const chipKnowledge = document.getElementById('chip-knowledge');
+    if (chipKnowledge) {
+      chipKnowledge.addEventListener('click', () => {
+        document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+        chipKnowledge.classList.add('active');
+        switchTab('knowledge');
+        showToast('已切换至向量知识库与 AI 记忆网络');
+      });
+    }
+
+    const chipFiles = document.getElementById('chip-files');
+    if (chipFiles) {
+      chipFiles.addEventListener('click', () => {
+        document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+        chipFiles.classList.add('active');
+        switchTab('files');
+        showToast('已切换至真实工作区文件浏览器');
+      });
+    }
   </script>
 </body>
 </html>
