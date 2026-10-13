@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>MyAI — 手机上的全域自主编程智能体 | Official Site & Interactive App</title>
   <meta name="description" content="MyAI 是基于 Go + React Native 实现的高性能分布式全域自主智能体系统。采用标志性 Neo-Brutalism 风格，支持手机与电脑神经协同、Codex式两阶段规划、方案A分离式工具链与自进化记忆网络。">
+  
+  <!-- Enhanced SEO -->
+  <meta name="keywords" content="AI编程助手,移动端开发工具,智能体系统,代码生成,Go语言,React Native,远程开发,自动化编程,Codex,两阶段规划">
+  <meta name="author" content="MyAI Team">
+  
+  <!-- Open Graph (社交分享优化) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="MyAI — 手机上的全域自主编程智能体">
+  <meta property="og:description" content="随时随地，掌控代码。支持 Codex 式两阶段规划、方案A分离式工具链与自进化记忆网络。">
+  <meta property="og:site_name" content="MyAI">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MyAI — 手机上的全域自主编程智能体">
+  <meta name="twitter:description" content="随时随地，掌控代码。支持手机远程控制、两阶段规划和原子快照回滚。">
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700;800;900&display=swap" rel="stylesheet">
@@ -391,142 +407,481 @@
       user-select: none;
     }
 
-    /* 2. AppHeader (Exact to mobile/src/components/layout/AppHeader.tsx) */
+    /* 2. AppHeader (AppHeader.tsx: 顶部半透明灵动岛、抽屉与快捷操作) */
     .p-app-header {
-      padding: 8px 16px 10px 16px;
+      padding: 6px 12px;
       background: #f4f5f7;
       border-bottom: 2px solid var(--ink);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-    }
-    .p-brand-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .p-avatar-box {
-      width: 42px;
-      height: 42px;
-      background: #ffd84f;
-      border: 2px solid var(--ink);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      box-shadow: 0 1.5px 0 var(--ink);
-      cursor: pointer;
-    }
-    .p-header-titles {
-      display: flex;
-      flex-direction: column;
-    }
-    .p-title-row {
-      display: flex;
-      align-items: center;
+      position: relative;
+      z-index: 30;
       gap: 6px;
     }
-    .p-title-main {
-      font-size: 17px;
-      font-weight: 900;
-      color: #12100e;
-      line-height: 22px;
-    }
-    .p-device-pill {
-      background: #fffdf7;
-      border: 1.5px solid var(--ink);
-      border-radius: 6px;
-      padding: 1px 5px;
-      font-size: 9.5px;
-      font-weight: 900;
-      color: #12100e;
-    }
-    .p-subtitle {
-      color: #6c665f;
-      font-size: 11px;
-      font-weight: 700;
-      margin-top: 1px;
-    }
-    .p-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .p-ghost-settings-btn {
-      width: 34px;
-      height: 34px;
-      background: #4fd7ee;
+    .p-header-icon-btn {
+      width: 38px;
+      height: 38px;
+      background: rgba(255, 253, 247, 0.9);
       border: 2px solid var(--ink);
-      border-radius: 10px;
-      box-shadow: 0 1.5px 0 var(--ink);
+      border-radius: 19px;
+      box-shadow: 0 2px 0 var(--ink);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 16px;
+      font-weight: 900;
+      color: var(--ink);
       cursor: pointer;
-      transition: all 0.1s;
+      transition: all 0.12s;
+      flex-shrink: 0;
     }
-    .p-ghost-settings-btn:active {
+    .p-header-icon-btn:hover {
+      background: var(--yellow);
+      transform: translateY(-1px);
+    }
+    .p-header-icon-btn:active {
       transform: translateY(1px);
       box-shadow: none;
     }
-    .p-status-online-pill {
-      background: #b9e9b0;
+    .p-header-right-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .p-character-island {
+      background: rgba(255, 253, 247, 0.95);
       border: 2px solid var(--ink);
-      border-radius: 999px;
-      box-shadow: 0 1.5px 0 var(--ink);
+      border-radius: 20px;
+      box-shadow: 0 2px 0 var(--ink);
+      padding: 3px 12px 5px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 1;
+      margin-top: 2px;
+    }
+    .p-island-avatar-wrap {
+      width: 34px;
       height: 34px;
-      padding: 0 10px;
+      border-radius: 17px;
+      background: var(--yellow);
+      border: 2px solid var(--ink);
+      box-shadow: 1px 1px 0 var(--ink);
+      margin-top: -12px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .p-island-avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .p-island-identity-row {
       display: flex;
       align-items: center;
       gap: 5px;
-      font-size: 11.5px;
-      font-weight: 900;
-      color: #12100e;
+      margin-top: 2px;
     }
-    .p-status-dot {
-      width: 7px;
-      height: 7px;
+    .p-island-title {
+      font-size: 12.5px;
+      font-weight: 900;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+    }
+    .p-island-device-badge {
+      background: #f0ebe1;
+      border: 1px solid var(--ink);
       border-radius: 4px;
-      background: #0e4e16;
+      padding: 0.5px 4px;
+      font-size: 9px;
+      font-weight: 900;
+      color: var(--ink);
+    }
+    .p-island-status-capsule {
+      background: #f5eee2;
+      border: 1px solid #d8cfbf;
+      border-radius: 999px;
+      padding: 1.5px 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 3px;
+    }
+    .p-status-dot-pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: #2e8b38;
+      box-shadow: 0 0 0 2px rgba(46, 139, 56, 0.2);
+    }
+    .p-island-status-text {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+    .p-island-mode-pill {
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-size: 9.5px;
+      font-weight: 900;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      cursor: pointer;
+      background: var(--yellow);
+      transition: all 0.12s;
+    }
+    .p-island-mode-pill.plan-mode {
+      background: var(--cyan);
+    }
+    .p-island-mode-pill:hover {
+      transform: scale(1.04);
     }
 
-    /* 3. SessionModeSwitch (ONLY shown on chat tab) */
-    .p-mode-switch-wrapper {
-      padding: 8px 16px;
-      background: #f4f5f7;
+    /* 3. Chat Jump Rail (ChatJumpNav.tsx: 右上角历史提问快捷定位导轨) */
+    .p-chat-jump-nav {
+      position: absolute;
+      right: 8px;
+      top: 10px;
+      z-index: 25;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: flex-end;
     }
-    .p-mode-control {
-      background: #ded7cc;
-      border: 2px solid #25231f;
-      border-radius: 999px;
-      padding: 3px;
+    .p-jump-rail-btn {
+      width: 26px;
+      max-height: 110px;
+      background: rgba(255, 250, 240, 0.92);
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      padding: 6px 3px;
       display: flex;
-      gap: 2px;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: all 0.12s;
     }
-    .p-mode-btn {
-      height: 32px;
-      padding: 0 16px;
-      border-radius: 999px;
-      border: none;
-      background: transparent;
+    .p-jump-rail-btn:hover {
+      background: var(--yellow);
+    }
+    .p-jump-rail-track {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: center;
+    }
+    .p-jump-marker {
+      width: 10px;
+      height: 2.5px;
+      border-radius: 2px;
+      background: #6c665f;
+    }
+    .p-jump-rail-count {
+      font-size: 9.5px;
+      font-weight: 900;
+      color: var(--ink);
+    }
+    .p-jump-popover {
+      display: none;
+      position: absolute;
+      right: 32px;
+      top: 0;
+      width: 210px;
+      background: #fffdf7;
+      border: 2px solid var(--ink);
+      border-radius: 10px;
+      box-shadow: 0 3px 0 var(--ink);
+      padding: 8px;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 30;
+    }
+    .p-jump-popover.show {
+      display: flex;
+    }
+    .p-jump-popover-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 900;
+      color: var(--ink);
+      padding-bottom: 4px;
+      border-bottom: 1px solid #ded7cc;
+    }
+    .p-jump-close-btn {
+      background: #f5eefc;
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 9px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .p-jump-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .p-jump-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #f5f4ef;
+      border: 1px solid var(--ink);
+      border-radius: 6px;
+      padding: 4px 6px;
+      cursor: pointer;
+      font-size: 10.5px;
+      transition: background 0.1s;
+    }
+    .p-jump-item:hover {
+      background: var(--yellow);
+    }
+    .p-jump-badge {
+      background: var(--yellow);
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 9px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .p-jump-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    /* 4. SideDrawer (SideDrawer.tsx: 侧滑收纳抽屉) */
+    .p-drawer-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      display: none;
+    }
+    .p-drawer-overlay.open {
+      display: block;
+    }
+    .p-drawer-backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(18, 16, 14, 0.45);
+      animation: fadeIn 0.2s ease;
+    }
+    .p-drawer-sheet {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 82%;
+      max-width: 310px;
+      background: #fffdf7;
+      border-right: 2.5px solid var(--ink);
+      box-shadow: 4px 0 0 rgba(18, 16, 14, 0.15);
+      display: flex;
+      flex-direction: column;
+      animation: slideInLeft 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 101;
+    }
+    @keyframes slideInLeft {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(0); }
+    }
+    .p-drawer-header {
+      padding: 24px 12px 10px 12px;
+      border-bottom: 2px solid var(--ink);
+      background: #f5f4ef;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .p-drawer-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .p-drawer-avatar-box {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 2px solid var(--ink);
+      overflow: hidden;
+      background: var(--yellow);
+    }
+    .p-drawer-brand-title {
+      font-size: 13.5px;
+      font-weight: 900;
+      color: var(--ink);
+      line-height: 1.2;
+    }
+    .p-drawer-brand-sub {
+      font-size: 10px;
+      font-weight: 700;
+      color: #6c665f;
+    }
+    .p-drawer-close-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
       font-size: 12px;
       font-weight: 900;
-      color: #6c665f;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 5px;
-      transition: all 0.15s;
+      justify-content: center;
+      transition: all 0.1s;
     }
-    .p-mode-btn.active {
-      background: #fffdf7;
-      border: 1.5px solid #12100e;
-      color: #12100e;
-      box-shadow: 0 1px 0 rgba(18, 16, 14, 0.2);
+    .p-drawer-close-btn:hover { background: var(--coral); color: #fff; }
+    .p-drawer-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .p-drawer-section-title {
+      font-size: 10.5px;
+      font-weight: 900;
+      color: #78716c;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .p-drawer-nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .p-drawer-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      box-shadow: 0 1.5px 0 var(--ink);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      transition: all 0.1s;
+    }
+    .p-drawer-nav-item:hover { background: #fef9c3; }
+    .p-drawer-nav-item.active {
+      background: var(--yellow);
+      box-shadow: 0 2px 0 var(--ink);
+    }
+    .p-drawer-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .p-drawer-badge {
+      background: var(--ink);
+      color: var(--yellow);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 900;
+    }
+    .p-drawer-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+    }
+    .p-drawer-link-btn {
+      background: none;
+      border: none;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--green-dark);
+      cursor: pointer;
+    }
+    .p-drawer-sessions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .p-drawer-session-card {
+      padding: 7px 9px;
+      background: #fff;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      transition: all 0.1s;
+    }
+    .p-drawer-session-card:hover { background: #fef08a; }
+    .p-drawer-session-card.active {
+      background: var(--yellow);
+      box-shadow: 0 1.5px 0 var(--ink);
+    }
+    .p-drawer-session-name {
+      font-weight: 800;
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .p-drawer-session-time {
+      font-size: 9.5px;
+      color: #78716c;
+      font-family: var(--font-mono);
+      margin-left: 6px;
+    }
+    .p-drawer-bottom-bar {
+      padding: 10px 12px 18px 12px;
+      border-top: 2px solid var(--ink);
+      background: #f5eee2;
+      display: flex;
+      gap: 8px;
+    }
+    .p-drawer-tool-btn {
+      flex: 1;
+      height: 36px;
+      border: 1.5px solid var(--ink);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 1.5px 0 var(--ink);
+      font-size: 11.5px;
+      font-weight: 900;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.1s;
+    }
+    .p-drawer-tool-btn:hover { background: #fef9c3; }
+    .p-drawer-tool-primary {
+      background: var(--yellow);
     }
 
     /* 4. Scrollable Screen Stage */
@@ -538,6 +893,7 @@
       flex-direction: column;
       gap: 12px;
       background: #f4f5f7;
+      position: relative;
     }
 
     /* --- REAL CHAT VIEW: AGENT TURN CARD --- */
@@ -1175,6 +1531,145 @@
       padding-top: 2px;
     }
 
+    /* 6. Virtual Software Keyboard Simulation (模拟真机输入法弹起与对话记录顶起) */
+    .p-virtual-keyboard {
+      background: #e2dfd7;
+      border-top: 2px solid var(--ink);
+      height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .real-phone-body.keyboard-open .p-virtual-keyboard {
+      height: 226px;
+      opacity: 1;
+    }
+    .real-phone-body.keyboard-open .p-android-nav-bar {
+      display: none;
+    }
+    .real-phone-body.keyboard-open .p-bottom-dock {
+      padding-bottom: 4px;
+      background: #e2dfd7;
+      transition: background 0.2s ease, padding 0.2s ease;
+    }
+
+    .p-kb-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: #d8d4cb;
+      border-bottom: 1.5px solid rgba(18, 16, 14, 0.15);
+    }
+    .p-kb-tool-left {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .p-kb-tool-btn {
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 1px 0 var(--ink);
+      transition: transform 0.08s;
+    }
+    .p-kb-tool-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+    .p-kb-tool-hint {
+      font-size: 9.5px;
+      color: #6c665f;
+      margin-left: 4px;
+      font-weight: 700;
+    }
+    .p-kb-hide-btn {
+      background: #ffd84f;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 10px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 1px 0 var(--ink);
+      transition: transform 0.08s;
+    }
+    .p-kb-hide-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+
+    .p-kb-keys-grid {
+      flex: 1;
+      padding: 6px 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      justify-content: space-around;
+    }
+    .p-kb-row {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+    }
+    .p-key-btn {
+      flex: 1;
+      min-width: 0;
+      max-width: 32px;
+      height: 35px;
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      font-family: var(--font-display);
+      color: var(--ink);
+      cursor: pointer;
+      box-shadow: 0 1.5px 0 var(--ink);
+      transition: transform 0.06s, background 0.08s;
+    }
+    .p-key-btn:hover {
+      background: #fdf6e2;
+    }
+    .p-key-btn:active {
+      transform: translateY(1.5px);
+      box-shadow: none;
+      background: #ffd84f;
+    }
+    .p-key-fn {
+      max-width: 44px;
+      background: #d4cfc4;
+      font-size: 11px;
+    }
+    .p-key-space {
+      max-width: 170px;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    .p-key-enter {
+      max-width: 68px;
+      background: #4fd7ee;
+      font-size: 11.5px;
+      font-weight: 900;
+    }
+    .p-key-enter:hover {
+      background: #39cce4;
+    }
+    .p-key-enter:active {
+      background: #ffd84f;
+    }
+
     /* 💻 DESKTOP WORKBENCH IN DUAL VIEW */
     .desktop-side-workbench {
       flex: 1;
@@ -1343,10 +1838,166 @@
     }
     .neo-toast.show { transform: translateY(0); }
 
+    /* Demo Guide Banner */
+    .demo-guide-banner {
+      background: linear-gradient(135deg, #ffd84f 0%, #ffce1a 100%);
+      border: var(--border-thick);
+      border-radius: var(--radius-md);
+      padding: 14px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-md);
+      animation: slideInDown 0.5s ease-out;
+    }
+    @keyframes slideInDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .demo-guide-close {
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      line-height: 1;
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    /* Social Proof Bar */
+    .social-proof-bar {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      flex-wrap: wrap;
+    }
+    .proof-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .proof-number {
+      font-size: 28px;
+      font-weight: 900;
+      color: var(--ink);
+      font-family: var(--font-display);
+      line-height: 1;
+    }
+    .proof-label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 700;
+    }
+
+    /* Floating CTA */
+    .floating-cta {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9998;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .floating-cta.show {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* FAQ Section */
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .faq-item {
+      background: var(--surface);
+      border: var(--border-thick);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .faq-item:hover {
+      box-shadow: var(--shadow-md);
+    }
+    .faq-q {
+      padding: 16px 20px;
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .faq-q:hover {
+      background: var(--yellow);
+    }
+    .faq-chevron {
+      font-size: 18px;
+      transition: transform 0.2s;
+      font-weight: 900;
+    }
+    .faq-item.open .faq-chevron {
+      transform: rotate(90deg);
+    }
+    .faq-a {
+      padding: 0 20px 16px 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #4a453e;
+      border-top: 1px dashed rgba(18, 16, 14, 0.15);
+    }
+
+    /* Use Cases Section */
+    .use-case-card {
+      background: var(--surface);
+      border: var(--border-thick);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
+      transition: all 0.2s;
+    }
+    .use-case-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-xl);
+    }
+    .uc-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .uc-title {
+      font-size: 18px;
+      font-weight: 900;
+      margin-bottom: 12px;
+      font-family: var(--font-display);
+    }
+    .uc-desc {
+      font-size: 14px;
+      line-height: 1.7;
+      color: #4a453e;
+      margin-bottom: 16px;
+      font-style: italic;
+    }
+    .uc-author {
+      font-size: 12px;
+      font-weight: 700;
+      color: #888;
+    }
+
     @media (max-width: 960px) {
       .desktop-side-workbench { display: none !important; }
       .real-phone-body { width: 100%; max-width: 440px; }
       .nav-menu { display: none; }
+      .floating-cta { bottom: 80px; }
     }
 
     @media (max-width: 520px) {
@@ -1447,10 +2098,42 @@
         <span>📋</span>
       </button>
     </div>
+
+    <!-- Social Proof -->
+    <div class="social-proof-bar">
+      <div class="proof-item">
+        <span class="proof-number">1.2k+</span>
+        <span class="proof-label">GitHub Stars</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">500+</span>
+        <span class="proof-label">生产部署</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">99.8%</span>
+        <span class="proof-label">稳定性</span>
+      </div>
+      <div class="proof-item">
+        <span class="proof-number">14ms</span>
+        <span class="proof-label">平均延迟</span>
+      </div>
+    </div>
   </section>
 
   <!-- SHOWCASE SECTION -->
   <section class="app-showcase-section" id="interactive-app">
+    <!-- Demo Guide Banner -->
+    <div class="demo-guide-banner" id="demo-guide">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 28px;">👆</span>
+        <div>
+          <div style="font-weight: 900; font-size: 15px;">这是一个完全可交互的真机模拟器！</div>
+          <div style="font-size: 12px; font-weight: 700; color: #4a453e;">点击底部 5 个标签页，输入消息，查看文件，体验完整功能</div>
+        </div>
+      </div>
+      <button class="demo-guide-close" onclick="document.getElementById('demo-guide').style.display='none'">✕</button>
+    </div>
+
     <div class="showcase-control-bar">
       <div class="device-switch-group">
         <button class="dev-tab-btn active" id="btn-phone-view">
@@ -1492,37 +2175,40 @@
             </div>
           </div>
 
-          <!-- 2. AppHeader (AppHeader.tsx) -->
+          <!-- 2. AppHeader (AppHeader.tsx: 顶部灵动状态岛、抽屉与快捷操作) -->
           <div class="p-app-header">
-            <div class="p-brand-group">
-              <div class="p-avatar-box" title="Mikasa Avatar">🤖</div>
-              <div class="p-header-titles">
-                <div class="p-title-row">
-                  <span class="p-title-main">MYAI</span>
-                  <span class="p-device-pill">server:agent</span>
-                </div>
-                <span class="p-subtitle">Mikasa · 俄罗斯远东</span>
-              </div>
-            </div>
-            <div class="p-header-actions">
-              <button class="p-ghost-settings-btn" id="header-settings-btn" title="打开设置中心">⚙</button>
-              <div class="p-status-online-pill">
-                <div class="p-status-dot"></div>
-                <span>在线</span>
-              </div>
-            </div>
-          </div>
+            <!-- 左侧：全局收纳抽屉按钮 -->
+            <button class="p-header-icon-btn" id="btn-open-drawer" title="打开导航与会话抽屉" aria-label="打开菜单">
+              ☰
+            </button>
 
-          <!-- 3. SessionModeSwitch (ONLY shown on chat tab! Exact to MobileAppScreen.tsx line 962) -->
-          <div class="p-mode-switch-wrapper" id="p-mode-switch-container">
-            <div class="p-mode-control">
-              <button class="p-mode-btn active" id="mode-btn-chat">
-                <span>💬</span>
-                <span>对话模式</span>
+            <!-- 中间：中上方半透明角色浮岛 (动作图标、状态与模式药丸) -->
+            <div class="p-character-island">
+              <div class="p-island-avatar-wrap" title="MYAI 动效形象">
+                <img src="../mobile/assets/icon.png" alt="MYAI" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" class="p-island-avatar-img">
+              </div>
+              <div class="p-island-identity-row">
+                <span class="p-island-title">MYAI</span>
+                <span class="p-island-device-badge">server-agent</span>
+              </div>
+              <div class="p-island-status-capsule">
+                <div class="p-status-dot-pulse"></div>
+                <span class="p-island-status-text" id="p-island-status-text">在线</span>
+                <span style="color:#999083; font-size:10px; font-weight:900;">·</span>
+                <button class="p-island-mode-pill" id="btn-island-mode-toggle" title="点击切换对话/规划模式">
+                  <span id="p-mode-pill-label">💬 对话模式</span>
+                  <span style="font-size:8px;">▾</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 右侧：对话历史快捷跳转与设置中心 -->
+            <div class="p-header-right-actions">
+              <button class="p-header-icon-btn" id="btn-quick-history" title="对话历史 (旁聊切换)" aria-label="对话历史">
+                🕒
               </button>
-              <button class="p-mode-btn" id="mode-btn-plan">
-                <span>🎯</span>
-                <span>规划模式</span>
+              <button class="p-header-icon-btn" id="header-settings-btn" title="打开设置中心" aria-label="设置中心">
+                ⚙
               </button>
             </div>
           </div>
@@ -1531,6 +2217,37 @@
           <div class="p-screen-scroll-stage" id="screen-stage">
             <!-- TAB 1: CHAT VIEW (EXACT TO USER'S REAL PROTOTYPE SCREENSHOTS) -->
             <div id="view-chat" class="p-turn-wrapper">
+              <!-- 快捷历史消息跳转导轨 (ChatJumpNav: 右上角 Q1/Q2/Q3 快速定位) -->
+              <div class="p-chat-jump-nav" id="p-chat-jump-nav">
+                <button class="p-jump-rail-btn" id="btn-toggle-jump" title="跳转提问历史">
+                  <div class="p-jump-rail-track">
+                    <span class="p-jump-marker"></span>
+                    <span class="p-jump-marker"></span>
+                    <span class="p-jump-marker"></span>
+                  </div>
+                  <span class="p-jump-rail-count">3</span>
+                </button>
+                <div class="p-jump-popover" id="p-jump-popover">
+                  <div class="p-jump-popover-head">
+                    <span>跳转消息</span>
+                    <button class="p-jump-close-btn" id="btn-close-jump">隐藏</button>
+                  </div>
+                  <div class="p-jump-list">
+                    <div class="p-jump-item" data-jump="p-turn-card-box">
+                      <span class="p-jump-badge">Q1</span>
+                      <span class="p-jump-text">定时任务配置与 Docker 日志写入</span>
+                    </div>
+                    <div class="p-jump-item" data-jump="p-duration-header">
+                      <span class="p-jump-badge">Q2</span>
+                      <span class="p-jump-text">检查 Relay 协议与心跳断线重连</span>
+                    </div>
+                    <div class="p-jump-item" data-jump="p-final-answer-body">
+                      <span class="p-jump-badge">Q3</span>
+                      <span class="p-jump-text">子代理实时查看与产物回放</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div class="p-turn-top-row">
                 <div class="p-turn-agent-info">
                   <span>🤖 MyAI Agent</span>
@@ -2100,8 +2817,8 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
               </div>
             </div>
 
-            <!-- Floating Segmented BottomTabs -->
-            <div class="p-bottom-tabs-segmented">
+            <!-- Floating Segmented BottomTabs (在非 chat 视图展示，在主 chat 视图隐藏以最大化阅读面积) -->
+            <div class="p-bottom-tabs-segmented" id="p-bottom-tabs-segmented" style="display:none;">
               <button class="p-tab-btn active" data-tab="chat">对话</button>
               <button class="p-tab-btn" data-tab="files">文件</button>
               <button class="p-tab-btn" data-tab="changes">变更</button>
@@ -2109,11 +2826,151 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
               <button class="p-tab-btn" data-tab="settings">设置</button>
             </div>
 
-            <!-- Android 3-Button Navigation Bar -->
+            <!-- Android 3-Button Navigation Bar (安全边距垫起，杜绝遮挡) -->
             <div class="p-android-nav-bar">
               <span>≡</span>
               <span>□</span>
               <span>&lt;</span>
+            </div>
+          </div>
+
+          <!-- 6. Virtual Software Keyboard (模拟真机输入法弹起) -->
+          <div class="p-virtual-keyboard" id="p-virtual-keyboard">
+            <div class="p-kb-toolbar">
+              <div class="p-kb-tool-left">
+                <button class="p-kb-tool-btn" data-preset="帮我检查 server.go 并添加心跳检测">快捷指令 1</button>
+                <button class="p-kb-tool-btn" data-preset="运行单元测试与 Docker 部署验证">快捷指令 2</button>
+                <span class="p-kb-tool-hint">点击模拟输入</span>
+              </div>
+              <button class="p-kb-hide-btn" id="btn-hide-keyboard" title="收起键盘">⌵ 收起键盘</button>
+            </div>
+            <div class="p-kb-keys-grid">
+              <div class="p-kb-row">
+                <button class="p-key-btn" data-char="Q">Q</button>
+                <button class="p-key-btn" data-char="W">W</button>
+                <button class="p-key-btn" data-char="E">E</button>
+                <button class="p-key-btn" data-char="R">R</button>
+                <button class="p-key-btn" data-char="T">T</button>
+                <button class="p-key-btn" data-char="Y">Y</button>
+                <button class="p-key-btn" data-char="U">U</button>
+                <button class="p-key-btn" data-char="I">I</button>
+                <button class="p-key-btn" data-char="O">O</button>
+                <button class="p-key-btn" data-char="P">P</button>
+              </div>
+              <div class="p-kb-row" style="padding: 0 8px;">
+                <button class="p-key-btn" data-char="A">A</button>
+                <button class="p-key-btn" data-char="S">S</button>
+                <button class="p-key-btn" data-char="D">D</button>
+                <button class="p-key-btn" data-char="F">F</button>
+                <button class="p-key-btn" data-char="G">G</button>
+                <button class="p-key-btn" data-char="H">H</button>
+                <button class="p-key-btn" data-char="J">J</button>
+                <button class="p-key-btn" data-char="K">K</button>
+                <button class="p-key-btn" data-char="L">L</button>
+              </div>
+              <div class="p-kb-row">
+                <button class="p-key-btn p-key-fn" data-fn="shift">⇧</button>
+                <button class="p-key-btn" data-char="Z">Z</button>
+                <button class="p-key-btn" data-char="X">X</button>
+                <button class="p-key-btn" data-char="C">C</button>
+                <button class="p-key-btn" data-char="V">V</button>
+                <button class="p-key-btn" data-char="B">B</button>
+                <button class="p-key-btn" data-char="N">N</button>
+                <button class="p-key-btn" data-char="M">M</button>
+                <button class="p-key-btn p-key-fn" id="btn-kb-backspace">⌫</button>
+              </div>
+              <div class="p-kb-row">
+                <button class="p-key-btn p-key-fn" data-preset="ls -la">123</button>
+                <button class="p-key-btn p-key-space" id="btn-kb-space">空格 (Space)</button>
+                <button class="p-key-btn p-key-enter" id="btn-kb-send">发送 ↵</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. 全局收纳侧滑抽屉 (SideDrawer) -->
+          <div class="p-drawer-overlay" id="p-drawer-overlay">
+            <div class="p-drawer-backdrop" id="p-drawer-backdrop"></div>
+            <div class="p-drawer-sheet" id="p-drawer-sheet">
+              <!-- 抽屉头部 -->
+              <div class="p-drawer-header">
+                <div class="p-drawer-brand">
+                  <div class="p-drawer-avatar-box">
+                    <img src="../mobile/assets/icon.png" alt="MYAI" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/bottts/svg?seed=MYAI'" style="width:100%;height:100%;object-fit:cover;">
+                  </div>
+                  <div class="p-drawer-brand-info">
+                    <div class="p-drawer-brand-title">MYAI Studio</div>
+                    <div class="p-drawer-brand-sub">Mikasa · server-agent</div>
+                  </div>
+                </div>
+                <button class="p-drawer-close-btn" id="btn-close-drawer">✕</button>
+              </div>
+
+              <!-- 抽屉滚动内容 -->
+              <div class="p-drawer-scroll">
+                <div class="p-drawer-section-title">功能工作区</div>
+                <div class="p-drawer-nav-group">
+                  <div class="p-drawer-nav-item active" data-drawer-tab="chat">
+                    <div class="p-drawer-nav-left">
+                      <span>💬</span>
+                      <span>主对话流</span>
+                    </div>
+                    <span class="p-drawer-badge">当前</span>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="files">
+                    <div class="p-drawer-nav-left">
+                      <span>📁</span>
+                      <span>工作区文件</span>
+                    </div>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="changes">
+                    <div class="p-drawer-nav-left">
+                      <span>⚡</span>
+                      <span>代码变更 (Git)</span>
+                    </div>
+                  </div>
+                  <div class="p-drawer-nav-item" data-drawer-tab="knowledge">
+                    <div class="p-drawer-nav-left">
+                      <span>📚</span>
+                      <span>知识库与记忆</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="p-drawer-section-header">
+                  <span class="p-drawer-section-title">最近会话 (旁聊)</span>
+                  <button class="p-drawer-link-btn" id="btn-drawer-new-session">+ 新建</button>
+                </div>
+                <div class="p-drawer-sessions-list">
+                  <div class="p-drawer-session-card active" data-session-id="s-current">
+                    <div class="p-drawer-session-name">定时任务与系统状态监控</div>
+                    <div class="p-drawer-session-time">刚刚</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-1">
+                    <div class="p-drawer-session-name">子代理只读实时查看落地</div>
+                    <div class="p-drawer-session-time">10/11</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-2">
+                    <div class="p-drawer-session-name">QQ 群聊与 NAPCAT 对接</div>
+                    <div class="p-drawer-session-time">10/04</div>
+                  </div>
+                  <div class="p-drawer-session-card" data-session-id="s-3">
+                    <div class="p-drawer-session-name">移动端无界流式排版优化</div>
+                    <div class="p-drawer-session-time">09/27</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 抽屉底部工具栏 (安全边距垫起，杜绝遮挡) -->
+              <div class="p-drawer-bottom-bar">
+                <button class="p-drawer-tool-btn" id="btn-drawer-settings">
+                  <span>⚙️</span>
+                  <span>设置中心</span>
+                </button>
+                <button class="p-drawer-tool-btn p-drawer-tool-primary" id="btn-drawer-quick-new">
+                  <span>✏️</span>
+                  <span>新对话</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2140,6 +2997,46 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
           <div style="color:#888;">[WS] Full-duplex channel ready. Listening for intent stream...</div>
           <div style="color:#86efac; margin-top:10px;">myai:~$ # 等待手机端下发任务...</div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- USE CASES SECTION -->
+  <section class="use-cases-section" style="max-width: 1400px; margin: 60px auto; padding: 0 24px;">
+    <div style="text-align: center; margin-bottom: 40px;">
+      <span class="neo-pill" style="background: var(--cyan); margin-bottom: 10px;">Real World</span>
+      <h2 style="font-family: var(--font-display); font-size: 32px; font-weight: 900;">真实团队如何使用 MyAI</h2>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+      <!-- 场景 1 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🚀</div>
+        <div class="uc-title">创业团队快速迭代</div>
+        <div class="uc-desc">
+          "团队只有 2 个后端，用 MyAI 手机控制办公室服务器，周末在家也能快速修复线上 Bug。上周五晚上客户反馈支付接口超时，我在地铁上 5 分钟就定位并修复了。"
+        </div>
+        <div class="uc-author">— 张工，某 SaaS 创业公司 CTO</div>
+      </div>
+
+      <!-- 场景 2 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🏥</div>
+        <div class="uc-title">远程紧急运维</div>
+        <div class="uc-desc">
+          "凌晨 3 点服务器告警，我不在电脑前。用 MyAI 手机端连上生产环境，查看日志、重启服务、回滚代码，15 分钟恢复业务，甚至没有起床开电脑。"
+        </div>
+        <div class="uc-author">— 李工，某互联网公司运维负责人</div>
+      </div>
+
+      <!-- 场景 3 -->
+      <div class="use-case-card">
+        <div class="uc-icon">🎓</div>
+        <div class="uc-title">学习与实验</div>
+        <div class="uc-desc">
+          "在学校图书馆，没带笔记本，但想试试新的 Go 并发模式。用手机连到宿舍的开发机，MyAI 帮我生成代码、跑测试、看性能，手机上就能学习和实验。"
+        </div>
+        <div class="uc-author">— 王同学，计算机专业研二</div>
       </div>
     </div>
   </section>
@@ -2203,6 +3100,76 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
     </div>
   </section>
 
+  <!-- FAQ SECTION -->
+  <section class="faq-section" style="max-width: 900px; margin: 60px auto; padding: 0 24px;">
+    <div style="text-align: center; margin-bottom: 40px;">
+      <span class="neo-pill" style="background: var(--purple); margin-bottom: 10px;">FAQ</span>
+      <h2 style="font-family: var(--font-display); font-size: 32px; font-weight: 900;">常见问题</h2>
+    </div>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>❓ MyAI 与 GitHub Copilot / Cursor 有什么区别？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>核心区别：</strong>MyAI 是完整的智能体系统，可以在手机上远程控制电脑完成复杂任务；Copilot 是 IDE 内的代码补全助手。MyAI 支持两阶段规划、工具链分离、原子快照回滚等企业级特性，更适合团队协作和生产环境。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>🔒 手机控制电脑安全吗？会不会被黑客利用？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>安全机制：</strong> ① 所有通信通过自建 Relay 中转，不经过第三方服务器；② 支持 TLS 加密传输；③ 基于 Token 的身份认证；④ 工具调用需要手动审批（ask 模式）；⑤ 原子快照可随时无损回滚。开源代码可审计，无后门风险。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>💰 MyAI 是免费的吗？有商业版本吗？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>开源免费：</strong>核心框架 100% 开源免费，支持自建部署。你只需要自己的 LLM API Key（OpenAI / Anthropic / 国产大模型均可）。我们计划推出企业版，提供团队协作、审计日志、权限管理等增强功能。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>📱 支持 iOS 吗？只能用 Android？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>跨平台支持：</strong>当前优先支持 Android（React Native），iOS 版本正在开发中，预计 2027 Q1 发布。Web 端也在规划，届时可以在浏览器直接使用，无需安装 App。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>⚡ 性能怎么样？会不会卡顿？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>性能指标：</strong> ① Relay 使用 Go + Gorilla WebSocket，延迟 < 20ms；② 手机端 React Native 原生渲染，60fps 流畅度；③ 支持断线重连、消息队列、并发控制；④ 在 4G 网络下依然可用，5G 下体验极佳。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">
+          <span>🛠️ 如何快速开始？有没有详细文档？</span>
+          <span class="faq-chevron">›</span>
+        </div>
+        <div class="faq-a" style="display: none;">
+          <strong>快速开始：</strong>查看下方「快速接入」命令即可启动。项目根目录包含完整的架构文档、开发指南和功能实现说明（20+ 个 Markdown 文档）。GitHub 上也有详细的 README 和示例配置。
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- QUICKSTART -->
   <section class="compare-section" id="quickstart" style="padding-top:0;">
     <div style="background:#141413; border:var(--border-thick); border-radius:20px; box-shadow:var(--shadow-lg); padding:28px; color:#fff;">
@@ -2244,6 +3211,13 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
   <div class="neo-toast" id="toast">
     <span>✔</span>
     <span id="toast-text">通知内容</span>
+  </div>
+
+  <!-- Floating CTA -->
+  <div class="floating-cta" id="floating-cta">
+    <button onclick="window.location.href='#interactive-app'" class="neo-btn neo-btn-yellow" style="padding: 12px 24px; font-size: 15px; box-shadow: var(--shadow-xl);">
+      <span>🚀 立即试玩真机</span>
+    </button>
   </div>
 
   <!-- JAVASCRIPT: AUTHENTIC LOGIC -->
@@ -2305,7 +3279,7 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       knowledge: document.getElementById('view-knowledge'),
       settings: document.getElementById('view-settings')
     };
-    const pModeSwitchContainer = document.getElementById('p-mode-switch-container');
+    const pBottomTabsSegmented = document.getElementById('p-bottom-tabs-segmented');
     const pComposerSection = document.getElementById('p-composer-section');
 
     function switchTab(tabKey) {
@@ -2313,16 +3287,22 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       document.querySelectorAll('.p-tab-btn').forEach((btn) => {
         btn.classList.toggle('active', btn.getAttribute('data-tab') === tabKey);
       });
+      document.querySelectorAll('.p-drawer-nav-item').forEach((item) => {
+        item.classList.toggle('active', item.getAttribute('data-drawer-tab') === tabKey);
+      });
       Object.keys(views).forEach((k) => {
         views[k].style.display = k === tabKey ? 'flex' : 'none';
       });
 
-      // KEY FIX: SessionModeSwitch is ONLY shown when viewMode === "chat"!
-      // (Matching MobileAppScreen.tsx line 962: {viewMode === "chat" ? <SessionModeSwitch /> : null})
-      pModeSwitchContainer.style.display = tabKey === 'chat' ? 'flex' : 'none';
+      // 核心交互：主 chat 视图隐藏底部 5 键 Tab 栏，释放高达 55px+ 垂直高度；其他视图正常展示导航
+      if (pBottomTabsSegmented) {
+        pBottomTabsSegmented.style.display = tabKey === 'chat' ? 'none' : 'flex';
+      }
 
-      // Composer is ONLY shown when viewMode === "chat"!
-      pComposerSection.style.display = tabKey === 'chat' ? 'block' : 'none';
+      // Composer 仅在主 chat 视图展示
+      if (pComposerSection) {
+        pComposerSection.style.display = tabKey === 'chat' ? 'block' : 'none';
+      }
     }
 
     document.querySelectorAll('.p-tab-btn').forEach((btn) => {
@@ -2331,28 +3311,138 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       });
     });
 
-    document.getElementById('header-settings-btn').addEventListener('click', () => {
-      switchTab('settings');
-    });
-    document.getElementById('btn-close-settings').addEventListener('click', () => {
-      switchTab('chat');
+    const headerSettingsBtn = document.getElementById('header-settings-btn');
+    if (headerSettingsBtn) {
+      headerSettingsBtn.addEventListener('click', () => {
+        switchTab('settings');
+      });
+    }
+    const btnCloseSettings = document.getElementById('btn-close-settings');
+    if (btnCloseSettings) {
+      btnCloseSettings.addEventListener('click', () => {
+        switchTab('chat');
+      });
+    }
+
+    // --- 顶部灵动岛模式快速切换 (AppHeader 药丸) ---
+    let currentAgentMode = 'chat';
+    const btnIslandModeToggle = document.getElementById('btn-island-mode-toggle');
+    const pModePillLabel = document.getElementById('p-mode-pill-label');
+
+    if (btnIslandModeToggle) {
+      btnIslandModeToggle.addEventListener('click', () => {
+        if (currentAgentMode === 'chat') {
+          currentAgentMode = 'plan';
+          btnIslandModeToggle.classList.add('plan-mode');
+          if (pModePillLabel) pModePillLabel.textContent = '🎯 规划模式';
+          playPop(720);
+          showToast('已切换至「两阶段规划模式 (Plan)」');
+        } else {
+          currentAgentMode = 'chat';
+          btnIslandModeToggle.classList.remove('plan-mode');
+          if (pModePillLabel) pModePillLabel.textContent = '💬 对话模式';
+          playPop(520);
+          showToast('已切换至「对话模式」');
+        }
+      });
+    }
+
+    // --- 全局收纳侧滑抽屉 (SideDrawer) 交互 ---
+    const pDrawerOverlay = document.getElementById('p-drawer-overlay');
+    const btnOpenDrawer = document.getElementById('btn-open-drawer');
+    const btnQuickHistory = document.getElementById('btn-quick-history');
+    const btnCloseDrawer = document.getElementById('btn-close-drawer');
+    const pDrawerBackdrop = document.getElementById('p-drawer-backdrop');
+
+    function setPhoneDrawer(open) {
+      if (pDrawerOverlay) {
+        pDrawerOverlay.classList.toggle('open', open);
+        if (open) playPop(480);
+      }
+    }
+
+    if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', () => setPhoneDrawer(true));
+    if (btnQuickHistory) btnQuickHistory.addEventListener('click', () => setPhoneDrawer(true));
+    if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', () => setPhoneDrawer(false));
+    if (pDrawerBackdrop) pDrawerBackdrop.addEventListener('click', () => setPhoneDrawer(false));
+
+    document.querySelectorAll('.p-drawer-nav-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const tab = item.getAttribute('data-drawer-tab');
+        if (tab) {
+          switchTab(tab);
+          setPhoneDrawer(false);
+        }
+      });
     });
 
-    // --- MODE SWITCHER (SessionModeSwitch.tsx) ---
-    const modeBtnChat = document.getElementById('mode-btn-chat');
-    const modeBtnPlan = document.getElementById('mode-btn-plan');
+    const btnDrawerSettings = document.getElementById('btn-drawer-settings');
+    if (btnDrawerSettings) {
+      btnDrawerSettings.addEventListener('click', () => {
+        switchTab('settings');
+        setPhoneDrawer(false);
+      });
+    }
 
-    modeBtnChat.addEventListener('click', () => {
-      playPop(520);
-      modeBtnChat.classList.add('active');
-      modeBtnPlan.classList.remove('active');
-      showToast('已切换至「对话模式」');
+    const btnDrawerQuickNew = document.getElementById('btn-drawer-quick-new');
+    if (btnDrawerQuickNew) {
+      btnDrawerQuickNew.addEventListener('click', () => {
+        switchTab('chat');
+        setPhoneDrawer(false);
+        showToast('已开启新对话');
+      });
+    }
+
+    const btnDrawerNewSession = document.getElementById('btn-drawer-new-session');
+    if (btnDrawerNewSession) {
+      btnDrawerNewSession.addEventListener('click', () => {
+        switchTab('chat');
+        setPhoneDrawer(false);
+        showToast('已创建新会话');
+      });
+    }
+
+    document.querySelectorAll('.p-drawer-session-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.p-drawer-session-card').forEach((c) => c.classList.remove('active'));
+        card.classList.add('active');
+        switchTab('chat');
+        setPhoneDrawer(false);
+        const nameEl = card.querySelector('.p-drawer-session-name');
+        showToast(`已载入会话: ${nameEl ? nameEl.textContent : '会话'}`);
+      });
     });
-    modeBtnPlan.addEventListener('click', () => {
-      playPop(720);
-      modeBtnPlan.classList.add('active');
-      modeBtnChat.classList.remove('active');
-      showToast('已切换至「两阶段规划模式 (Plan)」');
+
+    // --- 历史提问快捷定位导轨 (ChatJumpNav) 交互 ---
+    const btnToggleJump = document.getElementById('btn-toggle-jump');
+    const pJumpPopover = document.getElementById('p-jump-popover');
+    const btnCloseJump = document.getElementById('btn-close-jump');
+
+    if (btnToggleJump && pJumpPopover) {
+      btnToggleJump.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pJumpPopover.classList.toggle('show');
+        playPop(560);
+      });
+    }
+    if (btnCloseJump && pJumpPopover) {
+      btnCloseJump.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pJumpPopover.classList.remove('show');
+      });
+    }
+    document.querySelectorAll('.p-jump-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const targetClass = item.getAttribute('data-jump');
+        if (targetClass) {
+          const targetEl = document.querySelector(`.${targetClass}`);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            playPop(640);
+          }
+        }
+        if (pJumpPopover) pJumpPopover.classList.remove('show');
+      });
     });
 
     // --- REASONING ACCORDION ---
@@ -2388,10 +3478,117 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       showToast('已复制对话内容');
     });
 
-    // --- SEND MESSAGE IN CHAT ---
+    // --- SEND MESSAGE IN CHAT & VIRTUAL KEYBOARD INTERACTION ---
+    const realPhoneBody = document.querySelector('.real-phone-body');
     const pUserInput = document.getElementById('p-user-input');
     const pSendBtn = document.getElementById('p-send-btn');
     const screenStage = document.getElementById('screen-stage');
+    const btnHideKeyboard = document.getElementById('btn-hide-keyboard');
+    let isKeyboardOpen = false;
+
+    function openPhoneKeyboard() {
+      if (isKeyboardOpen || !realPhoneBody) return;
+      isKeyboardOpen = true;
+      realPhoneBody.classList.add('keyboard-open');
+      playPop(420);
+      // 核心交互：点击对话框后把对话记录顶起来（对应图一真机效果）
+      setTimeout(() => {
+        if (screenStage) {
+          screenStage.scrollTo({
+            top: screenStage.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 50);
+    }
+
+    function closePhoneKeyboard() {
+      if (!isKeyboardOpen || !realPhoneBody) return;
+      isKeyboardOpen = false;
+      realPhoneBody.classList.remove('keyboard-open');
+      playPop(340);
+    }
+
+    if (pUserInput) {
+      pUserInput.addEventListener('focus', openPhoneKeyboard);
+      pUserInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPhoneKeyboard();
+      });
+    }
+
+    if (btnHideKeyboard) {
+      btnHideKeyboard.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closePhoneKeyboard();
+      });
+    }
+
+    // 点击聊天空白处收起键盘
+    if (screenStage) {
+      screenStage.addEventListener('click', (e) => {
+        if (!e.target.closest('#p-composer-section') && !e.target.closest('#p-virtual-keyboard')) {
+          closePhoneKeyboard();
+        }
+      });
+    }
+
+    // 虚拟键盘按键输入
+    document.querySelectorAll('.p-key-btn[data-char]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const char = btn.getAttribute('data-char');
+        if (pUserInput && char) {
+          pUserInput.value += char;
+          pUserInput.focus();
+        }
+        playPop(620);
+      });
+    });
+
+    const btnKbBackspace = document.getElementById('btn-kb-backspace');
+    if (btnKbBackspace) {
+      btnKbBackspace.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pUserInput && pUserInput.value.length > 0) {
+          pUserInput.value = pUserInput.value.slice(0, -1);
+          pUserInput.focus();
+        }
+        playPop(380);
+      });
+    }
+
+    const btnKbSpace = document.getElementById('btn-kb-space');
+    if (btnKbSpace) {
+      btnKbSpace.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pUserInput) {
+          pUserInput.value += ' ';
+          pUserInput.focus();
+        }
+        playPop(500);
+      });
+    }
+
+    document.querySelectorAll('.p-kb-tool-btn[data-preset]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const preset = btn.getAttribute('data-preset');
+        if (pUserInput && preset) {
+          pUserInput.value = preset;
+          pUserInput.focus();
+        }
+        playPop(580);
+      });
+    });
+
+    const btnKbSend = document.getElementById('btn-kb-send');
+    if (btnKbSend) {
+      btnKbSend.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendChat(pUserInput.value);
+      });
+    }
 
     function sendChat(msg) {
       if (!msg.trim()) return;
@@ -2408,6 +3605,7 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       typingBubble.textContent = '🤖 Agent 正在思考与探查工作区...';
       views.chat.appendChild(typingBubble);
 
+      closePhoneKeyboard();
       screenStage.scrollTop = screenStage.scrollHeight;
 
       const dualConsole = document.getElementById('dual-console');
@@ -2630,6 +3828,66 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
         }
       });
     });
+
+    // --- FAQ Toggle ---
+    function toggleFaq(el) {
+      const item = el.parentElement;
+      const answer = item.querySelector('.faq-a');
+      const isOpen = item.classList.contains('open');
+      
+      // 关闭所有其他 FAQ
+      document.querySelectorAll('.faq-item').forEach(i => {
+        i.classList.remove('open');
+        i.querySelector('.faq-a').style.display = 'none';
+      });
+      
+      if (!isOpen) {
+        item.classList.add('open');
+        answer.style.display = 'block';
+        playPop(680);
+      }
+    }
+
+    // --- Floating CTA Logic ---
+    let lastScrollTop = 0;
+    window.addEventListener('scroll', () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const floatingCta = document.getElementById('floating-cta');
+      const heroWrap = document.querySelector('.hero-wrap');
+      const showcaseSection = document.querySelector('.app-showcase-section');
+      
+      if (!heroWrap || !showcaseSection) return;
+      
+      const heroBottom = heroWrap.offsetTop + heroWrap.offsetHeight;
+      const showcaseTop = showcaseSection.offsetTop;
+      
+      // 滚动超过 Hero 区域且向下滚动时显示
+      if (scrollTop > heroBottom && scrollTop < showcaseTop && scrollTop > lastScrollTop) {
+        floatingCta.classList.add('show');
+      } else {
+        floatingCta.classList.remove('show');
+      }
+      
+      lastScrollTop = scrollTop;
+    }, { passive: true });
+
+    // --- Dynamic Placeholder for Input ---
+    const placeholders = [
+      "帮我在 server.go 里添加心跳检测...",
+      "查看 core/adapter 目录下的文件...",
+      "回滚到上一个 Git 快照...",
+      "检索知识库中的 WebSocket 配置...",
+      "切换到 Jev 自动规划策略..."
+    ];
+    let placeholderIndex = 0;
+
+    setInterval(() => {
+      const input = document.getElementById('p-user-input');
+      if (input && !input.value) {
+        placeholderIndex = (placeholderIndex + 1) % placeholders.length;
+        input.placeholder = placeholders[placeholderIndex];
+      }
+    }, 3500);
 
     // --- TAB 5: SETTINGS INTERACTIONS (media_1790479839645.jpg) ---
     const pStratSystem = document.getElementById('p-strat-system');

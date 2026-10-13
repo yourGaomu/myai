@@ -1531,6 +1531,145 @@
       padding-top: 2px;
     }
 
+    /* 6. Virtual Software Keyboard Simulation (模拟真机输入法弹起与对话记录顶起) */
+    .p-virtual-keyboard {
+      background: #e2dfd7;
+      border-top: 2px solid var(--ink);
+      height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: height 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .real-phone-body.keyboard-open .p-virtual-keyboard {
+      height: 226px;
+      opacity: 1;
+    }
+    .real-phone-body.keyboard-open .p-android-nav-bar {
+      display: none;
+    }
+    .real-phone-body.keyboard-open .p-bottom-dock {
+      padding-bottom: 4px;
+      background: #e2dfd7;
+      transition: background 0.2s ease, padding 0.2s ease;
+    }
+
+    .p-kb-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: #d8d4cb;
+      border-bottom: 1.5px solid rgba(18, 16, 14, 0.15);
+    }
+    .p-kb-tool-left {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .p-kb-tool-btn {
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 1px 0 var(--ink);
+      transition: transform 0.08s;
+    }
+    .p-kb-tool-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+    .p-kb-tool-hint {
+      font-size: 9.5px;
+      color: #6c665f;
+      margin-left: 4px;
+      font-weight: 700;
+    }
+    .p-kb-hide-btn {
+      background: #ffd84f;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 10px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 1px 0 var(--ink);
+      transition: transform 0.08s;
+    }
+    .p-kb-hide-btn:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+
+    .p-kb-keys-grid {
+      flex: 1;
+      padding: 6px 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      justify-content: space-around;
+    }
+    .p-kb-row {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+    }
+    .p-key-btn {
+      flex: 1;
+      min-width: 0;
+      max-width: 32px;
+      height: 35px;
+      background: #fffdf7;
+      border: 1.5px solid var(--ink);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      font-family: var(--font-display);
+      color: var(--ink);
+      cursor: pointer;
+      box-shadow: 0 1.5px 0 var(--ink);
+      transition: transform 0.06s, background 0.08s;
+    }
+    .p-key-btn:hover {
+      background: #fdf6e2;
+    }
+    .p-key-btn:active {
+      transform: translateY(1.5px);
+      box-shadow: none;
+      background: #ffd84f;
+    }
+    .p-key-fn {
+      max-width: 44px;
+      background: #d4cfc4;
+      font-size: 11px;
+    }
+    .p-key-space {
+      max-width: 170px;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    .p-key-enter {
+      max-width: 68px;
+      background: #4fd7ee;
+      font-size: 11.5px;
+      font-weight: 900;
+    }
+    .p-key-enter:hover {
+      background: #39cce4;
+    }
+    .p-key-enter:active {
+      background: #ffd84f;
+    }
+
     /* 💻 DESKTOP WORKBENCH IN DUAL VIEW */
     .desktop-side-workbench {
       flex: 1;
@@ -2695,7 +2834,60 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
             </div>
           </div>
 
-          <!-- 6. 全局收纳侧滑抽屉 (SideDrawer) -->
+          <!-- 6. Virtual Software Keyboard (模拟真机输入法弹起) -->
+          <div class="p-virtual-keyboard" id="p-virtual-keyboard">
+            <div class="p-kb-toolbar">
+              <div class="p-kb-tool-left">
+                <button class="p-kb-tool-btn" data-preset="帮我检查 server.go 并添加心跳检测">快捷指令 1</button>
+                <button class="p-kb-tool-btn" data-preset="运行单元测试与 Docker 部署验证">快捷指令 2</button>
+                <span class="p-kb-tool-hint">点击模拟输入</span>
+              </div>
+              <button class="p-kb-hide-btn" id="btn-hide-keyboard" title="收起键盘">⌵ 收起键盘</button>
+            </div>
+            <div class="p-kb-keys-grid">
+              <div class="p-kb-row">
+                <button class="p-key-btn" data-char="Q">Q</button>
+                <button class="p-key-btn" data-char="W">W</button>
+                <button class="p-key-btn" data-char="E">E</button>
+                <button class="p-key-btn" data-char="R">R</button>
+                <button class="p-key-btn" data-char="T">T</button>
+                <button class="p-key-btn" data-char="Y">Y</button>
+                <button class="p-key-btn" data-char="U">U</button>
+                <button class="p-key-btn" data-char="I">I</button>
+                <button class="p-key-btn" data-char="O">O</button>
+                <button class="p-key-btn" data-char="P">P</button>
+              </div>
+              <div class="p-kb-row" style="padding: 0 8px;">
+                <button class="p-key-btn" data-char="A">A</button>
+                <button class="p-key-btn" data-char="S">S</button>
+                <button class="p-key-btn" data-char="D">D</button>
+                <button class="p-key-btn" data-char="F">F</button>
+                <button class="p-key-btn" data-char="G">G</button>
+                <button class="p-key-btn" data-char="H">H</button>
+                <button class="p-key-btn" data-char="J">J</button>
+                <button class="p-key-btn" data-char="K">K</button>
+                <button class="p-key-btn" data-char="L">L</button>
+              </div>
+              <div class="p-kb-row">
+                <button class="p-key-btn p-key-fn" data-fn="shift">⇧</button>
+                <button class="p-key-btn" data-char="Z">Z</button>
+                <button class="p-key-btn" data-char="X">X</button>
+                <button class="p-key-btn" data-char="C">C</button>
+                <button class="p-key-btn" data-char="V">V</button>
+                <button class="p-key-btn" data-char="B">B</button>
+                <button class="p-key-btn" data-char="N">N</button>
+                <button class="p-key-btn" data-char="M">M</button>
+                <button class="p-key-btn p-key-fn" id="btn-kb-backspace">⌫</button>
+              </div>
+              <div class="p-kb-row">
+                <button class="p-key-btn p-key-fn" data-preset="ls -la">123</button>
+                <button class="p-key-btn p-key-space" id="btn-kb-space">空格 (Space)</button>
+                <button class="p-key-btn p-key-enter" id="btn-kb-send">发送 ↵</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. 全局收纳侧滑抽屉 (SideDrawer) -->
           <div class="p-drawer-overlay" id="p-drawer-overlay">
             <div class="p-drawer-backdrop" id="p-drawer-backdrop"></div>
             <div class="p-drawer-sheet" id="p-drawer-sheet">
@@ -3286,10 +3478,117 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       showToast('已复制对话内容');
     });
 
-    // --- SEND MESSAGE IN CHAT ---
+    // --- SEND MESSAGE IN CHAT & VIRTUAL KEYBOARD INTERACTION ---
+    const realPhoneBody = document.querySelector('.real-phone-body');
     const pUserInput = document.getElementById('p-user-input');
     const pSendBtn = document.getElementById('p-send-btn');
     const screenStage = document.getElementById('screen-stage');
+    const btnHideKeyboard = document.getElementById('btn-hide-keyboard');
+    let isKeyboardOpen = false;
+
+    function openPhoneKeyboard() {
+      if (isKeyboardOpen || !realPhoneBody) return;
+      isKeyboardOpen = true;
+      realPhoneBody.classList.add('keyboard-open');
+      playPop(420);
+      // 核心交互：点击对话框后把对话记录顶起来（对应图一真机效果）
+      setTimeout(() => {
+        if (screenStage) {
+          screenStage.scrollTo({
+            top: screenStage.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 50);
+    }
+
+    function closePhoneKeyboard() {
+      if (!isKeyboardOpen || !realPhoneBody) return;
+      isKeyboardOpen = false;
+      realPhoneBody.classList.remove('keyboard-open');
+      playPop(340);
+    }
+
+    if (pUserInput) {
+      pUserInput.addEventListener('focus', openPhoneKeyboard);
+      pUserInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPhoneKeyboard();
+      });
+    }
+
+    if (btnHideKeyboard) {
+      btnHideKeyboard.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closePhoneKeyboard();
+      });
+    }
+
+    // 点击聊天空白处收起键盘
+    if (screenStage) {
+      screenStage.addEventListener('click', (e) => {
+        if (!e.target.closest('#p-composer-section') && !e.target.closest('#p-virtual-keyboard')) {
+          closePhoneKeyboard();
+        }
+      });
+    }
+
+    // 虚拟键盘按键输入
+    document.querySelectorAll('.p-key-btn[data-char]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const char = btn.getAttribute('data-char');
+        if (pUserInput && char) {
+          pUserInput.value += char;
+          pUserInput.focus();
+        }
+        playPop(620);
+      });
+    });
+
+    const btnKbBackspace = document.getElementById('btn-kb-backspace');
+    if (btnKbBackspace) {
+      btnKbBackspace.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pUserInput && pUserInput.value.length > 0) {
+          pUserInput.value = pUserInput.value.slice(0, -1);
+          pUserInput.focus();
+        }
+        playPop(380);
+      });
+    }
+
+    const btnKbSpace = document.getElementById('btn-kb-space');
+    if (btnKbSpace) {
+      btnKbSpace.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pUserInput) {
+          pUserInput.value += ' ';
+          pUserInput.focus();
+        }
+        playPop(500);
+      });
+    }
+
+    document.querySelectorAll('.p-kb-tool-btn[data-preset]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const preset = btn.getAttribute('data-preset');
+        if (pUserInput && preset) {
+          pUserInput.value = preset;
+          pUserInput.focus();
+        }
+        playPop(580);
+      });
+    });
+
+    const btnKbSend = document.getElementById('btn-kb-send');
+    if (btnKbSend) {
+      btnKbSend.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendChat(pUserInput.value);
+      });
+    }
 
     function sendChat(msg) {
       if (!msg.trim()) return;
@@ -3306,6 +3605,7 @@ func (s *RelayServer) HandleConnection(ws *websocket.Conn) {<br>
       typingBubble.textContent = '🤖 Agent 正在思考与探查工作区...';
       views.chat.appendChild(typingBubble);
 
+      closePhoneKeyboard();
       screenStage.scrollTop = screenStage.scrollHeight;
 
       const dualConsole = document.getElementById('dual-console');
