@@ -52,6 +52,7 @@ import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
 import { historyMessageToChatItem } from "../utils/chatHistory";
 import { agentActivity } from "../utils/agentActivity";
+import { newRequestID } from "../utils/ids";
 
 export function MobileAppScreen() {
   useAndroidNavigationBar();
@@ -217,16 +218,22 @@ export function MobileAppScreen() {
     appendMessages,
     appendAssistant,
     clearSessionPendingRequest,
+    removeSessionPendingQuestion,
     completeAssistant,
     getSessionChat,
     hasPendingRequest,
     markAssistantError,
+    markUserMessageQueued,
+    markUserMessageDelivered,
     mergeSessionChats,
     replaceMessages,
     resetActiveAssistant,
+    removePendingQuestions,
     sessionChatsVersion,
+    sessionChats,
     setSessionLastUsage,
     setSessionPendingPermission,
+    setSessionPendingQuestion,
     setSessionPendingRequest,
     startBackgroundAssistant,
   } = useChatMessages();
@@ -308,6 +315,8 @@ export function MobileAppScreen() {
   const currentPauseBusy = Boolean(pendingActions.pause);
   const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
+  const questionSyncKeyRef = useRef("");
+
   // 从这里开始组装传输能力：Sender 只发送，Requests/Actions 表达命令，Handler 消费响应。
   const addRelayErrorMessage = useCallback(
     (message: string) => addMessage(sessionID, "error", message),
@@ -322,6 +331,21 @@ export function MobileAppScreen() {
     socketRef,
     userID,
   });
+
+  useEffect(() => {
+    if (!connected || !clientToken) {
+      questionSyncKeyRef.current = "";
+      return;
+    }
+    const syncKey = `${clientToken}:${deviceID}`;
+    if (questionSyncKeyRef.current === syncKey) {
+      return;
+    }
+    questionSyncKeyRef.current = syncKey;
+    const knownQuestionIDs = Object.values(sessionChats).flatMap((chat) => chat.pendingQuestions.map((question) => question.questionID));
+    sendEnvelope("user_question_list", { request_id: newRequestID(), payload: { known_question_ids: knownQuestionIDs } });
+  }, [clientToken, connected, deviceID, sendEnvelope, sessionChats]);
+
   const activeKnowledgeBase = knowledgeBases.find((base) => base.id === selectedKnowledgeBaseID);
   const {
     applyTask: applySubagentTask,
@@ -626,7 +650,7 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
-  const { allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
+  const { answerUserQuestion, allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addUserMessage: (targetSessionID, message, requestID, attachments) => addMessage(targetSessionID, "user", message, requestID, attachments),
@@ -642,6 +666,7 @@ export function MobileAppScreen() {
     clearSessionPendingRequest,
     setSessionLastUsage,
     setSessionPendingPermission,
+    setSessionPendingQuestion,
     setSessionPendingRequest,
     startPausePending: () => startPending("pause"),
     stopPausePending: () => stopPending("pause"),
@@ -789,6 +814,8 @@ export function MobileAppScreen() {
     applySessionGenerationPreferences,
     applySessionGenerationError: setSessionGenerationError,
     clearSessionPendingRequest,
+    markUserMessageQueued,
+    markUserMessageDelivered,
     completeAssistant,
     currentFilePath: filePath,
     getSessionChat,
@@ -821,6 +848,9 @@ export function MobileAppScreen() {
     setSessionContext,
     setSessionLastUsage,
     setSessionPendingPermission,
+    setSessionPendingQuestion,
+    removeSessionPendingQuestion,
+    removePendingQuestions,
     setSessionID,
     setStatus,
     stopPending,
@@ -1179,6 +1209,8 @@ export function MobileAppScreen() {
           onAllowPermission: allowPermission,
           onDenyPermission: denyPermission,
           pendingPermission: currentChat.pendingPermission,
+          onAnswerUserQuestion: answerUserQuestion,
+          pendingQuestions: currentChat.pendingQuestions,
         }}
         plan={{
           activeSession,

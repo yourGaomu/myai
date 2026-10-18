@@ -18,6 +18,7 @@ import (
 	messagecommand "myai/core/application/session/message/command"
 	messageresult "myai/core/application/session/message/result"
 	domainagentrun "myai/core/domain/agentrun"
+	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	agentrunport "myai/core/port/agentrun"
 	modelport "myai/core/port/model"
@@ -60,6 +61,28 @@ func TestExecutionContinuesWhenAgentRunAppendTimesOut(t *testing.T) {
 	}
 	if elapsed := time.Since(startedAt); elapsed > time.Second {
 		t.Fatalf("AgentRun persistence delayed the plan too long: %s", elapsed)
+	}
+}
+
+func TestPlanStepPromptIsMarkedInternalButRemainsInGenerationContext(t *testing.T) {
+	current := &session.Session{
+		ID: "session-1", Model: "model-1",
+		CurrentPlan: &agentplan.Plan{
+			ID: "plan-1", SessionID: "session-1", Goal: "finish the task", Status: agentplan.StatusApproved,
+			Steps: []agentplan.Step{{ID: "step-1", Order: 1, Title: "implement", Status: agentplan.StepStatusPending}},
+		},
+	}
+	appender := &capturePlanStepAppender{current: current}
+	service := ExecutionService{Messages: appender}
+	task, err := service.preparePlanStep(context.Background(), current, session.Clone(current), current.CurrentPlan, 0, false)
+	if err != nil {
+		t.Fatalf("prepare plan step: %v", err)
+	}
+	if appender.command.SyntheticReason != domainmessage.SyntheticReasonPlanStep {
+		t.Fatalf("plan step prompt was not marked internal: %#v", appender.command)
+	}
+	if len(task.Session.Messages) == 0 || !task.Session.Messages[len(task.Session.Messages)-1].IsSyntheticReason(domainmessage.SyntheticReasonPlanStep) {
+		t.Fatalf("internal prompt must remain in the model context: %#v", task.Session.Messages)
 	}
 }
 
@@ -311,6 +334,22 @@ type fakeMessageAppender struct{ current *session.Session }
 
 func (appender fakeMessageAppender) AppendUserMessage(_ context.Context, command messagecommand.AppendUserMessage) (messageresult.Command, error) {
 	return messageresult.Command{Session: appender.current, Input: command.Input, Appended: true}, nil
+}
+
+type capturePlanStepAppender struct {
+	current *session.Session
+	command messagecommand.AppendUserMessage
+}
+
+func (appender *capturePlanStepAppender) AppendUserMessage(_ context.Context, command messagecommand.AppendUserMessage) (messageresult.Command, error) {
+	appender.command = command
+	message := domainmessage.SyntheticUserText(command.SyntheticReason, command.Input)
+	current := session.Clone(appender.current)
+	current.AppendMessage(message)
+	return messageresult.Command{
+		Session: current, Input: command.Input, Appended: true,
+		AppendedMessages: []domainmessage.Message{message},
+	}, nil
 }
 
 type recordingGenerationService struct{ calls int }

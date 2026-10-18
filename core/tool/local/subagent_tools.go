@@ -114,6 +114,7 @@ func (tool *StartAsyncTaskTool) Call(ctx context.Context, args json.RawMessage) 
 		PlanID:           execution.PlanID, StepID: execution.StepID,
 		DefinitionID: input.DefinitionID, Instruction: input.Instruction, Title: input.Title,
 		FallbackModelID: execution.ModelID, WorkspaceRoot: execution.WorkspaceRoot,
+		UserQuestion: toolruntime.UserQuestionHandlerFrom(ctx),
 	})
 	if err != nil {
 		return tooldef.ToolOutput{}, err

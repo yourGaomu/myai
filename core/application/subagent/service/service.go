@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	domaininteraction "myai/core/domain/interaction"
 	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
 	workspaceport "myai/core/port/workspace"
@@ -46,8 +47,9 @@ type Service struct {
 }
 
 type activeExecution struct {
-	runID string
-	done  chan struct{}
+	runID        string
+	done         chan struct{}
+	userQuestion domaininteraction.UserQuestionHandler
 }
 
 type childWait struct {

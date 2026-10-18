@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	domaininteraction "myai/core/domain/interaction"
+	domainsubagent "myai/core/domain/subagent"
 	domaintool "myai/core/domain/tool"
 	modelport "myai/core/port/model"
 	subagentport "myai/core/port/subagent"
@@ -12,7 +14,7 @@ import (
 // task event log. The runner remains independent of the application service;
 // all identity and persistence concerns stay at this boundary.
 func (service *Service) taskStream(ctx context.Context, taskID string, runID string) modelport.ChatStreamHandler {
-	return modelport.ChatStreamHandler{
+	stream := modelport.ChatStreamHandler{
 		CorrelationID: runID,
 		OnReasoning: func(text string) {
 			service.publishRuntimeEvent(ctx, taskID, runID, subagentport.TaskEventKindReasoning, text, "", "", "", "", "", true)
@@ -53,6 +55,34 @@ func (service *Service) taskStream(ctx context.Context, taskID string, runID str
 			return false
 		},
 	}
+	if handler := service.userQuestionHandler(taskID); handler != nil {
+		stream.OnUserQuestion = func(questionCtx context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+			task, err := service.Tasks.GetTask(questionCtx, taskID)
+			if err != nil {
+				return domaininteraction.Answer{}, err
+			}
+			request.SessionID = service.rootSessionID(questionCtx, task)
+			request.SourceSessionID = task.ChildSessionID
+			request.SourceTaskID = task.ID
+			request.RunID = runID
+			return handler(questionCtx, request)
+		}
+	}
+	return stream
+}
+
+func (service *Service) rootSessionID(ctx context.Context, task domainsubagent.Task) string {
+	sessionID := task.ParentSessionID
+	parentTaskID := task.ParentTaskID
+	for parentTaskID != "" {
+		parent, err := service.Tasks.GetTask(ctx, parentTaskID)
+		if err != nil {
+			break
+		}
+		sessionID = parent.ParentSessionID
+		parentTaskID = parent.ParentTaskID
+	}
+	return sessionID
 }
 
 func (service *Service) publishRuntimeEvent(ctx context.Context, taskID string, runID string, kind string, content string, toolName string, arguments string, status string, errorCode string, errorMessage string, delta bool) {

@@ -29,6 +29,11 @@ const (
 	TypeToolResult                       MessageType = "tool_result"
 	TypePermissionAsk                    MessageType = "permission_ask"
 	TypePermissionResult                 MessageType = "permission_result"
+	TypeUserQuestion                     MessageType = "user_question"
+	TypeUserQuestionAnswer               MessageType = "user_question_answer"
+	TypeUserQuestionResolved             MessageType = "user_question_resolved"
+	TypeUserQuestionList                 MessageType = "user_question_list"
+	TypeUserQuestionListResult           MessageType = "user_question_list_result"
 	TypeSessionList                      MessageType = "session_list"
 	TypeSessionListResult                MessageType = "session_list_result"
 	TypeSessionNew                       MessageType = "session_new"
@@ -430,6 +435,7 @@ type AgentRunCompletedPayload struct {
 // identifies a new continuation, never the foreground request that spawned it.
 type BackgroundTurnEventPayload struct {
 	TurnID    string         `json:"turn_id"`
+	RequestID string         `json:"request_id,omitempty"`
 	SessionID string         `json:"session_id"`
 	RunID     string         `json:"run_id,omitempty"`
 	Sequence  uint64         `json:"sequence"`
@@ -494,6 +500,50 @@ type PermissionAskPayload struct {
 type PermissionResultPayload struct {
 	ApprovalID string `json:"approval_id"`
 	Allowed    bool   `json:"allowed"`
+}
+
+type UserQuestionItemPayload struct {
+	ID         string   `json:"id"`
+	Prompt     string   `json:"prompt"`
+	Options    []string `json:"options,omitempty"`
+	AllowOther bool     `json:"allow_other,omitempty"`
+}
+
+type UserQuestionPayload struct {
+	QuestionID      string                    `json:"question_id"`
+	ToolCallID      string                    `json:"tool_call_id,omitempty"`
+	RunID           string                    `json:"run_id,omitempty"`
+	SourceTaskID    string                    `json:"source_task_id,omitempty"`
+	SourceSessionID string                    `json:"source_session_id,omitempty"`
+	Title           string                    `json:"title,omitempty"`
+	Questions       []UserQuestionItemPayload `json:"questions"`
+}
+
+type UserQuestionAnswerPayload struct {
+	QuestionID string            `json:"question_id"`
+	Answers    map[string]string `json:"answers,omitempty"`
+	Cancelled  bool              `json:"cancelled,omitempty"`
+}
+
+type UserQuestionResolvedPayload struct {
+	QuestionID string `json:"question_id"`
+	Status     string `json:"status"`
+}
+
+type UserQuestionListPayload struct {
+	SessionID        string   `json:"session_id,omitempty"`
+	KnownQuestionIDs []string `json:"known_question_ids,omitempty"`
+}
+
+type UserQuestionListItemPayload struct {
+	SessionID string              `json:"session_id"`
+	RequestID string              `json:"request_id,omitempty"`
+	Question  UserQuestionPayload `json:"question"`
+}
+
+type UserQuestionListResultPayload struct {
+	Questions           []UserQuestionListItemPayload `json:"questions"`
+	ResolvedQuestionIDs []string                      `json:"resolved_question_ids,omitempty"`
 }
 
 type SessionListPayload struct {

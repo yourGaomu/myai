@@ -331,6 +331,64 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.user-question-box {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e3bd59;
+  border-radius: 8px;
+  background: #fff8db;
+  padding: 14px;
+}
+
+.user-question-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.user-question-head strong {
+  color: #25241f;
+}
+
+.user-question-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-question-content {
+  display: grid;
+  gap: 10px;
+  max-height: 34vh;
+  overflow: auto;
+}
+
+.user-question-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #d8d1bd;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.user-question-item legend {
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.user-question-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.user-question-choice input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
@@ -357,6 +415,7 @@ textarea:focus {
   }
 
   .permission-box,
+  .user-question-box,
   .composer,
   .pair-form {
     grid-template-columns: 1fr;

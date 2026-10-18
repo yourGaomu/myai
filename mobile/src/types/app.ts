@@ -6,6 +6,16 @@ export type PermissionState = {
   arguments: string;
 };
 
+export type UserQuestionState = {
+  questionID: string;
+  requestID: string;
+  sessionID: string;
+  title: string;
+  questions: import("../protocol").UserQuestionItemPayload[];
+  sourceTaskID?: string;
+  submitted?: boolean;
+};
+
 export type SessionPermissionMode = "readonly" | "ask" | "full";
 export type SessionAgentMode = "chat" | "plan";
 

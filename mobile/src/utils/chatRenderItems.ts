@@ -232,7 +232,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
       const toolName = ev.tool_name || ev.title || "tool";
       const failed =
         Boolean(ev.error_message || ev.error_code) ||
-        Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded");
+        Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded" && ev.status !== "skipped");
       // 1.0 优先依据 tool_call_id 精确配对工具开始与结束事件
       const existing = findMatchingPendingToolStep(tools, toolName, ev.tool_call_id, ev.arguments);
       if (existing) {

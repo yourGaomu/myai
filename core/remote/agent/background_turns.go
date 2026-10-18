@@ -19,7 +19,7 @@ type SessionContinuationControl interface {
 
 func backgroundTurnPayload(event service.BackgroundTurnEvent) protocol.BackgroundTurnEventPayload {
 	payload := protocol.BackgroundTurnEventPayload{
-		TurnID: event.TurnID, SessionID: event.SessionID, RunID: event.RunID, Sequence: event.Sequence,
+		TurnID: event.TurnID, RequestID: event.RequestID, SessionID: event.SessionID, RunID: event.RunID, Sequence: event.Sequence,
 		Kind: event.Kind, Status: event.Status, Content: event.Content, Reasoning: event.Reasoning, Error: event.Error,
 	}
 	if event.Run != nil {

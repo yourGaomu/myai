@@ -127,6 +127,9 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			}
 		}
 		tools := s.toolsForSession(command.Session, command.ForceChatMode)
+		if command.Stream.OnUserQuestion == nil {
+			tools = filterInteractiveTools(tools)
+		}
 		snapshot, err := s.prepareSnapshot(runCtx, command, tools)
 		if err != nil {
 			return modelport.ChatResult{}, err
@@ -243,6 +246,17 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	return finalizeResult(result, totalUsage, reasoningParts), nil
 }
 
+func filterInteractiveTools(tools []modelport.Tool) []modelport.Tool {
+	filtered := make([]modelport.Tool, 0, len(tools))
+	for _, candidate := range tools {
+		if candidate.Function != nil && candidate.Function.Name == "ask_user" {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
+}
+
 func (s AgentLoopService) maxToolRounds(current *session.Session) int {
 	if current != nil && current.MaxToolRounds > 0 {
 		return current.MaxToolRounds
@@ -282,7 +296,11 @@ func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaing
 	appended := make([]domainmessage.Message, 0)
 	var conflictErr error
 	if identified, ok := s.PendingInput.(generationport.IdentifiedPendingTurnInput); ok {
-		items = identified.DrainIdentified(current.ID)
+		if active, supportsActiveTurn := s.PendingInput.(generationport.ActiveTurnPendingInput); supportsActiveTurn {
+			items = active.DrainActiveTurn(current.ID)
+		} else {
+			items = identified.DrainIdentified(current.ID)
+		}
 		for _, item := range items {
 			if item.ID != "" {
 				// 1. 先用 SourceID 检查消息是否已经持久化，避免重试重复追加。
@@ -365,6 +383,9 @@ func (s AgentLoopService) releasePendingInput(sessionID string, items []domainge
 func (s AgentLoopService) hasPendingInput(current *session.Session) bool {
 	if s.PendingInput == nil || current == nil {
 		return false
+	}
+	if active, ok := s.PendingInput.(generationport.ActiveTurnPendingInput); ok {
+		return active.HasActiveTurnPending(current.ID)
 	}
 	return s.PendingInput.HasPending(current.ID)
 }

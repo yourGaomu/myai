@@ -33,6 +33,7 @@ const (
 	SyntheticReasonSubagentResult     SyntheticReason = "subagent_result"
 	SyntheticReasonInterAgentMessage  SyntheticReason = "inter_agent_message"
 	SyntheticReasonAutonomousPlanning SyntheticReason = "autonomous_planning"
+	SyntheticReasonPlanStep           SyntheticReason = "plan_step"
 	SyntheticReasonCompactionSummary  SyntheticReason = "compaction_summary"
 )
 

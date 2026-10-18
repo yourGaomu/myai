@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -9,6 +10,7 @@ import (
 	agentrunapi "myai/core/application/agentrun/api"
 	agentruncommand "myai/core/application/agentrun/command"
 	domainagentrun "myai/core/domain/agentrun"
+	domaininteraction "myai/core/domain/interaction"
 	modelport "myai/core/port/model"
 )
 
@@ -35,6 +37,10 @@ func newRunStreamRecorder(ctx context.Context, runID string, runs agentrunapi.Co
 }
 
 func (r *runStreamRecorder) Handler() modelport.ChatStreamHandler {
+	var onUserQuestion domaininteraction.UserQuestionHandler
+	if r.base.OnUserQuestion != nil {
+		onUserQuestion = r.onUserQuestion
+	}
 	return modelport.ChatStreamHandler{
 		CorrelationID:   r.base.CorrelationID,
 		OnReasoning:     r.onReasoning,
@@ -44,11 +50,20 @@ func (r *runStreamRecorder) Handler() modelport.ChatStreamHandler {
 		OnToolResult:    r.onToolResult,
 		OnAsset:         r.base.OnAsset,
 		OnToolAsk:       r.onToolAsk,
+		OnUserQuestion:  onUserQuestion,
 		OnRunStarted:    r.base.OnRunStarted,
 		OnRunEvent:      r.base.OnRunEvent,
 		OnRunCompleted:  r.base.OnRunCompleted,
 		OnPlanUpdate:    r.base.OnPlanUpdate,
 	}
+}
+
+func (r *runStreamRecorder) onUserQuestion(ctx context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+	r.flushReasoning()
+	if r.base.OnUserQuestion == nil {
+		return domaininteraction.Answer{}, errors.New("user interaction is unavailable for this turn")
+	}
+	return r.base.OnUserQuestion(ctx, request)
 }
 
 func (r *runStreamRecorder) Close() {

@@ -2,6 +2,7 @@
 export type MessageType =
   | "heartbeat"
   | "user_message"
+  | "user_message_queued"
   | "assistant_delta"
   | "assistant_done"
   | "agent_run_started"
@@ -13,6 +14,11 @@ export type MessageType =
   | "tool_result"
   | "permission_ask"
   | "permission_result"
+  | "user_question"
+  | "user_question_answer"
+  | "user_question_resolved"
+  | "user_question_list"
+  | "user_question_list_result"
   | "session_list"
   | "session_list_result"
   | "session_new"
@@ -380,6 +386,10 @@ export type PairResponse = {
   client_token: string;
 };
 
+export type UserMessageQueuedPayload = {
+  content: string;
+};
+
 export type AssistantDeltaPayload = {
   content?: string;
   reasoning?: string;
@@ -475,6 +485,7 @@ export type BackgroundTurnKind =
 
 export type BackgroundTurnEventPayload = {
   turn_id?: string;
+  request_id?: string;
   session_id?: string;
   run_id?: string;
   sequence?: number;
@@ -526,6 +537,45 @@ export type PermissionAskPayload = {
 
 export type PermissionResultPayload = {
   allowed: boolean;
+};
+
+export type UserQuestionItemPayload = {
+  id: string;
+  prompt: string;
+  options?: string[];
+  allow_other?: boolean;
+};
+
+export type UserQuestionPayload = {
+  question_id: string;
+  tool_call_id?: string;
+  run_id?: string;
+  source_task_id?: string;
+  source_session_id?: string;
+  title?: string;
+  questions: UserQuestionItemPayload[];
+};
+
+export type UserQuestionAnswerPayload = {
+  question_id: string;
+  answers?: Record<string, string>;
+  cancelled?: boolean;
+};
+
+export type UserQuestionResolvedPayload = {
+  question_id: string;
+  status: "answered" | "dismissed" | "timed_out" | "canceled" | string;
+};
+
+export type UserQuestionListItemPayload = {
+  session_id: string;
+  request_id?: string;
+  question: UserQuestionPayload;
+};
+
+export type UserQuestionListResultPayload = {
+  questions?: UserQuestionListItemPayload[];
+  resolved_question_ids?: string[];
 };
 
 export type SessionSummary = {

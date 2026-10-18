@@ -139,6 +139,54 @@ func TestQueueAllowsSameContentForDifferentMessageIDs(t *testing.T) {
 	}
 }
 
+func TestNextTurnInputIsNotClaimedByCurrentTurnMailboxDrain(t *testing.T) {
+	queue := NewQueue()
+	child := domainsubagent.AgentMessage{
+		ID: "child-result", RecipientAgentID: "parent", Kind: domainsubagent.AgentMessageKindTaskResult,
+		Content: "child finished", Trigger: domainsubagent.AgentMessageTriggerQueue,
+		Status: domainsubagent.AgentMessagePending, CreatedAt: time.Now(),
+	}
+	if err := queue.EnqueueAgentMessage("parent", child); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.EnqueueNextTurn("parent", "request-1", "please cancel the timer"); err != nil {
+		t.Fatal(err)
+	}
+	active := queue.DrainActiveTurn("parent")
+	if len(active) != 1 || active[0].ID != "child-result" {
+		t.Fatalf("current turn should only claim mailbox events: %#v", active)
+	}
+	if queue.HasActiveTurnPending("parent") {
+		t.Fatal("queued user input should not keep the active turn looping")
+	}
+	next := queue.DrainIdentified("parent")
+	if len(next) != 1 || next[0].ID != "request-1" || next[0].Trigger != domaingeneration.PendingTurnTriggerNextTurn {
+		t.Fatalf("queued user input was not retained for its own turn: %#v", next)
+	}
+}
+
+func TestNextTurnAcknowledgementDoesNotCallInterAgentRepository(t *testing.T) {
+	queue := NewQueue()
+	acknowledger := &recordingAcknowledger{}
+	queue.SetAcknowledger(acknowledger)
+	if err := queue.EnqueueNextTurn("session-1", "request-1", "follow-up"); err != nil {
+		t.Fatal(err)
+	}
+	items := queue.DrainIdentified("session-1")
+	if err := queue.Acknowledge("request-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledger.ids) != 0 {
+		t.Fatalf("ordinary user request was incorrectly acknowledged as inter-agent data: %#v", acknowledger.ids)
+	}
+	if err := queue.RequeueIdentified("session-1", items); err != nil {
+		t.Fatal(err)
+	}
+	if pending := queue.DrainIdentified("session-1"); len(pending) != 1 || pending[0].ID != "request-1" {
+		t.Fatalf("user request acknowledgement should release its in-flight claim: %#v", pending)
+	}
+}
+
 func TestQueueTreatsSameMessageWithDifferentCreatedAtAsIdempotent(t *testing.T) {
 	queue := NewQueue()
 	first := domainsubagent.AgentMessage{

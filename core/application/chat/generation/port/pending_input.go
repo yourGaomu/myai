@@ -20,6 +20,14 @@ type IdentifiedPendingTurnInput interface {
 	Acknowledge(messageID string) error
 }
 
+// 1. ActiveTurnPendingInput 分离当前 turn 可读取的 mailbox 与必须新开一轮的用户消息。
+// 1.1 新一轮输入要等当前会话操作释放锁后再交给聊天流程处理。
+type ActiveTurnPendingInput interface {
+	DrainActiveTurn(sessionID string) []domaingeneration.PendingTurnInputItem
+	HasActiveTurnPending(sessionID string) bool
+	EnqueueNextTurn(sessionID, requestID, content string) error
+}
+
 // StructuredPendingTurnInput preserves the full inter-agent envelope while it
 // is waiting for the recipient turn. It is optional so ordinary local input
 // queues remain small and easy to test.

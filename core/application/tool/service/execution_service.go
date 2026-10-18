@@ -49,28 +49,61 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 	}
 	createdAt := s.now()
 	slots := make([]callExecution, len(command.Calls))
-	var wg sync.WaitGroup
-	var exclusive sync.RWMutex
+	barriers := make([]bool, len(command.Calls))
+	hasBarrier := false
 	for index, call := range command.Calls {
 		if strings.TrimSpace(call.Name) == "" {
-			slots[index].skip = true
 			continue
 		}
-		wg.Add(1)
-		go func(index int, call domainmessage.ToolCall) {
-			defer wg.Done()
-			permission := s.lookupPermission(call.Name)
-			if permission == tooldef.PermissionRead {
-				exclusive.RLock()
-				defer exclusive.RUnlock()
-			} else {
-				exclusive.Lock()
-				defer exclusive.Unlock()
-			}
-			slots[index] = s.executeOne(ctx, command, call, index, createdAt)
-		}(index, call)
+		registered, err := s.Registry.GetTool(call.Name)
+		if err != nil {
+			continue
+		}
+		barrier, ok := registered.(tooldef.TurnBarrier)
+		if ok && barrier.IsTurnBarrier() {
+			barriers[index] = true
+			hasBarrier = true
+		}
 	}
-	wg.Wait()
+	if hasBarrier {
+		// 1. 问用户是当前 turn 的边界：先等待回答，再让模型决定是否执行同批其他工具。
+		barrierExecuted := false
+		for index, call := range command.Calls {
+			if strings.TrimSpace(call.Name) == "" {
+				slots[index].skip = true
+				continue
+			}
+			if barriers[index] && !barrierExecuted {
+				barrierExecuted = true
+				slots[index] = s.executeOne(ctx, command, call, index, createdAt)
+				continue
+			}
+			slots[index] = s.skippedCall(command, call, index, createdAt)
+		}
+	} else {
+		var wg sync.WaitGroup
+		var exclusive sync.RWMutex
+		for index, call := range command.Calls {
+			if strings.TrimSpace(call.Name) == "" {
+				slots[index].skip = true
+				continue
+			}
+			wg.Add(1)
+			go func(index int, call domainmessage.ToolCall) {
+				defer wg.Done()
+				permission := s.lookupPermission(call.Name)
+				if permission == tooldef.PermissionRead {
+					exclusive.RLock()
+					defer exclusive.RUnlock()
+				} else {
+					exclusive.Lock()
+					defer exclusive.Unlock()
+				}
+				slots[index] = s.executeOne(ctx, command, call, index, createdAt)
+			}(index, call)
+		}
+		wg.Wait()
+	}
 
 	result := toolresult.Execution{
 		Calls:    make([]domainmessage.ToolCall, 0, len(command.Calls)),
@@ -90,6 +123,34 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 		}
 	}
 	return result, nil
+}
+
+func (s ExecutionService) skippedCall(command toolcommand.Execution, call domainmessage.ToolCall, index int, createdAt time.Time) callExecution {
+	callCreatedAt := createdAt.Add(time.Duration(index*2) * time.Nanosecond)
+	resultCreatedAt := createdAt.Add(time.Duration(index*2+1) * time.Nanosecond)
+	output := domaintool.ToolOutput{
+		Content: "This call was not executed because the same model response asked the user a question. Review the user's answer, then call the tool again if it is still needed.",
+		Status:  domaintool.ResultStatusSkipped,
+	}
+	if command.Callbacks.OnToolCall != nil {
+		command.Callbacks.OnToolCall(call.Name, call.Arguments)
+	}
+	if command.Callbacks.OnToolCallIdentified != nil {
+		command.Callbacks.OnToolCallIdentified(call)
+	}
+	if command.Callbacks.OnToolResult != nil {
+		command.Callbacks.OnToolResult(call.Name, call.Arguments, output)
+	}
+	if command.Callbacks.OnToolResultIdentified != nil {
+		command.Callbacks.OnToolResultIdentified(call, output)
+	}
+	return callExecution{
+		call: call, message: ToolResultMessage(call, output),
+		entries: []domaintool.ExecutionEntry{
+			ToolCallEntry(toolcommand.ToolCallEntry{SessionID: command.SessionID, Call: call, CreatedAt: callCreatedAt}),
+			ToolResultEntry(toolcommand.ToolResultEntry{SessionID: command.SessionID, Call: call, Output: output, CreatedAt: resultCreatedAt}),
+		},
+	}
 }
 
 func (s ExecutionService) lookupPermission(name string) tooldef.Permission {
@@ -127,7 +188,7 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 	}
 	entries := []domaintool.ExecutionEntry{ToolCallEntry(toolcommand.ToolCallEntry{SessionID: command.SessionID, Call: call, CreatedAt: callCreatedAt})}
 	//再次检测工具调用是否合理
-	if !toolAllowed(command.AllowedTools, command.EnforceToolAllowlist, call.Name) {
+	if !toolAllowedForExecution(ctx, command, call.Name, registeredTool) {
 		message := fmt.Sprintf("tool %s is not allowed for this subagent", call.Name)
 		output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "subagent_tool_denied", message)
 		return s.finishedCall(ctx, command, call, permission, output, nil, entries, resultCreatedAt)
@@ -171,6 +232,14 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		output = outputForError(ctx, toolErr)
 	}
 	return s.finishedCall(ctx, command, call, permission, output.Normalized(), toolErr, entries, resultCreatedAt)
+}
+
+func toolAllowedForExecution(ctx context.Context, command toolcommand.Execution, name string, registered tooldef.Tool) bool {
+	if toolAllowed(command.AllowedTools, command.EnforceToolAllowlist, name) {
+		return true
+	}
+	interactive, ok := registered.(tooldef.UserInteraction)
+	return ok && interactive.RequiresUserInteraction() && executioncontext.UserQuestionHandlerFrom(ctx) != nil
 }
 
 func (s ExecutionService) failedCall(command toolcommand.Execution, call domainmessage.ToolCall, code string, err error, callCreatedAt, resultCreatedAt time.Time) callExecution {

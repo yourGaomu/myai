@@ -63,8 +63,12 @@ import type {
   TokenUsage,
   ToolCallPayload,
   ToolResultPayload,
+  UserQuestionPayload,
+  UserQuestionListResultPayload,
+  UserQuestionResolvedPayload,
+  UserMessageQueuedPayload,
 } from "../protocol";
-import type { PendingAction, PermissionState } from "../types/app";
+import type { PendingAction, PermissionState, UserQuestionState } from "../types/app";
 import { shortID } from "../utils/ids";
 
 type Args = {
@@ -167,6 +171,8 @@ type Args = {
     payload?: SubagentTaskResultPayload,
   ) => void;
   clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
+  markUserMessageQueued: (sessionID: string, requestID: string) => void;
+  markUserMessageDelivered: (sessionID: string, requestID: string) => void;
   completeAssistant: (
     sessionID: string,
     requestID: string | undefined,
@@ -179,6 +185,7 @@ type Args = {
   getSessionChat: (sessionID: string) => {
     activeAssistantID: string;
     pendingRequestID: string;
+    pendingQuestions: UserQuestionState[];
   };
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
@@ -220,6 +227,9 @@ type Args = {
     sessionID: string,
     permission: PermissionState | null,
   ) => void;
+  setSessionPendingQuestion: (sessionID: string, question: UserQuestionState | null) => void;
+  removeSessionPendingQuestion: (sessionID: string, questionID: string) => void;
+  removePendingQuestions: (questionIDs: string[]) => void;
   setSessionID: (sessionID: string) => void;
   setStatus: (status: string) => void;
   stopPending: (action: PendingAction) => void;
@@ -293,6 +303,8 @@ export function useRemoteMessageHandler({
   applySubagentTaskEventsResult,
   applyRealtimeSubagentTaskEvent,
   clearSessionPendingRequest,
+  markUserMessageQueued,
+  markUserMessageDelivered,
   completeAssistant,
   currentFilePath,
   getSessionChat,
@@ -323,16 +335,35 @@ export function useRemoteMessageHandler({
   setSessionContext,
   setSessionLastUsage,
   setSessionPendingPermission,
+  setSessionPendingQuestion,
+  removeSessionPendingQuestion,
+  removePendingQuestions,
   setSessionID,
   setStatus,
   stopPending,
 }: Args) {
   const turnSequenceMapRef = useRef<Record<string, number>>({});
+  const resolvedUserQuestionIDsRef = useRef(new Set<string>());
 
   return useCallback(
     (message: RelayMessage) => {
       // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
       switch (message.type) {
+        case "user_message_queued": {
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const payload = (message.payload || {}) as UserMessageQueuedPayload;
+          if (targetSessionID && message.request_id) {
+            markUserMessageQueued(targetSessionID, message.request_id);
+            clearSessionPendingRequest(targetSessionID, message.request_id);
+            if (activeRequestIDRef.current === message.request_id) {
+              activeRequestIDRef.current = "";
+            }
+            if (payload.content && targetSessionID !== sessionIDRef.current) {
+              addUnreadSession?.(targetSessionID);
+            }
+          }
+          break;
+        }
         case "heartbeat":
           setStatus(
             message.request_id
@@ -486,6 +517,10 @@ export function useRemoteMessageHandler({
               const isFailed = payload.status === "failed";
               const isPaused = payload.status === "paused";
 
+              if (payload.request_id && !isFailed && !isPaused) {
+                markUserMessageDelivered(targetSessionID, payload.request_id);
+              }
+
               if (isFailed) {
                 markAssistantError(
                   targetSessionID,
@@ -504,6 +539,9 @@ export function useRemoteMessageHandler({
               }
 
               delete requestSessionMapRef.current[turnID];
+              if (payload.request_id) {
+                delete requestSessionMapRef.current[payload.request_id];
+              }
               requestSessions();
               break;
             }
@@ -607,7 +645,7 @@ export function useRemoteMessageHandler({
             payload.arguments || "",
             payload.result || "",
             Boolean(payload.error) ||
-              Boolean(payload.status && payload.status !== "success"),
+              Boolean(payload.status && payload.status !== "success" && payload.status !== "skipped"),
             message.request_id,
             payload,
             payload.tool_call_id,
@@ -628,6 +666,76 @@ export function useRemoteMessageHandler({
             permission: payload.permission || "permission",
             arguments: payload.arguments || "",
           });
+          break;
+        }
+        case "user_question": {
+          const payload = (message.payload || {}) as UserQuestionPayload;
+          if (!payload.question_id || !payload.questions?.length) {
+            break;
+          }
+          if (resolvedUserQuestionIDsRef.current.has(payload.question_id)) {
+            break;
+          }
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const existing = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
+          setSessionPendingQuestion(targetSessionID, {
+            questionID: payload.question_id,
+            requestID: message.request_id || "",
+            sessionID: targetSessionID,
+            title: payload.title || "需要你确认一些信息",
+            questions: payload.questions,
+            sourceTaskID: payload.source_task_id,
+            submitted: existing?.questionID === payload.question_id ? existing.submitted : false,
+          });
+          if (targetSessionID && targetSessionID !== sessionIDRef.current) {
+            addUnreadSession?.(targetSessionID);
+          }
+          break;
+        }
+        case "user_question_resolved": {
+          const payload = (message.payload || {}) as UserQuestionResolvedPayload;
+          if (payload.question_id) {
+            rememberResolvedUserQuestion(payload.question_id, resolvedUserQuestionIDsRef.current);
+          }
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const pendingQuestion = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
+          if (pendingQuestion) {
+            removeSessionPendingQuestion(targetSessionID, payload.question_id);
+          }
+          if (payload.status && payload.status !== "answered") {
+            addEventMessage(targetSessionID, `用户询问已结束：${payload.status}`);
+          }
+          break;
+        }
+        case "user_question_list_result": {
+          const payload = (message.payload || {}) as UserQuestionListResultPayload;
+          const resolvedIDs = payload.resolved_question_ids || [];
+          for (const questionID of resolvedIDs) {
+            rememberResolvedUserQuestion(questionID, resolvedUserQuestionIDsRef.current);
+          }
+          removePendingQuestions(resolvedIDs);
+          for (const item of payload.questions || []) {
+            const question = item.question;
+            if (!item.session_id || !question?.question_id || !question.questions?.length) {
+              continue;
+            }
+            if (resolvedUserQuestionIDsRef.current.has(question.question_id)) {
+              continue;
+            }
+            const existing = getSessionChat(item.session_id).pendingQuestions.find((pending) => pending.questionID === question.question_id);
+            setSessionPendingQuestion(item.session_id, {
+              questionID: question.question_id,
+              requestID: item.request_id || "",
+              sessionID: item.session_id,
+              title: question.title || "需要你确认一些信息",
+              questions: question.questions,
+              sourceTaskID: question.source_task_id,
+              submitted: existing?.submitted || false,
+            });
+            if (item.session_id !== sessionIDRef.current) {
+              addUnreadSession?.(item.session_id);
+            }
+          }
           break;
         }
         case "session_list_result": {
@@ -1083,6 +1191,8 @@ export function useRemoteMessageHandler({
       applySubagentTaskList,
       applySubagentTaskResult,
       clearSessionPendingRequest,
+      markUserMessageQueued,
+      markUserMessageDelivered,
       completeAssistant,
       currentFilePath,
       getSessionChat,
@@ -1109,11 +1219,25 @@ export function useRemoteMessageHandler({
       setSessionContext,
       setSessionLastUsage,
       setSessionPendingPermission,
+      setSessionPendingQuestion,
+      removeSessionPendingQuestion,
+      removePendingQuestions,
       setSessionID,
       setStatus,
       stopPending,
     ],
   );
+}
+
+function rememberResolvedUserQuestion(questionID: string, resolvedIDs: Set<string>) {
+  if (!questionID) {
+    return;
+  }
+  resolvedIDs.add(questionID);
+  if (resolvedIDs.size > 256) {
+    const oldest = resolvedIDs.values().next().value;
+    if (oldest) resolvedIDs.delete(oldest);
+  }
 }
 
 function resolveChatSessionID(

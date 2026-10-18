@@ -12,8 +12,10 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationresult "myai/core/application/chat/generation/result"
 	domainagentrun "myai/core/domain/agentrun"
+	domaingeneration "myai/core/domain/generation"
 	domainsubagent "myai/core/domain/subagent"
 	"myai/core/llm"
+	modelport "myai/core/port/model"
 	"myai/core/session"
 )
 
@@ -205,6 +207,56 @@ func TestCompletionDuringBackgroundGenerationSchedulesFollowingTurn(t *testing.T
 	waitContinuationWorkers(t, s)
 	if calls.Load() != 2 {
 		t.Fatalf("late wake lost, calls=%d", calls.Load())
+	}
+}
+
+func TestQueuedUserInputStartsItsOwnBackgroundTurn(t *testing.T) {
+	var latest generationcommand.GenerationTask
+	messages := &recordingAutoPlanMessages{current: &session.Session{ID: "parent", Model: "test"}}
+	s := NewChatService(ChatDependencies{
+		Models: autoPlanModelRegistry{}, TurnInputQueue: pendinginput.NewQueue(), GenerationTasks: continuationGenerator(func(_ context.Context, command generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+			latest = command
+			command.Stream.OnAnswer("queued answer")
+			return generationresult.GenerationResponse{
+				SessionID: command.Session.ID,
+				Result:    modelport.ChatResult{Content: "queued answer"},
+			}, nil
+		}),
+		MessageCommands: messages,
+	})
+	events, unsubscribe := s.SubscribeBackgroundTurns(8)
+	defer unsubscribe()
+	unlock, err := s.lockSessionOperation(context.Background(), "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueQueuedUserTurn(context.Background(), "parent", "request-queued", "please cancel the timer"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("queued input ran before the current operation released its lock: %#v", event)
+	case <-time.After(20 * time.Millisecond):
+	}
+	unlock()
+	waitContinuationWorkers(t, s)
+	if latest.LatestInput != "please cancel the timer" || latest.Stream.CorrelationID == "" || latest.Stream.CorrelationID == "request-queued" {
+		t.Fatalf("queued input lost its request identity: %#v", latest)
+	}
+	if len(messages.commands) != 1 || messages.commands[0].SourceID != "request-queued" || messages.commands[0].SourceKind != domaingeneration.PendingTurnSourceUserMessage {
+		t.Fatalf("queued user message was not appended idempotently: %#v", messages.commands)
+	}
+	var observedDelta, observedCompletion bool
+	for len(events) > 0 {
+		event := <-events
+		if event.RequestID != "request-queued" || event.TurnID == "request-queued" {
+			t.Fatalf("background response was not correlated to the queued request: %#v", event)
+		}
+		observedDelta = observedDelta || (event.Kind == "delta" && event.Content == "queued answer")
+		observedCompletion = observedCompletion || (event.Kind == "completed" && event.Content == "queued answer")
+	}
+	if !observedDelta || !observedCompletion {
+		t.Fatalf("queued answer was not streamed to completion: delta=%v completed=%v", observedDelta, observedCompletion)
 	}
 }
 

@@ -25,6 +25,14 @@ type Tool interface {
 	Call(ctx context.Context, args json.RawMessage) (ToolOutput, error)
 }
 
+type TurnBarrier interface {
+	IsTurnBarrier() bool
+}
+
+type UserInteraction interface {
+	RequiresUserInteraction() bool
+}
+
 type Permission string
 
 const (

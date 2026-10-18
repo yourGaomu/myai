@@ -4,6 +4,7 @@ import { ChatPanel } from "../components/chat/ChatPanel";
 import { FilesPanel } from "../components/files/FilesPanel";
 import { KnowledgeWorkspacePanel } from "../components/knowledge/KnowledgeWorkspacePanel";
 import { PermissionPrompt } from "../components/permissions/PermissionPrompt";
+import { UserQuestionPrompt } from "../components/permissions/UserQuestionPrompt";
 import { PlanPanel } from "../components/plan/PlanPanel";
 import { SettingsPanel } from "../components/settings/SettingsPanel";
 import { SessionsPanel } from "../components/sessions/SessionsPanel";
@@ -302,6 +303,14 @@ export function MobileMainContent({
           permission={permission.pendingPermission}
         />
       ) : null}
+      {permission.pendingQuestions.map((question) => (
+        <UserQuestionPrompt
+          key={question.questionID}
+          buttonFeedback={common.buttonFeedback}
+          onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
+          question={question}
+        />
+      ))}
     </>
   );
 }

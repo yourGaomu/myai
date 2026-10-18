@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	domaininteraction "myai/core/domain/interaction"
 	"myai/core/session"
 )
 
@@ -14,6 +15,7 @@ type ragSettingsKey struct{}
 type executionKey struct{}
 type knowledgeSearchBudgetKey struct{}
 type memorySearchBudgetKey struct{}
+type userQuestionHandlerKey struct{}
 
 // KnowledgeSearchBudget limits model-driven knowledge searches to one turn.
 // It is intentionally shared through context so the tool executor can preserve
@@ -55,17 +57,30 @@ func (budget *KnowledgeSearchBudget) Reserve(query string) error {
 }
 
 type Execution struct {
-	ToolCallID    string
-	SessionID     string
-	TaskID        string
-	RequestID     string
-	RunID         string
-	ParentRunID   string
-	PlanID        string
-	StepID        string
-	WorkspaceRoot string
-	SandboxID     string
-	ModelID       string
+	ToolCallID      string
+	SessionID       string
+	ParentSessionID string
+	TaskID          string
+	RequestID       string
+	RunID           string
+	ParentRunID     string
+	PlanID          string
+	StepID          string
+	WorkspaceRoot   string
+	SandboxID       string
+	ModelID         string
+}
+
+func WithUserQuestionHandler(ctx context.Context, handler domaininteraction.UserQuestionHandler) context.Context {
+	if handler == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, userQuestionHandlerKey{}, handler)
+}
+
+func UserQuestionHandlerFrom(ctx context.Context) domaininteraction.UserQuestionHandler {
+	handler, _ := ctx.Value(userQuestionHandlerKey{}).(domaininteraction.UserQuestionHandler)
+	return handler
 }
 
 // WithCallID 为每个工具调用保留稳定身份，嵌套 spawn_agent 可以关联父调用。
@@ -151,8 +166,10 @@ func WithExecution(ctx context.Context, execution Execution) context.Context {
 
 func CurrentExecution(ctx context.Context) (Execution, bool) {
 	execution, ok := ctx.Value(executionKey{}).(Execution)
-	// 1. 批次共享会话信息；调用 ID 从执行器派生的上下文读取。
-	execution.ToolCallID = CallID(ctx)
+	// 1. 批次上下文保留默认 ID；执行器派生的当前调用 ID 优先覆盖它。
+	if callID := CallID(ctx); callID != "" {
+		execution.ToolCallID = callID
+	}
 	return execution, ok
 }
 

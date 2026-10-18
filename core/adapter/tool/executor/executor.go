@@ -31,10 +31,14 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		return generationresult.ToolExecution{}, errors.New("session is nil")
 	}
 	ctx = toolruntime.WithRAGSettings(ctx, command.Session.RAGSettings)
+	if command.Stream.OnUserQuestion != nil {
+		ctx = toolruntime.WithUserQuestionHandler(ctx, command.Stream.OnUserQuestion)
+	}
 	metadata := agentrunruntime.MetadataFrom(ctx)
 	ctx = toolruntime.WithExecution(ctx, toolruntime.Execution{
 		SessionID: command.Session.ID, RequestID: command.RequestID,
-		RunID: metadata.RunID, ParentRunID: metadata.ParentRunID, PlanID: metadata.PlanID, StepID: metadata.StepID,
+		ParentSessionID: command.Session.ParentSessionID,
+		RunID:           metadata.RunID, ParentRunID: metadata.ParentRunID, PlanID: metadata.PlanID, StepID: metadata.StepID,
 		// Metadata.TaskID identifies the agent currently executing this tool
 		// call. Session.ParentTaskID is the task that created the session and
 		// must only be used for the child task's parent relationship. Using it

@@ -1118,6 +1118,7 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewEditFileToolWithWorkspace(app.workspace),
 		local.NewShellToolWithWorkspaceAndRemote(app.workspace, app.localCommandExecutor, app.workspaceCommandRunner),
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
+		local.NewAskUserTool(),
 	}
 	if app.assetClient != nil {
 		localTools = append(localTools, local.NewReadAssetToolWithDownloader(app.assetClient))

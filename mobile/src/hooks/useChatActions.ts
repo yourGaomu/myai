@@ -1,6 +1,6 @@
 import { useCallback, type RefObject } from "react";
 
-import type { PermissionState } from "../types/app";
+import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment } from "../types/chat";
 import type { PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
 import { userMessageEcho } from "../utils/attachments";
@@ -23,6 +23,7 @@ type Args = {
   sessionID: string;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
   setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
+  setSessionPendingQuestion: (sessionID: string, question: UserQuestionState | null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
   startPausePending: () => void;
   stopPausePending: () => void;
@@ -46,6 +47,7 @@ export function useChatActions({
   sessionID,
   setSessionLastUsage,
   setSessionPendingPermission,
+  setSessionPendingQuestion,
   setSessionPendingRequest,
   startPausePending,
   stopPausePending,
@@ -123,6 +125,24 @@ export function useChatActions({
   const allowPermission = useCallback(() => sendPermissionResult(true), [sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);
 
+  const answerUserQuestion = useCallback(
+    (question: UserQuestionState, answers: Record<string, string>, cancelled = false) => {
+      if (question.submitted) {
+        return false;
+      }
+      const sent = sendEnvelope("user_question_answer", {
+        request_id: question.requestID,
+        session_id: question.sessionID,
+        payload: { question_id: question.questionID, answers, cancelled },
+      });
+      if (sent) {
+        setSessionPendingQuestion(question.sessionID, { ...question, submitted: true });
+      }
+      return sent;
+    },
+    [sendEnvelope, setSessionPendingQuestion],
+  );
+
   const pauseSession = useCallback(() => {
     const targetSessionID = sessionID.trim();
     if (!targetSessionID) {
@@ -182,6 +202,7 @@ export function useChatActions({
   ]);
 
   return {
+    answerUserQuestion,
     allowPermission,
     denyPermission,
     pauseSession,

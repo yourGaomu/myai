@@ -14,6 +14,7 @@ import (
 // Sequence is per TurnID. Run history is the recovery source after disconnect.
 type BackgroundTurnEvent struct {
 	TurnID    string
+	RequestID string
 	SessionID string
 	RunID     string
 	Sequence  uint64
@@ -66,7 +67,17 @@ func (s *ChatService) publishBackgroundTurn(event BackgroundTurnEvent) {
 }
 
 func (s *ChatService) backgroundStream(sessionID string) (llm.ChatStreamHandler, func(ChatResponse, error)) {
-	turnID := uuid.NewString()
+	return s.backgroundStreamWithIdentity(sessionID, uuid.NewString(), "")
+}
+
+func (s *ChatService) backgroundStreamForRequest(sessionID string, requestID string) (llm.ChatStreamHandler, func(ChatResponse, error)) {
+	return s.backgroundStreamWithIdentity(sessionID, uuid.NewString(), requestID)
+}
+
+func (s *ChatService) backgroundStreamWithIdentity(sessionID string, turnID string, requestID string) (llm.ChatStreamHandler, func(ChatResponse, error)) {
+	if turnID == "" {
+		turnID = uuid.NewString()
+	}
 	var mu sync.Mutex
 	var sequence uint64
 	var runID string
@@ -79,7 +90,7 @@ func (s *ChatService) backgroundStream(sessionID string) (llm.ChatStreamHandler,
 			runID = event.Run.ID
 		}
 		sequence++
-		event.TurnID, event.SessionID, event.RunID, event.Sequence = turnID, sessionID, runID, sequence
+		event.TurnID, event.RequestID, event.SessionID, event.RunID, event.Sequence = turnID, requestID, sessionID, runID, sequence
 		s.publishBackgroundTurn(event)
 	}
 	stream := llm.ChatStreamHandler{

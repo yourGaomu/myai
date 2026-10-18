@@ -2,6 +2,7 @@ package model
 
 import (
 	domainagentrun "myai/core/domain/agentrun"
+	domaininteraction "myai/core/domain/interaction"
 	domaintool "myai/core/domain/tool"
 	agentplan "myai/core/plan"
 )
@@ -28,6 +29,7 @@ type ChatStreamHandler struct {
 	OnToolResult    func(event ToolResultEvent)
 	OnAsset         func(asset domaintool.SharedAsset)
 	OnToolAsk       func(request ToolPermissionRequest) bool
+	OnUserQuestion  domaininteraction.UserQuestionHandler
 	OnRunStarted    func(run domainagentrun.Run)
 	OnRunEvent      func(event domainagentrun.Event)
 	OnRunCompleted  func(run domainagentrun.Run)

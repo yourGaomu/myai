@@ -35,6 +35,7 @@ func NewQueue() *Queue {
 
 var _ generationport.PendingTurnInput = (*Queue)(nil)
 var _ generationport.IdentifiedPendingTurnInput = (*Queue)(nil)
+var _ generationport.ActiveTurnPendingInput = (*Queue)(nil)
 var _ generationport.PendingInputConfigurer = (*Queue)(nil)
 var _ generationport.PendingInputReleaser = (*Queue)(nil)
 
@@ -62,6 +63,17 @@ func (q *Queue) EnqueueIdentified(sessionID, messageID, content string) error {
 		return errors.New("pending message id is empty")
 	}
 	return q.enqueue(sessionID, messageID, content)
+}
+
+func (q *Queue) EnqueueNextTurn(sessionID, requestID, content string) error {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return errors.New("pending request id is empty")
+	}
+	return q.enqueueItem(sessionID, requestID, content, domaingeneration.PendingTurnInputItem{
+		ID: requestID, Content: content, SourceKind: domaingeneration.PendingTurnSourceUserMessage,
+		Trigger: domaingeneration.PendingTurnTriggerNextTurn,
+	})
 }
 
 func (q *Queue) EnqueueAgentMessage(sessionID string, message domainsubagent.AgentMessage) error {
@@ -173,6 +185,42 @@ func (q *Queue) DrainIdentified(sessionID string) []domaingeneration.PendingTurn
 	return append([]domaingeneration.PendingTurnInputItem(nil), items...)
 }
 
+func (q *Queue) DrainActiveTurn(sessionID string) []domaingeneration.PendingTurnInputItem {
+	if q == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	queued := q.messages[sessionID]
+	active := make([]domaingeneration.PendingTurnInputItem, 0, len(queued))
+	nextTurn := make([]domaingeneration.PendingTurnInputItem, 0, len(queued))
+	for _, item := range queued {
+		if item.Trigger == domaingeneration.PendingTurnTriggerNextTurn {
+			nextTurn = append(nextTurn, item)
+			continue
+		}
+		active = append(active, item)
+	}
+	if len(nextTurn) == 0 {
+		delete(q.messages, sessionID)
+	} else {
+		q.messages[sessionID] = nextTurn
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	if q.inflight[sessionID] == nil {
+		q.inflight[sessionID] = make(map[string]domaingeneration.PendingTurnInputItem)
+	}
+	for _, item := range active {
+		if item.ID != "" {
+			q.inflight[sessionID][item.ID] = item
+		}
+	}
+	return append([]domaingeneration.PendingTurnInputItem(nil), active...)
+}
+
 // RequeueIdentified restores a claimed batch in its original order. Existing
 // IDs are ignored so a retry cannot duplicate a durable agent message.
 func (q *Queue) RequeueIdentified(sessionID string, items []domaingeneration.PendingTurnInputItem) error {
@@ -250,6 +298,18 @@ func (q *Queue) Acknowledge(messageID string) error {
 		return nil
 	}
 	q.mu.Lock()
+	for sessionID, items := range q.inflight {
+		item, exists := items[messageID]
+		if !exists || item.SourceKind != domaingeneration.PendingTurnSourceUserMessage || item.Trigger != domaingeneration.PendingTurnTriggerNextTurn {
+			continue
+		}
+		delete(items, messageID)
+		if len(items) == 0 {
+			delete(q.inflight, sessionID)
+		}
+		q.mu.Unlock()
+		return nil
+	}
 	acknowledger := q.acknowledger
 	q.mu.Unlock()
 	if acknowledger == nil {
@@ -279,6 +339,21 @@ func (q *Queue) HasPending(sessionID string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.messages[sessionID]) > 0
+}
+
+func (q *Queue) HasActiveTurnPending(sessionID string) bool {
+	if q == nil {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, item := range q.messages[sessionID] {
+		if item.Trigger != domaingeneration.PendingTurnTriggerNextTurn {
+			return true
+		}
+	}
+	return false
 }
 
 func (q *Queue) HasImmediatePending(sessionID string) bool {

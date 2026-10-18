@@ -139,6 +139,31 @@ func (s *ChatService) EnqueueTurnInputMessage(sessionID, messageID, input string
 	return s.dependencies.TurnInputQueue.Enqueue(sessionID, input)
 }
 
+func (s *ChatService) EnqueueQueuedUserTurn(ctx context.Context, sessionID, requestID, input string) error {
+	if s == nil || s.dependencies.TurnInputQueue == nil {
+		return errors.New("turn input queue is not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.CurrentSessionID()
+	}
+	if sessionID == "" {
+		return errors.New("session id is empty")
+	}
+	if err := s.resumeContinuations(ctx, sessionID); err != nil {
+		return err
+	}
+	if nextTurn, ok := s.dependencies.TurnInputQueue.(generationport.ActiveTurnPendingInput); ok {
+		if err := nextTurn.EnqueueNextTurn(sessionID, requestID, input); err != nil {
+			return err
+		}
+	} else if err := s.EnqueueTurnInputMessage(sessionID, requestID, input); err != nil {
+		return err
+	}
+	s.schedulePendingTurn(sessionID)
+	return nil
+}
+
 func (s *ChatService) EnqueueTurnInputAgentMessage(sessionID string, message domainsubagent.AgentMessage) error {
 	// 1. 优先走结构化队列，保留来源、触发方式和父子代理关系。
 	if s == nil || s.dependencies.TurnInputQueue == nil {
@@ -251,10 +276,17 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	if err := s.resumeContinuations(ctx, sessionID); err != nil {
 		return ChatResponse{}, err
 	}
+	return s.sendMessageLocked(ctx, sessionID, input, stream, "", "")
+}
 
+func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler, sourceID string, sourceKind string) (ChatResponse, error) {
+	if s.dependencies.Models == nil {
+		return ChatResponse{}, errors.New("llm client is nil")
+	}
 	var currentBefore *session.Session
 	autoPlanAction := AutoPlanActionChat
 	var autoPlanDecision AutoPlanDecision
+	var err error
 	// Load one stable pre-turn snapshot for both plan classification and
 	// deterministic (always-mode) retrieval. AppendUserMessage deliberately
 	// reloads the session after adding the new message.
@@ -300,6 +332,8 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		Input:                   input,
 		ForceAutonomousPlanning: autoPlanAction == AutoPlanActionPlanOnly || autoPlanAction == AutoPlanActionPlanExecute,
 		RAGContext:              retrievalInfo.Prompt,
+		SourceID:                sourceID,
+		SourceKind:              sourceKind,
 	})
 	if err != nil {
 		return ChatResponse{}, err
@@ -311,7 +345,7 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 		title = titleFromInput(input)
 	}
 	// 持久化与主生成流程解耦；落库失败由适配器上报，不阻断已经开始的模型请求。
-	if s.dependencies.UserMessages != nil {
+	if s.dependencies.UserMessages != nil && prepared.Appended {
 		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 			SessionID:          current.ID,
 			Model:              current.Model,
@@ -642,6 +676,41 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 			}
 		}
 		return nil
+	}
+	if identified, ok := s.dependencies.TurnInputQueue.(generationport.IdentifiedPendingTurnInput); ok {
+		userItems := make([]domaingeneration.PendingTurnInputItem, 0, len(pendingItems))
+		mailboxItems := make([]domaingeneration.PendingTurnInputItem, 0, len(pendingItems))
+		for _, item := range pendingItems {
+			if item.SourceKind == domaingeneration.PendingTurnSourceUserMessage && item.Trigger == domaingeneration.PendingTurnTriggerNextTurn {
+				userItems = append(userItems, item)
+				continue
+			}
+			mailboxItems = append(mailboxItems, item)
+		}
+		for index, item := range userItems {
+			turnStream := stream
+			var finish func(ChatResponse, error)
+			if background {
+				turnStream, finish = s.backgroundStreamForRequest(sessionID, item.ID)
+			}
+			queuedResponse, queuedErr := s.sendMessageLocked(ctx, sessionID, item.Content, turnStream, item.ID, domaingeneration.PendingTurnSourceUserMessage)
+			if finish != nil {
+				finish(queuedResponse, queuedErr)
+			}
+			if queuedErr != nil {
+				remaining := append(append([]domaingeneration.PendingTurnInputItem(nil), userItems[index:]...), mailboxItems...)
+				return ChatResponse{}, errors.Join(queuedErr, requeue(remaining))
+			}
+			if ackErr := identified.Acknowledge(item.ID); ackErr != nil {
+				remaining := append(append([]domaingeneration.PendingTurnInputItem(nil), userItems[index:]...), mailboxItems...)
+				return ChatResponse{}, errors.Join(ackErr, requeue(remaining))
+			}
+			response = queuedResponse
+		}
+		pendingItems = mailboxItems
+		if len(pendingItems) == 0 {
+			return response, nil
+		}
 	}
 	var current *session.Session
 	latestInput := ""

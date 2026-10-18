@@ -16,7 +16,7 @@ export type UploadedAssetAttachment = UploadedAssetPayload & {
 export type ChatAttachment = WorkspaceFileAttachment | UploadedAssetAttachment;
 
 export type ChatMessageStatus =
-  "streaming" | "done" | "paused" | "error" | "tool_running";
+  "streaming" | "done" | "paused" | "error" | "tool_running" | "queued";
 
 export type ChatItem = {
   attachments?: ChatAttachment[];

@@ -12,6 +12,7 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	subagentcommand "myai/core/application/subagent/command"
 	subagentresult "myai/core/application/subagent/result"
+	domaininteraction "myai/core/domain/interaction"
 	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
@@ -147,7 +148,7 @@ func (service *Service) Start(ctx context.Context, command subagentcommand.Start
 		service.admissionMu.Unlock()
 		return subagentresult.Task{}, err
 	}
-	if !service.registerActiveRunLocked(task.ID, run.ID) {
+	if !service.registerActiveRunLocked(task.ID, run.ID, command.UserQuestion) {
 		service.mu.Unlock()
 		service.releaseExecutionLease(task.ID, run.ID)
 		service.admissionMu.Unlock()
@@ -1048,16 +1049,16 @@ func (service *Service) completeActiveRunLocked(taskID, runID string) bool {
 	return released
 }
 
-func (service *Service) registerActiveRun(taskID, runID string) bool {
+func (service *Service) registerActiveRun(taskID, runID string, userQuestion ...domaininteraction.UserQuestionHandler) bool {
 	if service == nil || taskID == "" {
 		return false
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	return service.registerActiveRunLocked(taskID, runID)
+	return service.registerActiveRunLocked(taskID, runID, userQuestion...)
 }
 
-func (service *Service) registerActiveRunLocked(taskID, runID string) bool {
+func (service *Service) registerActiveRunLocked(taskID, runID string, userQuestion ...domaininteraction.UserQuestionHandler) bool {
 	if service.activeRuns == nil {
 		service.activeRuns = make(map[string]*activeExecution)
 	}
@@ -1069,8 +1070,24 @@ func (service *Service) registerActiveRunLocked(taskID, runID string) bool {
 			return false
 		}
 	}
-	service.activeRuns[taskID] = &activeExecution{runID: runID, done: make(chan struct{})}
+	var handler domaininteraction.UserQuestionHandler
+	if len(userQuestion) > 0 {
+		handler = userQuestion[0]
+	}
+	service.activeRuns[taskID] = &activeExecution{runID: runID, done: make(chan struct{}), userQuestion: handler}
 	return true
+}
+
+func (service *Service) userQuestionHandler(taskID string) domaininteraction.UserQuestionHandler {
+	if service == nil {
+		return nil
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if active := service.activeRuns[taskID]; active != nil {
+		return active.userQuestion
+	}
+	return nil
 }
 
 func (service *Service) taskIsActive(taskID string) bool {

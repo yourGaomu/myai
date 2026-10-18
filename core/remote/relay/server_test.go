@@ -247,6 +247,94 @@ func TestRelayPermissionResultPreservesOriginalChatRoute(t *testing.T) {
 	}
 }
 
+func TestRelayRoutesUserQuestionAndAnswerWithoutReplacingChatRoute(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	clientToken := pairTestClient(t, testServer, "123456")
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeUserMessage, RequestID: "question-req-1", UserID: "local", DeviceID: "pc-local",
+		SessionID: "session-1", ClientToken: clientToken,
+	})
+	readTestMessage(t, agentConn, protocol.TypeUserMessage)
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+
+	questionPayload, err := json.Marshal(protocol.UserQuestionPayload{
+		QuestionID: "question-1", Title: "Choose a scope", Questions: []protocol.UserQuestionItemPayload{{
+			ID: "scope", Prompt: "How much?", Options: []string{"small", "large"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeUserQuestion, RequestID: "question-req-1", UserID: "local", DeviceID: "pc-local",
+		SessionID: "session-1", Payload: questionPayload,
+	})
+	readTestMessage(t, clientConn, protocol.TypeUserQuestion)
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+
+	answerPayload, err := json.Marshal(protocol.UserQuestionAnswerPayload{
+		QuestionID: "question-1", Answers: map[string]string{"scope": "large"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeUserQuestionAnswer, RequestID: "question-req-1", UserID: "local", DeviceID: "pc-local",
+		SessionID: "session-1", ClientToken: clientToken, Payload: answerPayload,
+	})
+	readTestMessage(t, agentConn, protocol.TypeUserQuestionAnswer)
+	if route := server.getClient("question-req-1"); route == nil || route.RequestType != protocol.TypeUserMessage {
+		t.Fatalf("user question answer replaced the original chat route: %#v", route)
+	}
+
+	listPayload, err := json.Marshal(protocol.UserQuestionListPayload{KnownQuestionIDs: []string{"question-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestMessage(t, clientConn, protocol.Message{
+		Type: protocol.TypeUserQuestionList, RequestID: "question-list-1", UserID: "local", DeviceID: "pc-local",
+		ClientToken: clientToken, Payload: listPayload,
+	})
+	readTestMessage(t, agentConn, protocol.TypeUserQuestionList)
+	listResult, err := json.Marshal(protocol.UserQuestionListResultPayload{ResolvedQuestionIDs: []string{"question-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestMessage(t, agentConn, protocol.Message{
+		Type: protocol.TypeUserQuestionListResult, RequestID: "question-list-1", UserID: "local", DeviceID: "pc-local", Payload: listResult,
+	})
+	deadline := time.Now().Add(time.Second)
+	if err := clientConn.SetReadDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var received protocol.Message
+		if err := clientConn.ReadJSON(&received); err != nil {
+			t.Fatalf("read question list result failed: %v", err)
+		}
+		if received.Type == protocol.TypeHeartbeat {
+			continue
+		}
+		if received.Type != protocol.TypeUserQuestionListResult {
+			t.Fatalf("expected message type %s, got %s", protocol.TypeUserQuestionListResult, received.Type)
+		}
+		break
+	}
+	if server.getClient("question-list-1") != nil {
+		t.Fatal("question list response did not release its request route")
+	}
+}
+
 func TestRelayResumesChatRouteAfterClientReconnect(t *testing.T) {
 	server := newTestServer()
 	testServer := httptest.NewServer(server.routes())

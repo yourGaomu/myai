@@ -20,7 +20,7 @@ export function historyMessageToChatItem(
     toolArguments: message.tool_arguments,
     toolError:
       message.tool_error ||
-      (message.tool_status && message.tool_status !== "success"
+      (message.tool_status && message.tool_status !== "success" && message.tool_status !== "skipped"
         ? message.tool_error_code || message.tool_status
         : undefined),
     toolStatus: message.tool_status,

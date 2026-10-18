@@ -455,7 +455,10 @@ func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline
 	step := currentPlan.Steps[index]
 	input := s.Inputs.BuildStepInput(currentPlan, step, index, len(currentPlan.Steps))
 	// Called serially before any generation in this batch starts.
-	prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{SessionID: current.ID, Input: input, ForceChatMode: true})
+	prepared, err := s.Messages.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
+		SessionID: current.ID, Input: input, ForceChatMode: true,
+		SyntheticReason: domainmessage.SyntheticReasonPlanStep,
+	})
 	if err == nil && prepared.Session == nil {
 		err = errors.New("message appender returned nil session")
 	}
@@ -466,7 +469,8 @@ func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline
 		}
 		s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
 			SessionID: prepared.Session.ID, Model: prepared.Session.Model, Title: title, Input: input,
-			RuntimeInstruction: prepared.RuntimeInstruction, AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(prepared.Session),
+			RuntimeInstruction: prepared.RuntimeInstruction, SyntheticReason: domainmessage.SyntheticReasonPlanStep,
+			AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(prepared.Session),
 		})
 	}
 	if err != nil {

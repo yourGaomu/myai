@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	domaininteraction "myai/core/domain/interaction"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/session"
+	localtools "myai/core/tool/local"
+	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -31,6 +34,19 @@ type fakeExecutableTool struct {
 	permission tooldef.Permission
 	result     string
 	err        error
+}
+
+type sideEffectTool struct {
+	calls *atomic.Int32
+}
+
+func (tool sideEffectTool) Name() string                   { return "write_file" }
+func (tool sideEffectTool) Description() string            { return "write" }
+func (tool sideEffectTool) Schema() any                    { return nil }
+func (tool sideEffectTool) Permission() tooldef.Permission { return tooldef.PermissionWrite }
+func (tool sideEffectTool) Call(context.Context, json.RawMessage) (domaintool.ToolOutput, error) {
+	tool.calls.Add(1)
+	return domaintool.SuccessOutput("written"), nil
 }
 
 func (t fakeExecutableTool) Name() string {
@@ -106,6 +122,75 @@ func TestExecutionServiceExecutesTool(t *testing.T) {
 	}
 	if len(hooks.after) != 1 || hooks.after[0].Result != "content" {
 		t.Fatalf("unexpected hook events: %#v", hooks.after)
+	}
+}
+
+func TestExecutionServiceQuestionBarrierDefersOtherToolsInSameBatch(t *testing.T) {
+	var writes atomic.Int32
+	ctx := toolruntime.WithExecution(context.Background(), toolruntime.Execution{SessionID: "session-1"})
+	ctx = toolruntime.WithUserQuestionHandler(ctx, func(_ context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+		if request.ToolCallID != "question-call" {
+			t.Fatalf("question is not bound to its tool call: %#v", request)
+		}
+		return domaininteraction.Answer{Answers: map[string]string{"question_1": "small"}}, nil
+	})
+	result, err := (ExecutionService{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+		"write_file": sideEffectTool{calls: &writes},
+		"ask_user":   localtools.NewAskUserTool(),
+	}}}).Execute(ctx, ExecutionCommand{
+		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{
+			{ID: "write-call", Name: "write_file", Arguments: `{"path":"x","content":"y"}`},
+			{ID: "question-call", Name: "ask_user", Arguments: `{"questions":[{"prompt":"Scope?","options":["small","large"]}]}`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writes.Load() != 0 {
+		t.Fatalf("side effect ran before the user answered: calls=%d", writes.Load())
+	}
+	if len(result.Messages) != 2 || result.Calls[0].ID != "write-call" || result.Calls[1].ID != "question-call" {
+		t.Fatalf("tool call/result order was not preserved: %#v", result)
+	}
+	deferred, ok := result.Messages[0].FirstToolResult()
+	if !ok || deferred.Status != domaintool.ResultStatusSkipped {
+		t.Fatalf("same-batch side effect was not marked as skipped: %#v", result.Messages[0])
+	}
+	questionResult, ok := result.Messages[1].FirstToolResult()
+	if !ok || questionResult.Status != domaintool.ResultStatusSuccess {
+		t.Fatalf("question did not complete with its answer: %#v", result.Messages[1])
+	}
+}
+
+func TestExecutionServiceExecutesOnlyFirstQuestionBarrierInBatch(t *testing.T) {
+	var questionCalls atomic.Int32
+	ctx := toolruntime.WithExecution(context.Background(), toolruntime.Execution{SessionID: "session-1"})
+	ctx = toolruntime.WithUserQuestionHandler(ctx, func(_ context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+		questionCalls.Add(1)
+		return domaininteraction.Answer{Answers: map[string]string{"question_1": request.Title}}, nil
+	})
+	result, err := (ExecutionService{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
+		"ask_user": localtools.NewAskUserTool(),
+	}}}).Execute(ctx, ExecutionCommand{
+		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
+		Calls: []domainmessage.ToolCall{
+			{ID: "first-question", Name: "ask_user", Arguments: `{"title":"first","questions":[{"prompt":"First?"}]}`},
+			{ID: "second-question", Name: "ask_user", Arguments: `{"title":"second","questions":[{"prompt":"Second?"}]}`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if questionCalls.Load() != 1 {
+		t.Fatalf("executed %d questions before returning to the model", questionCalls.Load())
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected both tool calls to be represented: %#v", result.Messages)
+	}
+	deferred, ok := result.Messages[1].FirstToolResult()
+	if !ok || deferred.Status != domaintool.ResultStatusSkipped {
+		t.Fatalf("second question was not deferred: %#v", result.Messages[1])
 	}
 }
 

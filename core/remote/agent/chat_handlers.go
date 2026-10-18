@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	domainagentrun "myai/core/domain/agentrun"
+	domaininteraction "myai/core/domain/interaction"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	intentport "myai/core/port/intent"
@@ -18,7 +19,7 @@ import (
 	"myai/core/service"
 )
 
-func (a *Agent) enqueueRunningTurnInput(conn *websocket.Conn, message protocol.Message, sessionID string) {
+func (a *Agent) enqueueRunningTurnInput(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string) {
 	payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
 	if err != nil {
 		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: fmt.Sprintf("decode user message failed: %v", err)}); writeErr != nil {
@@ -32,9 +33,17 @@ func (a *Agent) enqueueRunningTurnInput(conn *websocket.Conn, message protocol.M
 		}
 		return
 	}
-	//进入消息队列之中
-	if err := a.chatService.EnqueueTurnInput(sessionID, payload.Content); err != nil {
-		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+	// 1. 把运行期间的新输入登记为独立下一轮，并保留原请求 ID 供实时答复关联。
+	var enqueueErr error
+	if queued, ok := a.chatService.(interface {
+		EnqueueQueuedUserTurn(context.Context, string, string, string) error
+	}); ok {
+		enqueueErr = queued.EnqueueQueuedUserTurn(ctx, sessionID, message.RequestID, payload.Content)
+	} else {
+		enqueueErr = a.chatService.EnqueueTurnInput(sessionID, payload.Content)
+	}
+	if enqueueErr != nil {
+		if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, sessionID, protocol.ErrorPayload{Message: enqueueErr.Error()}); writeErr != nil {
 			log.Printf("send queued user message error failed: %v", writeErr)
 		}
 		return
@@ -194,6 +203,17 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			message.SessionID = sessionID
 			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
+		},
+		OnUserQuestion: func(questionCtx context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+			questionMessage := message
+			if request.RequestID != "" {
+				questionMessage.RequestID = request.RequestID
+			}
+			questionMessage.SessionID = request.SessionID
+			if questionMessage.SessionID == "" {
+				questionMessage.SessionID = sessionID
+			}
+			return a.askUserQuestion(questionCtx, conn, questionMessage, request)
 		},
 		OnRunStarted: func(run domainagentrun.Run) {
 			send(protocol.TypeAgentRunStarted, protocol.AgentRunStartedPayload{Run: agentRunPayload(run)})

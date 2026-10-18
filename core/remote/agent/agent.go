@@ -45,6 +45,8 @@ type Agent struct {
 	lastTaskEventSequence atomic.Uint64
 	permissionWaiters     *permissionWaiterRegistry
 	permissionTimeout     time.Duration
+	userQuestionWaiters   *userQuestionWaiterRegistry
+	userQuestionTimeout   time.Duration
 	activeSubagentWaits   atomic.Int32
 }
 
@@ -63,20 +65,22 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 	}
 
 	return &Agent{
-		config:            config,
-		chatService:       chatService,
-		fileService:       fileService,
-		changeService:     changeService,
-		knowledgeService:  knowledgeService,
-		memoryService:     memoryService,
-		memoryExtraction:  memoryExtraction,
-		memoryDream:       memoryDream,
-		subagentService:   subagentService,
-		subagentEvents:    subagentEvents,
-		pluginManager:     pluginManager,
-		runtimes:          newSessionRuntimeManager(),
-		permissionWaiters: newPermissionWaiterRegistry(),
-		permissionTimeout: 60 * time.Second,
+		config:              config,
+		chatService:         chatService,
+		fileService:         fileService,
+		changeService:       changeService,
+		knowledgeService:    knowledgeService,
+		memoryService:       memoryService,
+		memoryExtraction:    memoryExtraction,
+		memoryDream:         memoryDream,
+		subagentService:     subagentService,
+		subagentEvents:      subagentEvents,
+		pluginManager:       pluginManager,
+		runtimes:            newSessionRuntimeManager(),
+		permissionWaiters:   newPermissionWaiterRegistry(),
+		permissionTimeout:   60 * time.Second,
+		userQuestionWaiters: newUserQuestionWaiterRegistry(),
+		userQuestionTimeout: 15 * time.Minute,
 	}
 }
 
@@ -373,6 +377,10 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		go a.processRegenerateMessage(ctx, conn, message)
 	case protocol.TypePermissionResult:
 		return a.handlePermissionResult(message)
+	case protocol.TypeUserQuestionAnswer:
+		return a.handleUserQuestionAnswer(message)
+	case protocol.TypeUserQuestionList:
+		return a.handleUserQuestionList(conn, message)
 	case protocol.TypeSessionList:
 		return a.handleSessionList(ctx, conn, message)
 	case protocol.TypeSessionNew:
@@ -595,7 +603,7 @@ func (a *Agent) processUserMessage(ctx context.Context, conn *websocket.Conn, me
 	runCtx, cancel, ok := runtime.start(ctx)
 	// 此时会话已经有对话在生成了。
 	if !ok {
-		a.enqueueRunningTurnInput(conn, message, sessionID)
+		a.enqueueRunningTurnInput(ctx, conn, message, sessionID)
 		return
 	}
 	// 当前任务结束后清除运行状态并取消其 Context。

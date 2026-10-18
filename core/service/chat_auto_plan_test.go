@@ -322,10 +322,12 @@ func (resumeClassifier) Classify(context.Context, *session.Session, string) (Aut
 type recordingAutoPlanMessages struct {
 	current                 *session.Session
 	forceAutonomousPlanning bool
+	commands                []messagecommand.AppendUserMessage
 }
 
 func (m *recordingAutoPlanMessages) AppendUserMessage(_ context.Context, command messagecommand.AppendUserMessage) (messageresult.Command, error) {
 	m.forceAutonomousPlanning = command.ForceAutonomousPlanning
+	m.commands = append(m.commands, command)
 	return messageresult.Command{Session: m.current, Input: command.Input, Appended: true}, nil
 }
 

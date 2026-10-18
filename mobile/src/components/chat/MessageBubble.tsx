@@ -90,7 +90,7 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
             </View>
           ) : null}
         </View>
-        <Text style={styles.userTurnMeta}>已发送</Text>
+        <Text style={styles.userTurnMeta}>{message.status === "queued" ? "排队中" : "已发送"}</Text>
       </View>
     );
   }

@@ -50,6 +50,11 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		if candidate.Function == nil {
 			continue
 		}
+		// 1. ask_user 是交互能力，不授予工作区工具权限；Agent Loop 会检查本轮是否有用户交互通道。
+		if candidate.Function.Name == "ask_user" {
+			filtered = append(filtered, candidate)
+			continue
+		}
 		if _, ok := allowed[candidate.Function.Name]; ok {
 			filtered = append(filtered, candidate)
 		}

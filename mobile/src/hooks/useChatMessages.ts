@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import type { TokenUsage, ToolResultPayload } from "../protocol";
-import type { PermissionState } from "../types/app";
+import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
 import { newRequestID } from "../utils/ids";
 
@@ -10,6 +10,7 @@ type SessionChatState = {
   lastUsage: TokenUsage | null;
   messages: ChatItem[];
   pendingPermission: PermissionState | null;
+  pendingQuestions: UserQuestionState[];
   pendingRequestID: string;
 };
 
@@ -21,6 +22,7 @@ function emptySessionChatState(): SessionChatState {
     lastUsage: null,
     messages: [],
     pendingPermission: null,
+    pendingQuestions: [],
     pendingRequestID: "",
   };
 }
@@ -70,6 +72,34 @@ export function useChatMessages() {
       updateSessionChat(sessionID, (current) => ({
         ...current,
         messages: [...current.messages, { attachments, id: newRequestID(), requestID, createdAt: new Date().toISOString(), role, text }],
+      }));
+    },
+    [updateSessionChat],
+  );
+
+  const markUserMessageQueued = useCallback(
+    (sessionID: string, requestID: string) => {
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        messages: current.messages.map((item) =>
+          item.role === "user" && item.requestID === requestID
+            ? { ...item, status: "queued" }
+            : item,
+        ),
+      }));
+    },
+    [updateSessionChat],
+  );
+
+  const markUserMessageDelivered = useCallback(
+    (sessionID: string, requestID: string) => {
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        messages: current.messages.map((item) =>
+          item.role === "user" && item.requestID === requestID
+            ? { ...item, status: "done" }
+            : item,
+        ),
       }));
     },
     [updateSessionChat],
@@ -541,6 +571,54 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  const setSessionPendingQuestion = useCallback(
+    (sessionID: string, question: UserQuestionState | null) => {
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        pendingQuestions: question
+          ? [
+              ...current.pendingQuestions.filter((item) => item.questionID !== question.questionID),
+              question,
+            ]
+          : [],
+      }));
+    },
+    [updateSessionChat],
+  );
+
+  const removeSessionPendingQuestion = useCallback(
+    (sessionID: string, questionID: string) => {
+      updateSessionChat(sessionID, (current) => ({
+        ...current,
+        pendingQuestions: current.pendingQuestions.filter((item) => item.questionID !== questionID),
+      }));
+    },
+    [updateSessionChat],
+  );
+
+  const removePendingQuestions = useCallback(
+    (questionIDs: string[]) => {
+      const removedIDs = new Set(questionIDs);
+      if (removedIDs.size === 0) {
+        return;
+      }
+      const current = sessionChatsRef.current;
+      let changed = false;
+      const next = { ...current };
+      for (const [sessionID, chat] of Object.entries(current)) {
+        const pendingQuestions = chat.pendingQuestions.filter((item) => !removedIDs.has(item.questionID));
+        if (pendingQuestions.length !== chat.pendingQuestions.length) {
+          next[sessionID] = { ...chat, pendingQuestions };
+          changed = true;
+        }
+      }
+      if (changed) {
+        commitSessionChats(next);
+      }
+    },
+    [commitSessionChats],
+  );
+
   const setSessionPendingRequest = useCallback(
     (sessionID: string, requestID: string) => {
       updateSessionChat(sessionID, (current) => ({
@@ -596,6 +674,10 @@ export function useChatMessages() {
           lastUsage: from.lastUsage || to.lastUsage,
           messages: mergeMessages(from.messages, to.messages),
           pendingPermission: from.pendingPermission || to.pendingPermission,
+          pendingQuestions: [
+            ...to.pendingQuestions,
+            ...from.pendingQuestions.filter((item) => !to.pendingQuestions.some((existing) => existing.questionID === item.questionID)),
+          ],
           pendingRequestID: from.pendingRequestID || to.pendingRequestID,
         },
       };
@@ -637,6 +719,8 @@ export function useChatMessages() {
 
   return {
     addMessage,
+    markUserMessageQueued,
+    markUserMessageDelivered,
     addToolCall,
     addToolResult,
     appendMessages,
@@ -652,6 +736,9 @@ export function useChatMessages() {
     resetActiveAssistant,
     setSessionLastUsage,
     setSessionPendingPermission,
+    setSessionPendingQuestion,
+    removeSessionPendingQuestion,
+    removePendingQuestions,
     setSessionPendingRequest,
     startBackgroundAssistant,
     sessionChats: sessionChatsRef.current,

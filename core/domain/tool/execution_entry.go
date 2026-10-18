@@ -10,6 +10,7 @@ const (
 	ResultStatusDenied   ResultStatus = "denied"
 	ResultStatusTimeout  ResultStatus = "timeout"
 	ResultStatusCanceled ResultStatus = "canceled"
+	ResultStatusSkipped  ResultStatus = "skipped"
 )
 
 type ToolOutput struct {
@@ -37,7 +38,7 @@ func (o ToolOutput) Normalized() ToolOutput {
 	if o.Status == "" {
 		o.Status = ResultStatusSuccess
 	}
-	if o.Status != ResultStatusSuccess {
+	if o.Status != ResultStatusSuccess && o.Status != ResultStatusSkipped {
 		if o.ErrorMessage == "" {
 			o.ErrorMessage = o.Content
 		}
@@ -49,7 +50,8 @@ func (o ToolOutput) Normalized() ToolOutput {
 }
 
 func (o ToolOutput) Failed() bool {
-	return o.Normalized().Status != ResultStatusSuccess
+	status := o.Normalized().Status
+	return status != ResultStatusSuccess && status != ResultStatusSkipped
 }
 
 type ExecutionEntryKind string

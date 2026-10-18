@@ -125,7 +125,7 @@ export function SubagentInspectionModal({
         };
         const failed =
           Boolean(ev.error_message || ev.error_code) ||
-          Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded");
+          Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded" && ev.status !== "skipped");
         existing.status = failed ? "failed" : "success";
         existing.result = ev.content;
         existing.errorCode = ev.error_code;

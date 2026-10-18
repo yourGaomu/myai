@@ -3,6 +3,7 @@ package command
 import (
 	"time"
 
+	domaininteraction "myai/core/domain/interaction"
 	domainsubagent "myai/core/domain/subagent"
 	modelport "myai/core/port/model"
 )
@@ -38,6 +39,7 @@ type StartTask struct {
 	ModelID          string
 	FallbackModelID  string
 	WorkspaceRoot    string
+	UserQuestion     domaininteraction.UserQuestionHandler
 }
 
 type CheckTask struct {
