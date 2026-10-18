@@ -118,7 +118,7 @@ core/App.go
        -> config.ViperLoader.Map
 ```
 
-已脱敏的配置结构见 [application.redacted.yaml](application.redacted.yaml)。开发环境最少需要：
+已脱敏的配置结构见 [application.redacted.yaml](../application.redacted.yaml)。开发环境最少需要：
 
 ```yaml
 myai:

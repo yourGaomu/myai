@@ -182,7 +182,7 @@ main.main
 
 ## 5. 第一阶段：Go 进入 `main.main`
 
-源码：[main.go](main.go)
+源码：[main.go](../main.go)
 
 ```go
 func main() {
@@ -204,7 +204,7 @@ func main() {
 
 ### 6.1 根命令对象
 
-源码：[core/cmd/root.go](core/cmd/root.go)
+源码：[core/cmd/root.go](../core/cmd/root.go)
 
 ```go
 var rootCmd = &cobra.Command{
@@ -223,7 +223,7 @@ func Execute() error {
 
 ### 6.2 `agentCmd` 的注册
 
-源码：[core/cmd/agent.go](core/cmd/agent.go)
+源码：[core/cmd/agent.go](../core/cmd/agent.go)
 
 ```go
 func init() {
@@ -380,7 +380,7 @@ return a.Run(ctx)
 
 ## 8. 第四阶段：`core.InitApp()` 初始化整个应用
 
-源码：[core/App.go](core/App.go)
+源码：[core/App.go](../core/App.go)
 
 ### 8.1 `Application` 是什么
 
@@ -505,7 +505,7 @@ Application.InitConfig
 -> config.Properties
 ```
 
-核心源码：[core/config/loader.go](core/config/loader.go)
+核心源码：[core/config/loader.go](../core/config/loader.go)
 
 ```go
 func (l ViperLoader) Load(workspace string) (Properties, error) {
@@ -748,7 +748,7 @@ app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
 })
 ```
 
-源码：[core/composition/chat/configuration.go](core/composition/chat/configuration.go)
+源码：[core/composition/chat/configuration.go](../core/composition/chat/configuration.go)
 
 `composition/chat` 相当于 Spring Boot 的显式 `@Configuration`。它负责把实现对象注入应用服务，例如：
 
@@ -835,7 +835,7 @@ ChatService.Bootstrap
 
 ## 15. workspace 文件服务如何初始化
 
-源码：[core/remote/files/service.go](core/remote/files/service.go)
+源码：[core/remote/files/service.go](../core/remote/files/service.go)
 
 ```go
 func New(root string) (*Service, error) {
@@ -973,7 +973,7 @@ func New(
 
 ### 17.1 为什么注入 `ChatFacade` 而不是 `*ChatService`
 
-接口定义在 [core/remote/agent/chat_facade.go](core/remote/agent/chat_facade.go)：
+接口定义在 [core/remote/agent/chat_facade.go](../core/remote/agent/chat_facade.go)：
 
 ```go
 type ChatFacade interface {

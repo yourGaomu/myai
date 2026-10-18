@@ -158,7 +158,7 @@ TaskService internal RequestID
 
 ## 5. 协议 DTO
 
-Go 定义：[core/remote/protocol/message.go](core/remote/protocol/message.go)
+Go 定义：[core/remote/protocol/message.go](../core/remote/protocol/message.go)
 
 ```go
 type Message struct {
@@ -176,7 +176,7 @@ type UserMessagePayload struct {
 }
 ```
 
-TypeScript 定义：[mobile/src/protocol.ts](mobile/src/protocol.ts)
+TypeScript 定义：[mobile/src/protocol.ts](../mobile/src/protocol.ts)
 
 ```ts
 export type RelayMessage<TPayload = unknown> = {
@@ -280,7 +280,7 @@ Composer.onPress
 -> useChatActions.sendUserMessage
 ```
 
-源码：[mobile/src/components/chat/Composer.tsx](mobile/src/components/chat/Composer.tsx)
+源码：[mobile/src/components/chat/Composer.tsx](../mobile/src/components/chat/Composer.tsx)
 
 ```tsx
 <Pressable
@@ -295,7 +295,7 @@ Composer.onPress
 
 ## 8. `useChatActions.sendUserMessage` 做了什么
 
-源码：[mobile/src/hooks/useChatActions.ts](mobile/src/hooks/useChatActions.ts)
+源码：[mobile/src/hooks/useChatActions.ts](../mobile/src/hooks/useChatActions.ts)
 
 核心代码：
 
@@ -382,7 +382,7 @@ package main
 
 ## 10. `useRelaySender` 构造完整信封
 
-源码：[mobile/src/hooks/useRelaySender.ts](mobile/src/hooks/useRelaySender.ts)
+源码：[mobile/src/hooks/useRelaySender.ts](../mobile/src/hooks/useRelaySender.ts)
 
 ```ts
 const socket = socketRef.current;
@@ -409,7 +409,7 @@ socket.send(JSON.stringify(envelope));
 
 ## 11. Relay 如何处理 `user_message`
 
-源码：[core/remote/relay/server.go](core/remote/relay/server.go)
+源码：[core/remote/relay/server.go](../core/remote/relay/server.go)
 
 调用链：
 
@@ -538,7 +538,7 @@ err := a.handleUserMessage(runCtx, conn, message)
 
 ## 14. Agent Handler 解码协议
 
-源码：[core/remote/agent/chat_handlers.go](core/remote/agent/chat_handlers.go)
+源码：[core/remote/agent/chat_handlers.go](../core/remote/agent/chat_handlers.go)
 
 ```go
 payload, err := protocol.DecodePayload[protocol.UserMessagePayload](message)
@@ -600,7 +600,7 @@ llm.ChatStreamHandler{
 
 ## 16. ChatService 入口
 
-源码：[core/service/chat.go](core/service/chat.go)
+源码：[core/service/chat.go](../core/service/chat.go)
 
 ```go
 func (s *ChatService) SendMessageStreamForSession(
@@ -732,7 +732,7 @@ TaskRecorder 被附加到 Context。`write_file`、`edit_file` 和 Shell 等工�
 
 ## 20. AssistantGenerationService 编排一次回答
 
-源码：[core/application/chat/generation/service/assistant_generation_service.go](core/application/chat/generation/service/assistant_generation_service.go)
+源码：[core/application/chat/generation/service/assistant_generation_service.go](../core/application/chat/generation/service/assistant_generation_service.go)
 
 调用顺序：
 
@@ -810,7 +810,7 @@ SelectedTokens >= ContextWindowK * 1000 * 70%
 
 ## 23. AgentLoopService 调用模型
 
-源码：[core/application/chat/generation/service/agent_loop_service.go](core/application/chat/generation/service/agent_loop_service.go)
+源码：[core/application/chat/generation/service/agent_loop_service.go](../core/application/chat/generation/service/agent_loop_service.go)
 
 每轮调用：
 
@@ -846,7 +846,7 @@ type ChatModelPort interface {
 }
 ```
 
-当前实现：[core/llm/model.go](core/llm/model.go)
+当前实现：[core/llm/model.go](../core/llm/model.go)
 
 ```go
 func (m *Model) Generate(ctx context.Context, request GenerateRequest) (ChatResult, error) {
