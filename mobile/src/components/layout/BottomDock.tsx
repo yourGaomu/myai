@@ -1,5 +1,6 @@
 import { StyleSheet, View } from "react-native";
 
+import { palette, space } from "../../constants/theme";
 import type { ViewMode } from "../../types/app";
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
@@ -92,9 +93,9 @@ export function BottomDock({
 
 const styles = StyleSheet.create({
   bottomDock: {
-    backgroundColor: "#f4f5f7",
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingTop: 6,
+    backgroundColor: palette.canvas,
+    gap: space.xs,
+    paddingHorizontal: space.xl,
+    paddingTop: space.sm,
   },
 });
