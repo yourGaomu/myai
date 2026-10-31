@@ -62,7 +62,8 @@
       ],
       "expo-updates",
       "expo-sqlite",
-      "./plugins/withRelayForegroundService"
+      "./plugins/withRelayForegroundService",
+      "expo-font"
     ],
     "extra": {
       "eas": {
