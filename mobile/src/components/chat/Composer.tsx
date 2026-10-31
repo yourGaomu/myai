@@ -1,8 +1,12 @@
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { attachmentKey, attachmentTitle, isImageAttachment, isUploadedAssetAttachment } from "../../utils/attachments";
+import { font, glass, palette, radius, shadow, space, weight } from "../../constants/theme";
 
 type Props = {
   attachedFiles: ChatAttachment[];
@@ -66,7 +70,7 @@ export function Composer({
                     style={styles.attachmentThumbnail}
                   />
                 ) : (
-                  <Text style={styles.attachmentIcon}>📎</Text>
+                  <Feather color={palette.ink3} name="file-text" size={14} />
                 )}
                 <View style={styles.attachmentInfo}>
                   <Text numberOfLines={1} style={styles.attachmentTitle}>
@@ -79,53 +83,37 @@ export function Composer({
                 <Pressable
                   accessibilityLabel="移除附件"
                   onPress={() => onRemoveAttachedFile(attachmentKey(file))}
-                  style={({ pressed }) =>
-                    buttonFeedback(styles.attachmentRemove, pressed)
-                  }
+                  style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
                 >
-                  <Text style={styles.attachmentRemoveText}>✕</Text>
+                  <Feather color={palette.err} name="x" size={12} />
                 </Pressable>
               </View>
             );
           })}
           {pendingUpload ? (
             <View style={[styles.attachmentChip, styles.uploadingChip]}>
-              <ActivityIndicator color="#12100e" size="small" />
+              <ActivityIndicator color={palette.brand} size="small" />
               <Text style={styles.uploadingText}>正在上传文件...</Text>
             </View>
           ) : null}
         </ScrollView>
       ) : null}
 
-      {/* 快捷任务提示条 (Agents-Anywhere Workbench Composer Layout) */}
-      <View style={styles.composerHeaderRow}>
-        <View style={styles.composerModeBadge}>
-          <View style={styles.modeLiveDot} />
-          <Text style={styles.modeText}>Agent 任务执行</Text>
-        </View>
-        {Platform.OS === "web" ? (
-          <Text style={styles.composerHintText}>Enter 发送 · Shift+Enter 换行</Text>
-        ) : null}
-      </View>
-
-      {/* 单行一体化输入胶囊 (Neo-Brutalism Composer Bar) */}
-      <View style={styles.composerBox}>
-        {/* 左侧上传附件按钮 */}
+      {/* 单行玻璃输入胶囊 */}
+      <BlurView intensity={glass.intensity} style={styles.composerBox} tint="dark">
+        {/* 左侧上传附件按钮：无背景无边框，只是一个图标 */}
         <Pressable
           accessibilityLabel="附加文件"
           disabled={pendingUpload}
           onPress={onUploadFile}
           style={({ pressed }) =>
-            buttonFeedback(
-              [styles.uploadBtn, pendingUpload && styles.disabledBtn],
-              pressed,
-            )
+            buttonFeedback([styles.iconButton, pendingUpload && styles.disabledBtn], pressed)
           }
         >
           {pendingUpload ? (
-            <ActivityIndicator color="#12100e" size="small" />
+            <ActivityIndicator color={palette.brand} size="small" />
           ) : (
-            <Text style={styles.uploadBtnIcon}>📎</Text>
+            <Feather color={palette.ink3} name="paperclip" size={19} />
           )}
         </Pressable>
 
@@ -147,13 +135,13 @@ export function Composer({
               }
             }
           }}
-          placeholder="输入需求，AI 将控制电脑执行..."
-          placeholderTextColor="#8c857b"
+          placeholder="输入需求，AI 将控制电脑执行…"
+          placeholderTextColor={palette.ink4}
           style={styles.input}
           value={messageInput}
         />
 
-        {/* 右侧动作按钮：空闲为 ▶ 发送，执行中为 ■ 暂停 */}
+        {/* 右侧动作按钮：空闲为箭头发送，执行中为方形暂停 */}
         {showPauseButton ? (
           <Pressable
             accessibilityLabel="暂停任务"
@@ -167,9 +155,9 @@ export function Composer({
             }
           >
             {pendingPause ? (
-              <ActivityIndicator color="#ffffff" size="small" />
+              <ActivityIndicator color={palette.err} size="small" />
             ) : (
-              <Text style={styles.pauseBtnText}>■</Text>
+              <Feather color={palette.err} name="square" size={13} />
             )}
           </Pressable>
         ) : (
@@ -177,211 +165,144 @@ export function Composer({
             accessibilityLabel="发送需求"
             disabled={isBusy}
             onPress={onSend}
-            style={({ pressed }) =>
-              buttonFeedback(
-                [styles.actionBtn, styles.sendBtn, isBusy && styles.disabledBtn],
-                pressed,
-              )
-            }
+            style={({ pressed }) => buttonFeedback([isBusy && styles.disabledBtn], pressed)}
           >
-            <Text style={styles.sendBtnText}>▶</Text>
+            <LinearGradient
+              colors={[palette.brandLight, palette.brandDeep]}
+              end={{ x: 1, y: 1 }}
+              start={{ x: 0.15, y: 0 }}
+              style={styles.sendBtn}
+            >
+              <Feather color={palette.inkInverse} name="arrow-up" size={15} strokeWidth={2.6} />
+            </LinearGradient>
           </Pressable>
         )}
-      </View>
+      </BlurView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   composerWrapper: {
-    gap: 4,
+    gap: space.md,
     width: "100%",
-  },
-  composerHeaderRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    paddingBottom: 2,
-  },
-  composerModeBadge: {
-    alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    flexDirection: "row",
-    gap: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  modeLiveDot: {
-    backgroundColor: "#2e8b38",
-    borderRadius: 3,
-    height: 6,
-    width: 6,
-  },
-  modeText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  composerHintText: {
-    color: "#8c857b",
-    fontSize: 10,
-    fontWeight: "700",
   },
   attachmentTray: {
     flexDirection: "row",
-    gap: 6,
+    gap: space.sm,
     paddingBottom: 2,
   },
   attachmentChip: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    elevation: 2,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexDirection: "row",
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1.5, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    gap: 6,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+    ...shadow.card,
   },
   uploadedAttachmentChip: {
-    backgroundColor: "#b9e9b0",
+    backgroundColor: palette.okWash,
+    borderColor: palette.okBorder,
   },
   imageAttachmentChip: {
-    backgroundColor: "#f2faee",
-    paddingLeft: 4,
-    paddingVertical: 4,
+    backgroundColor: palette.surface3,
     gap: 7,
+    paddingLeft: space.xs,
   },
   attachmentThumbnail: {
-    backgroundColor: "#e8e3d8",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    height: 34,
-    width: 34,
+    backgroundColor: palette.surface4,
+    borderRadius: radius.xs,
+    height: 28,
+    width: 28,
   },
   attachmentInfo: {
     justifyContent: "center",
     maxWidth: 140,
   },
   attachmentSubtext: {
-    color: "#4a7c44",
-    fontSize: 9,
-    fontWeight: "800",
+    color: palette.ok,
+    fontSize: font.micro,
+    fontWeight: weight.medium,
     marginTop: 1,
   },
   uploadingChip: {
-    backgroundColor: "#fff8db",
     borderStyle: "dashed",
-    paddingHorizontal: 10,
+    paddingHorizontal: space.lg,
   },
   uploadingText: {
-    color: "#7a5900",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.brand,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     marginLeft: 3,
   },
-  attachmentIcon: {
-    fontSize: 11,
-  },
   attachmentTitle: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     maxWidth: 160,
   },
   attachmentRemove: {
     paddingHorizontal: 2,
   },
-  attachmentRemoveText: {
-    color: "#d94b34",
-    fontSize: 11,
-    fontWeight: "900",
-  },
   composerBox: {
     alignItems: "flex-end",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 14,
-    borderWidth: 2,
-    elevation: 3,
+    backgroundColor: palette.glassTintStrong,
+    borderColor: palette.glassEdge,
+    borderRadius: radius.xl,
+    borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 2, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    gap: 7,
+    overflow: "hidden",
+    paddingBottom: 7,
+    paddingLeft: 9,
+    paddingRight: 7,
+    paddingTop: 7,
     width: "100%",
+    ...shadow.float,
   },
-  uploadBtn: {
+  iconButton: {
     alignItems: "center",
-    backgroundColor: "#f8f1e5",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    height: 32,
+    height: 30,
     justifyContent: "center",
-    width: 32,
-  },
-  uploadBtnIcon: {
-    color: "#12100e",
-    fontSize: 14,
+    width: 30,
   },
   input: {
-    backgroundColor: "transparent",
-    color: "#12100e",
+    backgroundColor: palette.transparent,
+    color: palette.ink1,
     flex: 1,
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: font.body,
+    fontWeight: weight.regular,
     includeFontPadding: false,
-    lineHeight: 18,
-    maxHeight: 72,
-    minHeight: 32,
-    paddingHorizontal: 4,
-    paddingVertical: Platform.OS === "ios" ? 6 : 2,
+    lineHeight: 20,
+    maxHeight: 88,
+    minHeight: 30,
+    paddingHorizontal: 0,
+    paddingVertical: Platform.OS === "ios" ? 6 : 3,
     textAlignVertical: "center",
   },
   actionBtn: {
     alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    height: 32,
+    borderRadius: 15,
+    height: 30,
     justifyContent: "center",
-    width: 32,
+    width: 30,
   },
   sendBtn: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1.5, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  sendBtnText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-    marginLeft: 1,
+    alignItems: "center",
+    borderRadius: 15,
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+    ...shadow.brandGlow,
   },
   pauseBtn: {
-    backgroundColor: "#25231f",
-    borderColor: "#12100e",
-  },
-  pauseBtnText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "900",
+    backgroundColor: palette.errWash,
+    borderColor: palette.errBorder,
+    borderWidth: 1,
   },
   disabledBtn: {
     opacity: 0.5,
