@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type { UserQuestionState } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -40,7 +42,8 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                   onPress={() => setAnswer(item.id, option)}
                   style={({ pressed }) => buttonFeedback([styles.option, selected && styles.optionSelected], pressed)}
                 >
-                  <Text style={styles.optionText}>{selected ? "●  " : "○  "}{option}</Text>
+                  <Feather color={selected ? palette.ok : palette.ink3} name={selected ? "check-circle" : "circle"} size={14} />
+                  <Text style={styles.optionText}>{option}</Text>
                 </Pressable>
               );
             })}
@@ -49,6 +52,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                 editable={!question.submitted}
                 onChangeText={(value) => setAnswer(item.id, value)}
                 placeholder={item.options?.length ? "其他答案" : "输入你的回答"}
+                placeholderTextColor={palette.ink4}
                 style={styles.answerInput}
                 value={answers[item.id] || ""}
               />
@@ -74,47 +78,49 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
 
 const styles = StyleSheet.create({
   questionBox: {
-    backgroundColor: "#fff8db",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 10,
     maxHeight: 420,
     padding: 12,
   },
-  title: { color: "#12100e", fontSize: 16, fontWeight: "900" },
-  subtitle: { color: "#4b4538", lineHeight: 20 },
+  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.bold },
+  subtitle: { color: palette.ink1, lineHeight: 20 },
   questions: { flexGrow: 0, maxHeight: 285 },
   item: { gap: 7, paddingVertical: 5 },
-  prompt: { color: "#12100e", fontWeight: "700", lineHeight: 21 },
+  prompt: { color: palette.ink1, fontWeight: weight.bold, lineHeight: 21 },
   option: {
-    backgroundColor: "#ffffff",
-    borderColor: "#59564e",
-    borderRadius: 6,
+    alignItems: "center",
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
     minHeight: 40,
-    justifyContent: "center",
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  optionSelected: { backgroundColor: "#e7f3e7", borderColor: "#216e39", borderWidth: 2 },
-  optionText: { color: "#12100e", lineHeight: 20 },
+  optionSelected: { backgroundColor: palette.okWash, borderColor: palette.okBorder, borderWidth: 1 },
+  optionText: { color: palette.ink1, flex: 1, lineHeight: 20 },
   answerInput: {
-    backgroundColor: "#ffffff",
-    borderColor: "#6b665a",
-    borderRadius: 6,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    color: "#12100e",
+    color: palette.ink1,
     minHeight: 42,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   row: { flexDirection: "row", gap: 8 },
   flex: { flex: 1, minWidth: 0 },
-  primaryButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 7, borderWidth: 2, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 },
-  primaryButtonText: { color: "#12100e", fontWeight: "800" },
-  secondaryButton: { alignItems: "center", backgroundColor: "#ffffff", borderColor: "#59564e", borderRadius: 7, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 },
-  secondaryButtonText: { color: "#12100e", fontWeight: "700" },
+  primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 },
+  primaryButtonText: { color: palette.inkInverse, fontWeight: weight.bold },
+  secondaryButton: { alignItems: "center", backgroundColor: palette.surface2, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 },
+  secondaryButtonText: { color: palette.ink1, fontWeight: weight.bold },
   disabled: { opacity: 0.45 },
-  waiting: { color: "#4b4538", fontWeight: "700", textAlign: "center" },
+  waiting: { color: palette.ink1, fontWeight: weight.bold, textAlign: "center" },
 });

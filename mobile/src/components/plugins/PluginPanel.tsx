@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { ButtonContent } from "../common/ButtonContent";
 import type { PluginInfo } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -27,7 +28,7 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
         </View>
         <View style={styles.row}>
           <Pressable disabled={pending} onPress={onRefresh} style={({ pressed }) => buttonFeedback([styles.action, pending && styles.disabled], pressed)}>
-            <ButtonContent loading={pending} text={pending ? "加载中" : "刷新"} />
+            <ButtonContent color={palette.ink1} loading={pending} text={pending ? "加载中" : "刷新"} />
           </Pressable>
           <Pressable disabled={pending} onPress={onReload} style={({ pressed }) => buttonFeedback([styles.primary, pending && styles.disabled], pressed)}>
             <ButtonContent loading={pending} text={pending ? "重载中" : "重载"} />
@@ -54,8 +55,8 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
               disabled={pending}
               onValueChange={(value) => onSetEnabled(plugin.id, value)}
               value={plugin.enabled}
-              trackColor={{ false: "#4b4741", true: "#8f6b3f" }}
-              thumbColor={plugin.enabled ? "#f5eee4" : "#bdb4a8"}
+              trackColor={{ false: palette.surface4, true: palette.brandDeep }}
+              thumbColor={plugin.enabled ? palette.brandLight : palette.ink4}
             />
           </View>
         );
@@ -66,20 +67,20 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
 
 const styles = StyleSheet.create({
   stack: { gap: 10 },
-  headerCard: { alignItems: "center", backgroundColor: "#211f1c", borderColor: "#403b35", borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
-  card: { alignItems: "center", backgroundColor: "#1c1a18", borderColor: "#36322d", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
+  headerCard: { alignItems: "center", backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
+  card: { alignItems: "center", backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
   flex: { flex: 1, minWidth: 0 },
-  title: { color: "#f4eee5", fontSize: 16, fontWeight: "700" },
-  name: { color: "#f4eee5", flexShrink: 1, fontSize: 14, fontWeight: "700" },
-  meta: { color: "#a9a096", fontSize: 12, marginTop: 3 },
+  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.bold },
+  name: { color: palette.ink1, flexShrink: 1, fontSize: font.body, fontWeight: weight.bold },
+  meta: { color: palette.ink2, fontSize: font.label, marginTop: 3 },
   nameRow: { alignItems: "center", flexDirection: "row", gap: 8 },
-  badge: { backgroundColor: "#2e4b3b", borderRadius: 6, color: "#b9e0c2", fontSize: 10, paddingHorizontal: 6, paddingVertical: 2, textTransform: "uppercase" },
-  badgeFailed: { backgroundColor: "#52302d", color: "#f3b9b1" },
-  error: { color: "#f0a59a", fontSize: 12, marginTop: 5 },
+  badge: { backgroundColor: palette.okWash, borderRadius: radius.sm, color: palette.ok, fontSize: font.micro, paddingHorizontal: 6, paddingVertical: 2, textTransform: "uppercase" },
+  badgeFailed: { backgroundColor: palette.surface3, color: palette.err },
+  error: { color: palette.err, fontSize: font.label, marginTop: 5 },
   row: { flexDirection: "row", gap: 6 },
-  action: { borderColor: "#5d554c", borderRadius: 8, borderWidth: 1, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
-  primary: { backgroundColor: "#8f6b3f", borderRadius: 8, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
+  action: { backgroundColor: palette.surface2, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
+  primary: { backgroundColor: palette.brand, borderRadius: radius.sm, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
   disabled: { opacity: 0.5 },
-  message: { color: "#c9bda9", fontSize: 12 },
-  empty: { backgroundColor: "#1c1a18", borderColor: "#36322d", borderRadius: 10, borderWidth: 1, color: "#91887e", fontSize: 13, padding: 14 },
+  message: { color: palette.ink3, fontSize: font.label },
+  empty: { backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, color: palette.ink2, fontSize: font.body, padding: 14 },
 });

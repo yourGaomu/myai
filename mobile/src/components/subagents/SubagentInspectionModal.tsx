@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type {
   AssetSummary,
@@ -23,6 +24,7 @@ import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
 import { formatDateTime } from "../../utils/format";
 import { MarkdownText } from "../chat/MarkdownText";
 import { SharedAssetCard } from "../chat/SharedAssetCard";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -203,7 +205,7 @@ export function SubagentInspectionModal({
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.avatarIcon}>
-                <Text style={styles.avatarEmoji}>🤖</Text>
+                <Feather color={palette.brand} name="cpu" size={16} />
               </View>
               <View style={styles.headerTitleWrap}>
                 <View style={styles.headerTitleRow}>
@@ -215,7 +217,8 @@ export function SubagentInspectionModal({
                   </View>
                 </View>
                 <View style={styles.headerMetaRow}>
-                  <Text style={styles.readOnlyBadge}>🔒 只读详情 (主会话不变)</Text>
+                  <Feather color={palette.ink3} name="lock" size={13} />
+                  <Text style={styles.readOnlyBadge}>只读详情 (主会话不变)</Text>
                   {task.definition_id ? (
                     <Text numberOfLines={1} style={styles.headerSub}>
                       · {task.definition_id}
@@ -231,16 +234,16 @@ export function SubagentInspectionModal({
                 style={({ pressed }) => buttonFeedback(styles.iconButton, pressed)}
               >
                 {loadingDetail || loadingEvents ? (
-                  <ActivityIndicator color="#12100e" size="small" />
+                  <ActivityIndicator color={palette.ink1} size="small" />
                 ) : (
-                  <Text style={styles.iconButtonText}>↻</Text>
+                  <Feather color={palette.ink1} name="rotate-cw" size={15} />
                 )}
               </Pressable>
               <Pressable
                 onPress={onClose}
                 style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}
               >
-                <Text style={styles.closeButtonText}>✕</Text>
+                <Feather color={palette.err} name="x" size={18} />
               </Pressable>
             </View>
           </View>
@@ -269,8 +272,9 @@ export function SubagentInspectionModal({
             {/* 4.1 排队或启动失败提醒（session_ready=false 时仍可查看） */}
             {!sessionReady ? (
               <View style={styles.warningBanner}>
+                <Feather color={palette.warn} name="alert-triangle" size={15} />
                 <Text style={styles.warningBannerText}>
-                  ⚠️ 子会话尚未创建或处于排队中，当前展示任务流转与运行事件。
+                  子会话尚未创建或处于排队中，当前展示任务流转与运行事件。
                 </Text>
               </View>
             ) : null}
@@ -309,7 +313,7 @@ export function SubagentInspectionModal({
             </View>
           ) : null}
 
-          {/* 6.0 视图选项卡 (实时过程 ↔ 历史消息 ↔ 产物) */}
+          {/* 6.0 视图选项卡 */}
           <View style={styles.tabBar}>
             <Pressable
               onPress={() => setActiveTab("process")}
@@ -320,14 +324,21 @@ export function SubagentInspectionModal({
                 )
               }
             >
-              <Text
-                style={[
-                  styles.tabButtonText,
-                  activeTab === "process" && styles.tabButtonTextActive,
-                ]}
-              >
-                ⚡ 实时过程
-              </Text>
+              <View style={styles.iconRow}>
+                <Feather
+                  color={activeTab === "process" ? palette.brand : palette.ink3}
+                  name="zap"
+                  size={14}
+                />
+                <Text
+                  style={[
+                    styles.tabButtonText,
+                    activeTab === "process" && styles.tabButtonTextActive,
+                  ]}
+                >
+                  实时过程
+                </Text>
+              </View>
             </Pressable>
 
             <Pressable
@@ -339,14 +350,21 @@ export function SubagentInspectionModal({
                 )
               }
             >
-              <Text
-                style={[
-                  styles.tabButtonText,
-                  activeTab === "messages" && styles.tabButtonTextActive,
-                ]}
-              >
-                💬 会话历史 ({messages.length})
-              </Text>
+              <View style={styles.iconRow}>
+                <Feather
+                  color={activeTab === "messages" ? palette.brand : palette.ink3}
+                  name="message-square"
+                  size={14}
+                />
+                <Text
+                  style={[
+                    styles.tabButtonText,
+                    activeTab === "messages" && styles.tabButtonTextActive,
+                  ]}
+                >
+                  会话历史 ({messages.length})
+                </Text>
+              </View>
             </Pressable>
 
             <Pressable
@@ -358,14 +376,21 @@ export function SubagentInspectionModal({
                 )
               }
             >
-              <Text
-                style={[
-                  styles.tabButtonText,
-                  activeTab === "assets" && styles.tabButtonTextActive,
-                ]}
-              >
-                📦 产物与文件 ({allAssets.length})
-              </Text>
+              <View style={styles.iconRow}>
+                <Feather
+                  color={activeTab === "assets" ? palette.brand : palette.ink3}
+                  name="package"
+                  size={14}
+                />
+                <Text
+                  style={[
+                    styles.tabButtonText,
+                    activeTab === "assets" && styles.tabButtonTextActive,
+                  ]}
+                >
+                  产物与文件 ({allAssets.length})
+                </Text>
+              </View>
             </Pressable>
           </View>
 
@@ -380,7 +405,7 @@ export function SubagentInspectionModal({
                 {/* 7.1 等待指示器 */}
                 {processViewModel.isWaiting ? (
                   <View style={styles.waitingNotice}>
-                    <ActivityIndicator color="#0f766e" size="small" />
+                    <ActivityIndicator color={palette.info} size="small" />
                     <Text style={styles.waitingNoticeText}>
                       正在{processViewModel.waitingStatus}...
                     </Text>
@@ -390,9 +415,12 @@ export function SubagentInspectionModal({
                 {/* 7.2 权限拒绝说明（后台审批不可用时明确显示） */}
                 {processViewModel.permissionDenials.map((denial, idx) => (
                   <View key={`denial-${idx}`} style={styles.permissionAlert}>
-                    <Text style={styles.permissionAlertTitle}>
-                      🛡️ 工具权限拒绝 · {denial.toolName}
-                    </Text>
+                    <View style={styles.iconRow}>
+                      <Feather color={palette.err} name="shield" size={15} />
+                      <Text style={styles.permissionAlertTitle}>
+                        工具权限拒绝 · {denial.toolName}
+                      </Text>
+                    </View>
                     <Text style={styles.permissionAlertText}>{denial.reason}</Text>
                   </View>
                 ))}
@@ -404,10 +432,15 @@ export function SubagentInspectionModal({
                       onPress={() => setThoughtExpanded((p) => !p)}
                       style={styles.thoughtHeader}
                     >
-                      <Text style={styles.thoughtHeaderTitle}>💭 推理思考</Text>
-                      <Text style={styles.thoughtChevron}>
-                        {thoughtExpanded ? "⌄" : "›"}
-                      </Text>
+                      <View style={styles.iconRow}>
+                        <Feather color={palette.ink2} name="message-circle" size={14} />
+                        <Text style={styles.thoughtHeaderTitle}>推理思考</Text>
+                      </View>
+                      <Feather
+                        color={palette.ink3}
+                        name={thoughtExpanded ? "chevron-down" : "chevron-right"}
+                        size={14}
+                      />
                     </Pressable>
                     {thoughtExpanded ? (
                       <View style={styles.thoughtBody}>
@@ -420,7 +453,10 @@ export function SubagentInspectionModal({
                 {/* 7.4 工具调用过程 */}
                 {processViewModel.tools.length > 0 ? (
                   <View style={styles.toolsSection}>
-                    <Text style={styles.sectionHeaderTitle}>🛠️ 工具调用序列</Text>
+                    <View style={styles.iconRow}>
+                      <Feather color={palette.brand} name="tool" size={14} />
+                      <Text style={styles.sectionHeaderTitle}>工具调用序列</Text>
+                    </View>
                     {processViewModel.tools.map((tool) => (
                       <View key={tool.toolCallID} style={styles.toolCard}>
                         <View style={styles.toolHeader}>
@@ -483,7 +519,10 @@ export function SubagentInspectionModal({
                 {/* 7.5 产生的资产预览 (复用 SharedAssetCard) */}
                 {processViewModel.eventAssets.length > 0 ? (
                   <View style={styles.assetsSection}>
-                    <Text style={styles.sectionHeaderTitle}>🖼️ 产物与资源</Text>
+                    <View style={styles.iconRow}>
+                      <Feather color={palette.brand} name="image" size={14} />
+                      <Text style={styles.sectionHeaderTitle}>产物与资源</Text>
+                    </View>
                     {processViewModel.eventAssets.map((asset) => (
                       <SharedAssetCard
                         asset={assetSummaryToSharedAsset(asset)}
@@ -497,12 +536,15 @@ export function SubagentInspectionModal({
                 {/* 7.6 最终回答正文 */}
                 {processViewModel.answerText ? (
                   <View style={styles.answerCard}>
-                    <Text style={styles.answerHeaderTitle}>💡 子代理回答</Text>
+                    <View style={styles.iconRow}>
+                      <Feather color={palette.brand} name="zap" size={14} />
+                      <Text style={styles.answerHeaderTitle}>子代理回答</Text>
+                    </View>
                     <MarkdownText text={processViewModel.answerText} />
                   </View>
                 ) : isRunning ? (
                   <View style={styles.emptyNotice}>
-                    <ActivityIndicator color="#0284c7" size="small" />
+                    <ActivityIndicator color={palette.cyan} size="small" />
                     <Text style={styles.emptyNoticeText}>子代理正在执行中，等待输出...</Text>
                   </View>
                 ) : (
@@ -525,9 +567,12 @@ export function SubagentInspectionModal({
                     }
                   >
                     {loadingMoreMessages ? (
-                      <ActivityIndicator color="#12100e" size="small" />
+                      <ActivityIndicator color={palette.ink1} size="small" />
                     ) : (
-                      <Text style={styles.loadMoreButtonText}>加载更早的历史记录 ❯</Text>
+                      <View style={styles.iconRow}>
+                        <Text style={styles.loadMoreButtonText}>加载更早的历史记录</Text>
+                        <Feather color={palette.ink1} name="chevron-right" size={14} />
+                      </View>
                     )}
                   </Pressable>
                 ) : null}
@@ -641,16 +686,21 @@ const monoFont = Platform.OS === "ios" ? "Menlo" : "monospace";
 
 const styles = StyleSheet.create({
   backdrop: {
-    backgroundColor: "rgba(18, 16, 14, 0.65)",
+    backgroundColor: palette.scrim,
     flex: 1,
     justifyContent: "flex-end",
   },
+  iconRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
   container: {
-    backgroundColor: "#fffdf9",
-    borderTopColor: "#12100e",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 3,
+    backgroundColor: palette.surface1,
+    borderTopColor: palette.hairline,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    borderTopWidth: 1,
     display: "flex",
     height: "88%",
     overflow: "hidden",
@@ -658,9 +708,9 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
-    backgroundColor: "#f4eee2",
-    borderBottomColor: "#12100e",
-    borderBottomWidth: 2,
+    backgroundColor: palette.brandWash,
+    borderBottomColor: palette.hairline,
+    borderBottomWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -674,16 +724,16 @@ const styles = StyleSheet.create({
   },
   avatarIcon: {
     alignItems: "center",
-    backgroundColor: "#e8ded1",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     height: 38,
     justifyContent: "center",
     width: 38,
   },
   avatarEmoji: {
-    fontSize: 20,
+    fontSize: font.display,
   },
   headerTitleWrap: {
     flex: 1,
@@ -695,9 +745,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   headerMetaRow: {
     alignItems: "center",
@@ -705,13 +755,13 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   readOnlyBadge: {
-    color: "#78716c",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink3,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   headerSub: {
-    color: "#a8a29e",
-    fontSize: 11,
+    color: palette.ink3,
+    fontSize: font.caption,
   },
   headerActions: {
     alignItems: "center",
@@ -720,63 +770,63 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     alignItems: "center",
-    backgroundColor: "#fbf8f2",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     height: 32,
     justifyContent: "center",
     width: 32,
   },
   iconButtonText: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   closeButton: {
     alignItems: "center",
-    backgroundColor: "#fee2e2",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     height: 32,
     justifyContent: "center",
     width: 32,
   },
   closeButtonText: {
-    color: "#991b1b",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.err,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   statusBadge: {
-    borderColor: "#12100e",
-    borderRadius: 999,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 1,
   },
   statusBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   statusRunning: {
-    backgroundColor: "#cffafe",
+    backgroundColor: palette.cyanWash,
   },
   statusSucceeded: {
-    backgroundColor: "#dcfce7",
+    backgroundColor: palette.okWash,
   },
   statusFailed: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: palette.errWash,
   },
   statusWaiting: {
-    backgroundColor: "#fef3c7",
+    backgroundColor: palette.brandWash,
   },
   statusDefault: {
-    backgroundColor: "#e7e5e4",
+    backgroundColor: palette.surface2,
   },
   metaCard: {
-    backgroundColor: "#fcfbf7",
-    borderBottomColor: "#e7dfd5",
+    backgroundColor: palette.brandWash,
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     gap: 4,
     paddingHorizontal: 14,
@@ -787,46 +837,50 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   metaLabel: {
-    color: "#78716c",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.ink3,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   metaValue: {
-    color: "#1c1917",
+    color: palette.ink1,
     flex: 1,
-    fontSize: 12,
+    fontSize: font.label,
   },
   idRow: {
     flexDirection: "row",
     gap: 12,
   },
   idText: {
-    color: "#a8a29e",
-    fontSize: 11,
+    color: palette.ink3,
+    fontSize: font.caption,
   },
   idMono: {
-    color: "#44403c",
+    color: palette.ink2,
     fontFamily: monoFont,
-    fontSize: 11,
+    fontSize: font.caption,
   },
   warningBanner: {
-    backgroundColor: "#fffbeb",
-    borderColor: "#fde68a",
-    borderRadius: 6,
+    alignItems: "center",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderRadius: radius.sm,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
     marginTop: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   warningBannerText: {
-    color: "#b45309",
-    fontSize: 11,
-    fontWeight: "600",
+    color: palette.warn,
+    flex: 1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   runBar: {
     alignItems: "center",
-    backgroundColor: "#f5eee4",
-    borderBottomColor: "#12100e",
+    backgroundColor: palette.brandWash,
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 8,
@@ -834,57 +888,56 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   runBarLabel: {
-    color: "#57534e",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   runPill: {
-    backgroundColor: "#fff",
-    borderColor: "#78716c",
-    borderRadius: 4,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
     marginRight: 6,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
   runPillSelected: {
-    backgroundColor: "#12100e",
-    borderColor: "#12100e",
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairline,
   },
   runPillText: {
-    color: "#44403c",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   runPillTextSelected: {
-    color: "#fff",
+    color: palette.ink1,
   },
   tabBar: {
-    backgroundColor: "#ede4d4",
-    borderBottomColor: "#12100e",
-    borderBottomWidth: 2,
+    backgroundColor: palette.surface1,
+    borderBottomColor: palette.hairline,
+    borderBottomWidth: 1,
     flexDirection: "row",
   },
   tabButton: {
     alignItems: "center",
-    borderRightColor: "#12100e",
+    borderRightColor: palette.hairline,
     borderRightWidth: 1,
     flex: 1,
     paddingVertical: 9,
   },
   tabButtonActive: {
-    backgroundColor: "#fffdf9",
-    borderBottomColor: "#fffdf9",
-    borderBottomWidth: 2,
-    marginBottom: -2,
+    backgroundColor: palette.surface2,
+    borderBottomColor: palette.brand,
+    borderBottomWidth: 1,
   },
   tabButtonText: {
-    color: "#78716c",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.ink3,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   tabButtonTextActive: {
-    color: "#12100e",
+    color: palette.ink1,
   },
   contentBody: {
     gap: 12,
@@ -896,60 +949,60 @@ const styles = StyleSheet.create({
   },
   waitingNotice: {
     alignItems: "center",
-    backgroundColor: "#f0fdfa",
-    borderColor: "#0f766e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.cyanWash,
+    borderColor: palette.okBorder,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     padding: 10,
   },
   waitingNoticeText: {
-    color: "#0f766e",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.info,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   permissionAlert: {
-    backgroundColor: "#fef2f2",
-    borderColor: "#ef4444",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.errBorder,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 4,
     padding: 10,
   },
   permissionAlertTitle: {
-    color: "#991b1b",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.err,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   permissionAlertText: {
-    color: "#b91c1c",
-    fontSize: 12,
+    color: palette.err,
+    fontSize: font.label,
   },
   thoughtCard: {
-    backgroundColor: "#f8f6f0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     overflow: "hidden",
   },
   thoughtHeader: {
     alignItems: "center",
-    backgroundColor: "#ede7da",
+    backgroundColor: palette.surface2,
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   thoughtHeaderTitle: {
-    color: "#44403c",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   thoughtChevron: {
-    color: "#78716c",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink3,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   thoughtBody: {
     padding: 10,
@@ -958,15 +1011,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sectionHeaderTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   toolCard: {
-    backgroundColor: "#fff",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 6,
     padding: 10,
   },
@@ -981,122 +1034,122 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   toolStatusTag: {
-    borderRadius: 4,
+    borderRadius: radius.xs,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   toolStatusTagText: {
-    fontSize: 10,
-    fontWeight: "800",
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   toolStatusRunning: {
-    backgroundColor: "#cffafe",
+    backgroundColor: palette.cyanWash,
   },
   toolStatusSuccess: {
-    backgroundColor: "#dcfce7",
+    backgroundColor: palette.okWash,
   },
   toolStatusFailed: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: palette.errWash,
   },
   toolName: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   toolCallIDMono: {
-    color: "#a8a29e",
+    color: palette.ink3,
     fontFamily: monoFont,
-    fontSize: 10,
+    fontSize: font.micro,
   },
   toolArgBox: {
-    backgroundColor: "#f5f5f4",
-    borderRadius: 4,
+    backgroundColor: palette.surface1,
+    borderRadius: radius.xs,
     padding: 6,
   },
   toolResultBox: {
-    backgroundColor: "#f5f5f4",
-    borderRadius: 4,
+    backgroundColor: palette.surface1,
+    borderRadius: radius.xs,
     padding: 6,
   },
   toolArgLabel: {
-    color: "#78716c",
-    fontSize: 10,
-    fontWeight: "700",
+    color: palette.ink3,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
     marginBottom: 2,
   },
   toolMonoText: {
-    color: "#1c1917",
+    color: palette.ink1,
     fontFamily: monoFont,
-    fontSize: 11,
+    fontSize: font.caption,
   },
   toolErrorText: {
-    color: "#dc2626",
+    color: palette.err,
   },
   assetsSection: {
     gap: 8,
   },
   answerCard: {
-    backgroundColor: "#fff",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 8,
     padding: 12,
   },
   answerHeaderTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   emptyNotice: {
     alignItems: "center",
-    borderColor: "#e7dfd5",
-    borderRadius: 8,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
     borderStyle: "dashed",
-    borderWidth: 1.5,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     justifyContent: "center",
     paddingVertical: 24,
   },
   emptyNoticeText: {
-    color: "#a8a29e",
-    fontSize: 13,
-    fontWeight: "600",
+    color: palette.ink3,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   messagesWrap: {
     gap: 8,
   },
   loadMoreButton: {
     alignItems: "center",
-    backgroundColor: "#ede7da",
-    borderColor: "#12100e",
-    borderRadius: 6,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
     borderWidth: 1,
     paddingVertical: 8,
   },
   loadMoreButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   messageCard: {
-    backgroundColor: "#fff",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 4,
     padding: 10,
   },
   messageCardUser: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#3b82f6",
+    backgroundColor: palette.cyanWash,
+    borderColor: palette.cyanWash,
   },
   messageCardAssistant: {
-    backgroundColor: "#fdf8ee",
+    backgroundColor: palette.brandWash,
   },
   messageCardTool: {
-    backgroundColor: "#fbfbfa",
+    backgroundColor: palette.surface1,
   },
   messageHeaderRow: {
     alignItems: "center",
@@ -1104,13 +1157,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   messageRoleText: {
-    color: "#78716c",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink3,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   messageTimeText: {
-    color: "#a8a29e",
-    fontSize: 10,
+    color: palette.ink3,
+    fontSize: font.micro,
   },
   assetsWrap: {
     gap: 10,

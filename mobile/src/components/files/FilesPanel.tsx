@@ -1,9 +1,11 @@
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import { ButtonContent } from "../common/ButtonContent";
 import type { AssetSummary, FileEntry, FileReadResultPayload } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { formatBytes, formatDateTime } from "../../utils/format";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -64,7 +66,7 @@ export function FilesPanel({
           <View style={styles.assetList}>
             {assets.map((asset) => (
               <View key={asset.id || asset.short_url} style={styles.assetRow}>
-                <Text style={styles.assetEmoji}>📦</Text>
+                <Feather color={palette.brand} name="package" size={18} />
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.fileName}>
                     {asset.file_name || asset.path || "Shared file"}
@@ -99,21 +101,25 @@ export function FilesPanel({
             onPress={onRefresh}
             style={({ pressed }) => buttonFeedback([styles.actionButton, pendingFiles && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingFiles} text={pendingFiles ? "加载中" : "刷新目录"} />
+            <ButtonContent color={palette.ink1} loading={pendingFiles} text={pendingFiles ? "加载中" : "刷新目录"} />
           </Pressable>
         </View>
 
         {/* 路径面包屑导航栏 */}
         <View style={styles.breadcrumbBar}>
-          <Text numberOfLines={1} style={[styles.breadcrumbText, styles.flex]}>
-            📁 {filePath || "工作区根目录"}
-          </Text>
+          <View style={[styles.iconRow, styles.flex]}>
+            <Feather color={palette.brand} name="folder" size={16} />
+            <Text numberOfLines={1} style={[styles.breadcrumbText, styles.flex]}>
+              {filePath || "工作区根目录"}
+            </Text>
+          </View>
           <Pressable
             disabled={!fileParent || pendingFiles}
             onPress={onGoToParent}
             style={({ pressed }) => buttonFeedback([styles.smallParentButton, (!fileParent || pendingFiles) && styles.disabledButton], pressed)}
           >
-            <Text style={styles.smallParentButtonText}>❮ 返回上一级</Text>
+            <Feather color={palette.inkInverse} name="chevron-left" size={15} />
+            <Text style={styles.smallParentButtonText}>返回上一级</Text>
           </Pressable>
         </View>
 
@@ -134,14 +140,18 @@ export function FilesPanel({
                   )
                 }
               >
-                <Text style={styles.fileEmoji}>{entry.type === "dir" ? "📁" : "📄"}</Text>
+                <Feather
+                  color={entry.type === "dir" ? palette.brand : palette.ink2}
+                  name={entry.type === "dir" ? "folder" : "file-text"}
+                  size={18}
+                />
                 <View style={styles.flex}>
                   <Text numberOfLines={1} style={styles.fileName}>{entry.name}</Text>
                 </View>
                 {entry.type === "dir" ? (
                   <View style={styles.dirRowRight}>
                     <Text style={styles.dirTag}>目录</Text>
-                    <Text style={styles.dirChevron}>❯</Text>
+                    <Feather color={palette.ink3} name="chevron-right" size={16} />
                   </View>
                 ) : (
                   <Text style={styles.fileSizeText}>{formatBytes(entry.size || 0)}</Text>
@@ -157,9 +167,12 @@ export function FilesPanel({
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
             <View style={styles.flex}>
-              <Text numberOfLines={1} style={styles.panelTitle}>
-                📄 {filePreview.name}
-              </Text>
+              <View style={styles.iconRow}>
+                <Feather color={palette.brand} name="file-text" size={16} />
+                <Text numberOfLines={1} style={[styles.panelTitle, styles.flex]}>
+                  {filePreview.name}
+                </Text>
+              </View>
               <Text numberOfLines={1} style={styles.pathText}>
                 {filePreview.path}
               </Text>
@@ -198,18 +211,19 @@ const styles = StyleSheet.create({
   container: {
     gap: 12,
   },
+  iconRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
   panel: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 16,
-    borderWidth: 2,
-    elevation: 3,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     gap: 10,
     padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   panelHeader: {
     alignItems: "center",
@@ -218,14 +232,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   panelTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   pathText: {
-    color: "#6c665f",
-    fontSize: 11.5,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
     marginTop: 2,
   },
   flex: {
@@ -234,108 +248,96 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 34,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   primaryButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.inkInverse,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   actionButton: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 32,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   actionButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   disabledButton: {
     opacity: 0.45,
   },
   breadcrumbBar: {
     alignItems: "center",
-    backgroundColor: "#fdfbf7",
-    borderColor: "#12100e",
-    borderRadius: 10,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   breadcrumbText: {
-    color: "#12100e",
+    color: palette.ink1,
     fontFamily: "monospace",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   smallParentButton: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    alignItems: "center",
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 3,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   smallParentButtonText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.inkInverse,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   assetList: {
     gap: 8,
   },
   assetRow: {
     alignItems: "center",
-    backgroundColor: "#fdfbf7",
-    borderColor: "#12100e",
-    borderRadius: 10,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 10,
     padding: 10,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   assetEmoji: {
-    fontSize: 16,
+    fontSize: font.title,
   },
   fileRow: {
     alignItems: "center",
-    borderBottomColor: "#ede7dd",
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 8,
@@ -347,17 +349,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   fileEmoji: {
-    fontSize: 15,
+    fontSize: font.bodyLg,
   },
   fileName: {
-    color: "#12100e",
+    color: palette.ink1,
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
-    fontSize: 12.5,
-    fontWeight: "800",
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   fileMeta: {
-    color: "#6c665f",
-    fontSize: 11,
+    color: palette.ink2,
+    fontSize: font.caption,
     marginTop: 2,
   },
   dirRowRight: {
@@ -366,35 +368,35 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   dirTag: {
-    backgroundColor: "#f3ede2",
-    borderColor: "#d5cabb",
-    borderRadius: 4,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
-    color: "#6c665f",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
   dirChevron: {
-    color: "#8c857b",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink3,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   fileSizeText: {
-    color: "#777066",
+    color: palette.ink2,
     fontFamily: "monospace",
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   fileList: {
     gap: 0,
   },
   darkCodeContainer: {
-    backgroundColor: "#12100e",
-    borderColor: "#25231f",
-    borderRadius: 10,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.md,
+    borderWidth: 1,
     overflow: "hidden",
     padding: 10,
   },
@@ -402,14 +404,14 @@ const styles = StyleSheet.create({
     maxHeight: 280,
   },
   darkCodeText: {
-    color: "#f7f5f0",
+    color: palette.ink2,
     fontFamily: "monospace",
-    fontSize: 11.5,
+    fontSize: font.caption,
     lineHeight: 17,
   },
   emptyText: {
-    color: "#6c665f",
-    fontSize: 12,
+    color: palette.ink2,
+    fontSize: font.label,
     paddingVertical: 8,
     textAlign: "center",
   },

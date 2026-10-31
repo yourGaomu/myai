@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { PermissionState } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import { palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -35,28 +36,28 @@ export function PermissionPrompt({ buttonFeedback, onAllow, onDeny, permission }
 
 const styles = StyleSheet.create({
   permissionBox: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
+    backgroundColor: palette.surface2,
+    borderColor: palette.brandDeep,
+    borderRadius: radius.md,
+    borderWidth: 1,
     gap: 10,
     padding: 12,
   },
   permissionTitle: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.ink1,
+    fontWeight: weight.bold,
   },
   argsScroll: {
-    backgroundColor: "#fff8db",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    backgroundColor: palette.recessed,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     maxHeight: 160,
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
   permissionArgs: {
-    color: "#12100e",
+    color: palette.ink2,
     lineHeight: 19,
   },
   row: {
@@ -70,30 +71,30 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 44,
     paddingHorizontal: 16,
   },
   primaryButtonText: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.inkInverse,
+    fontWeight: weight.bold,
   },
   secondaryButton: {
     alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 44,
     paddingHorizontal: 16,
   },
   secondaryButtonText: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.ink1,
+    fontWeight: weight.bold,
   },
 });

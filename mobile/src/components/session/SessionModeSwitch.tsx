@@ -2,6 +2,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import type { SessionAgentMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -11,9 +12,9 @@ type Props = {
   pending: boolean;
 };
 
-const modes: Array<{ icon: string; label: string; mode: SessionAgentMode }> = [
-  { icon: "💬", label: "对话模式", mode: "chat" },
-  { icon: "🎯", label: "规划模式", mode: "plan" },
+const modes: Array<{ label: string; mode: SessionAgentMode }> = [
+  { label: "对话模式", mode: "chat" },
+  { label: "规划模式", mode: "plan" },
 ];
 
 export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pending }: Props) {
@@ -37,7 +38,7 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
               }
             >
               {pending && selected ? (
-                <ActivityIndicator color="#12100e" size="small" />
+                <ActivityIndicator color={palette.ink1} size="small" />
               ) : (
                 <Text
                   style={[
@@ -45,7 +46,7 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
                     selected && styles.buttonTextActive,
                   ]}
                 >
-                  {`${item.icon} ${item.label}`}
+                  {item.label}
                 </Text>
               )}
             </Pressable>
@@ -63,37 +64,33 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   control: {
-    backgroundColor: "#ded7cc",
-    borderColor: "#25231f",
-    borderRadius: 999,
-    borderWidth: 2,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 2,
     padding: 3,
   },
   button: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 32,
     justifyContent: "center",
     paddingHorizontal: 16,
   },
   buttonActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderWidth: 1.5,
-    elevation: 2,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1, width: 0 },
-    shadowOpacity: 0.16,
-    shadowRadius: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderWidth: 1,
+    ...shadow.card,
   },
   buttonText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   buttonTextActive: {
-    color: "#12100e",
+    color: palette.ink1,
   },
 });

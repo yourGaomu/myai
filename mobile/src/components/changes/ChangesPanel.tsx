@@ -1,5 +1,7 @@
 import { Pressable, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
+import { palette } from "../../constants/theme";
 import { ButtonContent } from "../common/ButtonContent";
 import type { ChangeEntry, HistoryCheckpoint } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
@@ -98,7 +100,10 @@ export function ChangesPanel({
                     </Text>
                     <Text style={styles.fileMeta}>{changeMeta(entry)}</Text>
                   </View>
-                  <Text style={styles.viewDiffText}>查看 Diff ❯</Text>
+                  <View style={styles.iconRow}>
+                    <Text style={styles.viewDiffText}>查看 Diff</Text>
+                    <Feather color={palette.ink3} name="chevron-right" size={16} />
+                  </View>
                 </Pressable>
               );
             })
@@ -130,7 +135,10 @@ export function ChangesPanel({
             historyCheckpoints.map((checkpoint) => (
               <View key={checkpoint.id} style={styles.historyRow}>
                 <View style={styles.historyHeader}>
-                  <Text style={styles.historyTag}>🏷️ {checkpoint.title || `Checkpoint ${shortID(checkpoint.id)}`}</Text>
+                  <View style={styles.iconRow}>
+                    <Feather color={palette.brand} name="tag" size={15} />
+                    <Text style={styles.historyTag}>{checkpoint.title || `Checkpoint ${shortID(checkpoint.id)}`}</Text>
+                  </View>
                   <Text style={styles.historyCount}>{checkpoint.change_count} 文件</Text>
                 </View>
                 <Text style={styles.historyMeta}>{formatDateTime(checkpoint.created_at)}</Text>
@@ -147,7 +155,7 @@ export function ChangesPanel({
                     onPress={() => onRevertHistory(checkpoint.id)}
                     style={({ pressed }) => buttonFeedback([styles.revertButton, pendingRevert && styles.disabledButton], pressed)}
                   >
-                    <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "一键回滚"} />
+                    <ButtonContent color={palette.err} loading={pendingRevert} text={pendingRevert ? "恢复中" : "一键回滚"} />
                   </Pressable>
                 </View>
               </View>

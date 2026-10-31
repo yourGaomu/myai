@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ButtonFeedback } from "../../types/ui";
 import { AIMemoryPanel, type AIMemoryPanelProps } from "./AIMemoryPanel";
 import { KnowledgePanel, type KnowledgePanelProps } from "./KnowledgePanel";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   aiMemory: Omit<AIMemoryPanelProps, "buttonFeedback">;
@@ -46,22 +47,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabBarWrapper: {
-    backgroundColor: "#f4f5f7",
+    backgroundColor: palette.canvas,
     paddingTop: 6,
     paddingBottom: 4,
   },
   tabs: {
-    backgroundColor: "#e6dfd3",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 2,
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 3,
     padding: 3,
   },
   tab: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flex: 1,
     justifyContent: "center",
     minHeight: 34,
@@ -69,22 +70,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   tabActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderWidth: 2,
-    elevation: 2,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 0,
-  },
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderWidth: 1,
+    ...shadow.card,
+    },
   tabText: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   tabTextActive: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.ink1,
+    fontWeight: weight.bold,
   },
 });

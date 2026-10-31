@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import { parseDiffRows, type DiffCell, type DiffLineKind, type DiffRow } from "../../utils/diff";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   diff: string;
@@ -53,7 +55,8 @@ export function DiffViewer({ diff, emptyText }: Props) {
           onPress={() => setWrapLines((prev) => !prev)}
           style={styles.wrapToggleBtn}
         >
-          <Text style={styles.wrapToggleText}>{wrapLines ? "↩ 自动换行" : "⇄ 横向滚动"}</Text>
+          <Feather color={palette.ink2} name={wrapLines ? "corner-up-left" : "repeat"} size={14} />
+          <Text style={styles.wrapToggleText}>{wrapLines ? "自动换行" : "横向滚动"}</Text>
         </Pressable>
       </View>
 
@@ -220,26 +223,23 @@ const monoFont = Platform.select({ ios: "Menlo", android: "monospace", default: 
 
 const styles = StyleSheet.create({
   emptyText: {
-    color: "#8c857b",
-    fontSize: 12,
+    color: palette.ink3,
+    fontSize: font.label,
     padding: 10,
   },
   diffViewer: {
-    backgroundColor: "#141413",
-    borderColor: "#12100e",
-    borderRadius: 12,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   diffHeader: {
     alignItems: "center",
-    backgroundColor: "#22211f",
-    borderBottomColor: "#383632",
-    borderBottomWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderBottomColor: palette.hairline,
+    borderBottomWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     minHeight: 38,
@@ -252,9 +252,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   diffHeaderTitle: {
-    color: "#f7f5f0",
-    fontSize: 11.5,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
     letterSpacing: 0.3,
   },
   diffStats: {
@@ -263,16 +263,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   diffAddedStat: {
-    color: "#7ee787",
+    color: palette.diffAdd,
     fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "900",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   diffRemovedStat: {
-    color: "#ffa198",
+    color: palette.diffDel,
     fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "900",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   diffRatioRow: {
     alignItems: "center",
@@ -281,44 +281,47 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   diffRatioBlock: {
-    borderRadius: 1.5,
+    borderRadius: radius.xxs,
     height: 7,
     width: 7,
   },
   diffRatioAdd: {
-    backgroundColor: "#3fb950",
+    backgroundColor: palette.diffAddBg,
   },
   diffRatioRemove: {
-    backgroundColor: "#f85149",
+    backgroundColor: palette.diffDelBg,
   },
   diffRatioNeutral: {
-    backgroundColor: "#484f58",
+    backgroundColor: palette.surface2,
   },
   wrapToggleBtn: {
-    backgroundColor: "#32302c",
-    borderColor: "#524e48",
-    borderRadius: 6,
+    alignItems: "center",
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   wrapToggleText: {
-    color: "#ffd84f",
-    fontSize: 10.5,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   diffTable: {
-    backgroundColor: "#141413",
+    backgroundColor: palette.surface1,
   },
   diffTableNoWrap: {
     minWidth: "100%",
   },
   diffHunkRow: {
     alignItems: "center",
-    backgroundColor: "#25221b",
-    borderBottomColor: "#38342b",
+    backgroundColor: palette.surface2,
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
-    borderTopColor: "#38342b",
+    borderTopColor: palette.hairline,
     borderTopWidth: 1,
     flexDirection: "row",
     gap: 8,
@@ -326,65 +329,65 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   diffHunkPill: {
-    backgroundColor: "rgba(255, 216, 79, 0.16)",
-    borderColor: "rgba(255, 216, 79, 0.4)",
-    borderRadius: 4,
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandGlow,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   diffHunkPillText: {
-    color: "#ffd84f",
+    color: palette.brand,
     fontFamily: monoFont,
-    fontSize: 10,
-    fontWeight: "900",
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   diffHunkContext: {
-    color: "#a8a299",
+    color: palette.ink2,
     flex: 1,
     fontFamily: monoFont,
-    fontSize: 10.5,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   diffCodeRow: {
     alignItems: "stretch",
-    borderBottomColor: "#1f1e1c",
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     borderLeftColor: "transparent",
-    borderLeftWidth: 3,
+    borderLeftWidth: 1,
     flexDirection: "row",
     minHeight: 23,
     paddingRight: 10,
   },
   diffContextRow: {
-    backgroundColor: "#141413",
+    backgroundColor: palette.surface1,
   },
   diffAddRow: {
-    backgroundColor: "rgba(46, 160, 67, 0.18)",
-    borderLeftColor: "#3fb950",
+    backgroundColor: palette.diffAddBg,
+    borderLeftColor: palette.diffAdd,
   },
   diffRemoveRow: {
-    backgroundColor: "rgba(248, 81, 73, 0.18)",
-    borderLeftColor: "#f85149",
+    backgroundColor: palette.diffDelBg,
+    borderLeftColor: palette.diffDel,
   },
   diffGutter: {
     alignItems: "flex-start",
-    backgroundColor: "rgba(255, 255, 255, 0.02)",
-    borderRightColor: "#2b2926",
+    backgroundColor: palette.glassInner,
+    borderRightColor: palette.hairline,
     borderRightWidth: 1,
     flexDirection: "row",
     paddingRight: 2,
   },
   diffAddGutter: {
-    backgroundColor: "rgba(46, 160, 67, 0.12)",
+    backgroundColor: palette.okWash,
   },
   diffRemoveGutter: {
-    backgroundColor: "rgba(248, 81, 73, 0.12)",
+    backgroundColor: palette.errWash,
   },
   diffLineNumber: {
-    color: "#6e7681",
+    color: palette.ink4,
     fontFamily: monoFont,
-    fontSize: 9.5,
+    fontSize: font.micro,
     lineHeight: 16,
     minWidth: 27,
     paddingHorizontal: 3,
@@ -393,27 +396,27 @@ const styles = StyleSheet.create({
   },
   diffMarker: {
     fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: "900",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
     lineHeight: 16,
     paddingTop: 3.5,
     textAlign: "center",
     width: 18,
   },
   diffAddMarker: {
-    color: "#7ee787",
+    color: palette.diffAdd,
   },
   diffRemoveMarker: {
-    color: "#ffa198",
+    color: palette.diffDel,
   },
   diffContextMarker: {
-    color: "#6e7681",
+    color: palette.ink3,
   },
   diffCode: {
-    color: "#e6edf3",
+    color: palette.ink1,
     flex: 1,
     fontFamily: monoFont,
-    fontSize: 11,
+    fontSize: font.caption,
     lineHeight: 16,
     minWidth: 0,
     paddingBottom: 3.5,

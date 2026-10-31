@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { ButtonContent } from "../common/ButtonContent";
 import type { Plan, PlanStep, SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   activeSession?: SessionSummary;
@@ -44,7 +45,7 @@ export function PlanPanel({
           </Text>
         </View>
         <View style={[styles.statusBadge, statusBadgeStyle(plan?.status)]}>
-          {pendingPlan || plan?.status === "running" ? <ActivityIndicator color="#12100e" size="small" /> : null}
+          {pendingPlan || plan?.status === "running" ? <ActivityIndicator color={palette.ink1} size="small" /> : null}
           <Text style={styles.statusText}>{planStatusLabel(plan?.status)}</Text>
         </View>
       </View>
@@ -107,7 +108,7 @@ function PlanStepRow({ plan, step }: { plan: Plan; step: PlanStep }) {
   return (
     <View style={[styles.stepRow, stepStatusStyle(displayStatus)]}>
       <View style={styles.stepIndex}>
-        {running ? <ActivityIndicator color="#12100e" size="small" /> : <Text style={styles.stepIndexText}>{step.order}</Text>}
+        {running ? <ActivityIndicator color={palette.ink1} size="small" /> : <Text style={styles.stepIndexText}>{step.order}</Text>}
       </View>
       <View style={styles.flex}>
         <Text style={styles.stepTitle}>{step.title}</Text>
@@ -206,17 +207,13 @@ function hasUnfinishedDependency(plan: Plan | undefined, step: PlanStep) {
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     gap: 12,
     padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
+    ...shadow.card,
   },
   planPanel: {
     minHeight: 420,
@@ -233,21 +230,21 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    color: "#12100e",
-    fontSize: 28,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.heavy,
   },
   meta: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
     marginTop: 3,
   },
   statusBadge: {
     alignItems: "center",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 3,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     flexDirection: "row",
     flexShrink: 0,
     gap: 6,
@@ -255,59 +252,59 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   statusDraft: {
-    backgroundColor: "#f5eefc",
+    backgroundColor: palette.brandWash,
   },
   statusRunning: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brandWashStrong,
   },
   statusDone: {
-    backgroundColor: "#b9e9b0",
+    backgroundColor: palette.okWash,
   },
   statusFailed: {
-    backgroundColor: "#ff7f68",
+    backgroundColor: palette.errWash,
   },
   statusText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   emptyBox: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 6,
     padding: 12,
   },
   emptyTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   emptyText: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.body,
+    fontWeight: weight.bold,
     lineHeight: 19,
   },
   goalBox: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 4,
     padding: 10,
   },
   goalLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
     textTransform: "uppercase",
   },
   goalText: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.bodyLg,
+    fontWeight: weight.bold,
     lineHeight: 21,
   },
   progressBox: {
@@ -319,25 +316,25 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   progressText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   progressMeta: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   progressTrack: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 3,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     height: 16,
     overflow: "hidden",
   },
   progressFill: {
-    backgroundColor: "#4fd7ee",
+    backgroundColor: palette.cyanWash,
     height: "100%",
   },
   stepList: {
@@ -345,69 +342,69 @@ const styles = StyleSheet.create({
   },
   stepRow: {
     alignItems: "center",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 10,
     padding: 10,
   },
   stepPending: {
-    backgroundColor: "#fffaf0",
+    backgroundColor: palette.surface1,
   },
   stepRunning: {
-    backgroundColor: "#fff4cc",
+    backgroundColor: palette.brandWash,
   },
   stepDone: {
-    backgroundColor: "#edf9e8",
+    backgroundColor: palette.okWash,
   },
   stepWaiting: {
-    backgroundColor: "#f1efff",
+    backgroundColor: palette.cyanWash,
   },
   stepFailed: {
-    backgroundColor: "#ffe1db",
+    backgroundColor: palette.errWash,
   },
   stepIndex: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 2,
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandDeep,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     height: 34,
     justifyContent: "center",
     width: 34,
   },
   stepIndexText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.brand,
+    fontSize: font.body,
+    fontWeight: weight.heavy,
   },
   stepTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
     lineHeight: 19,
   },
   stepDescription: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
     marginTop: 3,
   },
   stepDependency: {
-    color: "#766e65",
-    fontSize: 11,
+    color: palette.ink2,
+    fontSize: font.caption,
     lineHeight: 16,
     marginTop: 2,
   },
   stepError: {
-    color: "#9b3b2f",
-    fontSize: 12,
+    color: palette.err,
+    fontSize: font.label,
     marginTop: 4,
   },
   stepAgent: {
-    color: "#286177",
-    fontSize: 11,
+    color: palette.cyan,
+    fontSize: font.caption,
     marginTop: 4,
   },
   stepMeta: {
@@ -415,13 +412,13 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   stepRetry: {
-    color: "#8b6f2b",
-    fontSize: 11,
+    color: palette.brand,
+    fontSize: font.caption,
   },
   stepStatus: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   actions: {
     flexDirection: "row",
@@ -430,28 +427,28 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   primaryButton: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     minHeight: 42,
     minWidth: 132,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
   secondaryButton: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     minHeight: 42,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
   secondaryButtonText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   disabledButton: {
     opacity: 0.45,

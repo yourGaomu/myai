@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 const workingFrames = [
   require("../../../assets/loading/character-01.png"),
@@ -93,7 +95,12 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
         <Text style={styles.title}>MYAI</Text>
         <Text style={styles.status}>{loadingFrames[frame].status}</Text>
         <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((frame + 1) / loadingFrames.length) * 100}%` }]} />
+          <LinearGradient
+            colors={[palette.brandLight, palette.brandDeep]}
+            end={{ x: 1, y: 0 }}
+            start={{ x: 0, y: 0 }}
+            style={[styles.progressFill, { width: `${((frame + 1) / loadingFrames.length) * 100}%` }]}
+          />
         </View>
       </Animated.View>
     </View>
@@ -103,7 +110,7 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     alignItems: "center",
-    backgroundColor: "#efe4d2",
+    backgroundColor: palette.canvas,
     bottom: 0,
     justifyContent: "center",
     left: 0,
@@ -122,29 +129,28 @@ const styles = StyleSheet.create({
     width: 144,
   },
   title: {
-    color: "#12100e",
-    fontSize: 26,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.heavy,
     marginTop: -8,
   },
   status: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.medium,
     marginTop: 4,
   },
   progressTrack: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 2,
-    height: 10,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    height: 6,
     marginTop: 14,
     overflow: "hidden",
     width: 150,
   },
   progressFill: {
-    backgroundColor: "#4fd7ee",
     height: "100%",
   },
 });

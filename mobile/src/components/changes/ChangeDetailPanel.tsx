@@ -1,5 +1,7 @@
 import { Pressable, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
+import { palette } from "../../constants/theme";
 import { ButtonContent } from "../common/ButtonContent";
 import type { ChangeDiffResultPayload, HistoryDiffResultPayload } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
@@ -38,7 +40,10 @@ export function ChangeDetailPanel({
     <View style={[styles.panel, styles.diffDetailPanel]}>
       <View style={styles.detailHeader}>
         <Pressable onPress={onBack} style={({ pressed }) => buttonFeedback(styles.detailBackButton, pressed)}>
-          <Text style={styles.detailBackText}>❮ 返回变更</Text>
+          <View style={styles.iconRow}>
+            <Feather color={palette.ink1} name="chevron-left" size={16} />
+            <Text style={styles.detailBackText}>返回变更</Text>
+          </View>
         </Pressable>
         <View style={styles.detailHeaderCenter}>
           <Text numberOfLines={1} style={styles.detailHeaderTitle}>
@@ -68,7 +73,7 @@ export function ChangeDetailPanel({
                   buttonFeedback([styles.revertButton, (!canRevertSelectedChange || pendingRevert) && styles.disabledButton], pressed)
                 }
               >
-                <ButtonContent loading={pendingRevert} text={pendingRevert ? "还原中" : "还原文件"} />
+                <ButtonContent color={palette.err} loading={pendingRevert} text={pendingRevert ? "还原中" : "还原文件"} />
               </Pressable>
             </>
           ) : historyDiff ? (
@@ -77,7 +82,7 @@ export function ChangeDetailPanel({
               onPress={() => onRevertHistory(historyDiff.checkpoint_id)}
               style={({ pressed }) => buttonFeedback([styles.revertButton, pendingRevert && styles.disabledButton], pressed)}
             >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
+              <ButtonContent color={palette.err} loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
             </Pressable>
           ) : null}
         </View>
@@ -86,10 +91,13 @@ export function ChangeDetailPanel({
       {changeDiff ? (
         <View style={styles.diffDetailContent}>
           <View style={styles.diffStatsBar}>
-            <Text numberOfLines={1} style={styles.diffStatsPath}>
-              📁 {changeDiff.path}
-              {changeDiff.truncated ? " · 已截断" : ""}
-            </Text>
+            <View style={[styles.iconRow, styles.flex]}>
+              <Feather color={palette.brand} name="folder" size={15} />
+              <Text numberOfLines={1} style={styles.diffStatsPath}>
+                {changeDiff.path}
+                {changeDiff.truncated ? " · 已截断" : ""}
+              </Text>
+            </View>
           </View>
           {changeDiff.binary ? (
             <Text style={styles.emptyText}>{changeDiff.message || "二进制文件暂不支持差异查看。"}</Text>
@@ -102,9 +110,12 @@ export function ChangeDetailPanel({
       {historyDiff ? (
         <View style={styles.diffDetailContent}>
           <View style={styles.diffStatsBar}>
-            <Text style={styles.diffStatsPath}>
-              🏷️ 快照 ID: {shortID(historyDiff.checkpoint_id)} ({(historyDiff.files || []).length} 个文件变动)
-            </Text>
+            <View style={[styles.iconRow, styles.flex]}>
+              <Feather color={palette.brand} name="tag" size={15} />
+              <Text style={styles.diffStatsPath}>
+                快照 ID: {shortID(historyDiff.checkpoint_id)} ({(historyDiff.files || []).length} 个文件变动)
+              </Text>
+            </View>
           </View>
           {historyDiff.message && (historyDiff.files || []).length > 0 ? <Text style={styles.emptyText}>{historyDiff.message}</Text> : null}
           {(historyDiff.files || []).length === 0 ? (

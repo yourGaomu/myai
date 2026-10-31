@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type { AgentTurnItem, AgentTurnTimelineStep, ToolCallStep } from "../../utils/chatRenderItems";
 import type { SubagentTask } from "../../protocol";
@@ -9,6 +10,7 @@ import { usageBreakdown } from "../../utils/tokenUsage";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
 import { MarkdownText } from "./MarkdownText";
 import { SharedAssetCard } from "./SharedAssetCard";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type FileChangeTag = {
   action: "NEW" | "MOD";
@@ -277,7 +279,7 @@ export function AgentTurnCard({
       <View style={styles.header}>
         <View style={styles.identity}>
           <View style={styles.avatarIcon}>
-            <Text style={styles.avatarEmoji}>🤖</Text>
+            <Feather color={palette.inkInverse} name="cpu" size={14} />
           </View>
           <Text style={styles.agentName}>{turn.model || "MyAI Agent"}</Text>
           <View style={styles.modelPill}>
@@ -304,16 +306,22 @@ export function AgentTurnCard({
           ) : turn.status === "error" ? (
             <Text style={styles.statusErrorText}>执行异常</Text>
           ) : turn.status === "paused" ? (
-            <Text style={styles.statusPausedText}>⏸ 已暂停{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
+            <>
+              <Feather color={palette.ink1} name="pause" size={12} />
+              <Text style={styles.statusPausedText}>已暂停{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
+            </>
           ) : (
-            <Text style={styles.statusCompletedText}>✓ 完成{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
+            <>
+              <Feather color={palette.ok} name="check" size={12} />
+              <Text style={styles.statusCompletedText}>完成{turn.elapsed ? ` · ${turn.elapsed}` : ""}</Text>
+            </>
           )}
         </View>
       </View>
 
       {/* 复合气泡大卡片 */}
       <View style={styles.cardBox}>
-        {/* 顶部耗时折叠头 + 交错式过程时间流 (思考段落 ↔ 运行了命令 / Shell 面板) */}
+        {/* 顶部耗时折叠头 + 交错式过程时间流 */}
         {hasProcess ? (
           <View style={styles.processContainer}>
             <Pressable
@@ -321,7 +329,7 @@ export function AgentTurnCard({
               style={({ pressed }) => buttonFeedback(styles.durationHeader, pressed)}
             >
               <Text style={styles.durationHeaderText}>{durationHeaderLabel}</Text>
-              <Text style={styles.durationChevron}>{trayOpen ? "⌄" : "›"}</Text>
+              <Feather color={palette.ink3} name={trayOpen ? "chevron-down" : "chevron-right"} size={14} />
             </Pressable>
 
             {trayOpen ? (
@@ -349,7 +357,10 @@ export function AgentTurnCard({
                 {fileChanges.length > 0 ? (
                   <View style={styles.reviewSection}>
                     <View style={styles.reviewHeaderRow}>
-                      <Text style={styles.reviewTitle}>📝 关联文件变更 ({fileChanges.length} 个文件)</Text>
+                      <View style={styles.iconRow}>
+                        <Feather color={palette.brand} name="edit-3" size={14} />
+                        <Text style={styles.reviewTitle}>关联文件变更 ({fileChanges.length} 个文件)</Text>
+                      </View>
                       <View style={styles.reviewBadge}>
                         <Text style={styles.reviewBadgeText}>改动已生效</Text>
                       </View>
@@ -372,7 +383,10 @@ export function AgentTurnCard({
                                 {basename}
                               </Text>
                             </View>
-                            <Text style={styles.reviewDiffHint}>查看 ❯</Text>
+                            <View style={styles.iconRow}>
+                              <Text style={styles.reviewDiffHint}>查看</Text>
+                              <Feather color={palette.ink3} name="chevron-right" size={13} />
+                            </View>
                           </View>
                         );
                       })}
@@ -408,14 +422,16 @@ export function AgentTurnCard({
         <View style={styles.cardFooter}>
           <View style={styles.footerActions}>
             <Pressable onPress={handleCopy} style={({ pressed }) => buttonFeedback(styles.actionBtn, pressed)}>
-              <Text style={styles.actionBtnText}>{copied ? "✓ 已复制" : "📋 复制"}</Text>
+              <Feather color={palette.ink2} name={copied ? "check" : "clipboard"} size={13} />
+              <Text style={styles.actionBtnText}>{copied ? "已复制" : "复制"}</Text>
             </Pressable>
             {turn.canRegenerate && onRegenerate ? (
               <Pressable
                 onPress={onRegenerate}
                 style={({ pressed }) => buttonFeedback([styles.actionBtn, styles.regenBtn], pressed)}
               >
-                <Text style={styles.regenBtnText}>🔄 重新生成</Text>
+                <Feather color={palette.ink1} name="refresh-cw" size={13} />
+                <Text style={styles.regenBtnText}>重新生成</Text>
               </Pressable>
             ) : null}
           </View>
@@ -484,7 +500,7 @@ function InterleavedToolGroup({
         <Text numberOfLines={1} style={styles.toolInlineGroupTitle}>
           {groupTitle}
         </Text>
-        <Text style={styles.toolInlineChevron}>{groupOpen ? "⌄" : "›"}</Text>
+        <Feather color={palette.ink3} name={groupOpen ? "chevron-down" : "chevron-right"} size={14} />
       </Pressable>
 
       {groupOpen ? (
@@ -564,7 +580,7 @@ function InterleavedToolRow({
           {rowTitle}
         </Text>
         {tool.duration ? <Text style={styles.toolInlineDuration}>{tool.duration}</Text> : null}
-        <Text style={styles.toolInlineChevron}>{expanded ? "⌄" : "›"}</Text>
+        <Feather color={palette.ink3} name={expanded ? "chevron-down" : "chevron-right"} size={14} />
       </Pressable>
 
       {/* 2.0 主聊天子代理摘要入口：按 parent_tool_call_id 匹配，显示状态与最近输出 */}
@@ -572,7 +588,7 @@ function InterleavedToolRow({
         <View style={styles.subagentSummaryCard}>
           <View style={styles.subagentSummaryHeader}>
             <View style={styles.subagentSummaryTitleRow}>
-              <Text style={styles.subagentIcon}>🤖</Text>
+              <Feather color={palette.brand} name="cpu" size={14} />
               <Text numberOfLines={1} style={styles.subagentSummaryName}>
                 {matchingSubagentTask.agent_nickname || matchingSubagentTask.title || "子代理"}
               </Text>
@@ -597,7 +613,9 @@ function InterleavedToolRow({
                 onPress={() => onInspectSubagent(matchingSubagentTask.id)}
                 style={({ pressed }) => buttonFeedback(styles.inspectSubagentBtn, pressed)}
               >
-                <Text style={styles.inspectSubagentBtnText}>🔍 实时详情 ❯</Text>
+                <Feather color={palette.ink1} name="search" size={12} />
+                <Text style={styles.inspectSubagentBtnText}>实时详情</Text>
+                <Feather color={palette.ink3} name="chevron-right" size={13} />
               </Pressable>
             ) : null}
           </View>
@@ -609,7 +627,7 @@ function InterleavedToolRow({
         </View>
       ) : (tool.name === "spawn_agent" || tool.name === "start_async_task") && isRunning ? (
         <View style={styles.subagentSpawningCard}>
-          <ActivityIndicator color="#0f766e" size="small" />
+          <ActivityIndicator color={palette.info} size="small" />
           <Text style={styles.subagentSpawningText}>子代理启动中...</Text>
         </View>
       ) : null}
@@ -732,126 +750,127 @@ const styles = StyleSheet.create({
   },
   avatarIcon: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     height: 22,
     justifyContent: "center",
     width: 22,
   },
   avatarEmoji: {
-    fontSize: 12,
+    fontSize: font.label,
   },
   agentName: {
-    color: "#12100e",
-    fontSize: 12.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   modelPill: {
-    backgroundColor: "#ede7da",
-    borderColor: "#d4ccbd",
-    borderRadius: 4,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   modelPillText: {
-    color: "#555047",
-    fontSize: 9.5,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   statusBadge: {
     alignItems: "center",
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     flexDirection: "row",
     gap: 4,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
+  iconRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
   statusCompleted: {
-    backgroundColor: "#b9e9b0",
-    borderColor: "#0e4e16",
+    backgroundColor: palette.okWash,
+    borderColor: palette.okBorder,
   },
   statusCompletedText: {
-    color: "#0e4e16",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ok,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   statusRunning: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#b58c00",
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandDeep,
   },
   statusRunningText: {
-    color: "#684d00",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.brand,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   statusPaused: {
-    backgroundColor: "#ede7da",
-    borderColor: "#7a7267",
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairlineStrong,
   },
   statusPausedText: {
-    color: "#4a453e",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   statusError: {
-    backgroundColor: "#ff7f68",
-    borderColor: "#d56c5b",
+    backgroundColor: palette.errWash,
+    borderColor: palette.errBorder,
   },
   statusErrorText: {
-    color: "#7a1f1a",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.err,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   pulseDot: {
-    backgroundColor: "#b58c00",
-    borderRadius: 3,
+    backgroundColor: palette.brand,
+    borderRadius: radius.xxs,
     height: 6,
     width: 6,
   },
 
   /* 复合卡片外框 */
   cardBox: {
-    backgroundColor: "#ffffff",
-    borderColor: "#12100e",
-    borderRadius: 14,
-    borderBottomLeftRadius: 4,
-    borderWidth: 1.5,
-    elevation: 2,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderBottomLeftRadius: radius.xs,
+    borderWidth: 1,
     overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
 
   /* 顶部耗时与交错过程流 (Codex 风格) */
   processContainer: {
-    backgroundColor: "#ffffff",
+    backgroundColor: palette.surface2,
     paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 6,
   },
   durationHeader: {
     alignItems: "center",
-    borderBottomColor: "#eceae4",
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 6,
     paddingBottom: 8,
   },
   durationHeaderText: {
-    color: "#5e5a53",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   durationChevron: {
-    color: "#7a756c",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   interleavedBody: {
     gap: 10,
@@ -880,68 +899,68 @@ const styles = StyleSheet.create({
   },
   termIconBadge: {
     alignItems: "center",
-    backgroundColor: "#f7f6f2",
-    borderColor: "#8c877e",
-    borderRadius: 4,
-    borderWidth: 1.2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     height: 18,
     justifyContent: "center",
     minWidth: 20,
     paddingHorizontal: 3,
   },
   termIconBadgeError: {
-    backgroundColor: "#fff0ee",
-    borderColor: "#c94a3f",
+    backgroundColor: palette.errWash,
+    borderColor: palette.errBorder,
   },
   termIconBadgeRunning: {
-    backgroundColor: "#fff8db",
-    borderColor: "#b58c00",
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandDeep,
   },
   termIconText: {
-    color: "#5e5a53",
+    color: palette.ink1,
     fontFamily: monoFont,
-    fontSize: 9.5,
-    fontWeight: "900",
+    fontSize: font.micro,
+    fontWeight: weight.bold,
     lineHeight: 11,
   },
   termIconTextError: {
-    color: "#c94a3f",
+    color: palette.err,
   },
   termIconTextRunning: {
-    color: "#8a6800",
+    color: palette.brand,
   },
   toolInlineGroupTitle: {
-    color: "#6b665e",
+    color: palette.ink1,
     flex: 1,
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   toolInlineText: {
-    color: "#6b665e",
+    color: palette.ink1,
     flex: 1,
-    fontSize: 13,
-    fontWeight: "500",
+    fontSize: font.body,
+    fontWeight: weight.medium,
   },
   toolInlineTextError: {
-    color: "#b83b30",
+    color: palette.err,
   },
   toolInlineDuration: {
-    color: "#9a948a",
+    color: palette.ink2,
     fontFamily: monoFont,
-    fontSize: 11,
+    fontSize: font.caption,
   },
   toolInlineChevron: {
-    color: "#7a756c",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.body,
+    fontWeight: weight.bold,
     paddingHorizontal: 2,
   },
 
   /* 工具详情上下分栏面板 (方案 A：调用请求 + 执行返回) */
   shellBox: {
-    backgroundColor: "#f4f3ef",
-    borderColor: "#dbd6ca",
-    borderRadius: 10,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
     borderWidth: 1,
     marginTop: 2,
     overflow: "hidden",
@@ -950,7 +969,7 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   toolSectionDivider: {
-    backgroundColor: "#e2dfd7",
+    backgroundColor: palette.surface3,
     height: 1,
   },
   shellHeaderBar: {
@@ -969,71 +988,71 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   toolReqBadge: {
-    backgroundColor: "#e6e1d6",
-    borderColor: "#b8b0a2",
-    borderRadius: 4,
+    backgroundColor: palette.surface3,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   toolReqBadgeText: {
-    color: "#4a453e",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   toolResBadge: {
-    borderRadius: 4,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   toolResBadgeSuccess: {
-    backgroundColor: "#dcf5d6",
-    borderColor: "#6ab85e",
+    backgroundColor: palette.okWash,
+    borderColor: palette.okBorder,
   },
   toolResBadgeRunning: {
-    backgroundColor: "#fff3bf",
-    borderColor: "#d4a91e",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
   },
   toolResBadgeError: {
-    backgroundColor: "#ffe3de",
-    borderColor: "#d96b5c",
+    backgroundColor: palette.errWash,
+    borderColor: palette.errBorder,
   },
   toolResBadgeText: {
-    fontSize: 10,
-    fontWeight: "800",
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   toolResBadgeTextSuccess: {
-    color: "#1b5e20",
+    color: palette.ok,
   },
   toolResBadgeTextRunning: {
-    color: "#7a5900",
+    color: palette.brand,
   },
   toolResBadgeTextError: {
-    color: "#9c2418",
+    color: palette.err,
   },
   toolErrorCodeText: {
-    color: "#b83b30",
+    color: palette.err,
     fontFamily: monoFont,
-    fontSize: 10.5,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   toolTruncatedTag: {
-    color: "#8c6d1f",
-    fontSize: 10,
-    fontWeight: "700",
+    color: palette.brand,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   shellHeaderTitle: {
-    color: "#4a463f",
+    color: palette.ink1,
     flex: 1,
     fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   shellHeaderMeta: {
-    color: "#8c867c",
+    color: palette.ink2,
     fontFamily: monoFont,
-    fontSize: 11,
+    fontSize: font.caption,
   },
   toolRequestScroll: {
     maxHeight: 150,
@@ -1046,25 +1065,25 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   shellCommandText: {
-    color: "#2c2a26",
+    color: palette.ink1,
     fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "600",
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     lineHeight: 17,
   },
   shellOutputText: {
-    color: "#57534c",
+    color: palette.ink1,
     fontFamily: monoFont,
-    fontSize: 11.5,
+    fontSize: font.caption,
     lineHeight: 17,
   },
   shellOutputTextError: {
-    color: "#b83b30",
+    color: palette.err,
   },
   shellEmptyText: {
-    color: "#8c867c",
+    color: palette.ink2,
     fontFamily: monoFont,
-    fontSize: 11.5,
+    fontSize: font.caption,
     fontStyle: "italic",
   },
   shellAssetWrap: {
@@ -1073,10 +1092,10 @@ const styles = StyleSheet.create({
 
   /* 关联文件变更审查 */
   reviewSection: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 6,
     marginTop: 4,
     padding: 8,
@@ -1087,31 +1106,31 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   reviewTitle: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   reviewBadge: {
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 4,
+    backgroundColor: palette.okWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   reviewBadgeText: {
-    color: "#0e4e16",
-    fontSize: 9.5,
-    fontWeight: "800",
+    color: palette.ok,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   reviewList: {
     gap: 4,
   },
   reviewItem: {
     alignItems: "center",
-    backgroundColor: "#f8f5ee",
-    borderColor: "#ded5c6",
-    borderRadius: 5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1126,35 +1145,35 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   reviewActionTag: {
-    borderRadius: 3,
+    borderRadius: radius.xxs,
     borderWidth: 1,
     paddingHorizontal: 4,
     paddingVertical: 0.5,
   },
   reviewActionTagMod: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandDeep,
   },
   reviewActionTagNew: {
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
+    backgroundColor: palette.okWash,
+    borderColor: palette.okBorder,
   },
   reviewActionTagText: {
-    color: "#12100e",
-    fontSize: 9,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   reviewFilePath: {
-    color: "#12100e",
+    color: palette.ink1,
     flex: 1,
     fontFamily: monoFont,
-    fontSize: 10.5,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   reviewDiffHint: {
-    color: "#6c665f",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
 
   /* 最终回答主体 */
@@ -1164,7 +1183,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cardBodyWithProcess: {
-    borderTopColor: "#eceae4",
+    borderTopColor: palette.hairline,
     borderTopWidth: 1,
   },
   attachments: {
@@ -1175,7 +1194,7 @@ const styles = StyleSheet.create({
   /* 底部元数据栏 */
   cardFooter: {
     alignItems: "center",
-    borderTopColor: "#f0eae1",
+    borderTopColor: palette.hairline,
     borderTopWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1189,27 +1208,29 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     alignItems: "center",
-    backgroundColor: "#f2ecdf",
-    borderColor: "#d7cfc2",
-    borderRadius: 5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
     justifyContent: "center",
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
   actionBtnText: {
-    color: "#49443c",
-    fontSize: 10.5,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   regenBtn: {
-    backgroundColor: "#4fd7ee",
-    borderColor: "#12100e",
+    backgroundColor: palette.cyanWash,
+    borderColor: palette.hairline,
   },
   regenBtnText: {
-    color: "#12100e",
-    fontSize: 10.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   tokenStat: {
     alignItems: "center",
@@ -1217,28 +1238,28 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   tokenBadge: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 4,
+    backgroundColor: palette.brandWashStrong,
+    borderColor: palette.brandDeep,
+    borderRadius: radius.xs,
     borderWidth: 1,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   tokenBadgeText: {
-    color: "#12100e",
-    fontSize: 10.5,
-    fontWeight: "900",
+    color: palette.brand,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   tokenBreakdownText: {
-    color: "#7d7568",
-    fontSize: 10,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   subagentSummaryCard: {
-    backgroundColor: "#f4fbf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.okWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 6,
     marginTop: 4,
     padding: 10,
@@ -1255,59 +1276,62 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   subagentIcon: {
-    fontSize: 14,
+    fontSize: font.body,
   },
   subagentSummaryName: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   subagentStatusPill: {
-    backgroundColor: "#e7e5e4",
-    borderColor: "#12100e",
-    borderRadius: 999,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   subagentStatusPillText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.bold,
   },
   subagentStatusRunning: {
-    backgroundColor: "#cffafe",
+    backgroundColor: palette.cyanWash,
   },
   subagentStatusSucceeded: {
-    backgroundColor: "#dcfce7",
+    backgroundColor: palette.okWash,
   },
   subagentStatusFailed: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: palette.errWash,
   },
   subagentStatusWaiting: {
-    backgroundColor: "#fef3c7",
+    backgroundColor: palette.brandWash,
   },
   inspectSubagentBtn: {
-    backgroundColor: "#12100e",
-    borderRadius: 6,
+    alignItems: "center",
+    backgroundColor: palette.surface3,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   inspectSubagentBtnText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.bold,
   },
   subagentSummarySnippet: {
-    color: "#44403c",
-    fontSize: 11,
+    color: palette.ink2,
+    fontSize: font.caption,
     lineHeight: 16,
   },
   subagentSpawningCard: {
     alignItems: "center",
-    backgroundColor: "#f0fdfa",
-    borderColor: "#0f766e",
-    borderRadius: 6,
+    backgroundColor: palette.cyanWash,
+    borderColor: palette.okBorder,
+    borderRadius: radius.sm,
     borderStyle: "dashed",
     borderWidth: 1,
     flexDirection: "row",
@@ -1316,9 +1340,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   subagentSpawningText: {
-    color: "#0f766e",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.info,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
 });
 

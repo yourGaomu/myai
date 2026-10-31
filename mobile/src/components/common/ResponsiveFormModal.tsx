@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ButtonFeedback } from "../../types/ui";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -94,29 +95,29 @@ export function ResponsiveFormModal({
 
 const styles = StyleSheet.create({
   keyboard: { flex: 1 },
-  backdrop: { backgroundColor: "rgba(28, 25, 22, 0.46)", flex: 1, paddingHorizontal: 14 },
+  backdrop: { backgroundColor: palette.scrim, flex: 1, paddingHorizontal: 14 },
   backdropCompact: { justifyContent: "flex-end", paddingHorizontal: 0 },
   backdropWide: { alignItems: "center", justifyContent: "center", paddingVertical: 24 },
-  sheet: { backgroundColor: "#f7f5f0", overflow: "hidden", width: "100%" },
-  sheetCompact: { borderTopLeftRadius: 8, borderTopRightRadius: 8 },
-  sheetWide: { borderRadius: 8, maxWidth: 760 },
+  sheet: { backgroundColor: palette.surface2, overflow: "hidden", width: "100%" },
+  sheetCompact: { borderTopLeftRadius: radius.sm, borderTopRightRadius: radius.sm },
+  sheetWide: { borderRadius: radius.sm, maxWidth: 760 },
   header: {
     alignItems: "center",
-    borderBottomColor: "#ddd8cf",
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     minHeight: 56,
     paddingHorizontal: 16,
   },
-  title: { color: "#1d211e", flex: 1, fontSize: 18, fontWeight: "800" },
-  closeButton: { alignItems: "center", borderRadius: 6, height: 38, justifyContent: "center", width: 38 },
-  closeText: { color: "#4d504c", fontSize: 28, fontWeight: "400", lineHeight: 30 },
+  title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.bold },
+  closeButton: { alignItems: "center", borderRadius: radius.sm, height: 38, justifyContent: "center", width: 38 },
+  closeText: { color: palette.ink1, fontSize: font.display, fontWeight: weight.regular, lineHeight: 30 },
   scroll: { flexShrink: 1 },
   body: { gap: 12, padding: 16 },
   footer: {
-    backgroundColor: "#ffffff",
-    borderTopColor: "#ddd8cf",
+    backgroundColor: palette.surface2,
+    borderTopColor: palette.hairline,
     borderTopWidth: 1,
     flexDirection: "row",
     gap: 10,

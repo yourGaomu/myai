@@ -1,10 +1,12 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { LayoutAnimation, Platform, Pressable, StyleSheet, Switch, Text, TextInput, UIManager, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type { SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
+import { font, palette, radius, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -196,7 +198,7 @@ export function SubagentPanel({
             <Text style={styles.meta}>{definitions.length} 个配置 / 当前会话 {visibleTasks.length} 个任务</Text>
           </View>
           <Pressable disabled={pending} onPress={onRefresh} style={({ pressed }) => buttonFeedback([styles.secondaryButton, pending && styles.disabled], pressed)}>
-            <ButtonContent loading={pending} text="刷新" />
+            <ButtonContent color={palette.ink1} loading={pending} text="刷新" />
           </Pressable>
           <Pressable
             disabled={pending}
@@ -242,7 +244,7 @@ export function SubagentPanel({
               <Text style={styles.modalCancelText}>取消</Text>
             </Pressable>
             <Pressable disabled={pending} onPress={submit} style={({ pressed }) => buttonFeedback([styles.primaryButton, styles.modalSubmitButton, pending && styles.disabled], pressed)}>
-              <ButtonContent color="#ffffff" loading={pending} text={editing ? "保存配置" : "创建配置"} />
+              <ButtonContent color={palette.inkInverse} loading={pending} text={editing ? "保存配置" : "创建配置"} />
             </Pressable>
           </>
         )}
@@ -250,19 +252,19 @@ export function SubagentPanel({
         title={editing ? "编辑子智能体配置" : "创建子智能体配置"}
         visible={showEditor}
       >
-          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, name: value }))} placeholder="名称" placeholderTextColor="#776f66" style={styles.input} value={draft.name} />
-          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, description: value }))} placeholder="用途说明" placeholderTextColor="#776f66" style={styles.input} value={draft.description} />
+          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, name: value }))} placeholder="名称" placeholderTextColor={palette.ink4} style={styles.input} value={draft.name} />
+          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, description: value }))} placeholder="用途说明" placeholderTextColor={palette.ink4} style={styles.input} value={draft.description} />
           <TextInput
             multiline
             onChangeText={(value) => setDraft((current) => ({ ...current, systemPrompt: value }))}
             placeholder="系统提示词"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={[styles.input, styles.promptInput]}
             textAlignVertical="top"
             value={draft.systemPrompt}
           />
-          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, modelID: value }))} placeholder="模型 ID，留空继承父会话" placeholderTextColor="#776f66" style={styles.input} value={draft.modelID} />
-          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, allowedTools: value }))} placeholder="工具白名单，以逗号分隔" placeholderTextColor="#776f66" style={styles.input} value={draft.allowedTools} />
+          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, modelID: value }))} placeholder="模型 ID，留空继承父会话" placeholderTextColor={palette.ink4} style={styles.input} value={draft.modelID} />
+          <TextInput onChangeText={(value) => setDraft((current) => ({ ...current, allowedTools: value }))} placeholder="工具白名单，以逗号分隔" placeholderTextColor={palette.ink4} style={styles.input} value={draft.allowedTools} />
 
           <Text style={styles.fieldLabel}>能力</Text>
           <View style={styles.segmentRow}>
@@ -278,8 +280,8 @@ export function SubagentPanel({
             <Segment label="OpenSandbox" selected={draft.isolationMode === "opensandbox"} onPress={() => setDraft((current) => ({ ...current, isolationMode: "opensandbox" }))} />
           </View>
           <View style={styles.row}>
-            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, maxTurns: value }))} placeholder="最大轮次" placeholderTextColor="#776f66" style={[styles.input, styles.flex]} value={draft.maxTurns} />
-            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, timeoutSeconds: value }))} placeholder="超时秒数" placeholderTextColor="#776f66" style={[styles.input, styles.flex]} value={draft.timeoutSeconds} />
+            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, maxTurns: value }))} placeholder="最大轮次" placeholderTextColor={palette.ink4} style={[styles.input, styles.flex]} value={draft.maxTurns} />
+            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, timeoutSeconds: value }))} placeholder="超时秒数" placeholderTextColor={palette.ink4} style={[styles.input, styles.flex]} value={draft.timeoutSeconds} />
           </View>
           <View style={styles.rowBetween}>
             <Text style={styles.fieldLabel}>启用</Text>
@@ -348,7 +350,7 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
         <View style={styles.taskHeaderSide}>
           <Text style={styles.badge}>{task.change_set?.files?.length || 0} 文件</Text>
           <View style={styles.drawerIcon}>
-            <Text style={styles.drawerIconText}>{expanded ? "▴" : "▾"}</Text>
+            <Feather color={palette.ink2} name={expanded ? "chevron-up" : "chevron-down"} size={14} />
           </View>
         </View>
       </Pressable>
@@ -378,7 +380,7 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
                 multiline
                 onChangeText={setMessageDraft}
                 placeholder={running ? "给子智能体追加要求" : "继续执行子智能体任务"}
-                placeholderTextColor="#776f66"
+                placeholderTextColor={palette.ink4}
                 style={[styles.input, styles.messageInput]}
                 textAlignVertical="top"
                 value={messageDraft}
@@ -388,18 +390,23 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
                 onPress={sendMessage}
                 style={({ pressed }) => buttonFeedback([styles.primaryButton, (pending || !messageDraft.trim()) && styles.disabled], pressed)}
               >
-                  <ButtonContent color="#ffffff" loading={pending} text={running ? "发送" : "继续执行"} />
+                  <ButtonContent color={palette.inkInverse} loading={pending} text={running ? "发送" : "继续执行"} />
               </Pressable>
             </View>
           ) : null}
           <View style={styles.actionRow}>
-            {onInspect ? <Pressable disabled={pending} onPress={onInspect} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent text="🔍 实时详情" /></Pressable> : null}
-            {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="继续主任务" /></Pressable> : null}
-            <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="刷新状态" /></Pressable>
-            {running ? <Pressable disabled={pending} onPress={onWait} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent loading={pending} text="等待完成" /></Pressable> : null}
-            {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="取消" /></Pressable> : null}
-            {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color="#ffffff" loading={pending} text="应用变更" /></Pressable> : null}
-            {pendingChanges ? <Pressable disabled={pending} onPress={onDiscard} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color="#8b2822" loading={pending} text="丢弃" /></Pressable> : null}
+            {onInspect ? (
+              <Pressable disabled={pending} onPress={onInspect} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}>
+                <Feather color={palette.ink1} name="search" size={15} />
+                <Text style={styles.secondaryButtonText}>实时详情</Text>
+              </Pressable>
+            ) : null}
+            {canResume ? <Pressable disabled={pending} onPress={onResume} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color={palette.inkInverse} loading={pending} text="继续主任务" /></Pressable> : null}
+            <Pressable disabled={pending} onPress={onCheck} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent color={palette.ink1} loading={pending} text="刷新状态" /></Pressable>
+            {running ? <Pressable disabled={pending} onPress={onWait} style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}><ButtonContent color={palette.ink1} loading={pending} text="等待完成" /></Pressable> : null}
+            {running ? <Pressable disabled={pending} onPress={onCancel} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color={palette.err} loading={pending} text="取消" /></Pressable> : null}
+            {pendingChanges ? <Pressable disabled={pending} onPress={onApply} style={({ pressed }) => buttonFeedback(styles.primaryButton, pressed)}><ButtonContent color={palette.inkInverse} loading={pending} text="应用变更" /></Pressable> : null}
+            {pendingChanges ? <Pressable disabled={pending} onPress={onDiscard} style={({ pressed }) => buttonFeedback(styles.dangerButton, pressed)}><ButtonContent color={palette.err} loading={pending} text="丢弃" /></Pressable> : null}
           </View>
         </View>
       ) : (
@@ -491,61 +498,61 @@ function formatEventTime(value: string) {
 
 const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  badge: { backgroundColor: "#dcebd8", borderRadius: 4, color: "#214222", fontSize: 11, fontWeight: "800", paddingHorizontal: 7, paddingVertical: 4 },
-  badgeMuted: { backgroundColor: "#ded8cf", color: "#5e574f" },
-  body: { color: "#38332d", fontSize: 13, lineHeight: 19, marginTop: 7 },
-  codeText: { color: "#575048", fontFamily: "monospace", fontSize: 11, marginTop: 6 },
-  dangerButton: { alignItems: "center", borderColor: "#9f352d", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
-  dangerText: { color: "#8b2822", fontSize: 12, fontWeight: "800" },
+  badge: { backgroundColor: palette.okWash, borderRadius: radius.xs, color: palette.ok, fontSize: font.caption, fontWeight: weight.bold, paddingHorizontal: 7, paddingVertical: 4 },
+  badgeMuted: { backgroundColor: palette.surface3, color: palette.ink1 },
+  body: { color: palette.ink1, fontSize: font.body, lineHeight: 19, marginTop: 7 },
+  codeText: { color: palette.ink1, fontFamily: "monospace", fontSize: font.caption, marginTop: 6 },
+  dangerButton: { alignItems: "center", borderColor: palette.errBorder, borderRadius: radius.xs, borderWidth: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
+  dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.bold },
   disabled: { opacity: 0.5 },
-  drawerIcon: { alignItems: "center", backgroundColor: "#eee6da", borderRadius: 4, height: 28, justifyContent: "center", width: 28 },
-  drawerIconText: { color: "#39342e", fontSize: 15, fontWeight: "900", lineHeight: 18 },
-  empty: { color: "#756d64", fontSize: 13, paddingVertical: 12 },
-  emptyResult: { color: "#756d64", fontSize: 12, lineHeight: 18, marginTop: 5 },
-  errorText: { color: "#9f352d", fontSize: 12, marginTop: 7 },
-  eventContent: { color: "#38332d", fontSize: 12, lineHeight: 18, marginTop: 5 },
-  eventItem: { borderBottomColor: "#e8ded1", borderBottomWidth: 1, paddingBottom: 8, paddingTop: 8 },
-  eventKind: { color: "#214222", fontSize: 11, fontWeight: "900" },
-  eventStatus: { color: "#756d64", fontSize: 11, marginTop: 4 },
-  eventTimeline: { backgroundColor: "#f7f1e8", borderColor: "#ded4c7", borderRadius: 5, borderWidth: 1, marginTop: 11, padding: 9 },
-  fieldLabel: { color: "#38332d", fontSize: 12, fontWeight: "800" },
+  drawerIcon: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, height: 28, justifyContent: "center", width: 28 },
+  drawerIconText: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.bold, lineHeight: 18 },
+  empty: { color: palette.ink3, fontSize: font.body, paddingVertical: 12 },
+  emptyResult: { color: palette.ink3, fontSize: font.label, lineHeight: 18, marginTop: 5 },
+  errorText: { color: palette.err, fontSize: font.label, marginTop: 7 },
+  eventContent: { color: palette.ink1, fontSize: font.label, lineHeight: 18, marginTop: 5 },
+  eventItem: { borderBottomColor: palette.hairline, borderBottomWidth: 1, paddingBottom: 8, paddingTop: 8 },
+  eventKind: { color: palette.ok, fontSize: font.caption, fontWeight: weight.bold },
+  eventStatus: { color: palette.ink3, fontSize: font.caption, marginTop: 4 },
+  eventTimeline: { backgroundColor: palette.brandWash, borderColor: palette.hairline, borderRadius: radius.xs, borderWidth: 1, marginTop: 11, padding: 9 },
+  fieldLabel: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
   flex: { flex: 1 },
-  input: { backgroundColor: "#fffdf8", borderColor: "#b8aa98", borderRadius: 5, borderWidth: 1, color: "#171411", fontSize: 13, minHeight: 42, paddingHorizontal: 11, paddingVertical: 9 },
-  item: { backgroundColor: "#fffdf8", borderColor: "#c7b9a6", borderRadius: 6, borderWidth: 1, padding: 12 },
-  itemTitle: { color: "#171411", fontSize: 14, fontWeight: "900" },
-  modalCancelButton: { alignItems: "center", borderColor: "#9c9184", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 13 },
-  modalCancelText: { color: "#4f4841", fontSize: 12, fontWeight: "800" },
+  input: { backgroundColor: palette.brandWash, borderColor: palette.hairlineStrong, borderRadius: radius.xs, borderWidth: 1, color: palette.ink1, fontSize: font.body, minHeight: 42, paddingHorizontal: 11, paddingVertical: 9 },
+  item: { backgroundColor: palette.brandWash, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, padding: 12 },
+  itemTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.bold },
+  modalCancelButton: { alignItems: "center", borderColor: palette.hairlineStrong, borderRadius: radius.xs, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 13 },
+  modalCancelText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
   modalSubmitButton: { minHeight: 42, minWidth: 120 },
-  meta: { color: "#756d64", fontSize: 11, lineHeight: 16 },
+  meta: { color: palette.ink3, fontSize: font.caption, lineHeight: 16 },
   messageComposer: { alignItems: "stretch", flexDirection: "row", gap: 8, marginTop: 11 },
   messageInput: { flex: 1, maxHeight: 100, minHeight: 42 },
-  notice: { backgroundColor: "#e6efe4", borderRadius: 5, color: "#2c5030", fontSize: 12, padding: 9 },
-  primaryButton: { alignItems: "center", backgroundColor: "#1d5c45", borderRadius: 5, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
-  primaryButtonText: { color: "#ffffff", fontSize: 12, fontWeight: "900" },
+  notice: { backgroundColor: palette.okWash, borderRadius: radius.xs, color: palette.ok, fontSize: font.label, padding: 9 },
+  primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.xs, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
+  primaryButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.bold },
   promptInput: { minHeight: 110 },
   row: { flexDirection: "row", gap: 9 },
   rowBetween: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" },
-  secondaryButton: { alignItems: "center", backgroundColor: "#eee6da", borderRadius: 5, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
-  secondaryButtonText: { color: "#39342e", fontSize: 12, fontWeight: "800" },
-  sectionTitle: { color: "#171411", fontSize: 13, fontWeight: "900", marginTop: 3 },
-  segment: { alignItems: "center", backgroundColor: "#eee6da", borderRadius: 4, flex: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 7 },
-  segmentActive: { backgroundColor: "#d4e8dc", borderColor: "#1d5c45", borderWidth: 1 },
+  secondaryButton: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
+  secondaryButtonText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
+  sectionTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.bold, marginTop: 3 },
+  segment: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, flex: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 7 },
+  segmentActive: { backgroundColor: palette.okWash, borderColor: palette.okBorder, borderWidth: 1 },
   segmentRow: { flexDirection: "row", gap: 6 },
-  segmentText: { color: "#5d554c", fontSize: 11, fontWeight: "800" },
-  segmentTextActive: { color: "#173e2e" },
+  segmentText: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.bold },
+  segmentTextActive: { color: palette.ok },
   stack: { gap: 10 },
-  taskDrawer: { borderTopColor: "#ded4c7", borderTopWidth: 1, padding: 12, paddingTop: 3 },
+  taskDrawer: { borderTopColor: palette.hairline, borderTopWidth: 1, padding: 12, paddingTop: 3 },
   taskDetail: { marginTop: 9 },
   taskHeader: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 66, padding: 12 },
-  taskHeaderPressed: { backgroundColor: "#f5efe5" },
+  taskHeaderPressed: { backgroundColor: palette.surface1 },
   taskHeaderSide: { alignItems: "center", flexDirection: "row", gap: 7 },
   taskItem: { overflow: "hidden", padding: 0 },
-  taskPreview: { borderTopColor: "#ede4d8", borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
-  taskPreviewError: { color: "#9f352d" },
-  taskPreviewText: { color: "#675f56", fontSize: 12, lineHeight: 17 },
+  taskPreview: { borderTopColor: palette.hairline, borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  taskPreviewError: { color: palette.err },
+  taskPreviewText: { color: palette.ink1, fontSize: font.label, lineHeight: 17 },
   taskTitle: { flexShrink: 1 },
   taskTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
-  title: { color: "#171411", fontSize: 17, fontWeight: "900" },
+  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.heavy },
   toolbar: { alignItems: "center", flexDirection: "row", gap: 8 },
-  unreadDot: { backgroundColor: "#1d5c45", borderRadius: 4, height: 7, width: 7 },
+  unreadDot: { backgroundColor: palette.infoWash, borderRadius: radius.xs, height: 7, width: 7 },
 });

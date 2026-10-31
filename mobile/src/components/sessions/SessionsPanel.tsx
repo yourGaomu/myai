@@ -4,6 +4,7 @@ import { ButtonContent } from "../common/ButtonContent";
 import type { SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { formatDateTime } from "../../utils/format";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -53,7 +54,7 @@ export function SessionsPanel({
       <View style={styles.sessionList}>
         {pendingSessions ? (
           <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#12100e" size="small" />
+            <ActivityIndicator color={palette.ink1} size="small" />
             <Text style={styles.inlineLoadingText}>正在同步会话...</Text>
           </View>
         ) : null}
@@ -105,7 +106,7 @@ export function SessionsPanel({
             onPress={onRefreshDeletedSessions}
             style={({ pressed }) => buttonFeedback([styles.recycleButton, (pendingSessions || !clientToken) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingSessions} text="刷新" />
+            <ButtonContent color={palette.ink1} loading={pendingSessions} text="刷新" />
           </Pressable>
         </View>
         {deletedSessions.length === 0 ? (
@@ -136,17 +137,13 @@ export function SessionsPanel({
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     gap: 10,
     padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
+    ...shadow.card,
   },
   sessionsPanel: {
     minHeight: 420,
@@ -158,22 +155,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   sessionsTitle: {
-    color: "#12100e",
-    fontSize: 28,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.heavy,
   },
   pathText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.bold,
     marginTop: 3,
   },
   floatingNewButton: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     height: 48,
     justifyContent: "center",
     minWidth: 58,
@@ -187,30 +184,30 @@ const styles = StyleSheet.create({
   },
   inlineLoading: {
     alignItems: "center",
-    backgroundColor: "#fff4cc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
   inlineLoadingText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   sessionListItem: {
     alignItems: "center",
-    borderBottomColor: "#d8ccb9",
+    borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 12,
     paddingVertical: 8,
   },
   sessionListItemActive: {
-    backgroundColor: "#fff4cc",
+    backgroundColor: palette.brandWash,
   },
   sessionMain: {
     alignItems: "center",
@@ -222,55 +219,55 @@ const styles = StyleSheet.create({
   },
   sessionAvatar: {
     alignItems: "center",
-    backgroundColor: "#f5f1e9",
-    borderColor: "#4fd7ee",
-    borderRadius: 34,
-    borderWidth: 3,
+    backgroundColor: palette.surface2,
+    borderColor: palette.cyanWash,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     height: 54,
     justifyContent: "center",
     width: 54,
   },
   sessionAvatarText: {
-    color: "#12100e",
-    fontSize: 20,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.bold,
   },
   sessionListTitle: {
-    color: "#12100e",
-    fontSize: 18,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   sessionListMeta: {
-    color: "#6c665f",
-    fontSize: 12,
+    color: palette.ink2,
+    fontSize: font.label,
     marginTop: 4,
   },
   sessionListTime: {
-    color: "#6c665f",
-    fontSize: 12,
+    color: palette.ink2,
+    fontSize: font.label,
     maxWidth: 92,
     textAlign: "right",
   },
   deleteButton: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 36,
     paddingHorizontal: 10,
   },
   deleteButtonText: {
-    color: "#a3342f",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.err,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   recycleBox: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 8,
     marginTop: 8,
     padding: 10,
@@ -282,63 +279,63 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   recycleTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.title,
+    fontWeight: weight.bold,
   },
   recycleButton: {
     alignItems: "center",
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 36,
     paddingHorizontal: 10,
   },
   deletedItem: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   deletedTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.bold,
   },
   restoreButton: {
     alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.okWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     minHeight: 34,
     paddingHorizontal: 10,
   },
   restoreButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   flex: {
     flex: 1,
     minWidth: 0,
   },
   emptyText: {
-    color: "#6c665f",
+    color: palette.ink2,
   },
   unreadDot: {
-    backgroundColor: "#ff4d4f",
-    borderColor: "#ffffff",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     height: 10,
     position: "absolute",
     right: -2,
