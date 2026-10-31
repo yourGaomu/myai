@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { Pressable, Text, type StyleProp, View, type ViewStyle } from "react-native";
+import { Image, Pressable, Text, type StyleProp, View, type ViewStyle } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 
+import { palette } from "../../constants/theme";
 import type { ChatItem } from "../../types/chat";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
@@ -27,23 +30,31 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   if (message.role === "tool_call" || message.role === "tool") {
     const isKnowledgeSearch = message.toolName === "knowledge_search";
     const displayName = isKnowledgeSearch ? "知识库检索" : message.toolName || "工具";
+    const dotStyle =
+      message.role === "tool_call"
+        ? styles.toolDotWarn
+        : message.toolError
+          ? styles.toolDotErr
+          : styles.toolDotOk;
     return (
       <View style={[styles.message, styles.toolMessage]}>
         <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolHeader, pressed)}>
-          <Text style={styles.toolBadge}>{message.role === "tool_call" ? "调用" : message.toolError ? "错误" : "完成"}</Text>
-          <View style={styles.flex}>
-            <Text style={styles.toolTitle}>{displayName}</Text>
-            <Text style={styles.toolSubtitle}>
-              {isKnowledgeSearch
-                ? message.role === "tool_call"
-                  ? "知识库检索"
-                  : "知识库结果"
-                : message.role === "tool_call"
-                  ? "工具请求"
-                  : "工具结果"}
-            </Text>
-          </View>
-          <Text style={styles.toolToggle}>{expanded ? "收起" : "展开"}</Text>
+          <View style={[styles.toolDot, dotStyle]} />
+          <Text numberOfLines={1} style={styles.toolTitle}>
+            {displayName}
+          </Text>
+          <Text numberOfLines={1} style={styles.toolSubtitle}>
+            {isKnowledgeSearch
+              ? message.role === "tool_call"
+                ? "知识库检索"
+                : "知识库结果"
+              : message.role === "tool_call"
+                ? "工具请求"
+                : message.toolError
+                  ? "执行错误"
+                  : "已完成"}
+          </Text>
+          <Feather color={palette.ink4} name={expanded ? "chevron-down" : "chevron-right"} size={13} />
         </Pressable>
         {expanded ? (
           <View style={styles.toolBody}>
@@ -72,7 +83,12 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   if (message.role === "user") {
     return (
       <View style={styles.userTurnWrapper}>
-        <View style={[styles.message, styles.userMessage]}>
+        <LinearGradient
+          colors={[palette.brandLight, palette.brandDeep]}
+          end={{ x: 1, y: 1 }}
+          start={{ x: 0.15, y: 0 }}
+          style={[styles.message, styles.userMessage]}
+        >
           {message.text ? (
             <Text selectable style={styles.userMessageText}>
               {message.text}
@@ -89,7 +105,7 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
               ))}
             </View>
           ) : null}
-        </View>
+        </LinearGradient>
         <Text style={styles.userTurnMeta}>{message.status === "queued" ? "排队中" : "已发送"}</Text>
       </View>
     );
@@ -97,6 +113,19 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
 
   return (
     <View style={[styles.message, styles[`${message.role}Message`]]}>
+      {message.role === "assistant" ? (
+        <View style={styles.assistantHeader}>
+          <LinearGradient
+            colors={[palette.brand, palette.brandDark]}
+            end={{ x: 1, y: 1 }}
+            start={{ x: 0.15, y: 0 }}
+            style={styles.assistantAvatarRing}
+          >
+            <Image source={require("../../../assets/avatar.png")} style={styles.assistantAvatarImage} />
+          </LinearGradient>
+          <Text style={styles.assistantName}>MYAI</Text>
+        </View>
+      ) : null}
       {message.reasoning && !hideReasoning ? (
         <ThinkingReasoning
           buttonFeedback={buttonFeedback}

@@ -20,6 +20,7 @@ import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
 import { ChatJumpNav, type ChatJumpAnchor } from "./ChatJumpNav";
 import { MessageBubble } from "./MessageBubble";
 import { ToolActivityGroup } from "./ToolActivityGroup";
+import { font, palette, radius, shadow, space, weight } from "../../constants/theme";
 
 type Props = {
   activeAssistantID: string;
@@ -140,7 +141,7 @@ export function ChatPanel({
         {messages.length === 0 && runs.length === 0 ? (
           loadingHistory ? (
             <View style={styles.inlineLoading}>
-              <ActivityIndicator color="#12100e" size="small" />
+              <ActivityIndicator color={palette.ink1} size="small" />
               <Text style={styles.inlineLoadingText}>正在加载会话历史...</Text>
             </View>
           ) : (
@@ -409,35 +410,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messages: {
-    gap: 12,
+    gap: space.xl,
     paddingBottom: 16,
     paddingTop: 4,
   },
   inlineLoading: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 12,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1.5, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 2,
+    ...shadow.float,
   },
   inlineLoadingText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.bold,
   },
   emptyText: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.body,
+    fontWeight: weight.bold,
     textAlign: "center",
     marginTop: 32,
   },

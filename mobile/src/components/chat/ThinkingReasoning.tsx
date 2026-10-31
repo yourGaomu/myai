@@ -8,7 +8,9 @@ import {
   View,
   type LayoutChangeEvent,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
+import { palette } from "../../constants/theme";
 import type { ButtonFeedback } from "../../types/ui";
 import { ShimmerLabel } from "./ShimmerLabel";
 import { styles } from "./styles";
@@ -94,17 +96,17 @@ export function ThinkingReasoning({
         onPress={() => setExpanded((value) => !value)}
         style={({ pressed }) => buttonFeedback(styles.reasoningHeader, pressed)}
       >
+        <Animated.View
+          accessible={false}
+          style={[styles.reasoningChevron, { transform: [{ rotate: chevronRotation }] }]}
+        >
+          <Feather color={palette.ink4} name="chevron-down" size={13} />
+        </Animated.View>
         {running ? (
           <ShimmerLabel containerStyle={styles.reasoningShimmerLabel} label="正在思考" />
         ) : (
           <Text style={styles.reasoningSummaryText}>{summary}</Text>
         )}
-        <Animated.Text
-          accessible={false}
-          style={[styles.reasoningChevron, { transform: [{ rotate: chevronRotation }] }]}
-        >
-          ⌄
-        </Animated.Text>
       </Pressable>
 
       <Animated.View

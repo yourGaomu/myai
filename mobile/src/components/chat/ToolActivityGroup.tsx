@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
+import { palette } from "../../constants/theme";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { isPermissionEvent, type ToolActivityGroupItem } from "../../utils/chatRenderItems";
@@ -20,14 +22,12 @@ export function ToolActivityGroup({ buttonFeedback, group }: Props) {
   return (
     <View style={[styles.message, styles.toolGroupMessage]}>
       <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolGroupHeader, pressed)}>
-        <Text style={[styles.toolGroupBadge, group.failedCount > 0 && styles.toolGroupBadgeError]}>{group.failedCount > 0 ? "错误" : "工具"}</Text>
-        <View style={styles.flex}>
-          <Text style={styles.toolGroupTitle}>工具活动</Text>
-          <Text numberOfLines={1} style={styles.toolGroupSubtitle}>
-            {summary}
-          </Text>
-        </View>
-        <Text style={styles.toolToggle}>{expanded ? "收起" : "展开"}</Text>
+        <View style={[styles.toolDot, group.failedCount > 0 ? styles.toolDotErr : styles.toolDotOk]} />
+        <Text style={styles.toolGroupTitle}>工具活动</Text>
+        <Text numberOfLines={1} style={styles.toolGroupSubtitle}>
+          {summary}
+        </Text>
+        <Feather color={palette.ink4} name={expanded ? "chevron-down" : "chevron-right"} size={13} />
       </Pressable>
       {expanded ? (
         <View style={styles.toolGroupBody}>
@@ -45,7 +45,7 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
     return (
       <View style={styles.toolGroupStep}>
         <View style={styles.toolGroupStepHeader}>
-          <Text style={styles.toolGroupStepBadge}>好</Text>
+          <View style={[styles.toolDot, styles.toolDotOk]} />
           <Text style={styles.toolGroupStepTitle}>权限</Text>
           <Text style={styles.toolGroupStepMeta}>#{index}</Text>
         </View>
@@ -56,12 +56,12 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
 
   const sharedAsset = parseSharedAsset(message.toolName, message.text);
   const failed = Boolean(message.toolError);
-  const badge = message.role === "tool_call" ? "调用" : failed ? "错误" : "完成";
+  const dotStyle = message.role === "tool_call" ? styles.toolDotWarn : failed ? styles.toolDotErr : styles.toolDotOk;
 
   return (
     <View style={styles.toolGroupStep}>
       <View style={styles.toolGroupStepHeader}>
-        <Text style={[styles.toolGroupStepBadge, failed && styles.toolGroupStepBadgeError]}>{badge}</Text>
+        <View style={[styles.toolDot, dotStyle]} />
         <Text numberOfLines={1} style={styles.toolGroupStepTitle}>
           {message.toolName === "knowledge_search" ? "知识库检索" : message.toolName || "tool"}
         </Text>
