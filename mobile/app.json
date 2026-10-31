@@ -2,7 +2,7 @@
   "expo": {
     "name": "MyAI Mobile",
     "slug": "myai-mobile",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -16,7 +16,7 @@
     "splash": {
       "image": "./assets/splash-character.png",
       "resizeMode": "contain",
-      "backgroundColor": "#efe4d2"
+      "backgroundColor": "#08080A"
     },
     "userInterfaceStyle": "dark",
     "ios": {
@@ -24,8 +24,12 @@
     },
     "android": {
       "package": "com.myai.mobile",
-      "versionCode": 8,
-      "predictiveBackGestureEnabled": false
+      "versionCode": 9,
+      "predictiveBackGestureEnabled": false,
+      "navigationBar": {
+        "backgroundColor": "#08080A",
+        "barStyle": "light-content"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,17 +46,17 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#efe4d2",
+          "backgroundColor": "#08080A",
           "image": "./assets/splash-character.png",
           "imageWidth": 260,
           "resizeMode": "contain"
         }
       ],
       [
-      "expo-navigation-bar",
+        "expo-navigation-bar",
         {
           "hidden": false,
-          "style": "dark",
+          "style": "light",
           "enforceContrast": false
         }
       ],
