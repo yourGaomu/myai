@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   title: {
     color: palette.ink1,
     fontSize: font.display,
-    fontWeight: weight.heavy,
+    fontWeight: weight.semibold,
     marginTop: -8,
   },
   status: {

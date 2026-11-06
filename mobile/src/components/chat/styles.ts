@@ -470,7 +470,7 @@ export const styles = StyleSheet.create({
   assetPreviewTapHintText: {
     color: palette.ink1,
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   imageModalBackdrop: {
     backgroundColor: palette.scrimHeavy,
@@ -489,7 +489,7 @@ export const styles = StyleSheet.create({
     color: palette.ink1,
     flex: 1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     marginRight: 12,
   },
   imageModalCloseBtn: {
@@ -538,7 +538,7 @@ export const styles = StyleSheet.create({
   imageModalActionBtnText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   assetPreviewOverlay: {
     alignItems: "center",
@@ -554,7 +554,7 @@ export const styles = StyleSheet.create({
   assetPreviewStatus: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
     marginTop: 4,
   },
   assetIconBox: {

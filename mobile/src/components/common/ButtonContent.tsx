@@ -19,6 +19,6 @@ const styles = StyleSheet.create({
   },
   buttonContentText: {
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
 });
