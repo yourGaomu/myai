@@ -1,6 +1,8 @@
 package langchaingo
 
 import (
+	"net/http"
+
 	"github.com/tmc/langchaingo/llms/ollama"
 
 	domainmodel "myai/core/domain/model"
@@ -30,9 +32,10 @@ func (OllamaChatAdapter) CreateModel(config modelport.CreationConfig) (modelport
 	model, err := ollama.New(
 		ollama.WithServerURL(config.BaseURL),
 		ollama.WithModel(config.ModelName),
+		ollama.WithHTTPClient(&http.Client{Transport: modelTransport{base: http.DefaultTransport, ollama: true}}),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model}, nil
+	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
 }

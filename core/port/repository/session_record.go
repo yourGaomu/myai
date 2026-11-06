@@ -7,6 +7,7 @@ import (
 	generation "myai/core/domain/generation"
 	agentplan "myai/core/plan"
 	"myai/core/session"
+	tooldef "myai/core/tool/tool"
 )
 
 type SessionRecord struct {
@@ -19,6 +20,7 @@ type SessionRecord struct {
 	SystemInstruction    string
 	AllowedTools         []string
 	EnforceToolAllowlist bool
+	PermissionCeiling    []tooldef.Permission
 	WorkspaceRoot        string
 	WorkspaceSandboxID   string
 	MaxToolRounds        int

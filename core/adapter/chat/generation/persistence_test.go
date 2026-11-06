@@ -3,8 +3,10 @@ package generation
 import (
 	"context"
 	"errors"
+	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
 	"strings"
 	"testing"
+	"time"
 
 	chatmessagerepository "myai/core/adapter/persistence/chatmessage/repository"
 	generationcommand "myai/core/application/chat/generation/command"
@@ -180,6 +182,12 @@ func (p failingSummaryPersistence) Save(context.Context, sessioncommand.SaveSess
 
 func (s *recordingSessionPersistence) Save(_ context.Context, command sessioncommand.SaveSession) error {
 	s.command = command
+	return nil
+}
+
+func (s *recordingSessionPersistence) TouchMessages(_ context.Context, snapshot *session.Session, id, model, title string, _ time.Time, _ bool) error {
+	s.command = sessioncommand.SaveSession{SessionID: id, Model: model, Title: title}
+	s.record = (chatmessagemapper.Mapper{}).Session(snapshot, title)
 	return nil
 }
 

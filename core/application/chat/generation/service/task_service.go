@@ -17,19 +17,22 @@ import (
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
+	sessionport "myai/core/port/session"
 	"myai/core/session"
 )
 
 type TaskService struct {
 	// TaskService creates the request-scoped checkpoint and Agent run before delegating generation.
-	RequestIDs   generationport.RequestIDGenerator
-	Recorders    generationport.TaskRecorderFactory
-	Generator    generationapi.Generator
-	Runs         agentrunapi.CommandService
-	TurnHooks    generationport.TurnLifecycleHooks
-	OnSaveError  func(error)
-	OnCloseError func(error)
-	OnRunError   func(error)
+	Sessions           sessionport.TranscriptStore
+	OnMessagesAppended func(*session.Session, []domainmessage.Message)
+	RequestIDs         generationport.RequestIDGenerator
+	Recorders          generationport.TaskRecorderFactory
+	Generator          generationapi.Generator
+	Runs               agentrunapi.CommandService
+	TurnHooks          generationport.TurnLifecycleHooks
+	OnSaveError        func(error)
+	OnCloseError       func(error)
+	OnRunError         func(error)
 }
 
 var _ generationapi.TaskService = TaskService{}
@@ -128,7 +131,7 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode, Internal: command.Internal,
 	})
 	response.RunID = runID
-	if resultErr == nil {
+	if resultErr == nil || response.Result.Content != "" {
 		// Persist the final answer in the run log so disconnected consumers can
 		// recover it even before asynchronous chat-message persistence catches up.
 		if runID != "" && s.Runs != nil && response.Result.Content != "" {
@@ -263,7 +266,22 @@ func (s TaskService) applyTurnHook(ctx context.Context, command generationcomman
 		}
 		return fmt.Errorf("turn denied by %s hook: %s", name, message)
 	}
-	appendHookContext(command.Session, outcome.Continuation)
+	message := domainmessage.HookContext(outcome.Continuation)
+	if !message.IsSynthetic() {
+		return nil
+	}
+	if s.Sessions != nil {
+		snapshot, appended, err := s.Sessions.AppendMessagesTo(command.Session.ID, message)
+		if err != nil {
+			return err
+		}
+		replaceRunSnapshot(command.Session, snapshot)
+		if s.OnMessagesAppended != nil && len(appended) > 0 {
+			s.OnMessagesAppended(command.Session, appended)
+		}
+	} else {
+		appendHookContext(command.Session, outcome.Continuation)
+	}
 	return nil
 }
 

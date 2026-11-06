@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -8,9 +9,12 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
+	planport "myai/core/application/chat/plan/port"
+	plancommand "myai/core/application/plan/command"
 	planservice "myai/core/application/plan/service"
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
+	sessionport "myai/core/port/session"
 	"myai/core/session"
 )
 
@@ -18,6 +22,7 @@ type ResponseCommitService struct {
 	// ResponseCommitService 负责把一次成功生成转换为会话状态，并在 Plan 模式下捕获结构化计划。
 	Memory       generationport.ResponseMemoryStore
 	PlanCapturer generationport.PlanCapturer
+	PlanStates   planport.StateStore
 	Now          func() time.Time
 }
 
@@ -43,16 +48,36 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 	if err := s.Memory.AddUsageTo(command.Session.ID, command.Result.Usage); err != nil {
 		return generationresult.Commit{}, err
 	}
-	// Chat 模式只保存回答；Plan 模式才解析 Markdown Plan，避免普通回复被误识别为计划。
-	if !command.CapturePlan || session.NormalizeAgentMode(command.Session.AgentMode) != session.AgentModePlan {
-		return generationresult.Commit{}, nil
+	var captured *agentplan.Plan
+	var planErr error
+	// Internal planning returns a draft to its caller; it must not replace the
+	// live plan being recovered by the executor.
+	if command.CapturePlan && session.NormalizeAgentMode(command.Session.AgentMode) == session.AgentModePlan {
+		captured = s.planCapturer().Capture(command.Session.ID, command.LatestInput, command.Result.Content, s.now())
+		if !command.Internal {
+			if s.PlanStates != nil {
+				state := plancommand.SaveState{SessionID: command.Session.ID, Model: command.Session.Model, Plan: captured, CheckExpected: true}
+				if previous := command.Session.CurrentPlan; previous != nil {
+					state.ExpectedPlanID, state.ExpectedRevision = previous.ID, previous.Revision
+				}
+				captured, planErr = s.PlanStates.Save(context.Background(), state)
+				if planErr != nil {
+					captured = nil
+				}
+			} else if err := s.Memory.SetCurrentPlanForSession(command.Session.ID, captured); err != nil {
+				planErr, captured = err, nil
+			}
+		}
 	}
-	currentPlan := s.planCapturer().Capture(command.Session.ID, command.LatestInput, command.Result.Content, s.now())
-	command.Session.CurrentPlan = agentplan.Clone(currentPlan)
-	if err := s.Memory.SetCurrentPlanForSession(command.Session.ID, currentPlan); err != nil {
-		return generationresult.Commit{}, err
+	var snapshot *session.Session
+	if memory, ok := s.Memory.(sessionport.TranscriptStore); ok {
+		var err error
+		snapshot, err = memory.Snapshot(command.Session.ID)
+		if err != nil {
+			return generationresult.Commit{}, err
+		}
 	}
-	return generationresult.Commit{Plan: currentPlan}, nil
+	return generationresult.Commit{Plan: captured, Session: snapshot}, planErr
 }
 
 func (s ResponseCommitService) planCapturer() generationport.PlanCapturer {

@@ -14,6 +14,10 @@ import (
 )
 
 func (a *Agent) handlePermissionResult(message protocol.Message) error {
+	return a.handlePermissionResultContext(context.Background(), message)
+}
+
+func (a *Agent) handlePermissionResultContext(ctx context.Context, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.PermissionResultPayload](message)
 	if err != nil {
 		return fmt.Errorf("decode permission result failed: %w", err)
@@ -22,8 +26,13 @@ func (a *Agent) handlePermissionResult(message protocol.Message) error {
 	if payload.ApprovalID == "" {
 		return fmt.Errorf("permission approval_id is required")
 	}
-	a.permissionWaiters.resolve(message.RequestID+":"+payload.ApprovalID, payload.Allowed)
-	return nil
+	if a.permissionWaiters != nil && a.permissionWaiters.resolve(message.RequestID+":"+payload.ApprovalID, payload.Allowed) {
+		return nil
+	}
+	if control, ok := a.chatService.(BackgroundPermissionControl); ok {
+		return control.ResolveBackgroundPermission(ctx, message.SessionID, message.RequestID, payload.ApprovalID, payload.Allowed)
+	}
+	return fmt.Errorf("permission approval is unknown, expired or already answered")
 }
 
 func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, message protocol.Message, request llm.ToolPermissionRequest, sendErrCh chan<- error) bool {

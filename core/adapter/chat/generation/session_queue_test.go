@@ -43,37 +43,40 @@ func TestSessionQueueSchedulesDifferentSessionsIndependently(t *testing.T) {
 	}
 }
 
-func TestSessionQueueRejectsSubmissionAfterExecutorCloses(t *testing.T) {
+func TestSessionQueueDrainsAcceptedSubmissionAfterExecutorCloses(t *testing.T) {
 	executor := &queuedExecutor{err: asyncport.ErrExecutorClosed}
 	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
 	executed := false
 
 	err := queue.Submit("session-1", func() { executed = true })
-	if !errors.Is(err, asyncport.ErrExecutorClosed) || executed {
-		t.Fatalf("expected closed executor rejection: executed=%v err=%v", executed, err)
+	if err != nil || !executed {
+		t.Fatalf("accepted task was not drained: executed=%v err=%v", executed, err)
 	}
 	if len(queue.queues) != 0 {
 		t.Fatalf("failed submission left a queued session: %#v", queue.queues)
 	}
 }
 
-func TestSessionQueueSubmitAndWaitIgnoresCancellationAfterAcceptance(t *testing.T) {
+func TestSessionQueueSubmitAndWaitIgnoresCancellationAfterExecutionStarts(t *testing.T) {
 	executor := &signalingExecutor{tasks: make(chan func(), 1)}
 	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
 	ctx, cancel := context.WithCancel(context.Background())
 	completed := make(chan error, 1)
+	started, release := make(chan struct{}), make(chan struct{})
 	go func() {
-		completed <- queue.SubmitAndWait(ctx, "session-1", func() error { return nil })
+		completed <- queue.SubmitAndWait(ctx, "session-1", func() error { close(started); <-release; return nil })
 	}()
 
 	scheduled := <-executor.tasks
+	go scheduled()
+	<-started
 	cancel()
 	select {
 	case err := <-completed:
-		t.Fatalf("wait returned before accepted persistence completed: %v", err)
+		t.Fatalf("wait returned before started persistence completed: %v", err)
 	case <-time.After(20 * time.Millisecond):
 	}
-	scheduled()
+	close(release)
 	if err := <-completed; err != nil {
 		t.Fatalf("unexpected persistence result: %v", err)
 	}
@@ -89,6 +92,112 @@ func TestSessionQueueSubmitAndWaitRejectsAlreadyCanceledContext(t *testing.T) {
 	}
 	if len(executor.tasks) != 0 {
 		t.Fatal("canceled context scheduled persistence")
+	}
+}
+
+func TestSessionQueueFailedHeadReturnsWaitingMutationAndNeverRetriesIt(t *testing.T) {
+	executor := &signalingExecutor{tasks: make(chan func(), 2)}
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
+	failure := errors.New("storage unavailable")
+	fail := true
+	if err := queue.SubmitTask("session", func() error {
+		if fail {
+			return failure
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := <-executor.tasks
+	mutations := 0
+	result := make(chan error, 1)
+	go func() {
+		result <- queue.SubmitAndWait(context.Background(), "session", func() error { mutations++; return nil })
+	}()
+	deadline := time.After(time.Second)
+	for {
+		queue.mu.Lock()
+		count := len(queue.queues["session"].tasks)
+		queue.mu.Unlock()
+		if count == 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("waiter not queued")
+		default:
+		}
+	}
+	worker()
+	select {
+	case err := <-result:
+		if !errors.Is(err, failure) {
+			t.Fatalf("waiter error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("head failure blocked synchronous mutation")
+	}
+	fail = false
+	flushed := make(chan error, 1)
+	go func() { flushed <- queue.Flush(context.Background()) }()
+	(<-executor.tasks)()
+	if err := <-flushed; err != nil {
+		t.Fatal(err)
+	}
+	if mutations != 0 {
+		t.Fatal("rolled-back mutation executed on retry")
+	}
+}
+
+func TestSessionQueueRetainsFailedWriteForFlushRetryInOrder(t *testing.T) {
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{})
+	failure := errors.New("offline")
+	fail := true
+	var values []string
+	queue.SubmitTask("session", func() error {
+		if fail {
+			return failure
+		}
+		values = append(values, "user")
+		return nil
+	})
+	queue.SubmitTask("session", func() error { values = append(values, "assistant"); return nil })
+	if err := queue.Flush(context.Background()); !errors.Is(err, failure) {
+		t.Fatalf("missing pending error %v", err)
+	}
+	if len(values) != 0 {
+		t.Fatal("failed head lost ordering")
+	}
+	fail = false
+	if err := queue.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0] != "user" || values[1] != "assistant" {
+		t.Fatalf("retry order=%v", values)
+	}
+}
+
+func TestSessionQueueCancelsQueuedMutationBeforeExecution(t *testing.T) {
+	executor := &signalingExecutor{tasks: make(chan func(), 1)}
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})
+	queue.Submit("session", func() {})
+	worker := <-executor.tasks
+	ctx, cancel := context.WithCancel(context.Background())
+	executed := false
+	result := make(chan error, 1)
+	go func() { result <- queue.SubmitAndWait(ctx, "session", func() error { executed = true; return nil }) }()
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel blocked")
+	}
+	worker()
+	if executed {
+		t.Fatal("canceled queued mutation executed")
 	}
 }
 

@@ -82,6 +82,11 @@ func saveManifestWithReplace(path string, value manifest, replace func(string, s
 func stateMap(files []fileState) map[string]fileState {
 	result := make(map[string]fileState, len(files))
 	for _, file := range files {
+		// Older manifests may contain paths now excluded by the shared policy.
+		// They must not become deletions merely because scanning omits them.
+		if shouldSkip(file.Path) {
+			continue
+		}
 		result[file.Path] = file
 	}
 	return result

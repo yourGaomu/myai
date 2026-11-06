@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
 	generationcommand "myai/core/application/chat/generation/command"
 	sessioncommand "myai/core/application/session/command"
 	domainmessage "myai/core/domain/message"
@@ -38,7 +39,7 @@ func TestWriterSavesUserMessageAndSession(t *testing.T) {
 	if sessions.command.SessionID != "session-1" || sessions.command.Title != "title" {
 		t.Fatalf("unexpected session command: %#v", sessions.command)
 	}
-	if len(messages.records) != 2 || messages.records[0].ID != "id-1" || messages.records[0].Role != repository.RoleSystem || messages.records[0].SyntheticReason != "runtime_instruction" {
+	if len(messages.records) != 2 || messages.records[0].ID != "id-1" || messages.records[0].Role != repository.RoleUser || messages.records[0].SyntheticReason != "runtime_instruction" {
 		t.Fatalf("unexpected message records: %#v", messages.records)
 	}
 	if !messages.records[0].CreatedAt.Equal(now) {
@@ -146,6 +147,12 @@ func (r *recordingTranscriptRepository) ReplaceSessionTranscript(_ context.Conte
 
 func (s *recordingSessionPersistence) Save(_ context.Context, command sessioncommand.SaveSession) error {
 	s.command = command
+	return nil
+}
+
+func (s *recordingSessionPersistence) TouchMessages(_ context.Context, snapshot *session.Session, id, model, title string, _ time.Time, _ bool) error {
+	s.command = sessioncommand.SaveSession{SessionID: id, Model: model, Title: title}
+	s.record = (chatmessagemapper.Mapper{}).Session(snapshot, title)
 	return nil
 }
 

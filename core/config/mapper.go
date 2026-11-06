@@ -17,6 +17,7 @@ import (
 	domainmodel "myai/core/domain/model"
 	"myai/core/hook"
 	"myai/core/mcp"
+	"myai/core/trust"
 )
 
 type Mapper struct {
@@ -87,16 +88,18 @@ func (m Mapper) ModelConfig(properties ModelProperties) domainmodel.Config {
 		provider = "openai"
 	}
 	return domainmodel.Config{
-		ID:        properties.ID,
-		Name:      properties.ID,
-		Provider:  provider,
-		Protocol:  domainmodel.NormalizeProtocol(domainmodel.Protocol(properties.Protocol)),
-		AuthType:  domainmodel.NormalizeAuthType(domainmodel.AuthType(properties.AuthType)),
-		BaseURL:   properties.BaseURL,
-		APIKey:    properties.APIKey,
-		ModelName: properties.ID,
-		Enabled:   true,
-		IsDefault: true,
+		ID:                  properties.ID,
+		Name:                properties.ID,
+		Provider:            provider,
+		Protocol:            domainmodel.NormalizeProtocol(domainmodel.Protocol(properties.Protocol)),
+		AuthType:            domainmodel.NormalizeAuthType(domainmodel.AuthType(properties.AuthType)),
+		BaseURL:             properties.BaseURL,
+		APIKey:              properties.APIKey,
+		ModelName:           properties.ID,
+		Enabled:             true,
+		IsDefault:           true,
+		ContextWindowTokens: properties.ContextWindowTokens,
+		MaxOutputTokens:     properties.MaxOutputLimit,
 		DefaultGenerationSettings: generation.Settings{
 			Temperature:     cloneFloat64(properties.Temperature),
 			TopP:            cloneFloat64(properties.TopP),
@@ -126,6 +129,7 @@ func cloneInt(value *int) *int {
 func (Mapper) AssetConfig(properties AssetProperties) asset.Config {
 	return asset.Config{
 		BaseURL:           properties.BaseURL,
+		APIKey:            properties.APIKey,
 		Timeout:           time.Duration(properties.UploadTimeoutSeconds) * time.Second,
 		DefaultTTLSeconds: properties.TTLSeconds,
 		DefaultMaxVisits:  properties.MaxVisits,
@@ -193,6 +197,7 @@ func (Mapper) HookConfig(workspace string, properties HookProperties) hook.Confi
 	return hook.Config{
 		Workspace:    workspace,
 		CommandHooks: commands,
+		Trust:        trust.NewPolicy(),
 	}
 }
 
@@ -201,6 +206,8 @@ func (Mapper) MCPConfig(workspace string, properties MCPProperties) mcp.Config {
 	for _, server := range properties.Servers {
 		servers = append(servers, mcp.ServerConfig{
 			Name:            server.Name,
+			URL:             server.URL,
+			Headers:         cloneStringMap(server.Headers),
 			Command:         server.Command,
 			Args:            append([]string(nil), server.Args...),
 			Env:             cloneStringMap(server.Env),
@@ -210,6 +217,8 @@ func (Mapper) MCPConfig(workspace string, properties MCPProperties) mcp.Config {
 			ProtocolVersion: server.ProtocolVersion,
 			Disabled:        server.Disabled,
 			Required:        server.Required,
+			Trust:           trust.NewPolicy(),
+			TrustWorkspace:  workspace,
 		})
 	}
 	return mcp.NormalizeConfig(mcp.Config{Servers: servers}, workspace)

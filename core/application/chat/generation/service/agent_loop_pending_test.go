@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -260,7 +261,7 @@ func TestWaitRoundsDoNotExhaustWorkspaceToolBudget(t *testing.T) {
 func TestRepeatedWaitsAreBoundedWithoutFalseFinalAnswer(t *testing.T) {
 	model := &pendingModel{}
 	for i := 0; i < 40; i++ {
-		model.responses = append(model.responses, modelport.ChatResult{ToolCalls: []domainmessage.ToolCall{{ID: "wait", Name: "wait_agent", Arguments: `{}`}}})
+		model.responses = append(model.responses, modelport.ChatResult{ToolCalls: []domainmessage.ToolCall{{ID: fmt.Sprintf("wait-%d", i), Name: "wait_agent", Arguments: `{}`}}})
 	}
 	s := AgentLoopService{Contexts: pendingContextProvider{}, ToolExecutor: pendingToolExecutor{}}
 	_, err := s.Run(context.Background(), generationcommand.Run{Model: model, Session: &session.Session{ID: "parent", MaxToolRounds: 1}})

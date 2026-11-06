@@ -14,6 +14,7 @@ func Clone(current *Session) *Session {
 	}
 	cloned := *current
 	cloned.AllowedTools = append([]string(nil), current.AllowedTools...)
+	cloned.PermissionCeiling = ClonePermissionCeiling(current.PermissionCeiling)
 	cloned.CurrentPlan = agentplan.Clone(current.CurrentPlan)
 	cloned.RAGSettings = CloneRAGSettings(current.RAGSettings)
 	cloned.GenerationSettings = generation.Clone(current.GenerationSettings)

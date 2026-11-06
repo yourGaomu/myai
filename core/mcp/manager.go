@@ -13,7 +13,7 @@ import (
 )
 
 type Manager struct {
-	// Manager 管理 MCP 子进程生命周期，并把远程工具包装成项目统一的 Tool 接口。
+	// 1. 管理 stdio 与 HTTP MCP 生命周期，统一复用工具权限、Hook 和热更新。
 	config      Config
 	mu          sync.Mutex
 	operationMu sync.Mutex
@@ -90,9 +90,9 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 			cleanupCandidate()
 			return errors.New("mcp server name is empty")
 		}
-		if strings.TrimSpace(server.Command) == "" {
+		if strings.TrimSpace(server.Command) == "" && strings.TrimSpace(server.URL) == "" {
 			cleanupCandidate()
-			return fmt.Errorf("mcp server %s command is empty", server.Name)
+			return fmt.Errorf("mcp server %s requires command or url", server.Name)
 		}
 
 		// required 服务启动失败会阻止应用启动；可选服务只记录警告并继续。

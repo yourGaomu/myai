@@ -198,11 +198,11 @@ func (r *TaskWorkspaceRecorder) SnapshotPath(path string) (*domainhistory.FileSn
 		return nil, nil
 	}
 
-	rel, abs, err := cleanRecorderPath(r.state.workspace, path)
+	rel, _, err := cleanRecorderPath(r.state.workspace, path)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, exists, err := SnapshotFile(abs, rel)
+	snapshot, exists, err := snapshotWorkspacePath(r.state.workspace, rel)
 	if err != nil || !exists {
 		return nil, err
 	}
@@ -217,11 +217,14 @@ func (r *TaskWorkspaceRecorder) RecordFileChange(ctx context.Context, path strin
 		return "", err
 	}
 
-	rel, abs, err := cleanRecorderPath(r.state.workspace, path)
+	rel, _, err := cleanRecorderPath(r.state.workspace, path)
 	if err != nil {
 		return "", err
 	}
-	after, exists, err := SnapshotFile(abs, rel)
+	if shouldSkipSnapshotPath(rel) || (before != nil && shouldSkipSnapshotPath(before.Path)) {
+		return "", nil
+	}
+	after, exists, err := snapshotWorkspacePath(r.state.workspace, rel)
 	if err != nil {
 		return "", err
 	}
@@ -265,6 +268,9 @@ func (r *TaskWorkspaceRecorder) RecordWorkspaceChanges(ctx context.Context, befo
 
 	changed := 0
 	for path, beforeSnapshot := range before {
+		if shouldSkipSnapshotPath(path) || shouldSkipSnapshotPath(beforeSnapshot.Path) {
+			continue
+		}
 		if _, ok := after[path]; ok {
 			continue
 		}
@@ -276,6 +282,9 @@ func (r *TaskWorkspaceRecorder) RecordWorkspaceChanges(ctx context.Context, befo
 		changed++
 	}
 	for path, afterSnapshot := range after {
+		if shouldSkipSnapshotPath(path) || shouldSkipSnapshotPath(afterSnapshot.Path) {
+			continue
+		}
 		beforeSnapshot, ok := before[path]
 		if ok && !snapshotChanged(&beforeSnapshot, &afterSnapshot) {
 			continue
@@ -297,7 +306,9 @@ func (r *TaskWorkspaceRecorder) RecordWorkspaceChanges(ctx context.Context, befo
 }
 
 func (t *TaskRecorder) addChange(state *taskWorkspaceState, change domainhistory.FileChange) {
-	if t == nil || state == nil {
+	if t == nil || state == nil || shouldSkipSnapshotPath(change.Path) ||
+		(change.Before != nil && shouldSkipSnapshotPath(change.Before.Path)) ||
+		(change.After != nil && shouldSkipSnapshotPath(change.After.Path)) {
 		return
 	}
 

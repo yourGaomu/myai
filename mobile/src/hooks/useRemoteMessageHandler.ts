@@ -185,6 +185,7 @@ type Args = {
   getSessionChat: (sessionID: string) => {
     activeAssistantID: string;
     pendingRequestID: string;
+    pendingPermission: PermissionState | null;
     pendingQuestions: UserQuestionState[];
   };
   historySessionIDRef: RefObject<string>;
@@ -344,6 +345,9 @@ export function useRemoteMessageHandler({
 }: Args) {
   const turnSequenceMapRef = useRef<Record<string, number>>({});
   const resolvedUserQuestionIDsRef = useRef(new Set<string>());
+  const resolvedPermissionIDsRef = useRef(new Set<string>());
+  const backgroundPermissionsRef = useRef<Record<string, { sessionID: string; turnID: string }>>({});
+  const backgroundQuestionsRef = useRef<Record<string, { sessionID: string; turnID: string }>>({});
 
   return useCallback(
     (message: RelayMessage) => {
@@ -405,6 +409,17 @@ export function useRemoteMessageHandler({
             sessionIDRef.current;
 
           if (payload.kind === "resync_required") {
+            for (const [approvalID, identity] of Object.entries(backgroundPermissionsRef.current)) {
+              const pending = getSessionChat(identity.sessionID).pendingPermission;
+              if (pending && pending.approvalID === approvalID && pending.requestID === identity.turnID) {
+                setSessionPendingPermission(identity.sessionID, null);
+              }
+            }
+            for (const [questionID, identity] of Object.entries(backgroundQuestionsRef.current)) {
+              removeSessionPendingQuestion(identity.sessionID, questionID);
+            }
+            backgroundPermissionsRef.current = {};
+            backgroundQuestionsRef.current = {};
             const resyncSessionID = targetSessionID || sessionIDRef.current;
             if (resyncSessionID) {
               requestAgentRuns?.(resyncSessionID);
@@ -425,7 +440,8 @@ export function useRemoteMessageHandler({
           const turnKey = `${targetSessionID}:${turnID}`;
           const lastSeq = turnSequenceMapRef.current[turnKey] || 0;
 
-          if (seq > 0) {
+          const interactionEvent = payload.kind === "permission_ask" || payload.kind === "user_question";
+          if (seq > 0 && !(interactionEvent && seq <= lastSeq)) {
             if (seq <= lastSeq) {
               // 实时轮次序号去重
               break;
@@ -443,6 +459,48 @@ export function useRemoteMessageHandler({
           }
 
           switch (payload.kind) {
+            case "permission_ask": {
+              const permission = payload.permission;
+              const approvalID = payload.approval_id || permission?.approval_id;
+              if (!approvalID || !permission || resolvedPermissionIDsRef.current.has(approvalID)) { break; }
+              backgroundPermissionsRef.current[approvalID] = { sessionID: targetSessionID, turnID };
+              setSessionPendingPermission(targetSessionID, {
+                approvalID, requestID: turnID, sessionID: targetSessionID,
+                name: permission.name || "tool", permission: permission.permission || "permission", arguments: permission.arguments || "",
+              });
+              break;
+            }
+            case "permission_resolved": {
+              if (payload.approval_id) {
+                rememberResolvedUserQuestion(payload.approval_id, resolvedPermissionIDsRef.current);
+                delete backgroundPermissionsRef.current[payload.approval_id];
+              }
+              const pending = getSessionChat(targetSessionID).pendingPermission;
+              if (pending && pending.requestID === turnID && pending.approvalID === payload.approval_id) {
+                setSessionPendingPermission(targetSessionID, null);
+              }
+              break;
+            }
+            case "user_question": {
+              const question = payload.question;
+              if (!question?.question_id || !question.questions?.length || resolvedUserQuestionIDsRef.current.has(question.question_id)) { break; }
+              backgroundQuestionsRef.current[question.question_id] = { sessionID: targetSessionID, turnID };
+              setSessionPendingQuestion(targetSessionID, {
+                questionID: question.question_id, requestID: turnID, sessionID: targetSessionID,
+                title: question.title || "需要你确认一些信息", questions: question.questions,
+                sourceTaskID: question.source_task_id, submitted: false,
+              });
+              break;
+            }
+            case "user_question_resolved": {
+              const questionID = payload.question?.question_id;
+              if (questionID) {
+                delete backgroundQuestionsRef.current[questionID];
+                rememberResolvedUserQuestion(questionID, resolvedUserQuestionIDsRef.current);
+                removeSessionPendingQuestion(targetSessionID, questionID);
+              }
+              break;
+            }
             case "started": {
               const run: AgentRun = payload.run || {
                 id: payload.run_id || turnID,
@@ -492,6 +550,11 @@ export function useRemoteMessageHandler({
             }
 
             case "completed": {
+              const pendingPermission = getSessionChat(targetSessionID).pendingPermission;
+              if (pendingPermission && pendingPermission.requestID === turnID) { setSessionPendingPermission(targetSessionID, null); }
+              for (const question of getSessionChat(targetSessionID).pendingQuestions) {
+                if (question.requestID === turnID) { removeSessionPendingQuestion(targetSessionID, question.questionID); }
+              }
               if (payload.run) {
                 applyRunCompleted({ run: payload.run });
               } else if (payload.run_id) {
@@ -659,13 +722,33 @@ export function useRemoteMessageHandler({
             requestSessionMapRef,
             sessionIDRef,
           );
+          if (!message.request_id || !payload.approval_id) {
+            addErrorMessage(targetSessionID, "授权请求缺少审批 ID，请等待电脑端重新发送。");
+            break;
+          }
+          if (resolvedPermissionIDsRef.current.has(payload.approval_id)) { break; }
           setSessionPendingPermission(targetSessionID, {
-            requestID: message.request_id || "",
+            approvalID: payload.approval_id,
+            requestID: message.request_id,
             sessionID: targetSessionID,
             name: payload.name || "tool",
             permission: payload.permission || "permission",
             arguments: payload.arguments || "",
           });
+          break;
+        }
+        case "permission_result": {
+          const payload = (message.payload || {}) as { approval_id?: string; allowed?: boolean };
+          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const pending = getSessionChat(targetSessionID).pendingPermission;
+          if (payload.approval_id) {
+            rememberResolvedUserQuestion(payload.approval_id, resolvedPermissionIDsRef.current);
+            delete backgroundPermissionsRef.current[payload.approval_id];
+          }
+          if (pending && pending.requestID === message.request_id && pending.approvalID === payload.approval_id) {
+            addEventMessage(targetSessionID, `${payload.allowed ? "Allowed" : "Denied"} ${pending.name}`);
+            setSessionPendingPermission(targetSessionID, null);
+          }
           break;
         }
         case "user_question": {
@@ -1056,6 +1139,17 @@ export function useRemoteMessageHandler({
           break;
         case "error": {
           const payload = (message.payload || {}) as ErrorPayload;
+          if (payload.request_type === "permission_result" || payload.request_type === "user_question_answer") {
+            const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+            addErrorMessage(targetSessionID, payload.message || "审批回复失败，请重试。");
+            if (payload.request_type === "user_question_answer") {
+              const pending = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
+              if (pending) {
+                setSessionPendingQuestion(targetSessionID, { ...pending, submitted: false });
+              }
+            }
+            break;
+          }
           applyIntentError(payload.message || "自动规划操作失败", message.request_id);
           if (isModelOperationPending) {
             stopPending("models");

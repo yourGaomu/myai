@@ -25,6 +25,14 @@ func (s StatePersistenceService) Save(ctx context.Context, command plancommand.S
 		currentPlan.Revision++
 	}
 	if s.Repository != nil {
+		if conditional, ok := s.Repository.(interface {
+			SaveCurrentPlanIfUnchanged(context.Context, string, string, *agentplan.Plan, string, int64) error
+		}); ok && command.CheckExpected {
+			if err := conditional.SaveCurrentPlanIfUnchanged(ctx, command.SessionID, command.Model, currentPlan, command.ExpectedPlanID, command.ExpectedRevision); err != nil {
+				return nil, err
+			}
+			return currentPlan, nil
+		}
 		if err := s.Repository.SaveCurrentPlan(ctx, command.SessionID, command.Model, currentPlan); err != nil {
 			return nil, err
 		}

@@ -2,6 +2,7 @@ package changes
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ func TestListDiffAndRevertSnapshotChanges(t *testing.T) {
 		t.Fatalf("expected main.go diff, got:\n%s", diff.Diff)
 	}
 
-	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "main.go"})
+	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "main.go", ExpectedHash: diff.ExpectedHash})
 	if err != nil {
 		t.Fatalf("revert changed file failed: %v", err)
 	}
@@ -104,7 +105,11 @@ func TestRevertDeletedFileRestoresSnapshot(t *testing.T) {
 		t.Fatalf("remove file failed: %v", err)
 	}
 
-	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "gone.txt"})
+	diff, err := service.Diff(context.Background(), protocol.ChangeDiffPayload{Path: "gone.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "gone.txt", ExpectedHash: diff.ExpectedHash})
 	if err != nil {
 		t.Fatalf("revert deleted file failed: %v", err)
 	}
@@ -125,7 +130,11 @@ func TestRevertNewFileRemovesIt(t *testing.T) {
 	service := newTestService(t, root)
 	writeTestFile(t, root, "new.txt", "hello\n")
 
-	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "new.txt"})
+	diff, err := service.Diff(context.Background(), protocol.ChangeDiffPayload{Path: "new.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverted, err := service.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "new.txt", ExpectedHash: diff.ExpectedHash})
 	if err != nil {
 		t.Fatalf("revert new file failed: %v", err)
 	}
@@ -166,7 +175,11 @@ func TestSQLiteBaselineSurvivesServiceRestart(t *testing.T) {
 		t.Fatalf("expected main.go to remain changed after restart: %+v", result.Entries)
 	}
 
-	reverted, err := restarted.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "main.go"})
+	diff, err := restarted.Diff(context.Background(), protocol.ChangeDiffPayload{Path: "main.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverted, err := restarted.Revert(context.Background(), protocol.ChangeRevertPayload{Path: "main.go", ExpectedHash: diff.ExpectedHash})
 	if err != nil {
 		t.Fatalf("revert after restart failed: %v", err)
 	}
@@ -300,6 +313,110 @@ func TestDiffRejectsUnsafePath(t *testing.T) {
 
 	if _, err := service.Diff(context.Background(), protocol.ChangeDiffPayload{Path: ".."}); err == nil {
 		t.Fatalf("expected path traversal to be rejected")
+	}
+}
+
+func TestEmptyBaselineSurvivesRestart(t *testing.T) {
+	root, dbPath := t.TempDir(), filepath.Join(t.TempDir(), "history.db")
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "new.txt", "new after empty baseline")
+	service, err = newTestServiceWithHistoryPath(root, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	list, err := service.List(context.Background(), protocol.ChangesListPayload{})
+	if err != nil || !hasChange(list.Entries, "new.txt") {
+		t.Fatal("empty baseline was overwritten on restart")
+	}
+}
+
+func TestCheckpointCreatedBeforeChangesDoesNotSuppressBaseline(t *testing.T) {
+	root, dbPath := t.TempDir(), filepath.Join(t.TempDir(), "history.db")
+	writeTestFile(t, root, "notes.txt", "baseline")
+	store, err := sqlitehistory.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, exists, err := history.SnapshotFile(filepath.Join(root, "notes.txt"), "notes.txt")
+	if err != nil || !exists {
+		t.Fatal("snapshot fixture failed")
+	}
+	workspace, err := normalizeRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveCheckpoint(context.Background(), domainhistory.Checkpoint{Workspace: workspace}, []domainhistory.FileChange{{Path: file.Path, After: &file}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	list, err := service.List(context.Background(), protocol.ChangesListPayload{})
+	if err != nil || !list.Clean {
+		t.Fatal("checkpoint-only workspace prevented initial baseline")
+	}
+	writeTestFile(t, root, "notes.txt", "after")
+	list, err = service.List(context.Background(), protocol.ChangesListPayload{})
+	if err != nil || len(list.Entries) != 1 || list.Entries[0].Status != "modified" {
+		t.Fatal("initial baseline was not established")
+	}
+}
+
+func TestLegacyEmptyWorkspaceRebuildsBaselineOnce(t *testing.T) {
+	root, dbPath := t.TempDir(), filepath.Join(t.TempDir(), "legacy.db")
+	workspace, err := normalizeRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := sqlitehistory.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceBaseline(context.Background(), workspace, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`DROP TABLE workspace_baselines`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "notes.txt", "rebuilt baseline")
+	service, err := newTestServiceWithHistoryPath(root, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "notes.txt", "later change")
+	service, err = newTestServiceWithHistoryPath(root, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	list, err := service.List(context.Background(), protocol.ChangesListPayload{})
+	if err != nil || len(list.Entries) != 1 || list.Entries[0].Status != "modified" {
+		t.Fatal("legacy empty workspace baseline was rebuilt more than once")
 	}
 }
 

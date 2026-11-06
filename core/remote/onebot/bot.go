@@ -301,7 +301,10 @@ func (b *Bot) HandleEvent(ctx context.Context, event Event) {
 	// 5.6 计算并发锁键并交由 SessionGuard 调度
 	guardKey := b.sessionGuardKey(event)
 	guardResult := b.guard.Submit(ctx, guardKey, parsed.CleanText, func(runCtx context.Context) {
-		b.executeTurn(runCtx, event, parsed.CleanText)
+		if err := b.executeTurn(runCtx, event, parsed.CleanText); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("[onebot] turn failed: %v", err)
+			_ = b.replyToEvent(runCtx, event, "会话处理失败，请稍后重试。")
+		}
 	})
 
 	switch guardResult {
@@ -318,82 +321,101 @@ func (b *Bot) HandleEvent(ctx context.Context, event Event) {
 // 6.3 按发送者角色与会话场景同步设置该 Session 的 PermissionMode（超级管理员私聊为 Full，其余为 Readonly）；
 // 6.4 将不可伪造的 CallerInfo 注入 Context，并在用户输入头部拼接结构化身份前缀；
 // 6.5 调用 ChatService.SendMessageStreamForSession 获取回答，触发水位压缩检查，并发送回 NapCatQQ。
-func (b *Bot) executeTurn(ctx context.Context, event Event, cleanText string) {
-	// 6.1 重新核验用户角色
+func (b *Bot) executeTurn(ctx context.Context, event Event, cleanText string) error {
 	user, found, err := b.store.GetUser(ctx, event.UserID)
 	if err != nil {
-		log.Printf("[onebot] reload user %d failed: %v", event.UserID, err)
-		return
+		return fmt.Errorf("reload OneBot identity: %w", err)
 	}
 	if !found {
-		user = UserIdentity{
-			UserID:   event.UserID,
-			Nickname: event.Sender.DisplayName(event.UserID),
-			Role:     RoleUser,
-		}
+		user = UserIdentity{UserID: event.UserID, Nickname: event.Sender.DisplayName(event.UserID), Role: RoleUser}
 	}
 	if user.Role == RoleBanned {
-		return
+		return nil
 	}
-
-	// 6.2 获取或创建绑定的 MyAI SessionID
 	sessionID, err := b.ensureSessionForEvent(ctx, event, &user)
 	if err != nil {
-		log.Printf("[onebot] ensure session failed: %v", err)
-		_ = b.replyToEvent(ctx, event, "初始化会话失败，请稍后重试。")
-		return
+		return fmt.Errorf("initialize OneBot session: %w", err)
 	}
-
-	// 6.3 动态设置会话的底层工具权限模式
-	permMode := string(session.PermissionModeReadonly)
-	if event.MessageType == "private" && user.Role == RoleSuperAdmin {
-		permMode = string(session.PermissionModeFull)
+	if err := b.configureSessionAccess(ctx, sessionID, event, user.Role); err != nil {
+		return err
 	}
-	_ = b.chat.SetPermissionModeForSession(ctx, sessionID, permMode)
-
-	// 6.4 注入真实 CallerInfo 到 Context 并构造带身份头部的 Prompt
 	caller := CallerInfo{
-		UserID:      event.UserID,
-		Nickname:    event.Sender.DisplayName(event.UserID),
-		GroupID:     event.GroupID,
-		MessageType: event.MessageType,
-		MessageID:   event.MessageID,
-		SessionID:   sessionID,
+		UserID: event.UserID, Nickname: event.Sender.DisplayName(event.UserID), GroupID: event.GroupID,
+		MessageType: event.MessageType, MessageID: event.MessageID, SessionID: sessionID,
 	}
 	callCtx := WithCallerInfo(ctx, caller)
 	promptInput := FormatPromptHeader(caller, user.Role) + "\n" + cleanText
-
-	// 6.5 调用 ChatService 生成回复
 	resp, err := b.chat.SendMessageStreamForSession(callCtx, sessionID, promptInput, llm.ChatStreamHandler{})
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(callCtx.Err(), context.Canceled) {
-			return
-		}
-		log.Printf("[onebot] chat generation failed (session=%s): %v", sessionID, err)
-		_ = b.replyToEvent(ctx, event, "抱歉，处理您的请求时遇到了错误："+err.Error())
-		return
+		return fmt.Errorf("generate OneBot reply: %w", err)
 	}
-
-	// 检查上下文水位并按需执行软/硬阈值压缩
 	if b.compactor != nil {
 		b.compactor.CheckAndCompact(callCtx, sessionID, resp)
 	}
-
 	replyText := strings.TrimSpace(resp.Result.Content)
 	if replyText == "" {
 		replyText = "（已完成操作）"
 	}
 	if err := b.replyToEvent(ctx, event, replyText); err != nil {
-		log.Printf("[onebot] send reply failed: %v", err)
-		return
+		return err
 	}
 	log.Printf("[onebot] sent reply to %s(%d) (session=%s)", caller.Nickname, event.UserID, sessionID)
+	return nil
+}
+
+// configureSessionAccess sets both discovery and execution restrictions before
+// generation. If the backend cannot enforce them, the turn must not run.
+func (b *Bot) configureSessionAccess(ctx context.Context, sessionID string, event Event, role Role) error {
+	full := event.MessageType == "private" && role == RoleSuperAdmin
+	mode := session.PermissionModeReadonly
+	if full {
+		mode = session.PermissionModeFull
+	}
+	if err := b.chat.SetPermissionModeForSession(ctx, sessionID, string(mode)); err != nil {
+		return fmt.Errorf("set OneBot permission mode: %w", err)
+	}
+	security, ok := b.chat.(interface {
+		SetToolAllowlistForSession(context.Context, string, []string, bool) error
+		SetRAGSettingsForSession(context.Context, string, session.RAGSettings) error
+	})
+	if !ok {
+		return errors.New("OneBot backend cannot enforce session tool restrictions")
+	}
+	allowed := allowedChatTools(role)
+	if full {
+		allowed = nil
+	}
+	if err := security.SetToolAllowlistForSession(ctx, sessionID, allowed, !full); err != nil {
+		return fmt.Errorf("set OneBot tool allowlist: %w", err)
+	}
+	if !full {
+		if err := security.SetRAGSettingsForSession(ctx, sessionID, session.RAGSettings{Mode: session.RetrievalModeOff}); err != nil {
+			return fmt.Errorf("disable OneBot workspace retrieval: %w", err)
+		}
+	}
+	return nil
+}
+
+func allowedChatTools(role Role) []string {
+	if !HasAtLeastRole(role, RoleAdmin) {
+		return []string{}
+	}
+	return []string{
+		"onebot_set_user_role", "onebot_clear_history", "onebot_set_group_switch", "onebot_set_persona",
+		"onebot_switch_model", "onebot_list_users_and_sessions", "onebot_send_message", "onebot_get_status", "onebot_query",
+	}
 }
 
 // ensureSessionForEvent 根据私聊或群聊（共享模式 vs 群内独立模式）解析或创建对应的 MyAI SessionID。
 // 7.1 私聊模式：使用 `onebot_users.private_session_id`，为空或已失效时创建新会话并回写；
 // 7.2 群聊独立模式（GroupSessionPerUser == true）：按 `group:<groupID>:user:<userID>` 维护独立会话；
 // 7.3 群聊共享模式（默认）：使用 `onebot_groups.session_id`，创建时自动应用 `group.Persona` 风格指令。
+func privateSessionPolicy(role Role) string {
+	return "onebot-v2-private-" + string(NormalizeRole(string(role)))
+}
+
+const groupSessionPolicy = "onebot-v2-group"
+
 func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *UserIdentity) (string, error) {
 	if event.MessageType == "group" && event.GroupID > 0 {
 		// 7.2 群内每人独立 Session 模式
@@ -430,7 +452,7 @@ func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *User
 				Enabled: true,
 			}
 		}
-		if group.SessionID != "" && b.sessionExists(ctx, group.SessionID) {
+		if group.SessionID != "" && group.SessionPolicy == groupSessionPolicy && b.sessionExists(ctx, group.SessionID) {
 			return group.SessionID, nil
 		}
 		newID, err := b.chat.CreateSession(ctx, fmt.Sprintf("QQ群聊:%d", event.GroupID))
@@ -441,6 +463,7 @@ func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *User
 			_ = b.chat.SetStyleInstructionForSession(ctx, newID, group.Persona)
 		}
 		group.SessionID = newID
+		group.SessionPolicy = groupSessionPolicy
 		group.UpdatedAt = time.Now().UTC()
 		if err := b.store.UpsertGroup(ctx, group); err != nil {
 			return "", err
@@ -449,7 +472,7 @@ func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *User
 	}
 
 	// 7.1 私聊模式
-	if user.PrivateSessionID != "" && b.sessionExists(ctx, user.PrivateSessionID) {
+	if user.PrivateSessionID != "" && user.PrivateSessionPolicy == privateSessionPolicy(user.Role) && b.sessionExists(ctx, user.PrivateSessionID) {
 		return user.PrivateSessionID, nil
 	}
 	newID, err := b.chat.CreateSession(ctx, fmt.Sprintf("QQ私聊:%d", event.UserID))
@@ -460,6 +483,7 @@ func (b *Bot) ensureSessionForEvent(ctx context.Context, event Event, user *User
 		_ = b.chat.SetStyleInstructionForSession(ctx, newID, user.Persona)
 	}
 	user.PrivateSessionID = newID
+	user.PrivateSessionPolicy = privateSessionPolicy(user.Role)
 	user.UpdatedAt = time.Now().UTC()
 	if err := b.store.UpsertUser(ctx, *user); err != nil {
 		return "", err

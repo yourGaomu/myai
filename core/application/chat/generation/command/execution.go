@@ -3,6 +3,7 @@ package command
 import (
 	"time"
 
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	modelport "myai/core/port/model"
@@ -23,11 +24,14 @@ type PersistUserMessage struct {
 }
 
 type ToolExecution struct {
-	Session       *session.Session
-	Calls         []domainmessage.ToolCall
-	Stream        modelport.ChatStreamHandler
-	RequestID     string
-	ForceChatMode bool
+	Session          *session.Session
+	Calls            []domainmessage.ToolCall
+	Stream           modelport.ChatStreamHandler
+	RequestID        string
+	ForceChatMode    bool
+	RequestBudget    *contextmgr.RequestBudget
+	PromptMessages   []domainmessage.Message
+	AssistantMessage *domainmessage.Message
 }
 
 type ToolExecutionRecord struct {

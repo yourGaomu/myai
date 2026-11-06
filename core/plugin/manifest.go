@@ -62,7 +62,7 @@ func (manifest Manifest) normalized() Manifest {
 		manifest.Protocol = defaultPluginProtocol
 	}
 	if manifest.Permission == "" {
-		manifest.Permission = "read"
+		manifest.Permission = "execute"
 	}
 	if manifest.TimeoutSeconds <= 0 {
 		manifest.TimeoutSeconds = 30
@@ -92,6 +92,9 @@ func (manifest Manifest) validate() error {
 	}
 	if manifest.Protocol != defaultPluginProtocol {
 		return fmt.Errorf("plugin %s uses unsupported protocol %q", manifest.ID, manifest.Protocol)
+	}
+	if manifest.Permission != "read" && manifest.Permission != "write" && manifest.Permission != "execute" {
+		return errors.New("plugin permission must be read, write, or execute")
 	}
 	if manifest.Entrypoint == "" {
 		return errors.New("plugin entrypoint is required")

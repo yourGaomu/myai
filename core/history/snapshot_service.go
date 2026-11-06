@@ -7,8 +7,11 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"unicode/utf8"
 
 	domainhistory "myai/core/domain/history"
@@ -17,37 +20,117 @@ import (
 const maxRecordedFileBytes = 512 * 1024
 
 func SnapshotFile(abs string, rel string) (domainhistory.FileSnapshot, bool, error) {
-	// 二进制或超大文件只记录元数据和哈希，不保存可恢复内容，防止 SQLite 无限制膨胀。
-	info, err := os.Stat(abs)
+	if shouldSkipSnapshotPath(rel) {
+		return domainhistory.FileSnapshot{}, false, nil
+	}
+	// Compatibility entry point: bind the absolute path to the workspace encoded
+	// by rel, then use the same Root reader as recorders and workspace scans.
+	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.ReplaceAll(rel, "\\", "/"))))
+	if rel == "." || !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return domainhistory.FileSnapshot{}, false, errors.New("invalid snapshot path")
+	}
+	abs, err := filepath.Abs(abs)
+	if err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
+	workspace := abs
+	for range strings.Split(rel, "/") {
+		workspace = filepath.Dir(workspace)
+	}
+	if !sameSnapshotPath(filepath.Join(workspace, filepath.FromSlash(rel)), abs) {
+		return domainhistory.FileSnapshot{}, false, errors.New("snapshot path does not match its workspace")
+	}
+	return snapshotWorkspacePath(workspace, rel)
+}
+
+func sameSnapshotPath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b) || (os.PathSeparator == '\\' && strings.EqualFold(filepath.Clean(a), filepath.Clean(b)))
+}
+
+func snapshotWorkspacePath(workspace, rel string) (domainhistory.FileSnapshot, bool, error) {
+	if shouldSkipSnapshotPath(rel) {
+		return domainhistory.FileSnapshot{}, false, nil
+	}
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
+	defer root.Close()
+	return snapshotRootPath(root, rel)
+}
+
+func validateSnapshotPath(root *os.Root, rel string) error {
+	if rel == "." || !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return errors.New("invalid snapshot path")
+	}
+	prefix := ""
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		if strings.ContainsAny(part, ":\x00") || (part != "." && part != ".." && strings.TrimRight(part, ". ") != part) {
+			return errors.New("ambiguous snapshot path")
+		}
+		prefix = path.Join(prefix, part)
+		info, err := root.Lstat(prefix)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 ||
+			(!info.IsDir() && !info.Mode().IsRegular()) || (i < len(parts)-1 && !info.IsDir()) {
+			return errors.New("snapshot path contains a link or non-regular entry")
+		}
+	}
+	return nil
+}
+
+func snapshotRootPath(root *os.Root, rel string) (domainhistory.FileSnapshot, bool, error) {
+	if shouldSkipSnapshotPath(rel) {
+		return domainhistory.FileSnapshot{}, false, nil
+	}
+	if err := validateSnapshotPath(root, rel); err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
+	info, err := root.Lstat(rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return domainhistory.FileSnapshot{}, false, nil
 	}
 	if err != nil {
 		return domainhistory.FileSnapshot{}, false, err
 	}
-	if info.IsDir() {
-		return domainhistory.FileSnapshot{}, false, nil
+	if !info.Mode().IsRegular() {
+		return domainhistory.FileSnapshot{}, false, errors.New("cannot snapshot a non-regular file")
 	}
-
-	file, err := os.Open(abs)
+	file, err := root.Open(rel)
 	if err != nil {
 		return domainhistory.FileSnapshot{}, false, err
 	}
 	defer file.Close()
-
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return domainhistory.FileSnapshot{}, false, errors.New("snapshot file changed while opening")
+	}
 	content, digest, err := readSnapshotContent(file, info.Size())
 	if err != nil {
 		return domainhistory.FileSnapshot{}, false, err
 	}
-
+	finalInfo, err := file.Stat()
+	if err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
+	if finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
+		return domainhistory.FileSnapshot{}, false, errors.New("snapshot file changed while reading")
+	}
+	if err := validateSnapshotPath(root, rel); err != nil {
+		return domainhistory.FileSnapshot{}, false, err
+	}
 	snapshot := domainhistory.FileSnapshot{
-		Path:      filepath.ToSlash(rel),
-		Size:      info.Size(),
-		Hash:      digest,
-		Binary:    isBinary(content),
-		TooLarge:  info.Size() > int64(maxRecordedFileBytes),
-		Mode:      info.Mode(),
-		Available: false,
+		Path: rel, Size: info.Size(), Hash: digest, Binary: isBinary(content),
+		TooLarge: info.Size() > int64(maxRecordedFileBytes), Mode: info.Mode(),
 	}
 	snapshot.Available = !snapshot.Binary && !snapshot.TooLarge
 	if snapshot.Available {
@@ -57,43 +140,32 @@ func SnapshotFile(abs string, rel string) (domainhistory.FileSnapshot, bool, err
 }
 
 func snapshotWorkspace(ctx context.Context, workspace string) (map[string]domainhistory.FileSnapshot, error) {
-	// 全量快照跳过依赖目录、版本库和敏感文件；符号链接目标必须仍在 workspace 内。
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	result := make(map[string]domainhistory.FileSnapshot)
-	err := filepath.WalkDir(workspace, func(path string, entry os.DirEntry, walkErr error) error {
+	err = fs.WalkDir(root.FS(), ".", func(rel string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if path == workspace {
+		if rel == "." {
 			return nil
 		}
-
-		rel, err := filepath.Rel(workspace, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if shouldSkipSnapshotPath(rel) {
+		if shouldSkipSnapshotPath(rel) || entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			if entry.IsDir() {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 		if entry.IsDir() {
 			return nil
 		}
-
-		if entry.Type()&os.ModeSymlink != 0 {
-			target, err := filepath.EvalSymlinks(path)
-			if err != nil || !insideRoot(workspace, target) {
-				return nil
-			}
-			path = target
-		}
-
-		snapshot, exists, err := SnapshotFile(path, rel)
+		snapshot, exists, err := snapshotRootPath(root, rel)
 		if err != nil {
 			return err
 		}

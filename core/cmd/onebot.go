@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,15 +33,15 @@ var (
 var onebotCmd = &cobra.Command{
 	Use:   "onebot",
 	Short: "Start myai OneBot v11 (NapCatQQ) QQ bot client",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
 		// 1.1 设置工作区并启动核心 Application 容器
 		core.SetWorkspace(onebotWorkspace)
 		core.InitApp()
 		app := core.GetApp()
-		defer func() { _ = app.Close() }()
-
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
+		defer func() { runErr = errors.Join(runErr, app.Close()) }()
 
 		// 1.2 初始化 OneBot 身份与群配置存储（MongoDB / 内存双模自适应）
 		store, err := onebot.NewStore(ctx, app.GetMongoDatabase())

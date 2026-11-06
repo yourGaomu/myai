@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "myai/core/adapter/documentprocessor/grpc/pb"
+	"myai/core/processpolicy"
 )
 
 type workerSupervisor struct {
@@ -69,19 +70,31 @@ func (supervisor *workerSupervisor) Start(parent context.Context, index int) (*w
 	if config.WorkingDir != "" {
 		command.Dir = config.WorkingDir
 	}
-	command.Env = append(os.Environ(), "MYAI_DOCUMENT_PROCESSOR_TOKEN="+token)
+	command.Env = processpolicy.Environment(map[string]string{"MYAI_DOCUMENT_PROCESSOR_TOKEN": token})
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open document processor stdout: %w", err)
 	}
 	command.Stderr = os.Stderr
-	if err := command.Start(); err != nil {
+	process, err := processpolicy.Start(command)
+	if err != nil {
+		_ = stdout.Close()
 		return nil, fmt.Errorf("start document processor %s: %w", workerID, err)
 	}
+	started := false
+	defer func() {
+		if !started {
+			_ = process.Kill()
+			_ = process.Wait()
+			if socketPath != "" {
+				_ = os.Remove(socketPath)
+			}
+		}
+	}()
 
 	exited := make(chan error, 1)
 	go func() {
-		exited <- command.Wait()
+		exited <- process.Wait()
 		close(exited)
 	}()
 	ready := make(chan readyResult, 1)
@@ -93,18 +106,18 @@ func (supervisor *workerSupervisor) Start(parent context.Context, index int) (*w
 	select {
 	case result := <-ready:
 		if result.err != nil {
-			_ = command.Process.Kill()
+			_ = process.Kill()
 			return nil, fmt.Errorf("read document processor readiness: %w", result.err)
 		}
 		message = result.message
 	case exitErr := <-exited:
 		return nil, fmt.Errorf("document processor %s exited before readiness: %w", workerID, exitErr)
 	case <-startupContext.Done():
-		_ = command.Process.Kill()
+		_ = process.Kill()
 		return nil, fmt.Errorf("wait for document processor %s readiness: %w", workerID, startupContext.Err())
 	}
 	if message.Event != "ready" || message.Protocol != "v1" || message.WorkerID != workerID || strings.TrimSpace(message.Endpoint) == "" {
-		_ = command.Process.Kill()
+		_ = process.Kill()
 		return nil, fmt.Errorf("document processor %s returned invalid readiness message", workerID)
 	}
 
@@ -117,7 +130,7 @@ func (supervisor *workerSupervisor) Start(parent context.Context, index int) (*w
 		),
 	)
 	if err != nil {
-		_ = command.Process.Kill()
+		_ = process.Kill()
 		return nil, fmt.Errorf("create document processor connection: %w", err)
 	}
 	result := &worker{
@@ -127,6 +140,7 @@ func (supervisor *workerSupervisor) Start(parent context.Context, index int) (*w
 		client:     pb.NewDocumentProcessorServiceClient(connection),
 		connection: connection,
 		command:    command,
+		process:    process,
 		exited:     exited,
 		config:     config,
 	}
@@ -134,6 +148,7 @@ func (supervisor *workerSupervisor) Start(parent context.Context, index int) (*w
 		_ = result.Close()
 		return nil, fmt.Errorf("health check document processor %s: %w", workerID, err)
 	}
+	started = true
 	return result, nil
 }
 

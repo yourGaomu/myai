@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"myai/core"
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
+	appconfig "myai/core/config"
 	remoteagent "myai/core/remote/agent"
 	"myai/core/remote/changes"
 	"myai/core/remote/files"
@@ -27,21 +28,24 @@ var (
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Start myai remote agent",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		if err := appconfig.ValidateCredential("relay agent token", agentRelayToken); err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
 		// Agent 进程加载完整 AI 应用，并额外暴露当前 workspace 的文件与变更查询能力。
 		core.SetWorkspace(agentWorkspace)
 		core.InitApp()
-		defer func() { _ = core.GetApp().Close() }()
-
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
+		defer func() { runErr = errors.Join(runErr, core.GetApp().Close()) }()
 
 		fileService, err := files.New(agentWorkspace)
 		if err != nil {
 			return err
 		}
 		//记录修改历史记录和git diff类似的功能
-		changeService, err := changes.NewWithStoreFactory(agentWorkspace, "", sqlitehistory.Factory{})
+		changeService, err := changes.NewWithStoreFactory(agentWorkspace, "", core.GetApp().HistoryStoreFactory())
 		if err != nil {
 			return err
 		}

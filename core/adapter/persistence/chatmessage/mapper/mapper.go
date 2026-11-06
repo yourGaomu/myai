@@ -7,7 +7,6 @@ import (
 	uuidadapter "myai/core/adapter/id/uuid"
 	chatmessageport "myai/core/adapter/persistence/chatmessage/port"
 	generationcommand "myai/core/application/chat/generation/command"
-	"myai/core/contextmgr"
 	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
@@ -56,13 +55,13 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 	}
 	if runtimeMessage := domainmessage.RuntimeInstruction(command.RuntimeInstruction); runtimeMessage.IsSynthetic() {
 		id := m.newID()
-		if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleSystem, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
+		if message, ok := latestSnapshotMessage(command.SessionSnapshot, runtimeMessage.Role, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
 			id = messageRecordID(message, 0, 1)
 		}
 		records = append(records, repository.MessageRecord{
 			ID:              id,
 			SessionID:       command.SessionID,
-			Role:            repository.RoleSystem,
+			Role:            string(runtimeMessage.Role),
 			Content:         runtimeMessage.Text(),
 			SyntheticReason: string(runtimeMessage.SyntheticReason),
 			CreatedAt:       createdAt,
@@ -133,13 +132,14 @@ func (m Mapper) Session(current *session.Session, title string) repository.Sessi
 		SystemInstruction:    current.SystemInstruction,
 		AllowedTools:         append([]string(nil), current.AllowedTools...),
 		EnforceToolAllowlist: current.EnforceToolAllowlist,
+		PermissionCeiling:    session.ClonePermissionCeiling(current.PermissionCeiling),
 		WorkspaceRoot:        current.WorkspaceRoot,
 		WorkspaceSandboxID:   current.WorkspaceSandboxID,
 		MaxToolRounds:        current.MaxToolRounds,
 		Model:                current.Model,
 		AgentMode:            string(session.NormalizeAgentMode(current.AgentMode)),
 		PermissionMode:       string(session.NormalizePermissionMode(current.PermissionMode)),
-		ContextWindowK:       contextmgr.NormalizeWindowK(current.ContextWindowK),
+		ContextWindowK:       current.ContextWindowK,
 		Summary:              current.Summary,
 		CompactedMessages:    current.CompactedMessages,
 		CompactionSourceHash: current.CompactionSourceHash,

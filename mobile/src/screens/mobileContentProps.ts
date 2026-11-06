@@ -58,6 +58,7 @@ export type SettingsContentProps = {
   onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  assetAPIKey: string;
   assetBaseURL: string;
   compact?: CompactInfo;
   context?: ContextInfo;
@@ -124,6 +125,7 @@ export type SettingsContentProps = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
+  onAssetAPIKeyChange: (value: string) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;

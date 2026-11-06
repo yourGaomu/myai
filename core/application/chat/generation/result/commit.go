@@ -1,7 +1,11 @@
 package result
 
-import agentplan "myai/core/plan"
+import (
+	agentplan "myai/core/plan"
+	"myai/core/session"
+)
 
 type Commit struct {
-	Plan *agentplan.Plan
+	Plan    *agentplan.Plan
+	Session *session.Session
 }

@@ -5,10 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +23,7 @@ import (
 	domainmodel "myai/core/domain/model"
 	"myai/core/llm"
 	"myai/core/service"
+	"myai/core/session"
 	"myai/core/skill"
 )
 
@@ -29,7 +34,9 @@ var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an AI chat session",
 	Run: func(cmd *cobra.Command, args []string) {
-		runChat()
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		runChatContext(ctx)
 	},
 }
 
@@ -39,6 +46,15 @@ func init() {
 }
 
 func runChat() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	runChatContext(ctx)
+}
+
+func runChatContext(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	// CLI 与手机 Agent 共用同一个 ChatService，只是输入输出适配器不同。
 	workspace, err := filepath.Abs(chatWorkspace)
 	if err != nil {
@@ -47,19 +63,58 @@ func runChat() {
 	}
 	core.SetWorkspace(workspace)
 	core.InitApp()
-	defer func() { _ = core.GetApp().Close() }()
+	defer func() {
+		if err := core.GetApp().Close(); err != nil {
+			log.Printf("chat shutdown incomplete: %v", err)
+		}
+	}()
 
-	reader := bufio.NewScanner(os.Stdin)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	reader := bufio.NewScanner(newChatInput(ctx, os.Stdin))
 	chatService := core.GetApp().GetChatService()
-	ctx := context.Background()
+	runChatLoop(ctx, reader, chatService)
+}
 
+type chatSessionService interface {
+	CurrentSessionID() string
+	CurrentModelID() string
+	NewSession(context.Context) error
+	ClearCurrent(context.Context) error
+	ListSessions(context.Context) ([]sessionresult.SessionListItem, error)
+	ListSkills(context.Context) ([]skill.Skill, error)
+	SkillRoot() string
+	ListModels() []llm.ModelInfo
+	CurrentPermissionMode() session.PermissionMode
+	CurrentAgentMode() session.AgentMode
+	CurrentContextInfo() service.ContextInfo
+	CurrentSessionPreferences(context.Context) (service.SessionPreferencesView, error)
+	SetGenerationSettings(context.Context, generation.Settings) error
+	SetStyleInstruction(context.Context, string) error
+	CompactCurrentSession(context.Context) (service.ContextInfo, error)
+	AddModelConfig(context.Context, modelcommand.AddConfig) error
+	SetPermissionMode(context.Context, string) error
+	SetAgentMode(context.Context, string) error
+	SetContextWindowK(context.Context, int) error
+	SwitchModel(context.Context, string) error
+	LoadSession(context.Context, string) error
+	SendMessageStream(context.Context, string, llm.ChatStreamHandler) (service.ChatResponse, error)
+}
+
+func runChatLoop(ctx context.Context, reader *bufio.Scanner, chatService chatSessionService) {
 	printChatHeader(chatService.CurrentSessionID(), chatService.CurrentModelID())
 
-	for {
+	for ctx.Err() == nil {
 		printPrompt()
 
 		if !reader.Scan() {
 			fmt.Println()
+			if ctx.Err() == nil && reader.Err() != nil {
+				printError("input error:", reader.Err())
+			}
+			return
+		}
+		if ctx.Err() != nil {
 			return
 		}
 
@@ -231,6 +286,10 @@ func runChat() {
 			printUserInput(input)
 			printAssistantHeader()
 			response, err := chatService.SendMessageStream(ctx, input, newChatStreamHandler(reader))
+			if ctx.Err() != nil {
+				fmt.Println()
+				return
+			}
 			if err != nil {
 				fmt.Println()
 				printError("AI error:", err)
@@ -241,10 +300,85 @@ func runChat() {
 	}
 }
 
+type chatReadRequest struct {
+	buffer []byte
+	result chan chatReadResult
+}
+
+type chatReadResult struct {
+	n   int
+	err error
+}
+
+// chatInput keeps one worker responsible for stdin. Reads happen only when the
+// shared scanner requests data, preserving synchronous command/approval prompts.
+// Cancellation releases the scanner without closing stdin. An underlying Read
+// already in progress can remain blocked until stdin next becomes readable.
+type chatInput struct {
+	ctx      context.Context
+	requests chan chatReadRequest
+	done     chan struct{}
+}
+
+func newChatInput(ctx context.Context, input io.Reader) *chatInput {
+	reader := &chatInput{
+		ctx:      ctx,
+		requests: make(chan chatReadRequest),
+		done:     make(chan struct{}),
+	}
+	go reader.readLoop(input)
+	return reader
+}
+
+func (reader *chatInput) readLoop(input io.Reader) {
+	defer close(reader.done)
+	for {
+		select {
+		case <-reader.ctx.Done():
+			return
+		case request := <-reader.requests:
+			if reader.ctx.Err() != nil {
+				return
+			}
+			n, err := input.Read(request.buffer)
+			request.result <- chatReadResult{n: n, err: err}
+		}
+	}
+}
+
+func (reader *chatInput) Read(buffer []byte) (int, error) {
+	if err := reader.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(buffer) == 0 {
+		return 0, nil
+	}
+	// The worker owns its buffer even if cancellation returns before Read does.
+	request := chatReadRequest{buffer: make([]byte, len(buffer)), result: make(chan chatReadResult, 1)}
+	select {
+	case <-reader.ctx.Done():
+		return 0, reader.ctx.Err()
+	case reader.requests <- request:
+	}
+	select {
+	case <-reader.ctx.Done():
+		return 0, reader.ctx.Err()
+	case result := <-request.result:
+		if err := reader.ctx.Err(); err != nil {
+			return 0, err
+		}
+		copy(buffer, request.buffer[:result.n])
+		return result.n, result.err
+	}
+}
+
 func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService interface {
 	AddModelConfig(context.Context, modelcommand.AddConfig) error
 }) error {
 	printModelAddHeader()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	id, err := readModelField(reader, "id", "", true)
 	if err != nil {
@@ -326,6 +460,9 @@ func addModelInteractive(ctx context.Context, reader *bufio.Scanner, chatService
 			TopP:            topP,
 			MaxOutputTokens: maxOutputTokens,
 		},
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := chatService.AddModelConfig(ctx, config); err != nil {
 		return err
@@ -409,6 +546,9 @@ func readModelField(reader *bufio.Scanner, label string, defaultValue string, re
 	for {
 		printFormPrompt(label, defaultValue)
 		if !reader.Scan() {
+			if err := reader.Err(); err != nil {
+				return "", err
+			}
 			return "", errors.New("input closed")
 		}
 

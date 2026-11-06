@@ -15,6 +15,13 @@ import (
 const interruptedTaskMessage = "subagent execution was interrupted by process restart"
 const interruptedTaskContinuation = "Continue the interrupted task from the existing child session. Review the current state and finish the assigned work."
 
+// Only scheduler admission errors may defer a recovery batch. Repository or
+// runtime failures must still reach startup and the recovery error handler.
+type recoverySchedulingError struct{ err error }
+
+func (err *recoverySchedulingError) Error() string { return err.err.Error() }
+func (err *recoverySchedulingError) Unwrap() error { return err.err }
+
 func (service *Service) saveTaskAndRun(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
 	if service == nil {
 		return errors.New("subagent task service is nil")
@@ -204,11 +211,14 @@ func (service *Service) RecoverInterruptedTasks(ctx context.Context) error {
 			if err := service.requeueInterruptedTask(ctx, task, run); err == nil {
 				continue
 			} else {
-				recoveryErrors = append(recoveryErrors, fmt.Errorf("requeue interrupted subagent task %s: %w", task.ID, err))
-				// Keep the durable task retryable when admission failed. Do not
-				// convert a transient queue-full/closed error into a false task
-				// failure; the periodic recovery loop will retry it.
 				service.releaseExecutionLease(task.ID, run.ID)
+				var schedulingErr *recoverySchedulingError
+				if errors.As(err, &schedulingErr) && (errors.Is(schedulingErr, subagentport.ErrSchedulerQueueFull) || errors.Is(schedulingErr, subagentport.ErrSchedulerClosed)) {
+					// The accepted tasks form this recovery batch. Leave the rest
+					// durable and retryable for the next scan without failing startup.
+					return errors.Join(recoveryErrors...)
+				}
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("requeue interrupted subagent task %s: %w", task.ID, err))
 				continue
 			}
 		}
@@ -252,7 +262,7 @@ func (service *Service) canRequeueAfterRestart(task domainsubagent.Task) bool {
 // requeueInterruptedTask preserves queued/running work across a process
 // restart. The previous scheduler context is gone, so the task is reset to a
 // clean queued transition and admitted to the new scheduler. If admission
-// fails, the caller falls back to the existing terminal failure path.
+// fails, the task stays queued for a later recovery batch.
 func (service *Service) requeueInterruptedTask(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run) error {
 	if service.Runtime != nil {
 		if err := service.Runtime.Register(task); err != nil {
@@ -271,10 +281,14 @@ func (service *Service) requeueInterruptedTask(ctx context.Context, task domains
 			service.completeActiveRun(task.ID, run.ID)
 		}
 	}()
+	var err error
+	task, err = service.recoverInterruptedMailbox(ctx, task, run.ID)
+	if err != nil {
+		return err
+	}
 	now := service.now()
 	wasInterrupted := task.Status != domainsubagent.TaskStatusQueued ||
 		run.Status != domainsubagent.RunStatusQueued
-	task.RecoverMailboxDeliveries(now)
 	task.Status = domainsubagent.TaskStatusQueued
 	task.ErrorMessage = ""
 	task.StartedAt = nil
@@ -294,14 +308,38 @@ func (service *Service) requeueInterruptedTask(ctx context.Context, task domains
 	if err := service.Scheduler.Submit(run.ID, func(runContext context.Context) {
 		service.execute(runContext, task.ID, run.ID, task.Definition.ModelID)
 	}); err != nil {
-		// The scheduler did not accept the recovered turn. Persist a queued
-		// task with no active lease so a later recovery pass can retry it.
-		service.completeActiveRun(task.ID, run.ID)
-		service.releaseExecutionLease(task.ID, run.ID)
-		return err
+		// The deferred local cleanup and caller's lease release make this
+		// queued task retryable without touching any later recovery records.
+		return &recoverySchedulingError{err: err}
 	}
 	registered = false
 	return nil
+}
+
+// recoverInterruptedMailbox resets durable claims before the queued transition.
+// Lease-guarded task/run writes preserve the repository's mailbox projection,
+// so changing only the detached task snapshot would retain delivering claims.
+func (service *Service) recoverInterruptedMailbox(ctx context.Context, task domainsubagent.Task, runID string) (domainsubagent.Task, error) {
+	for _, message := range task.Mailbox {
+		if message.Status != domainsubagent.MessageStatusDelivering {
+			continue
+		}
+		if err := service.renewExecutionLease(ctx, task.ID, runID); err != nil {
+			return task, fmt.Errorf("renew mailbox recovery lease: %w", err)
+		}
+		if err := service.releaseMailboxMessage(task.ID, message.ID, nil); err != nil {
+			return task, fmt.Errorf("release interrupted mailbox message %s: %w", message.ID, err)
+		}
+	}
+	current, err := service.Tasks.GetTask(ctx, task.ID)
+	if err != nil {
+		return task, err
+	}
+	if current.Terminal() || (current.CurrentRunID != "" && current.CurrentRunID != runID) {
+		return current, subagentport.ErrTaskStateConflict
+	}
+	current.CurrentRunID = runID
+	return current, nil
 }
 
 func (service *Service) recoveryRun(ctx context.Context, task *domainsubagent.Task) (domainsubagent.Run, error) {

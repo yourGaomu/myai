@@ -2,7 +2,6 @@ package generation
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	generationcommand "myai/core/application/chat/generation/command"
@@ -26,26 +25,13 @@ func (p UserMessagePersistence) PersistUserMessage(command generationcommand.Per
 	if command.CreatedAt.IsZero() {
 		command.CreatedAt = p.now()
 	}
-	run := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), p.timeout())
-		defer cancel()
+	persistence := Persistence{Queue: p.Queue, Async: p.Async, Timeout: p.Timeout, OnError: p.OnError}
+	persistence.submit(command.SessionID, func(ctx context.Context) error {
 		if p.Messages == nil {
-			return
+			return nil
 		}
-		err := p.Messages.SaveUserMessage(ctx, command)
-		if err != nil && p.OnError != nil {
-			p.OnError(fmt.Errorf("save user message failed: %w", err))
-		}
-	}
-	if p.Queue != nil {
-		if err := p.Queue.Submit(command.SessionID, run); err != nil {
-			p.report(fmt.Errorf("schedule user message persistence: %w", err))
-		}
-		return
-	}
-	if err := p.Async.Submit(run); err != nil {
-		p.report(fmt.Errorf("schedule user message persistence: %w", err))
-	}
+		return p.Messages.SaveUserMessage(ctx, command)
+	}, "save user message")
 }
 
 func (p UserMessagePersistence) report(err error) {

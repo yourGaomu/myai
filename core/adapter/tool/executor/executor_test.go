@@ -127,16 +127,24 @@ func TestPromptToolResultBudgetShrinksAsCurrentTurnGrows(t *testing.T) {
 		},
 	}
 	calls := []domainmessage.ToolCall{{ID: "call-1", Name: "read_file"}}
-	before := promptToolResultBudget(current, calls)
+	budget := contextmgr.NewRequestBudget(4000, 300, 700)
+	assistant := domainmessage.Assistant("model body", "model reasoning", calls)
+	command := generationcommand.ToolExecution{Session: current, RequestBudget: &budget, PromptMessages: domainmessage.CloneAll(current.Messages), AssistantMessage: &assistant}
+	before := promptToolResultBudgetForRequest(command, calls)
+	want := budget.MessageLimit() - contextmgr.EstimateMessagesTokens(command.PromptMessages) - contextmgr.EstimateMessagesTokens([]domainmessage.Message{assistant})
+	if before != want {
+		t.Fatalf("budget = %d, want %d including schemas, output, full assistant and reasoning", before, want)
+	}
 	current.Messages = append(current.Messages,
 		domainmessage.ToolCallMessage(calls),
 		domainmessage.ToolResultMessage(domainmessage.ToolResult{
 			ToolCallID: "call-1", Name: "read_file", Content: strings.Repeat("x", 4000),
 		}),
 	)
-	after := promptToolResultBudget(current, calls)
-	if before <= 0 || after >= before {
-		t.Fatalf("expected current-turn growth to reduce budget, before=%d after=%d", before, after)
+	command.PromptMessages = domainmessage.CloneAll(current.Messages)
+	after := promptToolResultBudgetForRequest(command, calls)
+	if before <= 0 || after <= 0 || after >= before {
+		t.Fatalf("expected current-turn growth to reduce a positive budget, before=%d after=%d", before, after)
 	}
 }
 

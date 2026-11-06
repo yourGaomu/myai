@@ -606,6 +606,7 @@ func (service *Service) ApplyChanges(ctx context.Context, command subagentcomman
 	if err != nil {
 		return subagentresult.Task{}, err
 	}
+	defer releaseMutation()
 	// Re-read after admission. Another instance may have completed or changed
 	// the task while this operation was waiting for the mutation lease.
 	current, err := service.Tasks.GetTask(ctx, task.ID)
@@ -616,7 +617,6 @@ func (service *Service) ApplyChanges(ctx context.Context, command subagentcomman
 		return subagentresult.Task{}, subagentport.ErrTaskStateConflict
 	}
 	task = current
-	defer releaseMutation()
 	result, applyErr := service.Workspaces.Apply(ctx, workspaceport.ApplyRequest{
 		Reference: task.Workspace, TaskID: task.ID, SessionID: task.ParentSessionID,
 		RequestID: strings.TrimSpace(command.RequestID), Title: "Apply subagent task: " + task.Title,
@@ -663,6 +663,7 @@ func (service *Service) DiscardChanges(ctx context.Context, command subagentcomm
 	if err != nil {
 		return subagentresult.Task{}, err
 	}
+	defer releaseMutation()
 	current, err := service.Tasks.GetTask(ctx, task.ID)
 	if err != nil {
 		return subagentresult.Task{}, err
@@ -671,7 +672,6 @@ func (service *Service) DiscardChanges(ctx context.Context, command subagentcomm
 		return subagentresult.Task{}, subagentport.ErrTaskStateConflict
 	}
 	task = current
-	defer releaseMutation()
 	result, err := service.Workspaces.Discard(ctx, workspaceport.DiscardRequest{
 		Reference: task.Workspace, DiscardedAt: service.now(), RequestID: operationID,
 	})
@@ -689,8 +689,18 @@ func (service *Service) DiscardChanges(ctx context.Context, command subagentcomm
 }
 
 func (service *Service) execute(ctx context.Context, taskID string, runID string, fallbackModelID string) {
-	defer service.releaseExecutionLease(taskID, runID)
 	defer service.completeActiveRun(taskID, runID)
+	// Admission protects the initial task/run commit, but its lease may expire
+	// while this run waits for a worker. Acquire again at the execution boundary
+	// rather than renewing an expired queue-time lease. A new owner still wins.
+	initialLeaseCheck, initialLeaseCancel := context.WithTimeout(ctx, service.leaseRenewTimeout())
+	err := service.acquireExecutionLease(initialLeaseCheck, taskID, runID)
+	initialLeaseCancel()
+	if err != nil {
+		service.reportError(fmt.Errorf("acquire subagent task %s execution lease: %w", taskID, err))
+		return
+	}
+	defer service.releaseExecutionLease(taskID, runID)
 	leaseContext, leaseCancel := context.WithCancel(ctx)
 	var leaseLost atomic.Bool
 	leaseDone := service.watchExecutionLease(leaseContext, taskID, runID, leaseCancel, &leaseLost)
@@ -709,13 +719,6 @@ func (service *Service) execute(ctx context.Context, taskID string, runID string
 			service.reportError(panicErr)
 		}
 	}()
-	initialLeaseCheck, initialLeaseCancel := context.WithTimeout(leaseContext, service.leaseRenewTimeout())
-	err := service.renewExecutionLease(initialLeaseCheck, taskID, runID)
-	initialLeaseCancel()
-	if err != nil {
-		service.reportError(fmt.Errorf("start subagent task %s without execution lease: %w", taskID, err))
-		return
-	}
 	task, run, ok, err := service.beginExecution(leaseContext, taskID, runID)
 	if err != nil {
 		service.reportError(fmt.Errorf("start subagent task %s execution: %w", taskID, err))

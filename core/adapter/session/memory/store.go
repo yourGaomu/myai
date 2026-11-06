@@ -2,6 +2,7 @@ package memory
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	domainsession "myai/core/session"
+	tooldef "myai/core/tool/tool"
 )
 
 type Session = domainsession.Session
@@ -180,30 +182,56 @@ func (sm *Store) AddUserTurnWithReasonTo(sessionID string, ragContext string, ru
 }
 
 func (sm *Store) AddUserTurnWithMetadataTo(sessionID string, ragContext string, runtimeInstruction string, input string, reason domainmessage.SyntheticReason, sourceID string, sourceKind string, sourceTaskID string) error {
-	// 1. 内存会话先完成原子追加，外层再把新增消息异步写入持久化仓库。
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, err := sm.sessionByIDLocked(sessionID)
-	if err != nil {
-		return err
-	}
-
-	session.AddUserTurnWithMetadata(ragContext, runtimeInstruction, input, reason, sourceID, sourceKind, sourceTaskID)
-	return nil
+	turn := &Session{}
+	turn.AddUserTurnWithMetadata(ragContext, runtimeInstruction, input, reason, sourceID, sourceKind, sourceTaskID)
+	_, _, err := sm.AppendMessagesTo(sessionID, turn.Messages...)
+	return err
 }
 
 func (sm *Store) AppendMessageTo(sessionID string, message domainmessage.Message) error {
-	// 2. 运行中的 AgentLoop 使用同一聚合根追加 mailbox 消息，保持上下文顺序。
+	_, _, err := sm.AppendMessagesTo(sessionID, message)
+	return err
+}
+
+// AppendMessagesTo is the single transcript mutation boundary. Validation and
+// identity assignment happen under the same lock as the append and snapshot.
+func (sm *Store) AppendMessagesTo(sessionID string, messages ...domainmessage.Message) (*Session, []domainmessage.Message, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, err := sm.sessionByIDLocked(sessionID)
+	current, err := sm.sessionByIDLocked(sessionID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	session.AppendMessage(message)
-	return nil
+	pending := make([]domainmessage.Message, 0, len(messages))
+	for _, message := range messages {
+		duplicate := false
+		for _, existing := range append(current.Messages[:len(current.Messages):len(current.Messages)], pending...) {
+			sameSource := message.SourceID != "" && message.SourceID == existing.SourceID
+			sameID := message.ID != "" && message.ID == existing.ID
+			if !sameSource && !sameID {
+				continue
+			}
+			if !sameMessagePayload(existing, message) {
+				return nil, nil, errors.New("message identity conflicts with session history")
+			}
+			duplicate = true
+			break
+		}
+		if !duplicate {
+			pending = append(pending, domainmessage.Clone(message))
+		}
+	}
+	start := len(current.Messages)
+	current.AppendMessages(pending...)
+	return domainsession.Clone(current), domainmessage.CloneAll(current.Messages[start:]), nil
+}
+
+func sameMessagePayload(left, right domainmessage.Message) bool {
+	return left.Role == right.Role && left.Reasoning == right.Reasoning &&
+		left.SyntheticReason == right.SyntheticReason && left.SourceID == right.SourceID &&
+		left.SourceKind == right.SourceKind && left.SourceTaskID == right.SourceTaskID &&
+		reflect.DeepEqual(left.Parts, right.Parts)
 }
 
 func (sm *Store) AddAssistantMessage(content string) error {
@@ -362,6 +390,56 @@ func (sm *Store) SwitchModelForSession(sessionID string, modelID string) error {
 	return nil
 }
 
+func (sm *Store) SetToolAllowlistForSession(sessionID string, allowed []string, enforce bool) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	current.AllowedTools = append([]string(nil), allowed...)
+	current.EnforceToolAllowlist = enforce
+	return nil
+}
+
+func (sm *Store) SetPermissionCeilingForSession(sessionID string, ceiling []tooldef.Permission) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	if current.PermissionCeiling == nil {
+		current.PermissionCeiling = domainsession.ClonePermissionCeiling(ceiling)
+		return nil
+	}
+	if ceiling == nil {
+		return nil
+	}
+	intersection := make([]tooldef.Permission, 0)
+	for _, permission := range current.PermissionCeiling {
+		for _, allowed := range ceiling {
+			if permission == allowed {
+				intersection = append(intersection, permission)
+				break
+			}
+		}
+	}
+	current.PermissionCeiling = intersection
+	return nil
+}
+
+func (sm *Store) SetWorkspaceForSession(sessionID, root, sandbox string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	current.WorkspaceRoot, current.WorkspaceSandboxID = root, sandbox
+	return nil
+}
+
 func (sm *Store) SetPermissionMode(mode PermissionMode) error {
 	return sm.SetPermissionModeForSession(sm.CurrentSessionId(), mode)
 }
@@ -395,6 +473,24 @@ func (sm *Store) SetAgentModeForSession(sessionID string, mode AgentMode) error 
 	}
 
 	session.AgentMode = mode
+	return nil
+}
+
+func (sm *Store) CompareAndSwapPlan(sessionID, expectedID string, expectedRevision int64, next *agentplan.Plan) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	actualID, actualRevision := "", int64(0)
+	if current.CurrentPlan != nil {
+		actualID, actualRevision = current.CurrentPlan.ID, current.CurrentPlan.Revision
+	}
+	if actualID != expectedID || actualRevision != expectedRevision {
+		return errors.New("session plan changed")
+	}
+	current.CurrentPlan = agentplan.Clone(next)
 	return nil
 }
 
@@ -513,10 +609,13 @@ func (sm *Store) Current() (*Session, error) {
 }
 
 func (sm *Store) GetSession(sessionId string) (*Session, error) {
+	return sm.Snapshot(sessionId)
+}
+
+func (sm *Store) Snapshot(sessionID string) (*Session, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-
-	return sm.getSessionLocked(sessionId)
+	return sm.getSessionLocked(sessionID)
 }
 
 func (sm *Store) getSessionLocked(sessionId string) (*Session, error) {
@@ -524,7 +623,7 @@ func (sm *Store) getSessionLocked(sessionId string) (*Session, error) {
 	if session == nil {
 		return nil, errors.New("session not found")
 	}
-	return session, nil
+	return domainsession.Clone(session), nil
 }
 
 func (sm *Store) CurrentSessionId() string {

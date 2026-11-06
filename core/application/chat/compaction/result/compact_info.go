@@ -4,6 +4,10 @@ import compaction "myai/core/domain/compaction"
 
 type CompactInfo struct {
 	Triggered         bool
+	Failed            bool
+	Error             string
+	Truncated         bool
+	DroppedMessages   int
 	Reason            string
 	BeforeTokens      int
 	AfterTokens       int

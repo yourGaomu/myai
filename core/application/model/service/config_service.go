@@ -45,6 +45,8 @@ func (s ConfigService) AddConfig(ctx context.Context, command modelcommand.AddCo
 		APIKey:                    command.APIKey,
 		ModelName:                 command.ModelName,
 		IsDefault:                 command.IsDefault,
+		ContextWindowTokens:       command.ContextWindowTokens,
+		MaxOutputTokens:           command.MaxOutputTokens,
 		DefaultGenerationSettings: generation.Clone(command.DefaultGenerationSettings),
 	})
 	if err := validateModelID(config.ID); err != nil {
@@ -86,13 +88,24 @@ func (s ConfigService) UpdateConfig(ctx context.Context, command modelcommand.Up
 	}
 	apiKey := strings.TrimSpace(command.APIKey)
 	if apiKey == "" && domainmodel.NormalizeAuthType(command.AuthType) != domainmodel.AuthTypeNone {
+		if normalizeModelConfig(domainmodel.Config{BaseURL: command.BaseURL}).BaseURL != normalizeModelConfig(old).BaseURL {
+			return modelresult.ConfigMutation{}, errors.New("api key must be supplied when changing base url")
+		}
 		apiKey = old.APIKey
+	}
+	contextWindow, outputLimit := old.ContextWindowTokens, old.MaxOutputTokens
+	if command.ContextWindowTokens != nil {
+		contextWindow = *command.ContextWindowTokens
+	}
+	if command.MaxOutputTokens != nil {
+		outputLimit = *command.MaxOutputTokens
 	}
 	config := normalizeModelConfig(domainmodel.Config{
 		ID: old.ID, Name: command.Name, Provider: command.Provider,
 		Protocol: command.Protocol, AuthType: command.AuthType, BaseURL: command.BaseURL,
 		APIKey: apiKey, ModelName: command.ModelName, Enabled: old.Enabled,
 		IsDefault: old.IsDefault, CreatedAt: old.CreatedAt,
+		ContextWindowTokens: contextWindow, MaxOutputTokens: outputLimit,
 		DefaultGenerationSettings: generation.Clone(command.DefaultGenerationSettings),
 	})
 	config, err = s.prepareUpdatedConfig(config, old)
@@ -231,6 +244,8 @@ func (s ConfigService) TestConfig(ctx context.Context, command modelcommand.AddC
 		BaseURL:                   command.BaseURL,
 		APIKey:                    command.APIKey,
 		ModelName:                 command.ModelName,
+		ContextWindowTokens:       command.ContextWindowTokens,
+		MaxOutputTokens:           command.MaxOutputTokens,
 		DefaultGenerationSettings: generation.Clone(command.DefaultGenerationSettings),
 	})
 	config, err := s.prepareNewConfig(config)
@@ -316,6 +331,20 @@ func (s ConfigService) prepareUpdatedConfig(config, old domainmodel.Config) (dom
 }
 
 func validateModelConfig(config domainmodel.Config, factory modelport.Factory) error {
+	if config.ContextWindowTokens < 0 || config.MaxOutputTokens < 0 {
+		return errors.New("model token limits must not be negative")
+	}
+	if config.ContextWindowTokens > 0 && config.MaxOutputTokens > config.ContextWindowTokens {
+		return errors.New("model output token limit exceeds context window")
+	}
+	if defaults := config.DefaultGenerationSettings.MaxOutputTokens; defaults != nil {
+		if config.MaxOutputTokens > 0 && *defaults > config.MaxOutputTokens {
+			return errors.New("default max_output_tokens exceeds model output token limit")
+		}
+		if config.ContextWindowTokens > 0 && *defaults > config.ContextWindowTokens {
+			return errors.New("default max_output_tokens exceeds model context window")
+		}
+	}
 	if err := generation.Validate(config.DefaultGenerationSettings); err != nil {
 		return fmt.Errorf("invalid model generation settings: %w", err)
 	}
@@ -376,6 +405,7 @@ func modelInfo(config domainmodel.Config) modelport.ModelInfo {
 		ID: config.ID, Name: config.Name, Provider: config.Provider, Protocol: config.Protocol,
 		AuthType: config.AuthType, BaseURL: config.BaseURL, HasAPIKey: config.APIKey != "",
 		ModelName: config.ModelName, Enabled: config.Enabled, IsDefault: config.IsDefault,
+		ContextWindowTokens: config.ContextWindowTokens, MaxOutputTokens: config.MaxOutputTokens,
 		DefaultGenerationSettings: generation.Clone(config.DefaultGenerationSettings),
 	}
 }

@@ -10,10 +10,46 @@ import (
 	"myai/core/session"
 )
 
-func (s AgentLoopService) appendMessages(current *session.Session, messages ...domainmessage.Message) {
+func (s AgentLoopService) appendMessages(current *session.Session, messages ...domainmessage.Message) error {
+	appended, err := s.appendSessionMessages(current, messages...)
+	if err != nil {
+		return err
+	}
+	s.persistMessages(current, appended)
+	return nil
+}
+
+func (s AgentLoopService) appendSessionMessages(current *session.Session, messages ...domainmessage.Message) ([]domainmessage.Message, error) {
+	if s.Sessions != nil {
+		snapshot, appended, err := s.Sessions.AppendMessagesTo(current.ID, messages...)
+		if err != nil {
+			return nil, err
+		}
+		replaceRunSnapshot(current, snapshot)
+		return appended, nil
+	}
 	start := len(current.Messages)
 	current.AppendMessages(messages...)
-	s.persistMessages(current, current.Messages[start:])
+	return domainmessage.CloneAll(current.Messages[start:]), nil
+}
+
+func (s AgentLoopService) refreshSession(current *session.Session) error {
+	if s.Sessions == nil {
+		return nil
+	}
+	snapshot, err := s.Sessions.Snapshot(current.ID)
+	if err == nil {
+		replaceRunSnapshot(current, snapshot)
+	}
+	return err
+}
+
+func replaceRunSnapshot(current, snapshot *session.Session) {
+	// A planning request may use a read-only mode without changing the durable
+	// session preference. All other state comes from the current aggregate.
+	mode := current.AgentMode
+	*current = *snapshot
+	current.AgentMode = mode
 }
 
 func (s AgentLoopService) persistMessages(current *session.Session, messages []domainmessage.Message) {

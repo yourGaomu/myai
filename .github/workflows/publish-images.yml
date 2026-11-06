@@ -23,8 +23,6 @@ jobs:
             dockerfile: Dockerfile.relay
           - name: agent
             dockerfile: Dockerfile.agent
-          - name: url-shortener
-            dockerfile: Dockerfile.url-shortener
 
     steps:
       - name: Check out source

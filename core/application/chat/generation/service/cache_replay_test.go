@@ -109,10 +109,11 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = (service.ResponseCommitService{Memory: memory}).Commit(command.Commit{Session: current, Result: response})
+	committed, err := (service.ResponseCommitService{Memory: memory}).Commit(command.Commit{Session: current, Result: response})
 	if err != nil {
 		t.Fatal(err)
 	}
+	current = committed.Session
 	if err := store.SaveMessage(context.Background(), mapper.AssistantMessageFromSession(current, response, time.Now())); err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +138,26 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 		t.Fatal(err)
 	}
 	third := wireMessages(t, bodies[2])
-	assertWirePrefix(t, second, third)
-	final := third[len(second)].(map[string]any)
+	stableSecond := withoutRequestContext(second)
+	stableThird := withoutRequestContext(third)
+	assertWirePrefix(t, stableSecond, stableThird)
+	final := stableThird[len(stableSecond)].(map[string]any)
 	if final["reasoning_content"] != " final reasoning " {
 		t.Fatalf("final reasoning replay=%v", final)
 	}
+}
+
+func withoutRequestContext(messages []any) []any {
+	result := make([]any, 0, len(messages))
+	for _, item := range messages {
+		message := item.(map[string]any)
+		text, _ := message["content"].(string)
+		if strings.HasPrefix(text, "Runtime instructions for this turn:") || strings.HasPrefix(text, "Current environment for this turn (facts only):") || strings.HasPrefix(text, "Current execution plan snapshot:") {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func wireMessages(t *testing.T, body map[string]any) []any {

@@ -2,8 +2,11 @@ package langchaingo
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/tmc/langchaingo/llms/googleai"
+	"google.golang.org/api/option"
+	googlehttp "google.golang.org/api/transport/http"
 
 	domainmodel "myai/core/domain/model"
 	corellm "myai/core/llm"
@@ -30,13 +33,18 @@ func (GoogleGenerativeAIAdapter) CreateModel(config modelport.CreationConfig) (m
 	if err := (GoogleGenerativeAIAdapter{}).ValidateConfig(config); err != nil {
 		return nil, err
 	}
+	transport, err := googlehttp.NewTransport(context.Background(), http.DefaultTransport, option.WithAPIKey(config.APIKey))
+	if err != nil {
+		return nil, err
+	}
 	model, err := googleai.New(
 		context.Background(),
 		googleai.WithAPIKey(config.APIKey),
+		googleai.WithHTTPClient(&http.Client{Transport: modelTransport{base: transport}}),
 		googleai.WithDefaultModel(config.ModelName),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model}, nil
+	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
 }

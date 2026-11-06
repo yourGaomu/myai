@@ -94,6 +94,7 @@ import (
 	agentrunport "myai/core/port/agentrun"
 	cacheport "myai/core/port/cache"
 	executionport "myai/core/port/execution"
+	historyport "myai/core/port/history"
 	intentport "myai/core/port/intent"
 	knowledgeport "myai/core/port/knowledge"
 	documentprocessorport "myai/core/port/knowledge/documentprocessor"
@@ -107,6 +108,7 @@ import (
 	"myai/core/tool"
 	"myai/core/tool/local"
 	tooldef "myai/core/tool/tool"
+	"myai/core/trust"
 )
 
 type Application struct {
@@ -228,6 +230,9 @@ func (app *Application) InitConfig() {
 	properties, err := (appconfig.ViperLoader{}).Load(app.workspace)
 	if err != nil {
 		panic(err)
+	}
+	if err := properties.ValidateCredentials(); err != nil {
+		panic(fmt.Errorf("invalid deployment credentials: %w", err))
 	}
 	app.properties = properties
 }
@@ -738,9 +743,13 @@ func (app *Application) InitSandbox() {
 	}
 }
 
+func (app *Application) HistoryStoreFactory() historyport.StoreFactory {
+	return sqlitehistory.Factory{BaseDir: app.properties.WorkspaceHistory.Path}
+}
+
 func (app *Application) InitWorkspaceIsolation() {
 	//创建快照工作区管理器
-	snapshotManager, err := snapshotworkspace.New(app.properties.Subagent.SnapshotRoot, sqlitehistory.Factory{})
+	snapshotManager, err := snapshotworkspace.New(app.properties.Subagent.SnapshotRoot, app.HistoryStoreFactory())
 	if err != nil {
 		panic(fmt.Errorf("init snapshot workspace manager failed: %w", err))
 	}
@@ -774,20 +783,21 @@ func (app *Application) InitChatService() {
 	}
 	// composition/chat 是显式依赖注入入口，相当于 Spring 的 @Configuration。
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
-		IntentController: intentController,
-		Models:           app.client,
-		ModelFactory:     adaptermodel.NewFactory(),
-		Sessions:         app.sessionMemory,
-		Store:            app.store,
-		Cache:            app.cache,
-		Async:            adapterthreadpool.Executor{Pool: app.threadPool},
-		Tools:            app.toolRegister,
-		Skills:           app.skillManager,
-		Hooks:            app.hookManager,
-		DefaultModel:     app.defaultModelID,
-		KnowledgeSearch:  app.knowledgeSearchService,
-		AgentRuns:        app.agentRunRepository,
-		AgentRunObserver: app.memoryExtractionService,
+		IntentController:    intentController,
+		Models:              app.client,
+		ModelFactory:        adaptermodel.NewFactory(),
+		Sessions:            app.sessionMemory,
+		Store:               app.store,
+		Cache:               app.cache,
+		Async:               adapterthreadpool.Executor{Pool: app.threadPool},
+		Tools:               app.toolRegister,
+		Skills:              app.skillManager,
+		Hooks:               app.hookManager,
+		DefaultModel:        app.defaultModelID,
+		KnowledgeSearch:     app.knowledgeSearchService,
+		AgentRuns:           app.agentRunRepository,
+		AgentRunObserver:    app.memoryRunObserver(),
+		HistoryStoreFactory: app.HistoryStoreFactory(),
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -874,14 +884,12 @@ func (app *Application) InitSubagents() {
 		panic(fmt.Errorf("init subagents failed: %w", err))
 	}
 	if err := applicationService.RecoverPendingAgentMessages(context.Background()); err != nil {
-		scheduler.Close()
-		panic(fmt.Errorf("recover pending subagent messages failed: %w", err))
+		log.Printf("recover pending subagent messages failed: %v", err)
 	}
 	if err := applicationService.RecoverInterruptedTasks(context.Background()); err != nil {
-		scheduler.Close()
-		panic(fmt.Errorf("recover interrupted subagent tasks failed: %w", err))
+		log.Printf("recover interrupted subagent tasks failed: %v", err)
 	}
-	if app.mongoDb != nil {
+	if applicationService.Tasks != nil {
 		recoveryCtx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		app.subagentRecoveryCancel = cancel
@@ -895,6 +903,9 @@ func (app *Application) InitSubagents() {
 				case <-recoveryCtx.Done():
 					return
 				case <-ticker.C:
+					if err := applicationService.RecoverPendingAgentMessages(recoveryCtx); err != nil && recoveryCtx.Err() == nil {
+						log.Printf("recover pending subagent messages failed: %v", err)
+					}
 					if err := applicationService.RecoverInterruptedTasks(recoveryCtx); err != nil && recoveryCtx.Err() == nil {
 						log.Printf("recover interrupted subagent tasks failed: %v", err)
 					}
@@ -911,49 +922,93 @@ func (app *Application) InitSubagents() {
 }
 
 func (app *Application) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return app.CloseContext(ctx)
+}
+
+func (app *Application) CloseContext(ctx context.Context) error {
 	if app == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	wait := func(done <-chan struct{}) error {
+		if done == nil {
+			return nil
+		}
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	closeResource := func(name string, close func() error) error {
+		done := make(chan error, 1)
+		go func() { done <- close() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("close %s: %w", name, err)
+			}
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("close %s: %w", name, ctx.Err())
+		}
 	}
 	var errs []error
 	if app.memoryRecoveryCancel != nil {
 		app.memoryRecoveryCancel()
-		<-app.memoryRecoveryDone
+		errs = append(errs, wait(app.memoryRecoveryDone))
 	}
 	if app.subagentRecoveryCancel != nil {
 		app.subagentRecoveryCancel()
-		<-app.subagentRecoveryDone
+		errs = append(errs, wait(app.subagentRecoveryDone))
 	}
-	// Stop task producers and drain workers before closing the resources used
-	// by subagent, chat persistence, and knowledge indexing jobs.
 	if app.subagentScheduler != nil {
-		app.subagentScheduler.Close()
+		errs = append(errs, app.subagentScheduler.CloseContext(ctx))
+	}
+	if app.chatService != nil {
+		errs = append(errs, app.chatService.Close(ctx))
 	}
 	if app.threadPool != nil {
-		app.threadPool.Shutdown()
+		errs = append(errs, app.threadPool.ShutdownContext(ctx))
+	}
+	if err := errors.Join(errs...); err != nil {
+		// Keep dependencies open when producers did not stop or writes did not flush.
+		return err
 	}
 	if app.pluginManager != nil {
-		errs = append(errs, app.pluginManager.Close())
+		errs = append(errs, closeResource("plugins", app.pluginManager.Close))
 	}
 	if app.mcpManager != nil {
-		errs = append(errs, app.mcpManager.Close())
+		errs = append(errs, closeResource("mcp", app.mcpManager.Close))
 	}
 	if app.skillManager != nil {
-		errs = append(errs, app.skillManager.Close())
+		errs = append(errs, closeResource("skills", app.skillManager.Close))
 	}
 	if app.workspaceCloser != nil {
-		errs = append(errs, app.workspaceCloser.Close())
+		errs = append(errs, closeResource("workspace", app.workspaceCloser.Close))
 	}
 	if app.documentProcessorCloser != nil {
-		errs = append(errs, app.documentProcessorCloser.Close())
+		errs = append(errs, closeResource("document processor", app.documentProcessorCloser.Close))
 	}
 	if app.vectorStoreCloser != nil {
-		errs = append(errs, app.vectorStoreCloser.Close())
+		errs = append(errs, closeResource("vector store", app.vectorStoreCloser.Close))
 	}
 	if app.localVectorStoreCloser != nil {
-		errs = append(errs, app.localVectorStoreCloser.Close())
+		errs = append(errs, closeResource("local vector store", app.localVectorStoreCloser.Close))
 	}
 	if app.keywordStoreCloser != nil {
-		errs = append(errs, app.keywordStoreCloser.Close())
+		errs = append(errs, closeResource("keyword store", app.keywordStoreCloser.Close))
+	}
+	if app.redisDb != nil {
+		errs = append(errs, closeResource("redis", app.redisDb.Close))
+	}
+	if app.mongoDb != nil {
+		errs = append(errs, closeResource("mongo", func() error { return app.mongoDb.Disconnect(ctx) }))
 	}
 	return errors.Join(errs...)
 }
@@ -1099,7 +1154,17 @@ func (app *Application) GetMemoryCatalogService() memorycatalogapi.Service {
 	return app.memoryCatalogService
 }
 
+func (app *Application) memoryRunObserver() agentrunport.CompletionObserver {
+	if app.memoryExtractionService == nil {
+		return nil
+	}
+	return app.memoryExtractionService
+}
+
 func (app *Application) GetMemoryExtractionService() memoryextractionapi.Service {
+	if app.memoryExtractionService == nil {
+		return nil
+	}
 	return app.memoryExtractionService
 }
 
@@ -1114,8 +1179,8 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewListFilesToolWithWorkspace(app.workspace),
 		local.NewReadFileToolWithWorkspace(app.workspace),
 		local.NewSearchFilesToolWithWorkspace(app.workspace),
-		local.NewWriteFileToolWithWorkspace(app.workspace),
-		local.NewEditFileToolWithWorkspace(app.workspace),
+		local.NewWriteFileToolWithWorkspaceAndHistory(app.workspace, app.HistoryStoreFactory()),
+		local.NewEditFileToolWithWorkspaceAndHistory(app.workspace, app.HistoryStoreFactory()),
 		local.NewShellToolWithWorkspaceAndRemote(app.workspace, app.localCommandExecutor, app.workspaceCommandRunner),
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 		local.NewAskUserTool(),
@@ -1171,7 +1236,10 @@ func (app *Application) ReloadMCP(ctx context.Context) error {
 }
 
 func (app *Application) InitPlugins() *pluginruntime.Manager {
-	manager := pluginruntime.NewManager(app.properties.Plugin.Root)
+	manager := pluginruntime.NewManager(app.properties.Plugin.Root,
+		pluginruntime.WithWorkspace(app.workspace),
+		pluginruntime.WithTrustPolicy(trust.NewPolicy()),
+	)
 	app.pluginManager = manager
 	if !app.properties.Plugin.Enabled {
 		return manager

@@ -11,12 +11,17 @@ import (
 	repository "myai/core/port/repository"
 	subagentport "myai/core/port/subagent"
 	domainsession "myai/core/session"
+	tooldef "myai/core/tool/tool"
 )
 
 type memoryStore interface {
 	PutSessionState(state domainsession.InitialState, setCurrent bool) error
 	GetSession(sessionID string) (*domainsession.Session, error)
 	RemoveSession(sessionID string) error
+	SetPermissionModeForSession(sessionID string, mode domainsession.PermissionMode) error
+	SetPermissionCeilingForSession(sessionID string, ceiling []tooldef.Permission) error
+	SetToolAllowlistForSession(sessionID string, allowed []string, enforce bool) error
+	SetWorkspaceForSession(sessionID, root, sandbox string) error
 }
 
 type sessionLoader interface {
@@ -36,13 +41,17 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 	if factory.Memory == nil {
 		return nil, errors.New("subagent session memory is nil")
 	}
+	mode, ceiling, allowedTools, err := factory.childPermissions(ctx, request)
+	if err != nil {
+		return nil, err
+	}
 	if current, err := factory.Memory.GetSession(request.SessionID); err == nil {
-		return factory.syncWorkspace(ctx, current, request)
+		return factory.syncWorkspace(ctx, current, request, mode, ceiling, allowedTools)
 	}
 	if factory.Loader != nil {
 		current, err := factory.Loader.Load(ctx, request.SessionID)
 		if err == nil {
-			return factory.syncWorkspace(ctx, current, request)
+			return factory.syncWorkspace(ctx, current, request, mode, ceiling, allowedTools)
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, err
@@ -55,8 +64,6 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 	if modelID == "" {
 		return nil, errors.New("subagent model id is required")
 	}
-	permissionMode := capabilityPermissionMode(request.Definition.CapabilityMode)
-	allowedTools := append([]string{}, request.Definition.AllowedTools...)
 	state := domainsession.InitialState{
 		ID: request.SessionID, Kind: domainsession.KindSubagent,
 		ParentSessionID: request.ParentSessionID, ParentTaskID: request.ParentTaskID,
@@ -68,8 +75,9 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 		WorkspaceSandboxID:   request.WorkspaceSandboxID,
 		Model:                modelID,
 		MaxToolRounds:        request.Definition.MaxTurns,
-		AgentMode:            domainsession.AgentModeChat, PermissionMode: permissionMode,
-		RAGSettings: domainsession.RAGSettings{Mode: domainsession.RetrievalModeOff},
+		AgentMode:            domainsession.AgentModeChat, PermissionMode: mode,
+		PermissionCeiling: tooldef.ClonePermissionCeiling(ceiling),
+		RAGSettings:       domainsession.RAGSettings{Mode: domainsession.RetrievalModeOff},
 	}
 	if err := factory.Memory.PutSessionState(state, false); err != nil {
 		return nil, err
@@ -81,6 +89,7 @@ func (factory Factory) Create(ctx context.Context, request subagentport.ChildSes
 			AgentDefinitionVer: state.AgentDefinitionVer, SystemInstruction: state.SystemInstruction,
 			AllowedTools: append([]string(nil), state.AllowedTools...), WorkspaceRoot: state.WorkspaceRoot,
 			EnforceToolAllowlist: state.EnforceToolAllowlist,
+			PermissionCeiling:    tooldef.ClonePermissionCeiling(state.PermissionCeiling),
 			WorkspaceSandboxID:   state.WorkspaceSandboxID, MaxToolRounds: state.MaxToolRounds,
 			Model: state.Model, AgentMode: string(state.AgentMode), PermissionMode: string(state.PermissionMode),
 			Title: "Subagent: " + request.Definition.Name, RAGSettings: state.RAGSettings,
@@ -131,23 +140,128 @@ func capabilityPermissionMode(mode domainsubagent.CapabilityMode) domainsession.
 	}
 }
 
-func (factory Factory) syncWorkspace(ctx context.Context, current *domainsession.Session, request subagentport.ChildSessionRequest) (*domainsession.Session, error) {
+func (factory Factory) childPermissions(ctx context.Context, request subagentport.ChildSessionRequest) (domainsession.PermissionMode, []tooldef.Permission, []string, error) {
+	parentID := strings.TrimSpace(request.ParentSessionID)
+	if parentID == "" || parentID == request.SessionID {
+		return "", nil, nil, errors.New("subagent parent session is required")
+	}
+	parent, err := factory.Memory.GetSession(parentID)
+	if err != nil && factory.Loader != nil {
+		parent, err = factory.Loader.Load(ctx, parentID)
+	}
+	if err != nil || parent == nil {
+		return "", nil, nil, errors.New("subagent parent session is unavailable")
+	}
+	mode := capabilityPermissionMode(request.Definition.CapabilityMode)
+	ceiling := intersectPermissions(modePermissions(mode), modePermissions(parent.PermissionMode), parent.PermissionCeiling)
+	if domainsession.NormalizeAgentMode(parent.AgentMode) == domainsession.AgentModePlan {
+		ceiling = intersectPermissions(ceiling, []tooldef.Permission{tooldef.PermissionRead})
+	}
+	allowed := append([]string{}, request.Definition.AllowedTools...)
+	if parent.EnforceToolAllowlist || parent.AllowedTools != nil {
+		allowed = intersectTools(allowed, parent.AllowedTools)
+	}
+	if domainsession.NormalizePermissionMode(parent.PermissionMode) == domainsession.PermissionModeAsk {
+		mode = domainsession.PermissionModeAsk
+	} else {
+		mode = modeForPermissions(ceiling)
+	}
+	return mode, ceiling, allowed, nil
+}
+
+func modePermissions(mode domainsession.PermissionMode) []tooldef.Permission {
+	switch domainsession.NormalizePermissionMode(mode) {
+	case domainsession.PermissionModeReadonly:
+		return []tooldef.Permission{tooldef.PermissionRead}
+	case domainsession.PermissionModeReadWrite:
+		return []tooldef.Permission{tooldef.PermissionRead, tooldef.PermissionWrite}
+	case domainsession.PermissionModeExecute:
+		return []tooldef.Permission{tooldef.PermissionRead, tooldef.PermissionExecute}
+	default:
+		return []tooldef.Permission{tooldef.PermissionRead, tooldef.PermissionWrite, tooldef.PermissionExecute}
+	}
+}
+
+func intersectPermissions(sets ...[]tooldef.Permission) []tooldef.Permission {
+	result := make([]tooldef.Permission, 0, 3)
+	for _, permission := range []tooldef.Permission{tooldef.PermissionRead, tooldef.PermissionWrite, tooldef.PermissionExecute} {
+		allowed := true
+		for _, set := range sets {
+			allowed = allowed && tooldef.PermissionAllowsCeiling(permission, set)
+		}
+		if allowed {
+			result = append(result, permission)
+		}
+	}
+	return result
+}
+
+func modeForPermissions(permissions []tooldef.Permission) domainsession.PermissionMode {
+	write := tooldef.PermissionAllowsCeiling(tooldef.PermissionWrite, permissions)
+	execute := tooldef.PermissionAllowsCeiling(tooldef.PermissionExecute, permissions)
+	switch {
+	case write && execute:
+		return domainsession.PermissionModeFull
+	case write:
+		return domainsession.PermissionModeReadWrite
+	case execute:
+		return domainsession.PermissionModeExecute
+	default:
+		return domainsession.PermissionModeReadonly
+	}
+}
+
+func intersectTools(tools, ceiling []string) []string {
+	result := make([]string, 0, len(tools))
+	for _, name := range tools {
+		for _, allowed := range ceiling {
+			if name == allowed {
+				result = append(result, name)
+				break
+			}
+		}
+	}
+	return result
+}
+
+func (factory Factory) syncWorkspace(ctx context.Context, current *domainsession.Session, request subagentport.ChildSessionRequest, mode domainsession.PermissionMode, ceiling []tooldef.Permission, allowed []string) (*domainsession.Session, error) {
 	if current == nil {
 		return nil, errors.New("subagent child session is nil")
 	}
+	if current.ParentSessionID != "" && current.ParentSessionID != request.ParentSessionID {
+		return nil, errors.New("subagent parent session does not match")
+	}
+	ceiling = intersectPermissions(ceiling, modePermissions(current.PermissionMode), current.PermissionCeiling)
+	if domainsession.NormalizePermissionMode(current.PermissionMode) == domainsession.PermissionModeAsk || mode == domainsession.PermissionModeAsk {
+		mode = domainsession.PermissionModeAsk
+	} else {
+		mode = modeForPermissions(ceiling)
+	}
+	if current.EnforceToolAllowlist || current.AllowedTools != nil {
+		allowed = intersectTools(allowed, current.AllowedTools)
+	}
+	// These setters update the live store under its lock. GetSession returns a
+	// snapshot, so mutating the returned object alone would not enforce limits.
+	if err := factory.Memory.SetPermissionCeilingForSession(current.ID, ceiling); err != nil {
+		return nil, err
+	}
+	if err := factory.Memory.SetPermissionModeForSession(current.ID, mode); err != nil {
+		return nil, err
+	}
+	if err := factory.Memory.SetToolAllowlistForSession(current.ID, allowed, true); err != nil {
+		return nil, err
+	}
 	root := strings.TrimSpace(request.WorkspaceRoot)
-	sandbox := strings.TrimSpace(request.WorkspaceSandboxID)
-	if (root == "" || root == current.WorkspaceRoot) && sandbox == current.WorkspaceSandboxID {
-		return current, nil
+	if root == "" {
+		root = current.WorkspaceRoot
 	}
-	if root != "" {
-		current.WorkspaceRoot = root
+	if err := factory.Memory.SetWorkspaceForSession(current.ID, root, strings.TrimSpace(request.WorkspaceSandboxID)); err != nil {
+		return nil, err
 	}
-	current.WorkspaceSandboxID = sandbox
 	if factory.Persistence != nil {
 		if err := factory.Persistence.Save(ctx, sessioncommand.SaveSession{SessionID: current.ID, Model: current.Model}); err != nil {
 			return nil, err
 		}
 	}
-	return current, nil
+	return factory.Memory.GetSession(current.ID)
 }

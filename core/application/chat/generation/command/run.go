@@ -12,6 +12,8 @@ type Run struct {
 	Stream             modelport.ChatStreamHandler
 	RequestID          string
 	ForceChatMode      bool
+	Internal           bool
+	ModelWindowTokens  int
 	Settings           generation.ResolvedSettings
 	EnvironmentContext string
 }

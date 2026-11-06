@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tooldef "myai/core/tool/tool"
+	"myai/core/trust"
 )
 
 const (
@@ -20,6 +21,8 @@ type Config struct {
 
 type ServerConfig struct {
 	Name            string
+	URL             string
+	Headers         map[string]string
 	Command         string
 	Args            []string
 	Env             map[string]string
@@ -29,6 +32,9 @@ type ServerConfig struct {
 	ProtocolVersion string
 	Disabled        bool
 	Required        bool
+	// Trust is injected by trusted application wiring, never workspace decoding.
+	Trust          *trust.Policy `json:"-" yaml:"-" mapstructure:"-"`
+	TrustWorkspace string        `json:"-" yaml:"-" mapstructure:"-"`
 }
 
 func NormalizeConfig(config Config, workspace string) Config {
@@ -36,6 +42,11 @@ func NormalizeConfig(config Config, workspace string) Config {
 	for index := range normalized.Servers {
 		normalized.Servers[index].Args = append([]string(nil), normalized.Servers[index].Args...)
 		normalized.Servers[index].Env = cloneEnvironment(normalized.Servers[index].Env)
+		normalized.Servers[index].Headers = cloneEnvironment(normalized.Servers[index].Headers)
+		if policy := normalized.Servers[index].Trust; policy != nil {
+			cloned := *policy
+			normalized.Servers[index].Trust = &cloned
+		}
 		normalizeServerConfig(&normalized.Servers[index], workspace)
 	}
 	return normalized
@@ -43,13 +54,14 @@ func NormalizeConfig(config Config, workspace string) Config {
 
 func normalizeServerConfig(config *ServerConfig, workspace string) {
 	config.Name = strings.TrimSpace(config.Name)
+	config.URL = strings.TrimSpace(config.URL)
 	config.Command = strings.TrimSpace(config.Command)
 	config.WorkingDir = strings.TrimSpace(config.WorkingDir)
 	config.Permission = strings.TrimSpace(strings.ToLower(config.Permission))
 	config.ProtocolVersion = strings.TrimSpace(config.ProtocolVersion)
 
 	if config.Permission == "" {
-		config.Permission = string(tooldef.PermissionRead)
+		config.Permission = string(tooldef.PermissionExecute)
 	}
 	if config.TimeoutSeconds <= 0 {
 		config.TimeoutSeconds = int(defaultTimeout.Seconds())

@@ -14,26 +14,31 @@ import (
 
 	"myai/core/mcp"
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 type Status string
 
 const (
-	StatusLoaded   Status = "loaded"
-	StatusDisabled Status = "disabled"
-	StatusFailed   Status = "failed"
+	StatusLoaded    Status = "loaded"
+	StatusDisabled  Status = "disabled"
+	StatusFailed    Status = "failed"
+	StatusUntrusted Status = "untrusted"
 )
 
 // Info is the user-visible state of a discovered local plugin.
 type Info struct {
-	Manifest  Manifest
-	Directory string
-	Status    Status
-	Error     string
+	Manifest     Manifest
+	Directory    string
+	Status       Status
+	Error        string
+	TrustRequest trust.Request
 }
 
 type Manager struct {
 	root        string
+	workspace   string
+	trustPolicy *trust.Policy
 	operationMu sync.Mutex
 
 	mu       sync.RWMutex
@@ -42,16 +47,39 @@ type Manager struct {
 	runtimes map[string]*mcp.Manager
 }
 
-func NewManager(root string) *Manager {
+type Option func(*Manager)
+
+func WithTrustPolicy(policy *trust.Policy) Option {
+	return func(manager *Manager) { manager.trustPolicy = policy }
+}
+
+func WithWorkspace(workspace string) Option {
+	return func(manager *Manager) { manager.workspace = workspace }
+}
+
+func NewManager(root string, options ...Option) *Manager {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		root = "plugins"
 	}
-	return &Manager{
-		root:     filepath.Clean(root),
-		infos:    make(map[string]Info),
-		runtimes: make(map[string]*mcp.Manager),
+	manager := &Manager{
+		root:      filepath.Clean(root),
+		workspace: filepath.Dir(filepath.Clean(root)),
+		infos:     make(map[string]Info),
+		runtimes:  make(map[string]*mcp.Manager),
 	}
+	for _, option := range options {
+		if option != nil {
+			option(manager)
+		}
+	}
+	if absolute, err := filepath.Abs(manager.root); err == nil {
+		manager.root = absolute
+	}
+	if absolute, err := filepath.Abs(manager.workspace); err == nil {
+		manager.workspace = absolute
+	}
+	return manager
 }
 
 func (manager *Manager) Root() string {
@@ -160,6 +188,39 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		}
 
 		server := manifest.serverConfig(directory)
+		request, err := launchTrustRequest(manifest, manager.workspace, directory, server)
+		if err != nil {
+			cleanupCandidates()
+			return err
+		}
+		if err := manager.trustPolicy.Authorize(ctx, request); err != nil {
+			if ctx.Err() != nil {
+				cleanupCandidates()
+				return ctx.Err()
+			}
+			candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusUntrusted, Error: err.Error(), TrustRequest: request}
+			continue
+		}
+		// Re-read after a review callback: only the exact declaration approved
+		// above may start, even if the workspace changed during confirmation.
+		current, err := loadManifest(directory)
+		if err != nil {
+			cleanupCandidates()
+			return err
+		}
+		currentRequest, err := TrustRequest(current, manager.workspace, directory)
+		if err != nil {
+			cleanupCandidates()
+			return err
+		}
+		if currentRequest.Digest != request.Digest {
+			candidateInfos[manifest.ID] = Info{Manifest: current, Directory: directory, Status: StatusUntrusted, Error: trust.ErrUntrusted.Error(), TrustRequest: currentRequest}
+			continue
+		}
+		// This exact launch instance passed the plugin declaration gate above.
+		// Its MCP transport still applies the shared process/environment policy.
+		server.Trust = &trust.Policy{Allow: true}
+		server.TrustWorkspace = manager.workspace
 		// Always surface startup errors to the plugin manager. Optional plugin
 		// policy is applied here, so a failed runtime can never appear loaded.
 		server.Required = true
@@ -175,7 +236,7 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 			continue
 		}
 		candidateRuntimes[manifest.ID] = runtime
-		candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusLoaded}
+		candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusLoaded, TrustRequest: request}
 		log.Printf("plugin %s loaded from %s", manifest.ID, directory)
 	}
 	candidateSources := make([]string, 0)

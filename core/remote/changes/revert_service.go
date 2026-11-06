@@ -2,75 +2,70 @@ package changes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	domainhistory "myai/core/domain/history"
 	"myai/core/remote/protocol"
 )
 
+func snapshotExpectedHash(now snapshotEntry, exists bool) string {
+	if !exists {
+		return "missing"
+	}
+	return hex.EncodeToString(now.Hash[:])
+}
+
 func (s *Service) Revert(ctx context.Context, payload protocol.ChangeRevertPayload) (protocol.ChangeRevertResultPayload, error) {
-	rel, abs, err := cleanPath(s.root, payload.Path)
+	s.operation.Lock()
+	defer s.operation.Unlock()
+	rel, _, err := cleanPath(s.root, payload.Path)
 	if err != nil {
 		return protocol.ChangeRevertResultPayload{}, err
 	}
 	if shouldHidePath(rel) {
-		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("refusing to revert sensitive change: %s", rel)
+		return protocol.ChangeRevertResultPayload{}, errors.New("refusing to revert a protected workspace path")
+	}
+	if payload.ExpectedHash == "" {
+		return protocol.ChangeRevertResultPayload{}, errors.New("expected_hash is required; preview this change again")
 	}
 	if err := ctx.Err(); err != nil {
 		return protocol.ChangeRevertResultPayload{}, err
 	}
-
+	now, exists, err := s.snapshotPath(rel)
+	if err != nil {
+		return protocol.ChangeRevertResultPayload{}, err
+	}
+	if payload.ExpectedHash != snapshotExpectedHash(now, exists) {
+		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("workspace conflict: %s changed since preview", rel)
+	}
 	s.mu.RLock()
-	base, ok := s.baseline[rel]
+	base, hasBase := s.baseline[rel]
 	s.mu.RUnlock()
-	// baseline 中不存在表示它是新文件，恢复动作应删除它；否则写回 baseline 内容。
-	if !ok {
-		info, err := os.Stat(abs)
-		if errors.Is(err, os.ErrNotExist) {
-			return protocol.ChangeRevertResultPayload{}, fmt.Errorf("new file no longer exists: %s", rel)
-		}
-		if err != nil {
+	if !hasBase && !exists {
+		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("new file no longer exists: %s", rel)
+	}
+	plan := restorePlan{path: rel, current: snapshotPtr(now, exists)}
+	if hasBase {
+		plan.desired = snapshotPtr(base, true)
+		if err := validateRestorable(plan.desired); err != nil {
 			return protocol.ChangeRevertResultPayload{}, err
 		}
-		if info.IsDir() {
-			return protocol.ChangeRevertResultPayload{}, fmt.Errorf("cannot revert directory: %s", rel)
-		}
-		if err := os.Remove(abs); err != nil {
-			return protocol.ChangeRevertResultPayload{}, err
-		}
-		return protocol.ChangeRevertResultPayload{
-			Path:     rel,
-			Reverted: true,
-			Message:  "New file removed from the workspace.",
-		}, nil
 	}
-	if !base.Available {
-		return protocol.ChangeRevertResultPayload{}, fmt.Errorf("baseline content is not available for: %s", rel)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if _, err := s.restore(ctx, []restorePlan{plan}, "baseline"); err != nil {
 		return protocol.ChangeRevertResultPayload{}, err
 	}
-	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(abs); err != nil {
-			return protocol.ChangeRevertResultPayload{}, err
-		}
-	}
-	if err := os.WriteFile(abs, base.Content, base.Mode.Perm()); err != nil {
-		return protocol.ChangeRevertResultPayload{}, err
-	}
-
 	return protocol.ChangeRevertResultPayload{
-		Path:     rel,
-		Reverted: true,
-		Message:  "File restored to the SQLite workspace history baseline.",
+		Path: rel, Reverted: true, Message: "File restored to the SQLite workspace history baseline.",
 	}, nil
 }
 
 func (s *Service) RevertCheckpoint(ctx context.Context, payload protocol.HistoryRevertPayload) (protocol.HistoryRevertResultPayload, error) {
+	s.operation.Lock()
+	defer s.operation.Unlock()
 	changes, err := s.store.LoadCheckpointChanges(ctx, s.root, payload.CheckpointID)
 	if err != nil {
 		return protocol.HistoryRevertResultPayload{}, err
@@ -78,59 +73,80 @@ func (s *Service) RevertCheckpoint(ctx context.Context, payload protocol.History
 	if len(changes) == 0 {
 		return protocol.HistoryRevertResultPayload{}, fmt.Errorf("checkpoint has no file changes: %s", payload.CheckpointID)
 	}
-
-	reverted := make([]string, 0, len(changes))
-	// 检查点按逆序恢复，正确撤销同一任务内可能存在顺序依赖的文件操作。
+	plans := make([]restorePlan, 0, len(changes))
+	seen := make(map[string]bool, len(changes))
+	// Validate the entire batch before creating backups or changing workspace files.
 	for i := len(changes) - 1; i >= 0; i-- {
-		change := changes[i]
-		if shouldHidePath(change.Path) {
-			return protocol.HistoryRevertResultPayload{}, fmt.Errorf("refusing to revert sensitive change: %s", change.Path)
-		}
-		if err := s.revertStoredChange(ctx, change); err != nil {
+		if err := ctx.Err(); err != nil {
 			return protocol.HistoryRevertResultPayload{}, err
 		}
-		reverted = append(reverted, change.Path)
+		change := changes[i]
+		rel, _, err := cleanPath(s.root, change.Path)
+		if err != nil {
+			return protocol.HistoryRevertResultPayload{}, err
+		}
+		if shouldHidePath(rel) {
+			return protocol.HistoryRevertResultPayload{}, errors.New("checkpoint contains a protected workspace path")
+		}
+		key := filesystemPathKey(rel)
+		if seen[key] {
+			return protocol.HistoryRevertResultPayload{}, fmt.Errorf("duplicate checkpoint path: %s", rel)
+		}
+		seen[key] = true
+		if change.Before == nil && change.After == nil {
+			return protocol.HistoryRevertResultPayload{}, fmt.Errorf("checkpoint has no file state: %s", rel)
+		}
+		if err := validateRestorable(change.Before); err != nil {
+			return protocol.HistoryRevertResultPayload{}, err
+		}
+		now, exists, err := s.snapshotPath(rel)
+		if err != nil {
+			return protocol.HistoryRevertResultPayload{}, err
+		}
+		if !snapshotMatches(snapshotPtr(now, exists), change.After) {
+			return protocol.HistoryRevertResultPayload{}, fmt.Errorf("workspace conflict: %s does not match checkpoint after state", rel)
+		}
+		plans = append(plans, restorePlan{path: rel, current: snapshotPtr(now, exists), desired: change.Before})
 	}
-
+	inverseID, err := s.restore(ctx, plans, payload.CheckpointID)
+	if err != nil {
+		return protocol.HistoryRevertResultPayload{}, err
+	}
+	paths := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		paths = append(paths, plan.path)
+	}
 	return protocol.HistoryRevertResultPayload{
-		CheckpointID: payload.CheckpointID,
-		Reverted:     true,
-		Paths:        reverted,
-		Message:      fmt.Sprintf("Reverted checkpoint %s.", payload.CheckpointID),
+		CheckpointID: payload.CheckpointID, InverseCheckpointID: inverseID,
+		Reverted: true, Paths: paths, Message: fmt.Sprintf("Reverted checkpoint %s.", payload.CheckpointID),
 	}, nil
 }
 
-func (s *Service) revertStoredChange(ctx context.Context, change domainhistory.StoredFileChange) error {
-	if err := ctx.Err(); err != nil {
-		return err
+func snapshotPtr(value snapshotEntry, exists bool) *domainhistory.FileSnapshot {
+	if !exists {
+		return nil
 	}
-	rel, abs, err := cleanPath(s.root, change.Path)
-	if err != nil {
-		return err
+	return &domainhistory.FileSnapshot{
+		Path: value.Path, Hash: value.Hash, Size: value.Size, Mode: value.Mode,
+		Content: append([]byte(nil), value.Content...), Available: value.Available,
+		Binary: value.Binary, TooLarge: value.TooLarge,
 	}
-	if change.Before == nil {
-		info, err := os.Stat(abs)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return fmt.Errorf("cannot revert directory: %s", rel)
-		}
-		return os.Remove(abs)
+}
+
+func snapshotMatches(actual, expected *domainhistory.FileSnapshot) bool {
+	if actual == nil || expected == nil {
+		return actual == nil && expected == nil
 	}
-	if !change.Before.Available {
-		return fmt.Errorf("checkpoint content is not available for: %s", rel)
+	return actual.Hash == expected.Hash && actual.Size == expected.Size && actual.Mode.Perm() == expected.Mode.Perm()
+}
+
+func validateRestorable(file *domainhistory.FileSnapshot) error {
+	if file == nil {
+		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
+	if !file.Available || file.Binary || file.TooLarge || file.Mode&(os.ModeType) != 0 ||
+		int64(len(file.Content)) != file.Size || sha256.Sum256(file.Content) != file.Hash {
+		return fmt.Errorf("checkpoint content is not available or valid for: %s", file.Path)
 	}
-	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(abs); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(abs, change.Before.Content, change.Before.Mode.Perm())
+	return nil
 }

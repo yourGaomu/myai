@@ -181,7 +181,7 @@ func TestModelAutoPlanClassifierUsesSemanticModelForAmbiguousContext(t *testing.
 	}
 }
 
-func TestSendMessageAutomaticallyPlansAndExecutesDevelopmentRequest(t *testing.T) {
+func TestSendMessageAutomaticallyPlansAndWaitsForConfirmation(t *testing.T) {
 	current := &session.Session{
 		ID: "session-1", Kind: session.KindUser, Model: "model-1", AgentMode: session.AgentModeChat,
 	}
@@ -217,11 +217,11 @@ func TestSendMessageAutomaticallyPlansAndExecutesDevelopmentRequest(t *testing.T
 	if len(planner.commands) != 1 || !planner.commands[0].CapturePlan || planner.commands[0].Session.AgentMode != session.AgentModePlan {
 		t.Fatalf("unexpected planning generation commands: %#v", planner.commands)
 	}
-	if len(executor.commands) != 1 || executor.commands[0].SessionID != current.ID {
-		t.Fatalf("unexpected plan execution commands: %#v", executor.commands)
+	if len(executor.commands) != 0 {
+		t.Fatalf("draft executed without confirmation: %#v", executor.commands)
 	}
-	if response.Result.Content != "implemented" || response.Plan == nil || response.Plan.Status != agentplan.StatusDone {
-		t.Fatalf("unexpected final response: %#v", response)
+	if response.Result.Content != "# Plan\n1. Implement feature" || response.Plan == nil || response.Plan.Status != agentplan.StatusDraft {
+		t.Fatalf("unexpected draft response: %#v", response)
 	}
 }
 

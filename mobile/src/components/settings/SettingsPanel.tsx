@@ -42,6 +42,7 @@ type Props = {
   onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  assetAPIKey: string;
   assetBaseURL: string;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
@@ -110,6 +111,7 @@ type Props = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
+  onAssetAPIKeyChange: (value: string) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -208,6 +210,7 @@ export function SettingsPanel({
   onSelectSection,
   activeModel,
   activeSession,
+  assetAPIKey,
   assetBaseURL,
   bindCode,
   buttonFeedback,
@@ -273,6 +276,7 @@ export function SettingsPanel({
   onRefreshPlugins,
   onReloadPlugins,
   onSetPluginEnabled,
+  onAssetAPIKeyChange,
   onAssetBaseURLChange,
   onRelayURLChange,
   onSetAgentMode,
@@ -672,6 +676,19 @@ export function SettingsPanel({
         style={styles.input}
         value={assetBaseURL}
       />
+      <TextInput
+        accessibilityLabel="Asset API Key"
+        autoCapitalize="none"
+        autoComplete="off"
+        autoCorrect={false}
+        onChangeText={onAssetAPIKeyChange}
+        placeholder="独立的 Asset API Key"
+        placeholderTextColor={palette.ink4}
+        secureTextEntry
+        style={styles.input}
+        value={assetAPIKey}
+      />
+      <Text style={styles.settingMeta}>Asset API Key 仅本次运行保存，重启后需重新输入。</Text>
       <View style={styles.row}>
         <TextInput
           keyboardType="number-pad"

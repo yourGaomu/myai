@@ -83,6 +83,8 @@ func (s BootstrapService) Bootstrap(ctx context.Context, command modelcommand.Bo
 			ModelName:                 modelName,
 			Enabled:                   config.Enabled,
 			IsDefault:                 config.IsDefault || modelID == defaultModelID,
+			ContextWindowTokens:       config.ContextWindowTokens,
+			MaxOutputTokens:           config.MaxOutputTokens,
 			DefaultGenerationSettings: generation.Clone(config.DefaultGenerationSettings),
 		})
 	}

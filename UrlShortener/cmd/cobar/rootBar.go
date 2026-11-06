@@ -38,6 +38,9 @@ func run(parent context.Context, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("load config failed: %w", err)
 	}
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
@@ -60,7 +63,10 @@ func run(parent context.Context, configPath string) error {
 		ObjectURLTTL: config.ObjectURLTTL,
 	})
 
-	router := handle.NewRouter(newService)
+	router := handle.NewRouter(newService, handle.RouterOptions{
+		APIKey:         config.APIKey,
+		MaxUploadBytes: config.MaxUploadBytes,
+	})
 
 	log.Printf("url shortener listening on %s", config.Addr)
 	if err := router.Run(config.Addr); err != nil {

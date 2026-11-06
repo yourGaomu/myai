@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"runtime"
 	"testing"
+
+	"myai/core/trust"
 )
 
 func TestAggregatePreToolUse(t *testing.T) {
@@ -35,7 +37,8 @@ func TestCommandHookHandlesJSONResult(t *testing.T) {
 	hook, err := NewCommandHook(CommandHookConfig{
 		Event:   string(EventPreToolUse),
 		Command: command,
-	}, dir)
+		Timeout: "30s",
+	}, dir, WithCommandTrustPolicy(&trust.Policy{Allow: true}))
 	if err != nil {
 		t.Fatalf("new command hook: %v", err)
 	}
@@ -119,8 +122,8 @@ func TestNormalizeDecision(t *testing.T) {
 	if normalizeDecision(" allow ") != DecisionAllow {
 		t.Fatalf("normalize allow failed")
 	}
-	if normalizeDecision("unknown") != DecisionContinue {
-		t.Fatalf("normalize continue failed")
+	if normalizeDecision("unknown") != DecisionDeny {
+		t.Fatalf("unknown decision must fail closed")
 	}
 }
 

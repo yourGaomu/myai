@@ -28,6 +28,7 @@ export function MobileMainContent({
           onSelectSection={settings.onSelectSection}
           activeModel={settings.activeModel}
           activeSession={settings.activeSession}
+          assetAPIKey={settings.assetAPIKey}
           assetBaseURL={settings.assetBaseURL}
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
@@ -96,6 +97,7 @@ export function MobileMainContent({
           mcpReloading={settings.mcpReloading}
           mcpMessage={settings.mcpMessage}
           onSetPluginEnabled={settings.onSetPluginEnabled}
+          onAssetAPIKeyChange={settings.onAssetAPIKeyChange}
           onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}

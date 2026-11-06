@@ -47,6 +47,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		return generationresult.GenerationResponse{}, fmt.Errorf("response committer is nil")
 	}
 
+	command.Session = session.Clone(command.Session)
 	model := s.Models.GetModel(command.Session.Model)
 	if model == nil {
 		return generationresult.GenerationResponse{}, fmt.Errorf("model not found: %s", command.Session.Model)
@@ -67,9 +68,15 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 			compactInfo = info
 		}
 	}
+	modelWindowTokens := 0
+	if s.ModelMetadata != nil {
+		if info, ok := s.ModelMetadata.GetModelInfo(command.Session.Model); ok {
+			modelWindowTokens = info.ContextWindowTokens
+		}
+	}
 	result, err := s.AgentRunner.Run(ctx, generationcommand.Run{
 		Model: model, Session: command.Session, Stream: command.Stream,
-		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
+		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode, Internal: command.Internal, ModelWindowTokens: modelWindowTokens,
 		Settings:           settings,
 		EnvironmentContext: environmentContextPrompt(s.now(), command.Session.WorkspaceRoot),
 	})
@@ -81,8 +88,11 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		Session: command.Session, LatestInput: command.LatestInput, Result: result, CapturePlan: command.CapturePlan,
 		Internal: command.Internal,
 	})
-	if err != nil {
-		return generationresult.GenerationResponse{}, err
+	if err != nil && commitResult.Session == nil {
+		return generationresult.GenerationResponse{SessionID: command.Session.ID, Result: result}, err
+	}
+	if commitResult.Session != nil {
+		command.Session = commitResult.Session
 	}
 	if s.Persistence != nil {
 		if !command.Internal {
@@ -92,7 +102,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	return generationresult.GenerationResponse{
 		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),
 		Compact: compactInfo, Plan: commitResult.Plan,
-	}, nil
+	}, err
 }
 
 func (s AssistantGenerationService) resolveGenerationSettings(current *session.Session) (generation.ResolvedSettings, error) {

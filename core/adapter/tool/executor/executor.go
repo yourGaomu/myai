@@ -11,6 +11,7 @@ import (
 	toolcommand "myai/core/application/tool/command"
 	toolport "myai/core/application/tool/port"
 	toolresult "myai/core/application/tool/result"
+	toolruntimeRegistry "myai/core/application/tool/runtime"
 	toolservice "myai/core/application/tool/service"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
@@ -18,6 +19,7 @@ import (
 	modelport "myai/core/port/model"
 	"myai/core/session"
 	toolruntime "myai/core/tool/runtimecontext"
+	tooldef "myai/core/tool/tool"
 )
 
 type Executor struct {
@@ -59,8 +61,9 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		ForceChatMode:        command.ForceChatMode,
 		RequestID:            command.RequestID,
 		WorkspaceRoot:        command.Session.WorkspaceRoot,
-		Isolated:             strings.TrimSpace(command.Session.WorkspaceSandboxID) != "",
+		Isolated:             e.sandboxedShell(ctx, command.Session.WorkspaceSandboxID),
 		Calls:                command.Calls,
+		PermissionCeiling:    tooldef.ClonePermissionCeiling(command.Session.PermissionCeiling),
 		AllowedTools:         append([]string(nil), command.Session.AllowedTools...),
 		EnforceToolAllowlist: command.Session.EnforceToolAllowlist,
 		Callbacks:            callbacksFromStream(command.Stream),
@@ -68,10 +71,11 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 	if err != nil {
 		return generationresult.ToolExecution{}, err
 	}
-	result.Messages, result.Entries = limitToolResultsForPrompt(
+	var budgetErr error
+	result.Messages, result.Entries, budgetErr = limitToolResultsForRequest(
 		result.Messages,
 		result.Entries,
-		promptToolResultBudget(command.Session, result.Calls),
+		promptToolResultBudgetForRequest(command, result.Calls),
 	)
 
 	return generationresult.ToolExecution{
@@ -79,7 +83,27 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		Messages: result.Messages,
 		Entries:  result.Entries,
 		Assets:   result.Assets,
-	}, nil
+	}, budgetErr
+}
+
+func (e Executor) sandboxedShell(ctx context.Context, sandboxID string) bool {
+	id := strings.TrimSpace(sandboxID)
+	if id == "" || strings.HasPrefix(strings.ToLower(id), "snapshot:") {
+		return false
+	}
+	registry := e.Registry
+	if snapshot := toolruntimeRegistry.RegistryFrom(ctx); snapshot != nil {
+		registry = snapshot
+	}
+	if registry == nil {
+		return false
+	}
+	registered, err := registry.GetTool("shell")
+	if err != nil {
+		return false
+	}
+	shell, ok := registered.(tooldef.SandboxedShell)
+	return ok && shell.IsSandboxedShell(ctx)
 }
 
 func callbacksFromStream(stream modelport.ChatStreamHandler) toolcommand.ExecutionCallbacks {

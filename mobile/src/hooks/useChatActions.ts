@@ -106,7 +106,11 @@ export function useChatActions({
         pendingPermission.sessionID ||
         requestSessionMapRef.current[pendingPermission.requestID] ||
         sessionID;
-      const payload: PermissionResultPayload = { allowed };
+      if (!pendingPermission.approvalID) {
+        addEventMessage(permissionSessionID, "授权请求缺少审批 ID，请等待电脑端重新发送。");
+        return;
+      }
+      const payload: PermissionResultPayload = { allowed, approval_id: pendingPermission.approvalID };
       const sent = sendEnvelope("permission_result", {
         request_id: pendingPermission.requestID,
         session_id: permissionSessionID,
@@ -117,10 +121,10 @@ export function useChatActions({
         // reconnect instead of losing the only way to resume the request.
         return;
       }
-      addEventMessage(permissionSessionID, `${allowed ? "Allowed" : "Denied"} ${pendingPermission.name}`);
-      setSessionPendingPermission(permissionSessionID, null);
+      // The Agent echoes permission_result after validating and consuming this
+      // approval. Keep it visible until that confirmation, including on errors.
     },
-    [addEventMessage, pendingPermission, requestSessionMapRef, sendEnvelope, sessionID, setSessionPendingPermission],
+    [addEventMessage, pendingPermission, requestSessionMapRef, sendEnvelope, sessionID],
   );
   const allowPermission = useCallback(() => sendPermissionResult(true), [sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);

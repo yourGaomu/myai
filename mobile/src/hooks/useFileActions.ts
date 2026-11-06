@@ -14,6 +14,7 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 
 type Args = {
   addErrorMessage: (message: string) => void;
+  assetAPIKey: string;
   assetBaseURL: string;
   attachedFiles: ChatAttachment[];
   changeDiffPath?: string;
@@ -34,6 +35,7 @@ type Args = {
 // 统一处理远程 workspace 文件与手机本地上传文件，两者最终都转换成聊天附件。
 export function useFileActions({
   addErrorMessage,
+  assetAPIKey,
   assetBaseURL,
   attachedFiles,
   changeDiffPath,
@@ -129,6 +131,10 @@ export function useFileActions({
       addErrorMessage("请先在设置中填写资源服务地址，再上传手机文件。");
       return;
     }
+    if (!assetAPIKey.trim()) {
+      addErrorMessage("请先在设置中填写独立的 Asset API Key，再上传手机文件（仅本次运行保存）。");
+      return;
+    }
 
     startPending("upload");
     try {
@@ -144,6 +150,7 @@ export function useFileActions({
       const asset = result.assets[0];
       const uploaded = await uploadMobileAsset({
         asset,
+        apiKey: assetAPIKey,
         baseURL: assetBaseURL,
         sessionID,
       });
@@ -169,7 +176,7 @@ export function useFileActions({
     } finally {
       stopPending("upload");
     }
-  }, [addErrorMessage, assetBaseURL, sessionID, setAttachedFiles, setViewMode, startPending, stopPending]);
+  }, [addErrorMessage, assetAPIKey, assetBaseURL, sessionID, setAttachedFiles, setViewMode, startPending, stopPending]);
 
   const removeAttachedFile = useCallback((key: string) => {
     setAttachedFiles((current) => current.filter((file) => attachmentKey(file) !== key));

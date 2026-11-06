@@ -52,16 +52,12 @@ func (w Writer) SaveUserMessage(ctx context.Context, command generationcommand.P
 	}
 	if w.Sessions != nil {
 		var err error
-		if snapshot := session.Clone(command.SessionSnapshot); snapshot != nil {
-			record := (chatmessagemapper.Mapper{IDs: w.IDs}).Session(snapshot, command.Title)
-			record.CreatedAt = createdAt
-			err = w.Sessions.SaveRecord(ctx, record)
+		if metadata, ok := w.Sessions.(interface {
+			TouchMessages(context.Context, *session.Session, string, string, string, time.Time, bool) error
+		}); ok {
+			err = metadata.TouchMessages(ctx, command.SessionSnapshot, command.SessionID, command.Model, command.Title, createdAt, false)
 		} else {
-			err = w.Sessions.Save(ctx, sessioncommand.SaveSession{
-				SessionID: command.SessionID,
-				Model:     command.Model,
-				Title:     command.Title,
-			})
+			err = w.Sessions.Save(ctx, sessioncommand.SaveSession{SessionID: command.SessionID, Model: command.Model, Title: command.Title})
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -93,7 +89,15 @@ func (w Writer) SaveAssistantMessage(ctx context.Context, current *session.Sessi
 		}
 	}
 	if w.Sessions != nil {
-		if err := w.Sessions.SaveRecord(ctx, mapper.Session(current, "")); err != nil {
+		var err error
+		if metadata, ok := w.Sessions.(interface {
+			TouchMessages(context.Context, *session.Session, string, string, string, time.Time, bool) error
+		}); ok {
+			err = metadata.TouchMessages(ctx, current, current.ID, current.Model, "", createdAt, true)
+		} else {
+			err = w.Sessions.Save(ctx, sessioncommand.SaveSession{SessionID: current.ID, Model: current.Model})
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}

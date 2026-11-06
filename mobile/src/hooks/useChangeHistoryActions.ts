@@ -52,7 +52,17 @@ export function useChangeHistoryActions({
 
   const revertSelectedChange = useCallback(() => {
     const path = changeDiff?.path || selectedChange;
+    const expectedHash = changeDiff?.path === path ? changeDiff.expected_hash : undefined;
     if (!path || !canRevertSelectedChange) {
+      return;
+    }
+    if (!expectedHash) {
+      // Refresh the preview before asking again; the server requires the hash
+      // of the version the user reviewed to avoid overwriting newer edits.
+      startPending("diff");
+      if (!sendEnvelope("change_diff", { request_id: newRequestID(), payload: { path } })) {
+        stopPending("diff");
+      }
       return;
     }
 
@@ -60,7 +70,7 @@ export function useChangeHistoryActions({
       startPending("revert");
       if (!sendEnvelope("change_revert", {
         request_id: newRequestID(),
-        payload: { path },
+        payload: { path, expected_hash: expectedHash },
       })) {
         stopPending("revert");
       }
@@ -81,7 +91,7 @@ export function useChangeHistoryActions({
         onPress: doRevert,
       },
     ]);
-  }, [canRevertSelectedChange, changeDiff?.path, selectedChange, sendEnvelope, startPending, stopPending]);
+  }, [canRevertSelectedChange, changeDiff?.path, changeDiff?.expected_hash, selectedChange, sendEnvelope, startPending, stopPending]);
 
   const revertHistoryCheckpoint = useCallback(
     (checkpointID: string) => {

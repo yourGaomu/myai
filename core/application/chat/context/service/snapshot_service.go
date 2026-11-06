@@ -15,6 +15,17 @@ func (SnapshotService) Snapshot(current *session.Session) contextmgr.Snapshot {
 	return (SnapshotService{}).SnapshotWithBudget(current, 0)
 }
 
+func (SnapshotService) SnapshotForRequest(current *session.Session, options contextmgr.RequestOptions) contextmgr.Snapshot {
+	if current == nil {
+		return contextmgr.Snapshot{}
+	}
+	checkpoint := compaction.LegacyCheckpoint(current.Summary, current.CompactedMessages, current.CompactionSourceHash)
+	if current.CompactionCheckpoint != nil {
+		checkpoint = *current.CompactionCheckpoint.Clone()
+	}
+	return contextmgr.BuildSnapshotForRequest(current.Messages, checkpoint, checkpoint.SourceEndMessage, options)
+}
+
 func (SnapshotService) SnapshotWithBudget(current *session.Session, reservedTokens int) contextmgr.Snapshot {
 	if current == nil {
 		return contextmgr.Snapshot{}

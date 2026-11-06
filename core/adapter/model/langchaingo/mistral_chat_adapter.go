@@ -1,10 +1,9 @@
 package langchaingo
 
 import (
-	"github.com/tmc/langchaingo/llms/mistral"
+	"strings"
 
 	domainmodel "myai/core/domain/model"
-	corellm "myai/core/llm"
 	modelport "myai/core/port/model"
 )
 
@@ -25,16 +24,18 @@ func (MistralChatAdapter) CreateModel(config modelport.CreationConfig) (modelpor
 	if err := (MistralChatAdapter{}).ValidateConfig(config); err != nil {
 		return nil, err
 	}
-	options := []mistral.Option{
-		mistral.WithAPIKey(config.APIKey),
-		mistral.WithModel(config.ModelName),
+	// The native SDK creates requests without ctx and performs hidden retries.
+	// Mistral speaks chat/completions, so reuse the existing compatible client
+	// to preserve cancellation and the shared retry budget.
+	if config.BaseURL == "" {
+		config.BaseURL = "https://api.mistral.ai"
 	}
-	if config.BaseURL != "" {
-		options = append(options, mistral.WithEndpoint(config.BaseURL))
+	config.BaseURL = strings.TrimRight(config.BaseURL, "/")
+	if !strings.HasSuffix(config.BaseURL, "/v1") {
+		config.BaseURL += "/v1"
 	}
-	model, err := mistral.New(options...)
-	if err != nil {
-		return nil, err
+	if config.ModelName == "" {
+		config.ModelName = "open-mistral-7b"
 	}
-	return &corellm.Model{LlmModel: model}, nil
+	return createOpenAIChatModel(config, true)
 }

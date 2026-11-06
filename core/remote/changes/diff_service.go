@@ -51,7 +51,7 @@ func historyFileToSnapshot(value domainhistory.FileSnapshot) snapshotEntry {
 }
 
 func additionDiff(entry snapshotEntry) (string, bool, bool) {
-	if entry.Binary || entry.TooLarge {
+	if entry.Binary || entry.TooLarge || !entry.Available {
 		return "", entry.TooLarge, true
 	}
 	diff, truncated := fileDiff("", string(entry.Content), entry.Path)

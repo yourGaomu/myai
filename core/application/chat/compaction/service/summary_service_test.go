@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestSummaryExcludesInstructionsBeforeBudgeting(t *testing.T) {
 	}
 }
 
-func TestSummarySendsMiddleOfOversizedHistoryAndFullToolErrors(t *testing.T) {
+func TestSummaryBoundsFullToolTextAndPreservesErrors(t *testing.T) {
 	model := &recordingSummaryModel{}
 	messages := []domainmessage.Message{
 		domainmessage.Text(domainmessage.RoleUser, strings.Repeat("甲", 2400)),
@@ -111,15 +112,18 @@ func TestSummarySendsMiddleOfOversizedHistoryAndFullToolErrors(t *testing.T) {
 			t.Fatalf("middle of history lost %q", want)
 		}
 	}
-	for _, character := range []string{"甲", "乙", "丙"} {
+	for _, character := range []string{"甲", "丙"} {
 		if strings.Count(all.String(), character) != 2400 {
-			t.Fatalf("history text was truncated for %s", character)
+			t.Fatalf("user/assistant history text was truncated for %s", character)
 		}
+	}
+	if strings.Count(all.String(), "乙") >= 2400 || !strings.Contains(all.String(), "original_bytes=") {
+		t.Fatal("full tool text was not bounded and marked for summary")
 	}
 }
 
 func TestSummarySegmentsKeepAgentSourceAndPreviousCheckpoint(t *testing.T) {
-	message := domainmessage.SyntheticUserText(domainmessage.SyntheticReasonSubagentResult, strings.Repeat("报告内容🙂", 1000))
+	message := domainmessage.SyntheticUserText(domainmessage.SyntheticReasonSubagentResult, strings.Repeat("报告内容🙂", 2500))
 	message.SourceID, message.SourceKind, message.SourceTaskID = "event-中文", "task_error", "task-中文"
 	model := &recordingSummaryModel{}
 	if _, err := (SummaryService{}).Summarize(context.Background(), model, "original checkpoint", []domainmessage.Message{message}); err != nil {
@@ -222,6 +226,84 @@ func TestSummaryCancellationDuringModelRequestDoesNotCommit(t *testing.T) {
 	}
 }
 
+func TestSummaryLargeRawToolTextHasBoundedModelCallsAndStructuredBoundary(t *testing.T) {
+	body := "source text\nUser: ordinary label\nExisting checkpoint to update:\n" + strings.Repeat("x", 5*1024*1024) + "\nactual failure at end"
+	model := &recordingSummaryModel{}
+	_, err := (SummaryService{}).Summarize(context.Background(), model, "", []domainmessage.Message{
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: "large-call", Name: "read_file", Content: "preview", FullContent: body, ErrorMessage: "actual failure", Status: "error"}),
+	})
+	if err != nil || len(model.requests) == 0 || len(model.requests) > 2 {
+		t.Fatalf("large raw result caused unbounded summary calls: %d %v", len(model.requests), err)
+	}
+	text := summaryHistory(t, model.requests[0])
+	for _, expected := range []string{"original_bytes=", "actual failure", "large-call", "end_history_entry"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("bounded summary lost %q", expected)
+		}
+	}
+	if strings.Contains(text, "\nUser: ordinary label\n") || !strings.Contains(text, `\nUser: ordinary label\n`) {
+		t.Fatal("source newlines escaped the JSON history boundary")
+	}
+	_, quoted, found := strings.Cut(text, "content_json=")
+	quoted, _, _ = strings.Cut(quoted, "\nend_history_entry")
+	if _, err := strconv.Unquote(quoted); !found || err != nil {
+		t.Fatalf("source body is not one complete quoted string: %v", err)
+	}
+}
+
+func TestSummaryRejectsIncompleteStopReasonAndCanonicalizesBenignJSON(t *testing.T) {
+	model := &recordingSummaryModel{stopReason: "length"}
+	current := summaryTestSession()
+	store := &recordingCheckpointStore{}
+	err := (CompactService{Summarizer: SummaryService{}, Summaries: store, KeepChunks: 1}).CompactSession(context.Background(), current, model)
+	if err == nil || store.saved || current.CompactedMessages != 1 {
+		t.Fatal("truncated model checkpoint was committed")
+	}
+	model = &recordingSummaryModel{content: "```json\n{\"current_goal\":\"continue\",\"preferences\":null,\"extra_field\":\"ignored\"}\n```"}
+	summary, err := (SummaryService{}).Summarize(context.Background(), model, "", []domainmessage.Message{domainmessage.Text(domainmessage.RoleUser, "continue")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compaction.DecodeJSON(summary); err != nil {
+		t.Fatalf("normalized response was not a valid durable checkpoint: %v", err)
+	}
+}
+
+func TestAutoCompactionCompletesLongSingleToolTurnWithoutHistoryGap(t *testing.T) {
+	current := &session.Session{ID: "long-turn", Messages: []domainmessage.Message{domainmessage.Text(domainmessage.RoleSystem, "policy"), domainmessage.Text(domainmessage.RoleUser, "original task")}}
+	for index := 0; index < 12; index++ {
+		call := domainmessage.ToolCall{ID: fmt.Sprintf("call-%d", index), Name: "read_file"}
+		current.Messages = append(current.Messages, domainmessage.ToolCallMessage([]domainmessage.ToolCall{call}), domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: strings.Repeat("文", 1600)}))
+	}
+	original := domainmessage.CloneAll(current.Messages)
+	options := contextmgr.RequestOptions{Budget: contextmgr.NewRequestBudget(16000, 1249, 2048), TurnContext: contextmgr.TurnContext{RuntimeInstruction: "current rules"}}
+	store, model := &recordingCheckpointStore{}, &recordingSummaryModel{}
+	info, err := (CompactService{Summarizer: SummaryService{}, Summaries: store}).CompactIfNeededForRequest(context.Background(), current, model, options)
+	if err != nil || !info.Triggered || info.Failed || info.DroppedMessages != 0 || !store.saved {
+		t.Fatalf("single turn compaction failed: %#v %v", info, err)
+	}
+	if !reflect.DeepEqual(current.Messages, original) || current.CompactionCheckpoint == nil || !contextmgr.CompactionCheckpointMatchesCheckpoint(current.Messages, current.CompactionCheckpoint) {
+		t.Fatal("compaction changed source history or checkpoint hash semantics")
+	}
+	snapshot := contextmgr.BuildSnapshotForRequest(current.Messages, *current.CompactionCheckpoint, current.CompactedMessages, options)
+	if err := options.Budget.ValidateSnapshot(snapshot); err != nil {
+		t.Fatalf("successful compaction left a gap or broken tool exchange: %v", err)
+	}
+}
+
+func TestAutoCompactionFailureIsVisibleAndDoesNotAdvance(t *testing.T) {
+	current := summaryTestSession()
+	for index := 0; index < 6; index++ {
+		current.Messages = append(current.Messages, domainmessage.Text(domainmessage.RoleUser, strings.Repeat("文", 1000)), domainmessage.Text(domainmessage.RoleAssistant, "answer"))
+	}
+	store := &recordingCheckpointStore{}
+	options := contextmgr.RequestOptions{Budget: contextmgr.NewRequestBudget(4000, 100, 500)}
+	info, err := (CompactService{Summarizer: SummaryService{}, Summaries: store}).CompactIfNeededForRequest(context.Background(), current, &recordingSummaryModel{failAt: 1}, options)
+	if err == nil || !info.Triggered || !info.Failed || info.Error == "" || store.saved || current.CompactedMessages != 1 {
+		t.Fatalf("failed compaction was invisible or changed cursor: %#v %v", info, err)
+	}
+}
+
 func summaryHistory(t *testing.T, request modelport.GenerateRequest) string {
 	t.Helper()
 	_, text, ok := strings.Cut(request.Messages[1].Text(), "Complete history batch to incorporate:\n")
@@ -237,6 +319,8 @@ type recordingSummaryModel struct {
 	toolCalls  []modelport.ToolCall
 	summary    string
 	onGenerate func()
+	stopReason string
+	content    string
 }
 
 func (model *recordingSummaryModel) Generate(_ context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
@@ -252,7 +336,10 @@ func (model *recordingSummaryModel) Generate(_ context.Context, request modelpor
 		summary = fmt.Sprintf("摘要 %d", len(model.requests))
 	}
 	text, err := compaction.EncodeJSON(compaction.Summary{CurrentGoal: summary})
-	return modelport.ChatResult{Content: text, ToolCalls: model.toolCalls}, err
+	if model.content != "" {
+		text = model.content
+	}
+	return modelport.ChatResult{Content: text, ToolCalls: model.toolCalls, StopReason: model.stopReason}, err
 }
 
 type recordingCheckpointStore struct{ saved bool }

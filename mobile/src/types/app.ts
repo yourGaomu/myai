@@ -1,4 +1,5 @@
 export type PermissionState = {
+  approvalID: string;
   requestID: string;
   sessionID: string;
   name: string;

@@ -1,6 +1,8 @@
 package langchaingo
 
 import (
+	"net/http"
+
 	"github.com/tmc/langchaingo/llms/anthropic"
 
 	domainmodel "myai/core/domain/model"
@@ -29,6 +31,7 @@ func (AnthropicMessagesAdapter) CreateModel(config modelport.CreationConfig) (mo
 	options := []anthropic.Option{
 		anthropic.WithToken(config.APIKey),
 		anthropic.WithModel(config.ModelName),
+		anthropic.WithHTTPClient(&http.Client{Transport: modelTransport{base: http.DefaultTransport}}),
 	}
 	if config.BaseURL != "" {
 		options = append(options, anthropic.WithBaseURL(config.BaseURL))
@@ -37,5 +40,5 @@ func (AnthropicMessagesAdapter) CreateModel(config modelport.CreationConfig) (mo
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model}, nil
+	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
 }

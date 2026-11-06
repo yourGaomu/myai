@@ -13,9 +13,9 @@ import (
 	tooldef "myai/core/tool/tool"
 )
 
-func TestShareFileToolRequiresWritePermission(t *testing.T) {
-	if permission := NewShareFileToolWithWorkspaceAndUploader(".", nil).Permission(); permission != tooldef.PermissionWrite {
-		t.Fatalf("Permission() = %q, want %q", permission, tooldef.PermissionWrite)
+func TestShareFileToolRequiresExecutePermission(t *testing.T) {
+	if permission := NewShareFileToolWithWorkspaceAndUploader(".", nil).Permission(); permission != tooldef.PermissionExecute {
+		t.Fatalf("Permission() = %q, want %q", permission, tooldef.PermissionExecute)
 	}
 }
 

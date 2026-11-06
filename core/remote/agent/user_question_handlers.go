@@ -13,6 +13,10 @@ import (
 )
 
 func (a *Agent) handleUserQuestionAnswer(message protocol.Message) error {
+	return a.handleUserQuestionAnswerContext(context.Background(), message)
+}
+
+func (a *Agent) handleUserQuestionAnswerContext(ctx context.Context, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.UserQuestionAnswerPayload](message)
 	if err != nil {
 		return fmt.Errorf("decode user question answer failed: %w", err)
@@ -20,10 +24,14 @@ func (a *Agent) handleUserQuestionAnswer(message protocol.Message) error {
 	if payload.QuestionID == "" {
 		return errors.New("question_id is required")
 	}
-	a.userQuestionWaiters.resolve(payload.QuestionID, domaininteraction.Answer{
-		Answers: payload.Answers, Cancelled: payload.Cancelled,
-	})
-	return nil
+	answer := domaininteraction.Answer{Answers: payload.Answers, Cancelled: payload.Cancelled}
+	if a.userQuestionWaiters.resolveFor(message.SessionID, message.RequestID, payload.QuestionID, answer) {
+		return nil
+	}
+	if control, ok := a.chatService.(BackgroundQuestionControl); ok {
+		return control.ResolveBackgroundQuestion(ctx, message.SessionID, message.RequestID, payload.QuestionID, answer)
+	}
+	return errors.New("user question is invalid, expired or already answered")
 }
 
 func (a *Agent) handleUserQuestionList(conn *websocket.Conn, message protocol.Message) error {
@@ -32,6 +40,23 @@ func (a *Agent) handleUserQuestionList(conn *websocket.Conn, message protocol.Me
 		return fmt.Errorf("decode user question list failed: %w", err)
 	}
 	requests, resolvedIDs := a.userQuestionWaiters.list(payload.SessionID, payload.KnownQuestionIDs)
+	if source, ok := a.chatService.(BackgroundQuestionSource); ok {
+		background := source.ListBackgroundQuestions("")
+		active := make(map[string]struct{}, len(background))
+		for _, request := range background {
+			active[request.ID] = struct{}{}
+			if payload.SessionID == "" || request.SessionID == payload.SessionID {
+				requests = append(requests, request)
+			}
+		}
+		filtered := resolvedIDs[:0]
+		for _, id := range resolvedIDs {
+			if _, pending := active[id]; !pending {
+				filtered = append(filtered, id)
+			}
+		}
+		resolvedIDs = filtered
+	}
 	items := make([]protocol.UserQuestionListItemPayload, 0, len(requests))
 	for _, request := range requests {
 		items = append(items, protocol.UserQuestionListItemPayload{
@@ -43,6 +68,12 @@ func (a *Agent) handleUserQuestionList(conn *websocket.Conn, message protocol.Me
 }
 
 func (a *Agent) askUserQuestion(ctx context.Context, conn *websocket.Conn, message protocol.Message, request domaininteraction.Request) (domaininteraction.Answer, error) {
+	if request.SessionID == "" {
+		request.SessionID = message.SessionID
+	}
+	if request.RequestID == "" {
+		request.RequestID = message.RequestID
+	}
 	if err := domaininteraction.ValidateRequest(request); err != nil {
 		return domaininteraction.Answer{}, err
 	}

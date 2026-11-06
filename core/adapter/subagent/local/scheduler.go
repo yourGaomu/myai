@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	subagentport "myai/core/port/subagent"
 )
@@ -22,9 +23,12 @@ type activeJob struct {
 	unpark    chan struct{}
 }
 
+const defaultCloseTimeout = 30 * time.Second
+
 type Scheduler struct {
 	jobs     chan scheduledJob
 	closedCh chan struct{}
+	done     chan struct{}
 	mu       sync.Mutex
 	active   map[string]*activeJob
 	closed   bool
@@ -43,6 +47,7 @@ func NewScheduler(workers int, queueSize int) *Scheduler {
 	scheduler := &Scheduler{
 		jobs:     make(chan scheduledJob, queueSize),
 		closedCh: make(chan struct{}),
+		done:     make(chan struct{}),
 		active:   make(map[string]*activeJob),
 	}
 	for index := 0; index < workers; index++ {
@@ -136,23 +141,54 @@ func (scheduler *Scheduler) Unpark(taskID string) error {
 	return nil
 }
 
+// Close stops admission, cancels accepted tasks and waits up to 30 seconds.
+// Call CloseContext to handle cancellation or an incomplete shutdown explicitly.
 func (scheduler *Scheduler) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultCloseTimeout)
+	defer cancel()
+	if err := scheduler.CloseContext(ctx); err != nil {
+		log.Printf("subagent scheduler close incomplete: %v", err)
+	}
+}
+
+// CloseContext stops admission and cancels both running and queued tasks before
+// waiting for every worker, including substitutes created by Park. Queued task
+// callbacks still run with a canceled context so their owners can clean up.
+// A context error leaves shutdown in progress; repeated calls wait on the same
+// completion and never report success while a task is still running.
+func (scheduler *Scheduler) CloseContext(ctx context.Context) error {
 	if scheduler == nil {
-		return
+		return nil
 	}
 	scheduler.mu.Lock()
-	if scheduler.closed {
-		scheduler.mu.Unlock()
-		return
+	if !scheduler.closed {
+		scheduler.closed = true
+		close(scheduler.closedCh)
+		for _, job := range scheduler.active {
+			job.cancel()
+		}
+		close(scheduler.jobs)
+		// Park adds workers under mu and rejects a closed scheduler, so no
+		// WaitGroup additions can race this wait after admission stops.
+		go func() {
+			scheduler.wg.Wait()
+			close(scheduler.done)
+		}()
 	}
-	scheduler.closed = true
-	close(scheduler.closedCh)
-	for _, job := range scheduler.active {
-		job.cancel()
-	}
-	close(scheduler.jobs)
+	done := scheduler.done
 	scheduler.mu.Unlock()
-	scheduler.wg.Wait()
+
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (scheduler *Scheduler) worker() {

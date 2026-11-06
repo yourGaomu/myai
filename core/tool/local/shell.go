@@ -8,6 +8,8 @@ import (
 	"time"
 
 	localexecutor "myai/core/adapter/execution/local"
+	workspaceopensandbox "myai/core/adapter/workspace/opensandbox"
+	workspacerouter "myai/core/adapter/workspace/router"
 	domainexecution "myai/core/domain/execution"
 	domainhistory "myai/core/domain/history"
 	domainsandbox "myai/core/domain/sandbox"
@@ -90,6 +92,31 @@ func (t *ShellTool) Schema() any {
 
 func (t *ShellTool) Permission() tooldef.Permission {
 	return tooldef.PermissionExecute
+}
+
+func (t *ShellTool) IsSandboxedShell(ctx context.Context) bool {
+	execution, ok := toolruntime.CurrentExecution(ctx)
+	id := strings.TrimSpace(execution.SandboxID)
+	if t == nil || !ok || id == "" || strings.HasPrefix(strings.ToLower(id), "snapshot:") {
+		return false
+	}
+	// Only the concrete remote adapter has no host-execution fallback. Unknown
+	// runners still work, but cannot acquire an approval exemption.
+	runner := t.remote
+	for depth := 0; depth < 4; depth++ {
+		switch remote := runner.(type) {
+		case *workspaceopensandbox.Manager:
+			return remote != nil
+		case *workspacerouter.Manager:
+			if remote == nil {
+				return false
+			}
+			runner = remote.Remote
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (t *ShellTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {

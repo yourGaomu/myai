@@ -10,20 +10,23 @@ func TestMapperCreatesIndependentRuntimeConfigs(t *testing.T) {
 	mapper := Mapper{Now: func() time.Time { return now }}
 
 	model := mapper.ModelConfig(ModelProperties{
-		ID:      "gpt-test",
-		BaseURL: "https://example.test",
-		APIKey:  "secret",
+		ID:                  "gpt-test",
+		BaseURL:             "https://example.test",
+		APIKey:              "secret",
+		ContextWindowTokens: 128000,
+		MaxOutputLimit:      16000,
 	})
-	if model.ID != "gpt-test" || model.Provider != "openai" || !model.CreatedAt.Equal(now) {
+	if model.ID != "gpt-test" || model.Provider != "openai" || !model.CreatedAt.Equal(now) || model.ContextWindowTokens != 128000 || model.MaxOutputTokens != 16000 {
 		t.Fatalf("unexpected model config: %#v", model)
 	}
 
 	asset := mapper.AssetConfig(AssetProperties{
 		BaseURL:              "https://asset.test",
+		APIKey:               "test-asset-key",
 		UploadTimeoutSeconds: 30,
 		TTLSeconds:           60,
 	})
-	if asset.Timeout != 30*time.Second || asset.DefaultTTLSeconds != 60 {
+	if asset.Timeout != 30*time.Second || asset.DefaultTTLSeconds != 60 || asset.APIKey != "test-asset-key" {
 		t.Fatalf("unexpected asset config: %#v", asset)
 	}
 
@@ -113,6 +116,7 @@ func TestMapperCreatesIndependentHookAndMCPConfigs(t *testing.T) {
 		Command:    "npx",
 		Args:       []string{"-y", "server"},
 		Env:        map[string]string{"MODE": "test"},
+		Headers:    map[string]string{"X-API-Key": "${TEST_MCP_KEY}"},
 		Permission: "read",
 	}}}
 	mcpConfig := mapper.MCPConfig("C:/workspace", mcpProperties)
@@ -121,7 +125,11 @@ func TestMapperCreatesIndependentHookAndMCPConfigs(t *testing.T) {
 	}
 	mcpConfig.Servers[0].Args[0] = "changed"
 	mcpConfig.Servers[0].Env["MODE"] = "changed"
+	mcpConfig.Servers[0].Headers["X-API-Key"] = "changed"
 	if mcpProperties.Servers[0].Args[0] != "-y" || mcpProperties.Servers[0].Env["MODE"] != "test" {
 		t.Fatal("expected MCP runtime config to own nested collections")
+	}
+	if mcpProperties.Servers[0].Headers["X-API-Key"] != "${TEST_MCP_KEY}" {
+		t.Fatal("expected MCP runtime config to own HTTP headers")
 	}
 }

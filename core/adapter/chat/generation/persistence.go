@@ -42,21 +42,25 @@ func (p Persistence) PersistAssistant(current *session.Session, result modelport
 }
 
 func (p Persistence) submit(sessionID string, task func(context.Context) error, operation string) {
-	run := func() {
+	run := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), p.timeout())
 		defer cancel()
-		if err := task(ctx); err != nil && p.OnError != nil {
-			p.OnError(fmt.Errorf("%s failed: %w", operation, err))
+		if err := task(ctx); err != nil {
+			wrapped := fmt.Errorf("%s failed: %w", operation, err)
+			p.report(wrapped)
+			return wrapped
 		}
+		return nil
 	}
 	if p.Queue != nil {
-		if err := p.Queue.Submit(sessionID, run); err != nil {
+		if err := p.Queue.SubmitTask(sessionID, run); err != nil {
 			p.report(fmt.Errorf("schedule %s: %w", operation, err))
 		}
 		return
 	}
-	if err := p.Async.Submit(run); err != nil {
+	if err := p.Async.Submit(func() { _ = run() }); err != nil {
 		p.report(fmt.Errorf("schedule %s: %w", operation, err))
+		_ = run()
 	}
 }
 

@@ -81,6 +81,14 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	if len(currentPlan.Steps) == 0 {
 		return planresult.Execution{}, errors.New("current plan has no steps")
 	}
+	if currentPlan.Status == agentplan.StatusRunning {
+		return planresult.Execution{}, errors.New("plan has an interrupted running execution; inspect completed effects and explicitly resolve its state before retrying")
+	}
+	for _, step := range currentPlan.Steps {
+		if step.Status == agentplan.StepStatusRunning {
+			return planresult.Execution{}, errors.New("plan has an interrupted running step; inspect completed effects and explicitly resolve its state before retrying")
+		}
+	}
 	if !agentplan.IsExecutableStatus(currentPlan.Status) {
 		return planresult.Execution{}, fmt.Errorf("current plan cannot execute from status %s", currentPlan.Status)
 	}
@@ -267,15 +275,8 @@ func (s ExecutionService) maxReplans() int {
 }
 
 func (s ExecutionService) maxParallelSteps(currentPlan *agentplan.Plan) int {
-	// Plans produced before dependency metadata was introduced are implicitly
-	// ordered by their list position. Keep those plans serial even when the
-	// application enables parallel scheduling for newer structured plans.
-	if !planHasDependencies(currentPlan) {
-		return 1
-	}
-	if s.MaxParallelSteps > 0 {
-		return s.MaxParallelSteps
-	}
+	// Shared-session steps execute serially until independent child transcripts
+	// and merge ownership are available.
 	return 1
 }
 
@@ -304,41 +305,21 @@ type stepExecutionResult struct {
 }
 
 func (s ExecutionService) executeReadyBatch(ctx context.Context, current *session.Session, currentPlan *agentplan.Plan, indexes []int, runID string, stream modelport.ChatStreamHandler, titleFirst bool) []stepExecutionResult {
-	results := make([]stepExecutionResult, len(indexes))
-	// Freeze the batch history before any sibling appends instructions or commits
-	// a result. Prepare all inputs before launching the parallel generations.
-	baseline := session.Clone(current)
-	tasks := make([]generationcommand.GenerationTask, len(indexes))
-	for i, index := range indexes {
-		tasks[i], results[i].Err = s.preparePlanStep(ctx, current, baseline, currentPlan, index, titleFirst && i == 0)
-		results[i].Index = index
-	}
-	serializedStream := synchronizedStream{base: stream}
-	parallel := len(indexes) > 1
-	var waitGroup sync.WaitGroup
-	for resultIndex, stepIndex := range indexes {
-		resultIndex, stepIndex := resultIndex, stepIndex
-		if results[resultIndex].Err != nil {
-			continue
-		}
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			stepStream := serializedStream.Handler()
-			var output *bufferedStepOutput
-			if parallel {
-				output = &bufferedStepOutput{}
-				stepStream = output.Handler(stepStream)
-			}
-			stepContext := agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{ParentRunID: runID, PlanID: currentPlan.ID, StepID: currentPlan.Steps[stepIndex].ID})
+	results := make([]stepExecutionResult, 0, len(indexes))
+	for position, index := range indexes {
+		task, err := s.preparePlanStep(ctx, current, nil, currentPlan, index, titleFirst && position == 0)
+		item := stepExecutionResult{Index: index, Err: err}
+		if err == nil {
+			stepContext := agentrunruntime.WithMetadata(ctx, agentrunruntime.Metadata{ParentRunID: runID, PlanID: currentPlan.ID, StepID: currentPlan.Steps[index].ID})
 			stepContext = agentrunruntime.WithRunID(stepContext, "")
-			task := tasks[resultIndex]
-			task.Stream = stepStream
-			results[resultIndex].Response, results[resultIndex].Err = s.Generation.Generate(stepContext, task)
-			results[resultIndex].Output = output
-		}()
+			task.Stream = stream
+			item.Response, item.Err = s.Generation.Generate(stepContext, task)
+		}
+		results = append(results, item)
+		if item.Err != nil {
+			break
+		}
 	}
-	waitGroup.Wait()
 	return results
 }
 
@@ -476,8 +457,7 @@ func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline
 	if err != nil {
 		return generationcommand.GenerationTask{}, err
 	}
-	stepSession := session.Clone(baseline)
-	stepSession.Messages = append(stepSession.Messages, domainmessage.CloneAll(prepared.AppendedMessages)...)
+	stepSession := session.Clone(prepared.Session)
 	title := ""
 	if titleFirst {
 		title = "Execute plan"

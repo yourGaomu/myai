@@ -7,7 +7,6 @@ import (
 	currentapi "myai/core/application/session/current/api"
 	currentport "myai/core/application/session/current/port"
 	currentresult "myai/core/application/session/current/result"
-	"myai/core/contextmgr"
 	agentplan "myai/core/plan"
 	"myai/core/session"
 )
@@ -24,7 +23,7 @@ func (s StateQueryService) State() currentresult.State {
 		ModelID:        strings.TrimSpace(s.DefaultModel),
 		AgentMode:      session.AgentModeChat,
 		PermissionMode: session.PermissionModeAsk,
-		ContextWindowK: contextmgr.DefaultWindowK,
+		ContextWindowK: 0,
 	}
 	if s.Memory == nil {
 		return state
@@ -44,7 +43,7 @@ func (s StateQueryService) State() currentresult.State {
 	}
 	state.AgentMode = session.NormalizeAgentMode(current.AgentMode)
 	state.PermissionMode = session.NormalizePermissionMode(current.PermissionMode)
-	state.ContextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
+	state.ContextWindowK = current.ContextWindowK
 	state.Usage = current.Usage
 	state.LastUsage = current.LastUsage
 	state.Plan = agentplan.Clone(current.CurrentPlan)

@@ -38,12 +38,16 @@ func (registry *userQuestionWaiterRegistry) register(request domaininteraction.R
 }
 
 func (registry *userQuestionWaiterRegistry) resolve(questionID string, answer domaininteraction.Answer) bool {
+	return registry.resolveFor("", "", questionID, answer)
+}
+
+func (registry *userQuestionWaiterRegistry) resolveFor(sessionID, requestID, questionID string, answer domaininteraction.Answer) bool {
 	if registry == nil {
 		return false
 	}
 	registry.mu.Lock()
 	waiter := registry.waiters[questionID]
-	if waiter == nil || domaininteraction.ValidateAnswer(waiter.request, answer) != nil {
+	if waiter == nil || sessionID != "" && waiter.request.SessionID != sessionID || requestID != "" && waiter.request.RequestID != requestID || domaininteraction.ValidateAnswer(waiter.request, answer) != nil {
 		registry.mu.Unlock()
 		return false
 	}

@@ -7,18 +7,25 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	"myai/core/history"
+	historyport "myai/core/port/history"
 )
 
-type Factory struct{}
+type Factory struct {
+	StoreFactory historyport.StoreFactory
+}
 
-func (Factory) NewTaskRecorder(record generationcommand.TaskRecord) generationport.TaskRecorder {
+func (f Factory) NewTaskRecorder(record generationcommand.TaskRecord) generationport.TaskRecorder {
+	factory := f.StoreFactory
+	if factory == nil {
+		factory = sqlitehistory.Factory{}
+	}
 	return Recorder{
 		task: history.NewTaskRecorder(history.RecordCommand{
 			Title:     record.Title,
 			Reason:    record.Reason,
 			SessionID: record.SessionID,
 			RequestID: record.RequestID,
-		}, sqlitehistory.Factory{}),
+		}, factory),
 	}
 }
 

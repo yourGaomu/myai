@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 func TestManagerLoadsMCPPluginAndUnregistersItOnClose(t *testing.T) {
@@ -36,7 +37,7 @@ func TestManagerLoadsMCPPluginAndUnregistersItOnClose(t *testing.T) {
 	}
 
 	registry := tool.NewRegisterTools()
-	manager := NewManager(root)
+	manager := NewManager(root, WithTrustPolicy(&trust.Policy{Allow: true}))
 	if err := manager.Load(context.Background(), registry); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestManagerReportsDisabledAndInvalidPluginsWithoutStoppingStartup(t *testin
 		t.Fatal(err)
 	}
 
-	manager := NewManager(root)
+	manager := NewManager(root, WithTrustPolicy(&trust.Policy{Allow: true}))
 	if err := manager.Load(context.Background(), tool.NewRegisterTools()); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestManagerSetEnabledPersistsManifestAndReloadsState(t *testing.T) {
 	}
 
 	registry := tool.NewRegisterTools()
-	manager := NewManager(root)
+	manager := NewManager(root, WithTrustPolicy(&trust.Policy{Allow: true}))
 	if err := manager.Load(context.Background(), registry); err != nil {
 		t.Fatal(err)
 	}

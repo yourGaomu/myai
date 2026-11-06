@@ -11,6 +11,7 @@ import (
 	messageport "myai/core/application/session/message/port"
 	messageresult "myai/core/application/session/message/result"
 	domainmessage "myai/core/domain/message"
+	sessionport "myai/core/port/session"
 	"myai/core/session"
 )
 
@@ -48,17 +49,25 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 		}
 	}
 	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForceAutonomousPlanning)
-	messageCount := len(current.Messages)
-	// 4. 追加时把事件来源一起写入会话聚合根，后续重试和进程恢复才能继续按 ID 判断。
-	if err := s.Memory.AddUserTurnWithMetadataTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason, command.SourceID, command.SourceKind, command.SourceTaskID); err != nil {
-		return messageresult.Command{}, err
+	turn := &session.Session{}
+	turn.AddUserTurnWithMetadata(command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason, command.SourceID, command.SourceKind, command.SourceTaskID)
+	var appended []domainmessage.Message
+	if memory, ok := s.Memory.(sessionport.TranscriptStore); ok {
+		current, appended, err = memory.AppendMessagesTo(current.ID, turn.Messages...)
+	} else {
+		messageCount := len(current.Messages)
+		err = s.Memory.AddUserTurnWithMetadataTo(current.ID, command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason, command.SourceID, command.SourceKind, command.SourceTaskID)
+		if err == nil {
+			current, err = s.Memory.GetSession(current.ID)
+			if err == nil {
+				appended = domainmessage.CloneAll(current.Messages[messageCount:])
+			}
+		}
 	}
-	current, err = s.Memory.GetSession(current.ID)
 	if err != nil {
 		return messageresult.Command{}, err
 	}
-	appended := domainmessage.CloneAll(current.Messages[messageCount:])
-	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext), AppendedMessages: appended, Appended: true}, nil
+	return messageresult.Command{Session: current, Input: command.Input, RuntimeInstruction: runtimeInstruction, RAGContext: strings.TrimSpace(command.RAGContext), AppendedMessages: appended, Appended: len(appended) > 0}, nil
 }
 
 func (s CommandService) PrepareRegeneration(ctx context.Context, command messagecommand.PrepareRegeneration) (messageresult.Command, error) {

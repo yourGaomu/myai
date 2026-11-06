@@ -1,8 +1,12 @@
 package handle
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
+	"io"
 	"log"
+	"mime/multipart"
 	"myai-url-shortener/internal/shortener"
 	"myai-url-shortener/internal/shortener/service"
 	"net/http"
@@ -13,24 +17,68 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type RouterOptions struct {
+	APIKey         string
+	MaxUploadBytes int64
+}
+
 type Handler struct {
 	service *service.Service
 }
 
-func NewRouter(service *service.Service) *gin.Engine {
+func NewRouter(service *service.Service, options RouterOptions) *gin.Engine {
 	handler := &Handler{service: service}
 
 	router := gin.New()
 	router.Use(gin.Recovery(), corsMiddleware(), requestCostMiddleware())
 	router.GET("/health", handler.health)
-	router.POST("/api/links", handler.createLink)
-	router.POST("/api/assets", handler.createAssetLink)
 	router.GET("/s/:code", handler.redirect)
-	router.GET("/api/links/:code", handler.getLinkInfo)
-	router.GET("/api/links", handler.getLinksInfo)
-	router.DELETE("/api/links/:code", handler.deleteLinkInfo)
-	return router
 
+	api := router.Group("/api", apiKeyMiddleware(options.APIKey))
+	api.POST("/links", handler.createLink)
+	api.POST("/assets", uploadLimitMiddleware(options.MaxUploadBytes), handler.createAssetLink)
+	api.GET("/links/:code", handler.getLinkInfo)
+	api.GET("/links", handler.getLinksInfo)
+	api.DELETE("/links/:code", handler.deleteLinkInfo)
+	return router
+}
+
+func apiKeyMiddleware(apiKey string) gin.HandlerFunc {
+	configured := strings.TrimSpace(apiKey) != ""
+	expected := sha256.Sum256([]byte(apiKey))
+	return func(c *gin.Context) {
+		headers := c.Request.Header.Values("Authorization")
+		var token string
+		valid := false
+		if len(headers) == 1 {
+			scheme, value, found := strings.Cut(headers[0], " ")
+			token = value
+			valid = found && strings.EqualFold(scheme, "Bearer") && token != "" && !strings.ContainsAny(token, " \t\r\n")
+		}
+		actual := sha256.Sum256([]byte(token))
+		// Compare fixed-length digests so key length does not short-circuit the comparison.
+		matches := subtle.ConstantTimeCompare(actual[:], expected[:])
+		if !configured || !valid || matches != 1 {
+			c.Header("WWW-Authenticate", "Bearer")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func uploadLimitMiddleware(maxBytes int64) gin.HandlerFunc {
+	if maxBytes <= 0 {
+		maxBytes = shortener.DefaultMaxUploadBytes
+	}
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > maxBytes {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "upload request too large"})
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
 }
 
 func corsMiddleware() gin.HandlerFunc {
@@ -83,11 +131,29 @@ func (h *Handler) createLink(c *gin.Context) {
 }
 
 func (h *Handler) createAssetLink(c *gin.Context) {
-	file, err := c.FormFile("file")
+	form, err := c.MultipartForm()
+	if form != nil {
+		defer form.RemoveAll()
+	}
+	if err == nil {
+		// Include any multipart epilogue in the request limit before uploading.
+		_, err = io.Copy(io.Discard, c.Request.Body)
+	}
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) || errors.Is(err, multipart.ErrMessageTooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "upload request too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart body"})
+		return
+	}
+	files := form.File["file"]
+	if len(files) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
+	file := files[0]
 
 	reader, err := file.Open()
 	if err != nil {

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"myai/core/contextmgr"
@@ -43,7 +44,7 @@ func summaryBatches(messages []domainmessage.Message, maxTokens int) ([]string, 
 				continue
 			}
 			entries = append(entries, entry)
-			text.WriteString(entry.header + entry.body + "\n\n")
+			text.WriteString(summaryEntryText(entry, entry.body, ""))
 		}
 		if text.Len() == 0 {
 			continue
@@ -124,20 +125,24 @@ func summaryEntryForMessage(message domainmessage.Message) (summaryEntry, bool) 
 	return summaryEntry{header: header, body: body, continuation: continuation.String()}, true
 }
 
+func summaryEntryText(entry summaryEntry, body, segment string) string {
+	return entry.header + segment + "content_json=" + strconv.Quote(body) + "\nend_history_entry\n\n"
+}
+
 func splitSummaryEntry(entry summaryEntry, maxTokens int) ([]string, error) {
-	full := entry.header + entry.body + "\n\n"
+	full := summaryEntryText(entry, entry.body, "")
 	if fitsSummaryBatch(full, maxTokens) {
 		return []string{full}, nil
 	}
 	var parts []string
 	runes := []rune(entry.body)
 	for segment := 1; len(runes) > 0; segment++ {
-		header := entry.header + entry.continuation + fmt.Sprintf("[segment %d of the same history entry]\n", segment)
+		header := entry.continuation + fmt.Sprintf("[segment %d of the same history entry]\n", segment)
 		// 3. 按 UTF-8 字符边界寻找可容纳的最长前缀；只移动游标，不删除中间内容。
 		low, high := 0, min(len(runes), maxTokens*4)
 		for low < high {
 			middle := low + (high-low+1)/2
-			if fitsSummaryBatch(header+string(runes[:middle])+"\n\n", maxTokens) {
+			if fitsSummaryBatch(summaryEntryText(entry, string(runes[:middle]), header), maxTokens) {
 				low = middle
 			} else {
 				high = middle - 1
@@ -146,13 +151,13 @@ func splitSummaryEntry(entry summaryEntry, maxTokens int) ([]string, error) {
 		if low == 0 {
 			return nil, errors.New("summary source metadata exceeds history budget")
 		}
-		parts = append(parts, header+string(runes[:low])+"\n\n")
+		parts = append(parts, summaryEntryText(entry, string(runes[:low]), header))
 		runes = runes[low:]
 	}
 	return parts, nil
 }
 
 func fitsSummaryBatch(text string, maxTokens int) bool {
-	// 4. token 估算忽略空白，额外限制字节数，防止大量空白绕过请求大小限制。
+	// Also bound encoded bytes; provider tokenizers and JSON escaping vary.
 	return len(text) <= maxTokens*4 && contextmgr.EstimateTextTokens(text) <= maxTokens
 }

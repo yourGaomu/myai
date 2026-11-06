@@ -46,17 +46,21 @@ type ChatService struct {
 	operationInit         sync.Once
 	operations            *sessionOperationCoordinator
 	pendingWakeMu         sync.Mutex
+	backgroundClosed      bool
+	backgroundWorkers     sync.WaitGroup
 	pendingWakes          map[string]*pendingWakeState
 	continuationMu        sync.Mutex
 	continuations         map[string]*continuationState
 	backgroundEventsMu    sync.Mutex
 	backgroundSubscribers map[chan BackgroundTurnEvent]struct{}
+	backgroundPending     map[string]*backgroundInteraction
 }
 
 type pendingWakeState struct {
 	// requested records an enqueue that happened while the worker was already
 	// running, so the worker gets another chance before it exits.
 	requested bool
+	cancel    context.CancelFunc
 }
 
 var ErrNoPendingParentInput = errors.New("no pending parent input")
@@ -87,6 +91,38 @@ type SessionPreferencesView struct {
 	Effective        generation.ResolvedSettings
 	StyleInstruction string
 	RAGSettings      session.RAGSettings
+}
+
+func (s *ChatService) FlushPersistence(ctx context.Context) error {
+	if s == nil || s.dependencies.FlushPersistence == nil {
+		return nil
+	}
+	return s.dependencies.FlushPersistence(ctx)
+}
+
+func (s *ChatService) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.pendingWakeMu.Lock()
+	s.backgroundClosed = true
+	for _, state := range s.pendingWakes {
+		if state.cancel != nil {
+			state.cancel()
+		}
+	}
+	s.pendingWakeMu.Unlock()
+	done := make(chan struct{})
+	go func() { s.backgroundWorkers.Wait(); close(done) }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return s.FlushPersistence(ctx)
+	}
 }
 
 func NewChatService(dependencies ChatDependencies) *ChatService {
@@ -203,6 +239,10 @@ func (s *ChatService) schedulePendingTurn(sessionID string) {
 		return
 	}
 	s.pendingWakeMu.Lock()
+	if s.backgroundClosed {
+		s.pendingWakeMu.Unlock()
+		return
+	}
 	if s.pendingWakes == nil {
 		s.pendingWakes = make(map[string]*pendingWakeState)
 	}
@@ -211,15 +251,24 @@ func (s *ChatService) schedulePendingTurn(sessionID string) {
 		s.pendingWakeMu.Unlock()
 		return
 	}
-	s.pendingWakes[sessionID] = &pendingWakeState{}
+	workerCtx, cancel := context.WithCancel(context.Background())
+	s.pendingWakes[sessionID] = &pendingWakeState{cancel: cancel}
+	s.backgroundWorkers.Add(1)
 	s.pendingWakeMu.Unlock()
-
-	go s.runPendingTurnWorker(sessionID)
+	go func() {
+		defer s.backgroundWorkers.Done()
+		defer cancel()
+		s.runPendingTurnWorkerContext(workerCtx, sessionID)
+	}()
 }
 
 func (s *ChatService) runPendingTurnWorker(sessionID string) {
+	s.runPendingTurnWorkerContext(context.Background(), sessionID)
+}
+
+func (s *ChatService) runPendingTurnWorkerContext(ctx context.Context, sessionID string) {
 	for {
-		_, err := s.continuePendingStreamForSession(context.Background(), sessionID, llm.ChatStreamHandler{}, true)
+		_, err := s.continuePendingStreamForSession(ctx, sessionID, llm.ChatStreamHandler{}, true)
 		if err != nil && !errors.Is(err, ErrNoPendingParentInput) && !errors.Is(err, ErrContinuationPaused) && !errors.Is(err, context.Canceled) {
 			if s.dependencies.OnPendingTurnError != nil {
 				s.dependencies.OnPendingTurnError(fmt.Errorf("wake parent session %s: %w", sessionID, err))
@@ -228,7 +277,7 @@ func (s *ChatService) runPendingTurnWorker(sessionID string) {
 
 		s.pendingWakeMu.Lock()
 		state := s.pendingWakes[sessionID]
-		if state == nil || !state.requested {
+		if s.backgroundClosed || ctx.Err() != nil || state == nil || !state.requested {
 			delete(s.pendingWakes, sessionID)
 			s.pendingWakeMu.Unlock()
 			return
@@ -305,6 +354,11 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 		// local so a classifier can never execute a nonexistent or completed plan.
 		autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
 		autoPlanAction = autoPlanDecision.Action
+		if autoPlanAction == AutoPlanActionPlanExecute {
+			// Planning decisions describe the work; execution requires a later
+			// explicit confirmation of the captured draft.
+			autoPlanAction = AutoPlanActionPlanOnly
+		}
 		if autoPlanAction == AutoPlanActionResumePlan && !hasExecutablePlan(currentBefore) {
 			// A classifier is advisory. Never execute a missing, completed, or
 			// otherwise non-executable plan based only on its response.
@@ -422,12 +476,7 @@ func (s *ChatService) generateAndExecutePlan(ctx context.Context, current *sessi
 func (s *ChatService) generatePlanOnly(ctx context.Context, current *session.Session, input string, title string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	planningSession := session.Clone(current)
 	planningSession.AgentMode = session.AgentModePlan
-	// The plan is delivered through OnPlanUpdate. Keeping the planning answer
-	// out of OnAnswer prevents it from being concatenated with the real step
-	// results in the single assistant response shown to the user.
-	planningStream := stream
-	planningStream.OnAnswer = nil
-	planning, err := s.generateAssistantForSession(ctx, planningSession, input, title, "autonomous planning", retrievalInfo, planningStream, true, false)
+	planning, err := s.generateAssistantForSession(ctx, planningSession, input, title, "autonomous planning", retrievalInfo, stream, true, false)
 	if err != nil {
 		return planning, err
 	}
@@ -691,7 +740,7 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 			turnStream := stream
 			var finish func(ChatResponse, error)
 			if background {
-				turnStream, finish = s.backgroundStreamForRequest(sessionID, item.ID)
+				turnStream, finish = s.backgroundStreamForContext(ctx, sessionID, "", item.ID)
 			}
 			queuedResponse, queuedErr := s.sendMessageLocked(ctx, sessionID, item.Content, turnStream, item.ID, domaingeneration.PendingTurnSourceUserMessage)
 			if finish != nil {
@@ -758,7 +807,7 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 	}
 	if background {
 		var completed func(ChatResponse, error)
-		stream, completed = s.backgroundStream(sessionID)
+		stream, completed = s.backgroundStreamForContext(ctx, sessionID, "", "")
 		defer func() { completed(response, resultErr) }()
 	}
 	response, err = s.generateAssistantForSession(
@@ -882,11 +931,8 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Stream:        stream,
 		CapturePlan:   capturePlan,
 		ForceChatMode: forceChatMode,
-		Internal:      reason == "autonomous planning" || reason == "recover plan",
+		Internal:      reason == "recover plan",
 	})
-	if err != nil {
-		return ChatResponse{}, err
-	}
 
 	return ChatResponse{
 		SessionID: response.SessionID,
@@ -896,7 +942,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Compact:   response.Compact,
 		Plan:      response.Plan,
 		Retrieval: retrievalInfo,
-	}, nil
+	}, err
 }
 
 func (s *ChatService) contextInfo(ctx context.Context, current *session.Session) ContextInfo {
@@ -1160,6 +1206,18 @@ func (s *ChatService) SetRAGSettingsForSession(ctx context.Context, sessionID st
 			SessionID: sessionID,
 			Settings:  settings,
 		})
+	})
+}
+
+func (s *ChatService) SetToolAllowlistForSession(ctx context.Context, sessionID string, allowed []string, enforce bool) error {
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		settings, ok := s.dependencies.SessionSettings.(interface {
+			SetToolAllowlist(context.Context, string, []string, bool) error
+		})
+		if !ok {
+			return errors.New("session settings do not support tool allowlists")
+		}
+		return settings.SetToolAllowlist(ctx, sessionID, allowed, enforce)
 	})
 }
 

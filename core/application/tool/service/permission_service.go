@@ -18,6 +18,9 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	// Hook 决策在本服务之前处理，任何 Hook 结果都不能提升会话权限。
 	permission := tooldef.NormalizePermission(command.Permission)
 	mode := session.NormalizePermissionMode(command.Mode)
+	if permission == tooldef.PermissionUnknown {
+		return toolresult.PermissionDecision{Message: fmt.Sprintf("permission denied: tool %s has an unknown permission declaration", command.Name)}
+	}
 	switch mode {
 	//拒绝写入、执行类工具
 	case session.PermissionModeReadonly:
@@ -38,6 +41,9 @@ func (PermissionService) Allow(command toolcommand.Permission) toolresult.Permis
 	//如果 Hook 明确要求确认
 	if command.RequireConfirmation {
 		return askForPermission(command, permission, mode, "hook requires confirmation")
+	}
+	if requiresExplicitApproval(command) {
+		return askForPermission(command, permission, mode, "protected path or external publication requires confirmation")
 	}
 	if permission == tooldef.PermissionRead {
 		return toolresult.PermissionDecision{Allowed: true}

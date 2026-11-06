@@ -1,6 +1,8 @@
 package urlConfig
 
 import (
+	"errors"
+	"myai-url-shortener/internal/shortener"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +17,8 @@ const (
 type Config struct {
 	Addr                string
 	BaseURL             string
+	APIKey              string
+	MaxUploadBytes      int64
 	DefaultTTL          time.Duration
 	StoreType           string
 	MongoURI            string
@@ -41,6 +45,19 @@ type Config struct {
 	ObjectURLTTL        time.Duration
 }
 
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.APIKey) == "" {
+		return errors.New("server.api_key (URL_SHORTENER_API_KEY) is required")
+	}
+	if strings.ContainsAny(c.APIKey, " \t\r\n") {
+		return errors.New("server.api_key (URL_SHORTENER_API_KEY) must not contain whitespace")
+	}
+	if c.MaxUploadBytes <= 0 {
+		return errors.New("server.max_upload_bytes (URL_SHORTENER_MAX_UPLOAD_BYTES) must be positive")
+	}
+	return nil
+}
+
 func ConfigFromEnv() Config {
 	return configFromViper(newViper())
 }
@@ -64,6 +81,7 @@ func DefaultConfig() Config {
 	return Config{
 		Addr:               addr,
 		BaseURL:            "http://localhost" + addr,
+		MaxUploadBytes:     shortener.DefaultMaxUploadBytes,
 		DefaultTTL:         24 * time.Hour,
 		StoreType:          "memory",
 		MongoURI:           "mongodb://localhost:27017",
@@ -96,6 +114,12 @@ func newViper() *viper.Viper {
 
 	bindEnv(v, "server.addr", "URL_SHORTENER_ADDR")
 	bindEnv(v, "server.base_url", "URL_SHORTENER_BASE_URL")
+	bindEnv(v, "server.api_key", "URL_SHORTENER_API_KEY")
+	// An explicitly empty key must override a file value and fail closed.
+	if value, set := os.LookupEnv("URL_SHORTENER_API_KEY"); set {
+		v.Set("server.api_key", value)
+	}
+	bindEnv(v, "server.max_upload_bytes", "URL_SHORTENER_MAX_UPLOAD_BYTES")
 	bindEnv(v, "server.default_ttl_seconds", "URL_SHORTENER_DEFAULT_TTL_SECONDS")
 	bindEnv(v, "store.type", "URL_SHORTENER_STORE")
 	bindEnv(v, "mongo.uri", "URL_SHORTENER_MONGO_URI")
@@ -163,6 +187,8 @@ func configFromViper(v *viper.Viper) Config {
 	config := Config{
 		Addr:                stringValue(v, "server.addr", defaults.Addr),
 		BaseURL:             stringValue(v, "server.base_url", defaults.BaseURL),
+		APIKey:              stringValue(v, "server.api_key", ""),
+		MaxUploadBytes:      int64Value(v, "server.max_upload_bytes", defaults.MaxUploadBytes),
 		DefaultTTL:          secondsValue(v, "server.default_ttl_seconds", defaults.DefaultTTL),
 		StoreType:           stringValue(v, "store.type", defaults.StoreType),
 		MongoURI:            stringValue(v, "mongo.uri", defaults.MongoURI),
@@ -208,6 +234,13 @@ func intValue(v *viper.Viper, key string, fallback int) int {
 		return fallback
 	}
 	return v.GetInt(key)
+}
+
+func int64Value(v *viper.Viper, key string, fallback int64) int64 {
+	if !v.IsSet(key) {
+		return fallback
+	}
+	return v.GetInt64(key)
 }
 
 func boolValue(v *viper.Viper, key string, fallback bool) bool {

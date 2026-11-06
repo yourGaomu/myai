@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"context"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"myai/core"
-	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	remoteagent "myai/core/remote/agent"
 	"myai/core/remote/changes"
 	"myai/core/remote/files"
@@ -27,20 +26,26 @@ var oneBotCmd = &cobra.Command{
 	Use:   "one-bot",
 	Short: "Start oneBot agent",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Agent 进程加载完整 AI 应用，并额外暴露当前 workspace 的文件与变更查询能力。
 		core.SetWorkspace(oneBotWorkspace)
 		core.InitApp()
-		defer func() { _ = core.GetApp().Close() }()
-
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
+		defer func() {
+			if err := core.GetApp().Close(); err != nil {
+				log.Printf("one-bot shutdown incomplete: %v", err)
+			}
+		}()
 
 		fileService, err := files.New(oneBotWorkspace)
 		if err != nil {
 			return err
 		}
 		//记录修改历史记录和git diff类似的功能
-		changeService, err := changes.NewWithStoreFactory(oneBotWorkspace, "", sqlitehistory.Factory{})
+		changeService, err := changes.NewWithStoreFactory(oneBotWorkspace, "", core.GetApp().HistoryStoreFactory())
 		if err != nil {
 			return err
 		}

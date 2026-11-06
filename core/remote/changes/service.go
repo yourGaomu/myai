@@ -14,10 +14,14 @@ import (
 
 type Service struct {
 	// Service 以 SQLite baseline 为参照提供 Changes 视图，不要求 workspace 必须是 Git 仓库。
-	root     string
-	store    historyport.Store
-	mu       sync.RWMutex
-	baseline map[string]snapshotEntry
+	root      string
+	files     *os.Root
+	store     historyport.Store
+	operation sync.Mutex
+	mu        sync.RWMutex
+	baseline  map[string]snapshotEntry
+	// renameFile permits deterministic filesystem failure tests.
+	renameFile func(*os.Root, string, string) error
 }
 
 func NewWithStoreFactory(root string, historyPath string, factory historyport.StoreFactory) (*Service, error) {
@@ -60,12 +64,18 @@ func NewWithStore(root string, store historyport.Store) (*Service, error) {
 }
 
 func newService(root string, store historyport.Store) (*Service, error) {
+	files, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
 	service := &Service{
 		root:     root,
+		files:    files,
 		store:    store,
 		baseline: make(map[string]snapshotEntry),
 	}
 	if err := service.loadOrCreateBaseline(context.Background()); err != nil {
+		_ = files.Close()
 		return nil, err
 	}
 	return service, nil
@@ -94,13 +104,28 @@ func normalizeRoot(root string) (string, error) {
 }
 
 func (s *Service) Close() error {
-	if s == nil || s.store == nil {
+	if s == nil {
 		return nil
 	}
-	return s.store.Close()
+	s.operation.Lock()
+	defer s.operation.Unlock()
+	var err error
+	if s.files != nil {
+		err = s.files.Close()
+	}
+	if s.store != nil {
+		err = errors.Join(err, s.store.Close())
+	}
+	return err
 }
 
 func (s *Service) Reset(ctx context.Context) error {
+	s.operation.Lock()
+	defer s.operation.Unlock()
+	return s.reset(ctx)
+}
+
+func (s *Service) reset(ctx context.Context) error {
 	snapshot, err := s.scan(ctx)
 	if err != nil {
 		return err

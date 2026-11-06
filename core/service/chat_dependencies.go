@@ -69,4 +69,5 @@ type ChatDependencies struct {
 	// The wakeup itself is best-effort; durable mailbox messages remain queued
 	// when generation fails and can be retried by a later event or recovery.
 	OnPendingTurnError func(error)
+	FlushPersistence   func(context.Context) error
 }

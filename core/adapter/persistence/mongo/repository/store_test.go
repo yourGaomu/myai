@@ -30,7 +30,7 @@ func TestStoreDelegatesSessionReadToTemplate(t *testing.T) {
 	}
 }
 
-func TestStoreDelegatesMessageInsertToTemplate(t *testing.T) {
+func TestStoreDelegatesImmutableMessageUpsertToTemplate(t *testing.T) {
 	operations := &fakeMongoOperations{}
 	store := NewWithTemplate(operations)
 	message := repository.MessageRecord{ID: "message-1", SessionID: "session-1"}
@@ -41,9 +41,14 @@ func TestStoreDelegatesMessageInsertToTemplate(t *testing.T) {
 	if operations.collection != messagesCollection {
 		t.Fatalf("expected messages collection, got %q", operations.collection)
 	}
-	inserted, ok := operations.document.(po.MessageDocument)
-	if !ok || inserted.ID != "message-1" {
-		t.Fatalf("unexpected inserted document: %#v", operations.document)
+	update := operations.update.(bson.M)
+	inserted, ok := update["$setOnInsert"].(po.MessageDocument)
+	if !ok || inserted.ID != "message-1" || update["$set"] != nil {
+		t.Fatalf("unexpected immutable upsert: %#v", operations.update)
+	}
+	filter := operations.filter.(bson.M)
+	if filter["_id"] != message.ID || filter["session_id"] != message.SessionID {
+		t.Fatalf("immutable identity filter missing: %#v", filter)
 	}
 }
 
@@ -96,6 +101,9 @@ func TestStoreRequiresFullSyncWhenMessageCursorIsMissing(t *testing.T) {
 type fakeMongoOperations struct {
 	collection    string
 	document      any
+	filter        any
+	update        any
+	updateErr     error
 	session       po.SessionDocument
 	sessions      []po.SessionDocument
 	message       po.MessageDocument
@@ -141,8 +149,9 @@ func (f *fakeMongoOperations) FindAll(_ context.Context, collection string, filt
 	return nil
 }
 
-func (f *fakeMongoOperations) UpdateOne(context.Context, string, any, any, ...options.Lister[options.UpdateOneOptions]) (*gomongo.UpdateResult, error) {
-	return &gomongo.UpdateResult{}, nil
+func (f *fakeMongoOperations) UpdateOne(_ context.Context, collection string, filter, update any, _ ...options.Lister[options.UpdateOneOptions]) (*gomongo.UpdateResult, error) {
+	f.collection, f.filter, f.update = collection, filter, update
+	return &gomongo.UpdateResult{}, f.updateErr
 }
 
 func (f *fakeMongoOperations) UpdateMany(context.Context, string, any, any, ...options.Lister[options.UpdateManyOptions]) (*gomongo.UpdateResult, error) {

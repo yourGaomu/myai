@@ -73,8 +73,8 @@ func TestResponseCommitServiceCapturesPlanInPlanMode(t *testing.T) {
 	if result.Plan == nil || result.Plan.ID != "plan-1" {
 		t.Fatalf("expected captured plan, got %#v", result.Plan)
 	}
-	if current.CurrentPlan == nil || current.CurrentPlan.ID != "plan-1" {
-		t.Fatalf("expected current session plan to be updated, got %#v", current.CurrentPlan)
+	if current.CurrentPlan != nil {
+		t.Fatal("commit mutated the input snapshot")
 	}
 	if memory.plan == nil || memory.plan.ID != "plan-1" {
 		t.Fatalf("expected plan to be persisted to memory store, got %#v", memory.plan)

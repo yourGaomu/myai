@@ -80,10 +80,12 @@ export function MobileAppScreen() {
   } = useMobileUiState();
   const handleTokenRestored = useCallback(() => setStatus("Paired"), [setStatus]);
   const {
+    assetAPIKey,
     assetBaseURL,
     clientToken,
     deviceID,
     relayURL,
+    setAssetAPIKey,
     setAssetBaseURL,
     setClientToken,
     setDeviceID,
@@ -547,6 +549,7 @@ export function MobileAppScreen() {
     uploadDocument,
   } = useKnowledgeActions({
     activeKnowledgeBase,
+    assetAPIKey,
     assetBaseURL,
     clientToken,
     onError: (message) => addMessage(sessionID, "error", message),
@@ -609,6 +612,7 @@ export function MobileAppScreen() {
     uploadLocalFile,
   } = useFileActions({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
+    assetAPIKey,
     assetBaseURL,
     attachedFiles,
     changeDiffPath: changeDiff?.path,
@@ -1401,6 +1405,7 @@ export function MobileAppScreen() {
           onSelectSection: setSettingsSection,
           activeModel,
           activeSession,
+          assetAPIKey,
           assetBaseURL,
           bindCode,
           compact: sessionCompacts[sessionID],
@@ -1470,6 +1475,7 @@ export function MobileAppScreen() {
           mcpReloading: pendingActions.mcp,
           mcpMessage,
           onSetPluginEnabled: setPluginEnabled,
+          onAssetAPIKeyChange: setAssetAPIKey,
           onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,
           onSetAgentMode: setAgentMode,

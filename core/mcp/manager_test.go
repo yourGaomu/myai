@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 func TestOptionalReloadFailurePreservesCallableOldSnapshot(t *testing.T) {
-	t.Setenv("MYAI_MCP_TEST_HELPER", "1")
 	registry := tool.NewRegisterTools()
-	config := Config{Servers: []ServerConfig{{Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5}}}
+	config := Config{Servers: []ServerConfig{{Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5,
+		Env: map[string]string{"MYAI_MCP_TEST_HELPER": "1"}, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}
 	manager := NewManager(config)
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
 		t.Fatal(err)
@@ -25,7 +26,7 @@ func TestOptionalReloadFailurePreservesCallableOldSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broken := Config{Servers: []ServerConfig{{Name: "first", Command: filepath.Join(t.TempDir(), "missing")}}}
+	broken := Config{Servers: []ServerConfig{{Name: "first", Command: filepath.Join(t.TempDir(), "missing"), Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}
 	if err := manager.Reload(context.Background(), broken, registry); err == nil {
 		t.Fatal("optional reload failure was swallowed")
 	}
@@ -57,11 +58,12 @@ func TestMCPRejectsDuplicateNames(t *testing.T) {
 }
 
 func TestManagerRollsBackEarlierServersWhenRequiredServerFails(t *testing.T) {
-	t.Setenv("MYAI_MCP_TEST_HELPER", "1")
 	registry := tool.NewRegisterTools()
 	manager := NewManager(Config{Servers: []ServerConfig{
-		{Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5},
-		{Name: "required", Command: filepath.Join(t.TempDir(), "missing-mcp-server"), Required: true, TimeoutSeconds: 1},
+		{Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5,
+			Env: map[string]string{"MYAI_MCP_TEST_HELPER": "1"}, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()},
+		{Name: "required", Command: filepath.Join(t.TempDir(), "missing-mcp-server"), Required: true, TimeoutSeconds: 1,
+			Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()},
 	}})
 
 	if err := manager.RegisterAll(context.Background(), registry); err == nil {
@@ -76,10 +78,10 @@ func TestManagerRollsBackEarlierServersWhenRequiredServerFails(t *testing.T) {
 }
 
 func TestManagerCloseUnregistersTools(t *testing.T) {
-	t.Setenv("MYAI_MCP_TEST_HELPER", "1")
 	registry := tool.NewRegisterTools()
 	manager := NewManager(Config{Servers: []ServerConfig{{
 		Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5,
+		Env: map[string]string{"MYAI_MCP_TEST_HELPER": "1"}, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(),
 	}}})
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
 		t.Fatal(err)
@@ -96,10 +98,10 @@ func TestManagerCloseUnregistersTools(t *testing.T) {
 }
 
 func TestManagerReloadKeepsPreviousRuntimeWhenRequiredCandidateFails(t *testing.T) {
-	t.Setenv("MYAI_MCP_TEST_HELPER", "1")
 	registry := tool.NewRegisterTools()
 	manager := NewManager(Config{Servers: []ServerConfig{{
 		Name: "first", Command: os.Args[0], Args: []string{"-test.run=TestMCPHelperProcess"}, TimeoutSeconds: 5,
+		Env: map[string]string{"MYAI_MCP_TEST_HELPER": "1"}, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(),
 	}}})
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
 		t.Fatal(err)
@@ -109,7 +111,8 @@ func TestManagerReloadKeepsPreviousRuntimeWhenRequiredCandidateFails(t *testing.
 	}
 
 	err := manager.Reload(context.Background(), Config{Servers: []ServerConfig{
-		{Name: "first", Command: filepath.Join(t.TempDir(), "missing-mcp-server"), Required: true, TimeoutSeconds: 1},
+		{Name: "first", Command: filepath.Join(t.TempDir(), "missing-mcp-server"), Required: true, TimeoutSeconds: 1,
+			Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()},
 	}}, registry)
 	if err == nil {
 		t.Fatal("expected reload failure")

@@ -33,19 +33,54 @@ type UserInteraction interface {
 	RequiresUserInteraction() bool
 }
 
+// SandboxedShell attests that this shell invocation will use an OS sandbox.
+// A copied workspace or a nonempty workspace identifier is not sufficient.
+type SandboxedShell interface {
+	IsSandboxedShell(context.Context) bool
+}
+
 type Permission string
 
 const (
 	PermissionRead    Permission = "read"
 	PermissionWrite   Permission = "write"
 	PermissionExecute Permission = "execute"
+	PermissionUnknown Permission = "unknown"
 )
 
+// NormalizePermission accepts only explicitly declared capabilities. Unknown or
+// missing declarations must never acquire read access through normalization.
 func NormalizePermission(permission Permission) Permission {
 	switch permission {
-	case PermissionWrite, PermissionExecute:
+	case PermissionRead, PermissionWrite, PermissionExecute:
 		return permission
 	default:
-		return PermissionRead
+		return PermissionUnknown
 	}
+}
+
+// PermissionAllowsCeiling distinguishes an unrestricted nil ceiling from an
+// explicitly empty ceiling that denies every capability.
+func PermissionAllowsCeiling(permission Permission, ceiling []Permission) bool {
+	permission = NormalizePermission(permission)
+	if permission == PermissionUnknown {
+		return false
+	}
+	if ceiling == nil {
+		return true
+	}
+	for _, allowed := range ceiling {
+		if allowed == permission {
+			return true
+		}
+	}
+	return false
+}
+
+// ClonePermissionCeiling preserves nil versus an explicit empty deny-all set.
+func ClonePermissionCeiling(ceiling []Permission) []Permission {
+	if ceiling == nil {
+		return nil
+	}
+	return append([]Permission{}, ceiling...)
 }

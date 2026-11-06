@@ -16,6 +16,8 @@ type Config struct {
 	ModelName                 string
 	Enabled                   bool
 	IsDefault                 bool
+	ContextWindowTokens       int
+	MaxOutputTokens           int
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
 	DefaultGenerationSettings generation.Settings

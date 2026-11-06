@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestConfiguredRelayAgentCredentialsBindsEveryTokenToAnIdentity(t *testing.T) {
 	previousToken := relayAgentToken
@@ -53,6 +56,22 @@ func TestConfiguredRelayAgentCredentialsRejectsDuplicateIdentity(t *testing.T) {
 
 	if _, err := configuredRelayAgentCredentials(); err == nil {
 		t.Fatal("expected duplicate identity to be rejected")
+	}
+}
+
+func TestConfiguredRelayAgentCredentialsRejectsExampleToken(t *testing.T) {
+	previousToken, previousUser, previousDevice, previousCredentials := relayAgentToken, relayAgentUser, relayAgentDevice, relayCredentials
+	t.Cleanup(func() {
+		relayAgentToken, relayAgentUser, relayAgentDevice, relayCredentials = previousToken, previousUser, previousDevice, previousCredentials
+	})
+	relayAgentToken = "replace-with-a-long-random-token"
+	relayAgentUser, relayAgentDevice, relayCredentials = "local", "pc-local", nil
+	_, err := configuredRelayAgentCredentials()
+	if err == nil {
+		t.Fatal("example token must be rejected before relay startup")
+	}
+	if strings.Contains(err.Error(), relayAgentToken) {
+		t.Fatal("validation error must not include the token")
 	}
 }
 
