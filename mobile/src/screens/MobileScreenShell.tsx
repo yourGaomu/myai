@@ -9,17 +9,12 @@ type Props = {
   bottomDock: ReactNode;
   bottomSafePadding: number;
   children: ReactNode;
+  // 顶栏固定在滚动区外面，自己处理状态栏安全区
+  header: ReactNode;
   scrollEnabled?: boolean;
-  topSafePadding: number;
 };
 
-export function MobileScreenShell({
-  bottomDock,
-  bottomSafePadding,
-  children,
-  scrollEnabled = true,
-  topSafePadding,
-}: Props) {
+export function MobileScreenShell({ bottomDock, bottomSafePadding, children, header, scrollEnabled = true }: Props) {
   useEffect(() => {
     if (Platform.OS === "web" && typeof document !== "undefined") {
       document.body.style.backgroundColor = palette.canvas;
@@ -34,40 +29,20 @@ export function MobileScreenShell({
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >
-        <View style={styles.screen}>
-          {/* 顶部品牌环境光：纯装饰，不参与布局与交互 */}
-          <View pointerEvents="none" style={styles.brandGlow} />
-          {scrollEnabled ? (
-            <ScrollView
-              contentContainerStyle={[
-                styles.content,
-                {
-                  paddingTop: topSafePadding,
-                  paddingBottom: bottomSafePadding + 20,
-                },
-              ]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              style={styles.scrollArea}
-            >
-              {children}
-            </ScrollView>
-          ) : (
-            <View
-              style={[
-                styles.content,
-                styles.fixedContent,
-                {
-                  paddingTop: topSafePadding,
-                  paddingBottom: 2,
-                },
-              ]}
-            >
-              {children}
-            </View>
-          )}
-          {bottomDock}
-        </View>
+        {header}
+        {scrollEnabled ? (
+          <ScrollView
+            contentContainerStyle={[styles.content, { paddingBottom: bottomSafePadding + 20 }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={styles.scrollArea}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={[styles.content, styles.fixedContent]}>{children}</View>
+        )}
+        {bottomDock}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -75,30 +50,11 @@ export function MobileScreenShell({
 
 const styles = StyleSheet.create({
   safe: {
-    flex: 1,
     backgroundColor: palette.canvas,
+    flex: 1,
   },
   keyboard: {
     flex: 1,
-  },
-  screen: {
-    flex: 1,
-  },
-  // RN 无 radial-gradient，用一个大圆 + 品牌色柔光模拟顶部环境光
-  brandGlow: {
-    position: "absolute",
-    top: -140,
-    alignSelf: "center",
-    width: 360,
-    height: 300,
-    borderRadius: 180, // = width/2，用于画正圆，非设计 token
-    backgroundColor: palette.ambientGlow,
-    shadowColor: palette.brand,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 90,
-    opacity: 0.5,
-    zIndex: 0,
   },
   scrollArea: {
     flex: 1,
@@ -106,6 +62,7 @@ const styles = StyleSheet.create({
   content: {
     gap: space.lg,
     paddingHorizontal: space.xl,
+    paddingTop: 4,
   },
   fixedContent: {
     flex: 1,

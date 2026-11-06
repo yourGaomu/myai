@@ -1,310 +1,248 @@
+import { useState } from "react";
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
 
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { attachmentKey, attachmentTitle, isImageAttachment, isUploadedAssetAttachment } from "../../utils/attachments";
-import { font, glass, palette, radius, shadow, space, weight } from "../../constants/theme";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { BottomSheet } from "../common/BottomSheet";
 
 type Props = {
   attachedFiles: ChatAttachment[];
   buttonFeedback: ButtonFeedback;
   canPause: boolean;
   messageInput: string;
+  modelLabel: string;
+  onBrowseWorkspace: () => void;
   onChangeMessage: (value: string) => void;
   onFocus?: () => void;
+  onOpenPermission?: () => void;
+  onOpenSession: () => void;
   onPause: () => void;
   onRemoveAttachedFile: (key: string) => void;
   onSend: () => void;
+  onTogglePlan: () => void;
   onUploadFile: () => void;
   pendingPause: boolean;
   pendingSend: boolean;
   pendingUpload: boolean;
+  permissionSummary?: string;
+  planMode: boolean;
+  planPending: boolean;
 };
 
-export function Composer({
-  attachedFiles,
-  buttonFeedback,
-  canPause,
-  messageInput,
-  onChangeMessage,
-  onFocus,
-  onPause,
-  onRemoveAttachedFile,
-  onSend,
-  onUploadFile,
-  pendingPause,
-  pendingSend,
-  pendingUpload,
-}: Props) {
-  const isBusy = pendingSend || canPause || pendingPause;
-  const showPauseButton = canPause || pendingPause;
+// 输入区：上面是输入框，下面一排是附件、规划开关、模型和发送/停止。
+export function Composer(props: Props) {
+  const { attachedFiles, canPause, messageInput, pendingPause, pendingSend, pendingUpload, planMode } = props;
+  const [focused, setFocused] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const busy = pendingSend || canPause || pendingPause;
+  const showStop = canPause || pendingPause;
+  const ready = !busy && (messageInput.trim() !== "" || attachedFiles.length > 0);
+  const placeholder = busy ? "MyAI 正在执行…" : planMode ? "描述目标，MyAI 会先给出计划" : "输入需求，MyAI 会在电脑上执行";
 
   return (
-    <View style={styles.composerWrapper}>
-      {/* 悬浮附件预览条 / 暂留区 */}
-      {attachedFiles.length > 0 || pendingUpload ? (
-        <ScrollView
-          contentContainerStyle={styles.attachmentTray}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-        >
-          {attachedFiles.map((file) => {
-            const isImg = isImageAttachment(file);
-            const imageUri = isUploadedAssetAttachment(file) ? file.local_uri || file.short_url : undefined;
-            return (
-              <View
-                key={attachmentKey(file)}
-                style={[
-                  styles.attachmentChip,
-                  isUploadedAssetAttachment(file) && styles.uploadedAttachmentChip,
-                  isImg && styles.imageAttachmentChip,
-                ]}
-              >
-                {isImg && imageUri ? (
-                  <Image
-                    resizeMode="cover"
-                    source={{ uri: imageUri }}
-                    style={styles.attachmentThumbnail}
-                  />
-                ) : (
-                  <Feather color={palette.ink3} name="file-text" size={14} />
-                )}
-                <View style={styles.attachmentInfo}>
-                  <Text numberOfLines={1} style={styles.attachmentTitle}>
-                    {attachmentTitle(file)}
-                  </Text>
-                  {isImg ? (
-                    <Text style={styles.attachmentSubtext}>图片附件</Text>
-                  ) : null}
-                </View>
-                <Pressable
-                  accessibilityLabel="移除附件"
-                  onPress={() => onRemoveAttachedFile(attachmentKey(file))}
-                  style={({ pressed }) => buttonFeedback(styles.attachmentRemove, pressed)}
-                >
-                  <Feather color={palette.err} name="x" size={12} />
-                </Pressable>
-              </View>
-            );
-          })}
-          {pendingUpload ? (
-            <View style={[styles.attachmentChip, styles.uploadingChip]}>
-              <ActivityIndicator color={palette.brand} size="small" />
-              <Text style={styles.uploadingText}>正在上传文件...</Text>
-            </View>
-          ) : null}
-        </ScrollView>
+    <View style={styles.wrap}>
+      {props.permissionSummary ? (
+        <Pressable accessibilityRole="button" onPress={props.onOpenPermission} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
+          <Feather color={palette.warn} name="shield" size={16} />
+          <Text numberOfLines={1} style={styles.pillText}>等待确认：{props.permissionSummary}</Text>
+          <Text style={styles.pillLink}>查看</Text>
+        </Pressable>
       ) : null}
 
-      {/* 单行玻璃输入胶囊 */}
-      <BlurView intensity={glass.intensity} style={styles.composerBox} tint="dark">
-        {/* 左侧上传附件按钮：无背景无边框，只是一个图标 */}
-        <Pressable
-          accessibilityLabel="附加文件"
-          disabled={pendingUpload}
-          onPress={onUploadFile}
-          style={({ pressed }) =>
-            buttonFeedback([styles.iconButton, pendingUpload && styles.disabledBtn], pressed)
-          }
-        >
-          {pendingUpload ? (
-            <ActivityIndicator color={palette.brand} size="small" />
-          ) : (
-            <Feather color={palette.ink3} name="paperclip" size={19} />
-          )}
-        </Pressable>
+      <View style={[styles.box, focused && styles.boxFocused]}>
+        {attachedFiles.length > 0 || pendingUpload ? (
+          <ScrollView contentContainerStyle={styles.tray} horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
+            {attachedFiles.map((file) => {
+              const imageUri = isUploadedAssetAttachment(file) ? file.local_uri || file.short_url : undefined;
+              return (
+                <View key={attachmentKey(file)} style={styles.chip}>
+                  {isImageAttachment(file) && imageUri ? (
+                    <Image resizeMode="cover" source={{ uri: imageUri }} style={styles.thumb} />
+                  ) : (
+                    <Feather color={palette.ink2} name="file-text" size={14} />
+                  )}
+                  <Text numberOfLines={1} style={styles.chipText}>{attachmentTitle(file)}</Text>
+                  <Pressable accessibilityLabel="移除附件" hitSlop={6} onPress={() => props.onRemoveAttachedFile(attachmentKey(file))} style={styles.chipRemove}>
+                    <Feather color={palette.ink3} name="x" size={14} />
+                  </Pressable>
+                </View>
+              );
+            })}
+            {pendingUpload ? (
+              <View style={styles.chip}>
+                <ActivityIndicator color={palette.brand} size="small" />
+                <Text style={styles.chipText}>正在上传…</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+        ) : null}
 
-        {/* 中间输入框 */}
         <TextInput
           accessibilityLabel="输入需求"
           multiline
-          onChangeText={onChangeMessage}
-          onFocus={onFocus}
+          onBlur={() => setFocused(false)}
+          onChangeText={props.onChangeMessage}
+          onFocus={() => {
+            setFocused(true);
+            props.onFocus?.();
+          }}
           onKeyPress={(e: any) => {
-            if (
-              Platform.OS === "web" &&
-              e.nativeEvent.key === "Enter" &&
-              !e.nativeEvent.shiftKey
-            ) {
+            if (Platform.OS === "web" && e.nativeEvent.key === "Enter" && !e.nativeEvent.shiftKey) {
               e.preventDefault();
-              if (!isBusy && (messageInput.trim() || attachedFiles.length > 0)) {
-                onSend();
-              }
+              if (ready) props.onSend();
             }
           }}
-          placeholder="输入需求，AI 将控制电脑执行…"
+          placeholder={placeholder}
           placeholderTextColor={palette.ink4}
           style={styles.input}
           value={messageInput}
         />
 
-        {/* 右侧动作按钮：空闲为箭头发送，执行中为方形暂停 */}
-        {showPauseButton ? (
-          <Pressable
-            accessibilityLabel="暂停任务"
-            disabled={pendingPause}
-            onPress={onPause}
-            style={({ pressed }) =>
-              buttonFeedback(
-                [styles.actionBtn, styles.pauseBtn, pendingPause && styles.disabledBtn],
-                pressed,
-              )
-            }
-          >
-            {pendingPause ? (
-              <ActivityIndicator color={palette.err} size="small" />
-            ) : (
-              <Feather color={palette.err} name="square" size={13} />
-            )}
+        <View style={styles.toolbar}>
+          <Pressable accessibilityLabel="添加附件" disabled={pendingUpload} onPress={() => setAttachOpen(true)} style={({ pressed }) => [styles.toolButton, pressed && styles.pressed]}>
+            <Feather color={palette.ink2} name="plus" size={20} />
           </Pressable>
-        ) : (
           <Pressable
-            accessibilityLabel="发送需求"
-            disabled={isBusy}
-            onPress={onSend}
-            style={({ pressed }) => buttonFeedback([isBusy && styles.disabledBtn], pressed)}
+            accessibilityLabel="规划模式"
+            accessibilityState={{ selected: planMode, disabled: props.planPending }}
+            disabled={props.planPending}
+            onPress={props.onTogglePlan}
+            style={({ pressed }) => [styles.chipButton, planMode && styles.chipButtonOn, pressed && styles.pressed, props.planPending && styles.dimmed]}
           >
-            <LinearGradient
-              colors={[palette.brandLight, palette.brandDeep]}
-              end={{ x: 1, y: 1 }}
-              start={{ x: 0.15, y: 0 }}
-              style={styles.sendBtn}
-            >
-              <Feather color={palette.inkInverse} name="arrow-up" size={15} strokeWidth={2.6} />
-            </LinearGradient>
+            <Feather color={planMode ? palette.brandLight : palette.ink2} name="list" size={15} />
+            <Text style={[styles.chipButtonText, planMode && styles.chipButtonTextOn]}>规划</Text>
           </Pressable>
-        )}
-      </BlurView>
+          <Pressable accessibilityLabel="会话设置" onPress={props.onOpenSession} style={({ pressed }) => [styles.chipButton, styles.modelChip, pressed && styles.pressed]}>
+            <Text numberOfLines={1} style={[styles.chipButtonText, styles.modelText]}>{props.modelLabel}</Text>
+            <Feather color={palette.ink4} name="chevron-down" size={13} />
+          </Pressable>
+          <View style={styles.spacer} />
+          {showStop ? (
+            <Pressable accessibilityLabel="停止" disabled={pendingPause} onPress={props.onPause} style={({ pressed }) => [styles.send, styles.sendStop, pressed && styles.pressed]}>
+              {pendingPause ? <ActivityIndicator color={palette.canvas} size="small" /> : <View style={styles.stopSquare} />}
+            </Pressable>
+          ) : (
+            <Pressable accessibilityLabel="发送" disabled={!ready} onPress={props.onSend} style={({ pressed }) => [styles.send, ready && styles.sendReady, pressed && styles.pressed]}>
+              <Feather color={ready ? palette.inkInverse : palette.ink4} name="arrow-up" size={19} />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      <BottomSheet accessibilityLabel="添加附件" onDismiss={() => setAttachOpen(false)} visible={attachOpen}>
+        <Text style={styles.sheetTitle}>添加附件</Text>
+        {[
+          { icon: "image" as const, label: "从手机上传", sub: "图片、文档等文件，上传后作为附件发送", onPress: props.onUploadFile },
+          { icon: "folder" as const, label: "从工作区选择", sub: "浏览电脑上的项目文件并添加到对话", onPress: props.onBrowseWorkspace },
+        ].map((item) => (
+          <Pressable
+            accessibilityRole="button"
+            key={item.label}
+            onPress={() => {
+              setAttachOpen(false);
+              item.onPress();
+            }}
+            style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+          >
+            <View style={styles.sheetIcon}>
+              <Feather color={palette.ink1} name={item.icon} size={19} />
+            </View>
+            <View style={styles.sheetTextBlock}>
+              <Text style={styles.sheetRowTitle}>{item.label}</Text>
+              <Text style={styles.sheetRowSub}>{item.sub}</Text>
+            </View>
+          </Pressable>
+        ))}
+      </BottomSheet>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  composerWrapper: {
-    gap: space.md,
-    width: "100%",
-  },
-  attachmentTray: {
-    flexDirection: "row",
-    gap: space.sm,
-    paddingBottom: 2,
-  },
-  attachmentChip: {
+  wrap: { gap: 8, width: "100%" },
+  pressed: { opacity: 0.75 },
+  dimmed: { opacity: 0.5 },
+  pill: {
     alignItems: "center",
     backgroundColor: palette.surface2,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.md,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    ...shadow.card,
-  },
-  uploadedAttachmentChip: {
-    backgroundColor: palette.okWash,
-    borderColor: palette.okBorder,
-  },
-  imageAttachmentChip: {
-    backgroundColor: palette.surface3,
-    gap: 7,
-    paddingLeft: space.xs,
-  },
-  attachmentThumbnail: {
-    backgroundColor: palette.surface4,
-    borderRadius: radius.xs,
-    height: 28,
-    width: 28,
-  },
-  attachmentInfo: {
-    justifyContent: "center",
-    maxWidth: 140,
-  },
-  attachmentSubtext: {
-    color: palette.ok,
-    fontSize: font.micro,
-    fontWeight: weight.medium,
-    marginTop: 1,
-  },
-  uploadingChip: {
-    borderStyle: "dashed",
-    paddingHorizontal: space.lg,
-  },
-  uploadingText: {
-    color: palette.brand,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-    marginLeft: 3,
-  },
-  attachmentTitle: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-    maxWidth: 160,
-  },
-  attachmentRemove: {
-    paddingHorizontal: 2,
-  },
-  composerBox: {
-    alignItems: "flex-end",
-    backgroundColor: palette.glassTintStrong,
-    borderColor: palette.glassEdge,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 7,
-    overflow: "hidden",
-    paddingBottom: 7,
-    paddingLeft: 9,
-    paddingRight: 7,
-    paddingTop: 7,
-    width: "100%",
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
     ...shadow.float,
   },
-  iconButton: {
-    alignItems: "center",
-    height: 30,
-    justifyContent: "center",
-    width: 30,
-  },
-  input: {
-    backgroundColor: palette.transparent,
-    color: palette.ink1,
-    flex: 1,
-    fontSize: font.body,
-    fontWeight: weight.regular,
-    includeFontPadding: false,
-    lineHeight: 20,
-    maxHeight: 88,
-    minHeight: 30,
-    paddingHorizontal: 0,
-    paddingVertical: Platform.OS === "ios" ? 6 : 3,
-    textAlignVertical: "center",
-  },
-  actionBtn: {
-    alignItems: "center",
-    borderRadius: 15,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
-  },
-  sendBtn: {
-    alignItems: "center",
-    borderRadius: 15,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
-    ...shadow.brandGlow,
-  },
-  pauseBtn: {
-    backgroundColor: palette.errWash,
-    borderColor: palette.errBorder,
+  pillText: { color: palette.ink1, flex: 1, fontSize: font.label },
+  pillLink: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.semibold },
+  box: {
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.xxl,
     borderWidth: 1,
+    paddingBottom: 8,
+    paddingLeft: 14,
+    paddingRight: 8,
+    paddingTop: 10,
+    ...shadow.float,
   },
-  disabledBtn: {
-    opacity: 0.5,
+  boxFocused: { borderColor: palette.brandDeep },
+  tray: { gap: 6, paddingBottom: 8, paddingRight: 6 },
+  chip: {
+    alignItems: "center",
+    backgroundColor: palette.well,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: 6,
+    height: 32,
+    paddingLeft: 10,
+    paddingRight: 4,
   },
+  thumb: { borderRadius: radius.xxs, height: 22, width: 22 },
+  chipText: { color: palette.ink1, fontSize: font.caption, maxWidth: 160 },
+  chipRemove: { alignItems: "center", height: 28, justifyContent: "center", width: 28 },
+  input: {
+    color: palette.ink1,
+    fontSize: font.reading,
+    includeFontPadding: false,
+    lineHeight: 24,
+    maxHeight: 120,
+    minHeight: 26,
+    paddingHorizontal: 0,
+    paddingRight: 6,
+    paddingVertical: Platform.OS === "ios" ? 2 : 0,
+    textAlignVertical: "top",
+  },
+  toolbar: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 8 },
+  toolButton: { alignItems: "center", borderRadius: radius.pill, height: 36, justifyContent: "center", width: 36 },
+  chipButton: {
+    alignItems: "center",
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
+    height: 32,
+    paddingHorizontal: 11,
+  },
+  chipButtonOn: { backgroundColor: palette.brandWash, borderColor: palette.brandDeep },
+  chipButtonText: { color: palette.ink2, fontSize: font.caption + 0.5 },
+  chipButtonTextOn: { color: palette.brandLight },
+  modelChip: { flexShrink: 1, minWidth: 0 },
+  modelText: { flexShrink: 1 },
+  spacer: { flex: 1 },
+  send: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
+  sendReady: { backgroundColor: palette.brand },
+  sendStop: { backgroundColor: palette.ink1 },
+  stopSquare: { backgroundColor: palette.canvas, borderRadius: 3, height: 12, width: 12 },
+  sheetTitle: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold, marginBottom: 8 },
+  sheetRow: { alignItems: "center", borderRadius: radius.md, flexDirection: "row", gap: 14, minHeight: 64, paddingHorizontal: 4 },
+  sheetIcon: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md - 2, height: 42, justifyContent: "center", width: 42 },
+  sheetTextBlock: { flex: 1 },
+  sheetRowTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.medium },
+  sheetRowSub: { color: palette.ink3, fontSize: font.caption, marginTop: 2 },
 });

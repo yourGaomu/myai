@@ -44,6 +44,7 @@ import type { ChatItem } from "../types/chat";
 import type { KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
+import type { SettingsSection } from "../components/settings/SettingsHome";
 
 export type MainContentCommonProps = {
   buttonFeedback: ButtonFeedback;
@@ -53,6 +54,8 @@ export type MainContentCommonProps = {
 };
 
 export type SettingsContentProps = {
+  activeSection: SettingsSection | null;
+  onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
   assetBaseURL: string;
@@ -171,6 +174,12 @@ export type PlanContentProps = {
 export type ChatContentProps = {
   activeAssistantID: string;
   chatScrollRef: RefObject<ScrollView | null>;
+  connected: boolean;
+  deviceID: string;
+  greetingName: string;
+  onOpenChanges: () => void;
+  onPickSuggestion: (text: string) => void;
+  onScrolledChange: (scrolled: boolean) => void;
   messages: ChatItem[];
   runs: AgentRunSnapshot[];
   onRegenerate: () => void;
@@ -187,12 +196,9 @@ export type FilesContentProps = {
   fileParent: string;
   filePath: string;
   filePreview: FileReadResultPayload | null;
-  filePreviewAttached: boolean;
-  onAttachFilePreview: () => void;
   onGoToParent: () => void;
   onOpenFileEntry: (entry: FileEntry) => void;
-  onRefreshAssets: () => void;
-  onRefreshFiles: () => void;
+  previewOpen: boolean;
 };
 
 export type ChangesContentProps = {

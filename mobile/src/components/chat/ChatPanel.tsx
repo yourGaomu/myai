@@ -17,14 +17,18 @@ import { buildChatTurns, groupToolActivity, type ChatRenderItem } from "../../ut
 import { AgentRunTimeline } from "./AgentRunTimeline";
 import { AgentTurnCard } from "./AgentTurnCard";
 import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
+import { ChatEmptyState } from "./ChatEmptyState";
 import { ChatJumpNav, type ChatJumpAnchor } from "./ChatJumpNav";
 import { MessageBubble } from "./MessageBubble";
 import { ToolActivityGroup } from "./ToolActivityGroup";
-import { font, palette, radius, shadow, space, weight } from "../../constants/theme";
+import { font, palette, space } from "../../constants/theme";
 
 type Props = {
   activeAssistantID: string;
   buttonFeedback: ButtonFeedback;
+  connected: boolean;
+  deviceID: string;
+  greetingName: string;
   chatScrollRef: RefObject<ScrollView | null>;
   loadingHistory: boolean;
   messages: ChatItem[];
@@ -33,13 +37,19 @@ type Props = {
   sessionID: string;
   subagentTasks?: SubagentTask[];
   onInspectSubagent?: (taskID: string) => void;
+  onOpenChanges?: () => void;
+  onPickSuggestion: (text: string) => void;
   onRegenerate: () => void;
+  onScrolledChange?: (scrolled: boolean) => void;
 };
 
 export function ChatPanel({
   activeAssistantID,
   buttonFeedback,
   chatScrollRef,
+  connected,
+  deviceID,
+  greetingName,
   loadingHistory,
   messages,
   pendingRequestID,
@@ -47,7 +57,10 @@ export function ChatPanel({
   sessionID,
   subagentTasks,
   onInspectSubagent,
+  onOpenChanges,
+  onPickSuggestion,
   onRegenerate,
+  onScrolledChange,
 }: Props) {
   const renderItems = useMemo(() => {
     return buildChatTurns(messages, runs);
@@ -56,6 +69,8 @@ export function ChatPanel({
   const itemOffsetsRef = useRef<Record<string, number>>({});
   const followTailRef = useRef(true);
   const lastViewportHeightRef = useRef<number>(0);
+  const scrolledRef = useRef(false);
+  const isEmpty = messages.length === 0 && runs.length === 0;
   const jumpAnchors = useMemo(() => userMessageAnchors(messages), [messages]);
   const assistantLoadingLabel = useMemo(
     () => loadingLabel(pendingRequestID, activeAssistantID, messages, runs),
@@ -110,7 +125,7 @@ export function ChatPanel({
   return (
     <View style={styles.chatContainer}>
       <ScrollView
-        contentContainerStyle={styles.messages}
+        contentContainerStyle={[styles.messages, isEmpty && styles.messagesEmpty]}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => {
           if (followTailRef.current) {
@@ -131,6 +146,11 @@ export function ChatPanel({
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
           const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
           followTailRef.current = distanceFromBottom <= 36;
+          const scrolled = contentOffset.y > 4;
+          if (scrolled !== scrolledRef.current) {
+            scrolledRef.current = scrolled;
+            onScrolledChange?.(scrolled);
+          }
         }}
         scrollEnabled={!jumpOpen}
         scrollEventThrottle={100}
@@ -138,14 +158,14 @@ export function ChatPanel({
         showsVerticalScrollIndicator={false}
         style={styles.messagesScroll}
       >
-        {messages.length === 0 && runs.length === 0 ? (
+        {isEmpty ? (
           loadingHistory ? (
             <View style={styles.inlineLoading}>
-              <ActivityIndicator color={palette.ink1} size="small" />
+              <ActivityIndicator color={palette.ink2} size="small" />
               <Text style={styles.inlineLoadingText}>正在加载会话历史...</Text>
             </View>
           ) : (
-            <Text style={styles.emptyText}>消息会显示在这里。</Text>
+            <ChatEmptyState connected={connected} deviceID={deviceID} name={greetingName} onPickSuggestion={onPickSuggestion} />
           )
         ) : (
           renderItems.map((item) => {
@@ -161,6 +181,7 @@ export function ChatPanel({
                   <AgentTurnCard
                     buttonFeedback={buttonFeedback}
                     onInspectSubagent={onInspectSubagent}
+                    onOpenChanges={onOpenChanges}
                     onRegenerate={onRegenerate}
                     subagentTasks={subagentTasks}
                     turn={item}
@@ -410,32 +431,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messages: {
-    gap: space.xl,
-    paddingBottom: 16,
-    paddingTop: 4,
+    gap: space.xxl,
+    paddingBottom: 18,
+    paddingTop: 10,
+  },
+  messagesEmpty: {
+    flexGrow: 1,
   },
   inlineLoading: {
     alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    alignSelf: "center",
     flexDirection: "row",
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    ...shadow.float,
+    marginTop: 32,
   },
   inlineLoadingText: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.bold,
-  },
-  emptyText: {
     color: palette.ink2,
-    fontSize: font.body,
-    fontWeight: weight.bold,
-    textAlign: "center",
-    marginTop: 32,
+    fontSize: font.label,
   },
 });

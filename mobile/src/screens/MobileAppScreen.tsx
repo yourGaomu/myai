@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Platform, type AppStateStatus, type ScrollView } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AppState, BackHandler, Platform, type AppStateStatus, type ScrollView } from "react-native";
 
-import { AppHeader } from "../components/layout/AppHeader";
+import { ActionBar } from "../components/layout/ActionBar";
+import { AppHeader, describeConnection } from "../components/layout/AppHeader";
+import { HeaderIconButton, ScreenHeader } from "../components/layout/ScreenHeader";
+import { PermissionSheet } from "../components/permissions/PermissionSheet";
+import { SessionSheet } from "../components/session/SessionSheet";
+import { settingsSectionTitles, type SettingsSection } from "../components/settings/SettingsHome";
+import { PairingScreen } from "../components/startup/PairingScreen";
 import { BottomDock } from "../components/layout/BottomDock";
 import { SideDrawer } from "../components/navigation/SideDrawer";
 import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
@@ -51,8 +57,10 @@ import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
 import { historyMessageToChatItem } from "../utils/chatHistory";
-import { agentActivity } from "../utils/agentActivity";
 import { newRequestID } from "../utils/ids";
+import { formatBytes } from "../utils/format";
+import { modelDisplayName, permissionLabel } from "../utils/session";
+import { baseName, dirName, toolTarget } from "../utils/toolDisplay";
 
 export function MobileAppScreen() {
   useAndroidNavigationBar();
@@ -239,6 +247,13 @@ export function MobileAppScreen() {
   } = useChatMessages();
   const [unreadSessionIDs, setUnreadSessionIDs] = useState<Record<string, boolean>>({});
   const [drawerVisible, setDrawerVisible] = useState(false);
+  // 新版布局的页面级状态：会话设置弹层、对话是否滚动（顶栏分隔线）、权限确认是否收起、设置详情页、文件预览
+  const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
+  const [chatScrolled, setChatScrolled] = useState(false);
+  const [minimizedPermissionID, setMinimizedPermissionID] = useState("");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const [filePreviewOpen, setFilePreviewOpen] = useState(false);
+  const sessionFromPermissionRef = useRef(false);
 
   useEffect(() => {
     if (sessionID) {
@@ -260,7 +275,7 @@ export function MobileAppScreen() {
     mergeSessionRuns,
     version: agentRunsVersion,
   } = useAgentRunState();
-  const { isBusy, pendingActions, startPending, stopPending } = usePendingActions();
+  const { pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
   const appActiveRef = useRef(AppState.currentState === "active");
@@ -301,19 +316,9 @@ export function MobileAppScreen() {
   });
   const currentChat = getSessionChat(sessionID);
   const currentRuns = getSessionRuns(sessionID);
-  const headerActivity = agentActivity({
-    connected,
-    messages: currentChat.messages,
-    pendingPermission: Boolean(currentChat.pendingPermission),
-    pendingRequestID: currentChat.pendingRequestID,
-    runs: currentRuns,
-    uploading: pendingActions.upload,
-  });
   void sessionChatsVersion;
   void agentRunsVersion;
-  const currentSessionBusy = Boolean(currentChat.pendingRequestID);
   const currentPauseBusy = Boolean(pendingActions.pause);
-  const uiBusy = isBusy || currentSessionBusy;
   const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
   const questionSyncKeyRef = useRef("");
 
@@ -1030,7 +1035,6 @@ export function MobileAppScreen() {
     openPlan,
     openSessions,
     selectSession,
-    toggleSettings,
   } = useNavigationActions({
     fileEntriesCount: fileEntries.length,
     filePath,
@@ -1043,6 +1047,78 @@ export function MobileAppScreen() {
     requestSessions,
     setViewMode,
   });
+
+  const pendingPermission = currentChat.pendingPermission;
+  const permissionSheetVisible = Boolean(pendingPermission) && minimizedPermissionID !== pendingPermission?.requestID;
+  const sessionRunning = currentRuns.some(({ run }) => run.status === "running");
+  const chatBusy = Boolean(currentChat.pendingRequestID) || sessionRunning;
+  const planMode = activeSession?.agent_mode === "plan";
+  const activePermissionLabel = permissionLabel(activeSession?.permission_mode);
+  const connectionLabel = describeConnection(status, connected, deviceID).label;
+
+  // 读文件结果到达时进入预览；离开文件页时回到列表
+  useEffect(() => {
+    if (filePreview) {
+      setFilePreviewOpen(true);
+    }
+  }, [filePreview]);
+  useEffect(() => {
+    if (viewMode !== "files") {
+      setFilePreviewOpen(false);
+    }
+    if (viewMode !== "settings") {
+      setSettingsSection(null);
+    }
+  }, [viewMode]);
+
+  // 安卓返回键：先退出二级详情，再回到对话；对话页交给系统处理
+  useEffect(() => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!settingsLoaded || !clientToken) return false;
+      if (viewMode === "files" && filePreviewOpen) {
+        setFilePreviewOpen(false);
+        return true;
+      }
+      if (viewMode === "settings" && settingsSection) {
+        setSettingsSection(null);
+        return true;
+      }
+      if (viewMode === "changeDetail") {
+        openChanges();
+        return true;
+      }
+      if (viewMode !== "chat") {
+        openChat();
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [clientToken, filePreviewOpen, openChanges, openChat, settingsLoaded, settingsSection, viewMode]);
+
+  const openSessionSheet = useCallback(() => {
+    sessionFromPermissionRef.current = false;
+    setSessionSheetVisible(true);
+  }, []);
+  const closeSessionSheet = useCallback(() => {
+    setSessionSheetVisible(false);
+    // 从权限确认里点「修改策略」进来的，关掉后回到权限确认
+    if (sessionFromPermissionRef.current) {
+      sessionFromPermissionRef.current = false;
+      setMinimizedPermissionID("");
+    }
+  }, []);
+  const startNewSession = useCallback(() => {
+    setChatScrolled(false);
+    setDrawerVisible(false);
+    setSessionSheetVisible(false);
+    newSession();
+    openChat();
+  }, [newSession, openChat]);
+  const pickSuggestion = useCallback((text: string) => setMessageInput(text), [setMessageInput]);
 
   const sessionHasRunningAgent = useMemo(() => {
     return currentRuns.some(({ run }) => run.status === "running");
@@ -1058,60 +1134,151 @@ export function MobileAppScreen() {
     ),
   );
 
-  return (
-    <MobileScreenShell
-      bottomDock={
-        <BottomDock
-          attachedFiles={attachedFiles}
-          bottomPadding={bottomSafePadding}
-          buttonFeedback={buttonFeedback}
-          canPause={canPauseSession}
-          changesActive={changesTabActive}
-          messageInput={messageInput}
-          onChangeMessage={setMessageInput}
-          onChangesPress={openChanges}
-          onChatPress={openChat}
-          onFilesPress={openFiles}
-          onFocusInput={() => {
-            requestAnimationFrame(() => {
-              chatScrollRef.current?.scrollToEnd({ animated: true });
-            });
-          }}
-          onPause={pauseSession}
-          onRemoveAttachedFile={removeAttachedFile}
-          onSend={sendUserMessage}
-          onKnowledgePress={openKnowledge}
-          onSettingsPress={toggleSettings}
-          onUploadFile={uploadLocalFile}
-          pendingPause={currentPauseBusy}
-          pendingSend={Boolean(currentChat.pendingRequestID)}
-          pendingSettings={pendingActions.settings}
-          pendingUpload={pendingActions.upload}
-          viewMode={viewMode}
-        />
-      }
-      bottomSafePadding={bottomSafePadding}
-      scrollEnabled={viewMode !== "chat"}
-      topSafePadding={topSafePadding}
-    >
+  // 未配对：全屏配对页。配对成功写入 client_token 后，上面的自动连接副作用会接着发起连接。
+  if (settingsLoaded && !clientToken) {
+    return (
+      <PairingScreen
+        bindCode={bindCode}
+        bottomInset={bottomSafePadding}
+        failed={/pair failed/i.test(status)}
+        normalizedRelayURL={normalizedRelayURL}
+        onBindCodeChange={setBindCode}
+        onPair={pairDevice}
+        onRelayURLChange={setRelayURL}
+        pending={pendingActions.pair}
+        relayURL={relayURL}
+        topInset={topSafePadding}
+      />
+    );
+  }
+
+  const refreshButton = (onPress: () => void, busy: boolean) => (
+    <HeaderIconButton accessibilityLabel="刷新" disabled={busy} icon="refresh-cw" muted onPress={onPress} size={19} />
+  );
+  let header: ReactNode;
+  if (viewMode === "chat") {
+    header = (
       <AppHeader
-        activity={headerActivity}
-        buttonFeedback={buttonFeedback}
+        busy={chatBusy}
         connected={connected}
         deviceID={deviceID}
-        isBusy={uiBusy}
-        mode={activeSession?.agent_mode === "plan" ? "plan" : "chat"}
-        modePending={pendingActions.settings}
-        onOpenHistory={() => setDrawerVisible(true)}
+        onNewSession={startNewSession}
         onOpenMenu={() => setDrawerVisible(true)}
-        onQuickNew={newSession}
-        onToggleMode={setAgentMode}
-        onToggleSettings={toggleSettings}
+        onOpenSession={openSessionSheet}
+        planMode={planMode}
+        scrolled={chatScrolled}
         status={status}
-        userID={userID}
+        title={activeSession?.title?.trim() || "新对话"}
+        topInset={topSafePadding}
+        waiting={Boolean(pendingPermission)}
+      />
+    );
+  } else {
+    let title = "设置";
+    let subtitle: string | undefined;
+    let onBack: () => void = openChat;
+    let right: ReactNode = null;
+    if (viewMode === "files") {
+      if (filePreviewOpen && filePreview) {
+        title = filePreview.name || baseName(filePreview.path);
+        subtitle = [dirName(filePreview.path), formatBytes(filePreview.size || 0)].filter(Boolean).join(" · ");
+        onBack = () => setFilePreviewOpen(false);
+      } else {
+        title = "文件";
+        right = refreshButton(() => { refreshCurrentFiles(); requestAssets(); }, pendingActions.files);
+      }
+    } else if (viewMode === "changes") {
+      title = "变更";
+      right = refreshButton(() => { requestChanges(); requestHistory(); }, pendingActions.changes || pendingActions.history);
+    } else if (viewMode === "changeDetail") {
+      title = changeDiff ? baseName(changeDiff.path) : historyDiff ? "快照对比" : "差异";
+      subtitle = changeDiff ? dirName(changeDiff.path) || undefined : undefined;
+      onBack = openChanges;
+    } else if (viewMode === "sessions") {
+      title = "全部对话";
+      right = refreshButton(() => { requestSessions(); requestDeletedSessions(); }, pendingActions.sessions);
+    } else if (viewMode === "knowledge") {
+      title = "知识库与记忆";
+      right = refreshButton(() => { requestCatalog(); requestProfiles(); }, pendingActions.knowledge);
+    } else if (viewMode === "plan") {
+      title = "计划";
+    } else if (settingsSection) {
+      title = settingsSectionTitles[settingsSection];
+      onBack = () => setSettingsSection(null);
+    }
+    header = <ScreenHeader onBack={onBack} right={right} subtitle={subtitle} title={title} topInset={topSafePadding} />;
+  }
+
+  let dock: ReactNode = null;
+  if (viewMode === "chat") {
+    dock = (
+      <BottomDock
+        attachedFiles={attachedFiles}
+        bottomPadding={bottomSafePadding}
+        buttonFeedback={buttonFeedback}
+        canPause={canPauseSession}
+        messageInput={messageInput}
+        modelLabel={activeModel ? modelDisplayName(activeModel) : activeSession?.model || "模型"}
+        onBrowseWorkspace={openFiles}
+        onChangeMessage={setMessageInput}
+        onFocus={() => {
+          requestAnimationFrame(() => {
+            chatScrollRef.current?.scrollToEnd({ animated: true });
+          });
+        }}
+        onOpenPermission={() => setMinimizedPermissionID("")}
+        onOpenSession={openSessionSheet}
+        onPause={pauseSession}
+        onRemoveAttachedFile={removeAttachedFile}
+        onSend={sendUserMessage}
+        onTogglePlan={() => setAgentMode(planMode ? "chat" : "plan")}
+        onUploadFile={uploadLocalFile}
+        pendingPause={currentPauseBusy}
+        pendingSend={Boolean(currentChat.pendingRequestID) || pendingActions.settings}
+        pendingUpload={pendingActions.upload}
+        permissionSummary={pendingPermission && !permissionSheetVisible ? toolTarget(pendingPermission.name, pendingPermission.arguments) : undefined}
+        planMode={planMode}
+        planPending={pendingActions.settings || !sessionID}
         viewMode={viewMode}
       />
+    );
+  } else if (viewMode === "files" && filePreviewOpen && filePreview) {
+    dock = (
+      <ActionBar
+        actions={[{
+          disabled: filePreview.binary || !filePreview.content,
+          icon: filePreviewAttached ? "check" : "paperclip",
+          label: filePreviewAttached ? "已添加到对话" : "添加到对话",
+          onPress: () => {
+            if (!filePreviewAttached) attachFilePreview();
+            openChat();
+          },
+          tone: filePreviewAttached ? "secondary" : "primary",
+        }]}
+        bottomPadding={bottomSafePadding}
+      />
+    );
+  } else if (viewMode === "changeDetail" && (changeDiff || historyDiff)) {
+    dock = (
+      <ActionBar
+        actions={changeDiff ? [
+          { disabled: !canOpenSelectedChangeFile, icon: "file-text", label: "打开文件", loading: pendingActions.files, onPress: openSelectedChangeFile, tone: "secondary" },
+          { disabled: !canRevertSelectedChange, icon: "rotate-ccw", label: "还原此文件", loading: pendingActions.revert, onPress: revertSelectedChange, tone: "danger" },
+        ] : [
+          { icon: "rotate-ccw", label: "回滚到这个快照", loading: pendingActions.revert, onPress: () => historyDiff && revertHistoryCheckpoint(historyDiff.checkpoint_id), tone: "danger" },
+        ]}
+        bottomPadding={bottomSafePadding}
+      />
+    );
+  }
 
+  return (
+    <MobileScreenShell
+      bottomDock={dock}
+      bottomSafePadding={dock ? 0 : bottomSafePadding}
+      header={header}
+      scrollEnabled={viewMode !== "chat"}
+    >
       <MobileMainContent
         changes={{
           canOpenSelectedChangeFile,
@@ -1136,6 +1303,12 @@ export function MobileAppScreen() {
         chat={{
           activeAssistantID: currentChat.activeAssistantID,
           chatScrollRef,
+          connected,
+          deviceID,
+          greetingName: userID.trim() && userID.trim() !== "local" ? userID.trim() : "",
+          onOpenChanges: openChanges,
+          onPickSuggestion: pickSuggestion,
+          onScrolledChange: setChatScrolled,
           messages: currentChat.messages,
           onInspectSubagent: openInspection,
           onRegenerate: regenerateSession,
@@ -1157,12 +1330,9 @@ export function MobileAppScreen() {
           fileParent,
           filePath,
           filePreview,
-          filePreviewAttached,
-          onAttachFilePreview: attachFilePreview,
+          previewOpen: filePreviewOpen,
           onGoToParent: goToParent,
           onOpenFileEntry: openFileEntry,
-          onRefreshAssets: () => requestAssets(),
-          onRefreshFiles: refreshCurrentFiles,
         }}
         knowledge={{
           activeSession,
@@ -1227,6 +1397,8 @@ export function MobileAppScreen() {
           unreadSessionIDs,
         }}
         settings={{
+          activeSection: settingsSection,
+          onSelectSection: setSettingsSection,
           activeModel,
           activeSession,
           assetBaseURL,
@@ -1362,24 +1534,25 @@ export function MobileAppScreen() {
         visible={Boolean(inspectedTaskID)}
       />
 
-      {/* 3.0 全局收纳抽屉（收纳工作区文件、变更历史、知识库、会话列表与设置中心） */}
+      {/* 全局侧栏：新对话、文件、变更、知识库、按日期分组的会话、设置 */}
       <SideDrawer
         activeSessionID={sessionID}
+        busySessionID={chatBusy ? sessionID : undefined}
         buttonFeedback={buttonFeedback}
+        changesCount={changes.length}
         connected={connected}
         deviceID={deviceID}
         onClose={() => setDrawerVisible(false)}
-        onNewSession={() => {
-          setDrawerVisible(false);
-          newSession();
-        }}
+        onNewSession={startNewSession}
         onOpenSettings={() => {
           setDrawerVisible(false);
-          toggleSettings();
+          setViewMode("settings");
         }}
         onSelectSession={(targetSessionID) => {
           setDrawerVisible(false);
+          setChatScrolled(false);
           handleLoadSession(targetSessionID);
+          openChat();
         }}
         onSelectViewMode={(mode) => {
           setDrawerVisible(false);
@@ -1387,13 +1560,58 @@ export function MobileAppScreen() {
           else if (mode === "files") openFiles();
           else if (mode === "changes") openChanges();
           else if (mode === "knowledge") openKnowledge();
-          else if (mode === "settings") toggleSettings();
+          else if (mode === "sessions") openSessions();
+          else if (mode === "settings") setViewMode("settings");
         }}
         sessions={sessions}
+        unreadSessionIDs={unreadSessionIDs}
         userID={userID}
         viewMode={viewMode}
         visible={drawerVisible}
       />
+
+      {/* 工具调用权限确认：点遮罩收成输入框上方的提示条，请求保持待确认 */}
+      <PermissionSheet
+        deviceID={deviceID}
+        onAllow={() => {
+          setMinimizedPermissionID("");
+          allowPermission();
+        }}
+        onDeny={() => {
+          setMinimizedPermissionID("");
+          denyPermission();
+        }}
+        onMinimize={() => setMinimizedPermissionID(pendingPermission?.requestID || "")}
+        onOpenPolicy={() => {
+          setMinimizedPermissionID(pendingPermission?.requestID || "");
+          sessionFromPermissionRef.current = true;
+          setSessionSheetVisible(true);
+        }}
+        permission={pendingPermission}
+        policyLabel={activePermissionLabel}
+        visible={permissionSheetVisible}
+      />
+
+      {/* 会话设置：模型、对话/规划、工具权限、上下文 */}
+      <SessionSheet
+        activeSession={activeSession}
+        connected={connected}
+        connectionLabel={connectionLabel}
+        context={sessionContexts[sessionID]}
+        currentModelID={currentModelID}
+        models={models}
+        onClose={closeSessionSheet}
+        onCompact={compactSession}
+        onReconnect={connect}
+        onRequestContext={requestContextInfo}
+        onSetAgentMode={setAgentMode}
+        onSetPermissionMode={setPermissionMode}
+        onSwitchModel={switchModel}
+        pendingModels={pendingActions.models}
+        pendingSettings={pendingActions.settings}
+        visible={sessionSheetVisible}
+      />
     </MobileScreenShell>
   );
 }
+

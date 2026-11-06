@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Updates from "expo-updates";
 
 import { ButtonContent } from "../common/ButtonContent";
+import { SettingsHome, type SettingsSection } from "./SettingsHome";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
@@ -34,9 +35,11 @@ import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
 import { modelDisplayName } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { font, fontFamily, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
+  activeSection: SettingsSection | null;
+  onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
   assetBaseURL: string;
@@ -157,7 +160,6 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "autoplan" | "skill" | "plugin" | "subagent" | "session" | "permission" | "context" | "generation";
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
 
 type FeatherIconName = ComponentProps<typeof Feather>["name"];
@@ -200,21 +202,10 @@ const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtoc
   { label: "Ollama", meta: "本地原生对话", protocol: "ollama-chat" },
 ];
 
-const settingSections: Array<{ icon: FeatherIconName; key: SettingsSection; label: string; meta: string }> = [
-  { icon: "message-circle", key: "session", label: "会话", meta: "新建与切换" },
-  { icon: "cpu", key: "model", label: "模型", meta: "选择当前模型" },
-  { icon: "compass", key: "autoplan", label: "自动规划", meta: "意图判断与记录" },
-  { icon: "zap", key: "connection", label: "连接", meta: "中继服务与配对" },
-  { icon: "sliders", key: "general", label: "常规", meta: "状态总览" },
-  { icon: "shield", key: "permission", label: "权限", meta: "工具调用策略" },
-  { icon: "cpu", key: "subagent", label: "智能体", meta: "配置与后台任务" },
-  { icon: "tool", key: "skill", label: "技能", meta: "本地技能中心" },
-  { icon: "box", key: "plugin", label: "插件", meta: "本地工具插件" },
-  { icon: "droplet", key: "generation", label: "生成", meta: "采样与回复风格" },
-  { icon: "package", key: "context", label: "上下文", meta: "窗口与压缩" },
-];
 
 export function SettingsPanel({
+  activeSection: selectedSection,
+  onSelectSection,
   activeModel,
   activeSession,
   assetBaseURL,
@@ -365,7 +356,8 @@ export function SettingsPanel({
   const [traceCustomSessionID, setTraceCustomSessionID] = useState("");
   const [selectedTraceID, setSelectedTraceID] = useState("");
 
-  const [activeSection, setActiveSection] = useState<SettingsSection>("session");
+  // 列表页时没有选中分区；各分区的数据加载副作用只在对应详情页打开时触发
+  const activeSection: SettingsSection | null = selectedSection;
   const requestContextInfoRef = useRef(onRequestContextInfo);
   const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
   const requestIntentConfigRef = useRef(onRequestIntentConfig);
@@ -464,7 +456,6 @@ export function SettingsPanel({
   const planBusy = pendingActions.plan;
   const canUseSessionSettings = Boolean(clientToken && sessionID);
   const wideLayout = width >= 760;
-  const activeSectionMeta = settingSections.find((section) => section.key === activeSection);
   const versionLabel = `v${mobileAppVersion} · Android ${mobileAndroidVersionCode}`;
   const updateLabel = Updates.isEnabled
     ? `${Updates.channel || "本地"} · ${Updates.updateId ? shortID(Updates.updateId) : "嵌入包"}`
@@ -1126,7 +1117,7 @@ export function SettingsPanel({
                   <Text numberOfLines={1} style={styles.skillName}>{item.name}</Text>
                   {item.description ? <Text numberOfLines={2} style={styles.skillDescription}>{item.description}</Text> : null}
                 </View>
-                <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text>
+                {item.updated_at ? <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text> : null}
               </View>
               {item.triggers && item.triggers.length > 0 ? (
                 <View style={styles.triggerRow}>
@@ -2670,111 +2661,76 @@ export function SettingsPanel({
     subagent: subagentSection,
   };
 
+  const relayHost = normalizedRelayURL.replace(/^[a-z]+:\/\//i, "");
+  const groups = [
+    {
+      label: "模型与生成",
+      rows: [
+        { icon: "cpu" as const, key: "model" as const, label: "模型", value: activeModel ? modelDisplayName(activeModel) : activeSession?.model || "" },
+        { icon: "sliders" as const, key: "generation" as const, label: "生成参数与回复风格" },
+      ],
+    },
+    {
+      label: "智能体",
+      rows: [
+        { icon: "compass" as const, key: "autoplan" as const, label: "自动规划", value: intentStrategies.find((item) => item.strategy === effectiveIntentConfig.strategy)?.label.replace(/\s*\(.*\)$/, "") },
+        { icon: "shield" as const, key: "permission" as const, label: "工具权限", value: permissionModeLabel(activePermission) },
+        { icon: "users" as const, key: "subagent" as const, label: "子代理" },
+        { icon: "tool" as const, key: "skill" as const, label: "技能", value: skills.length ? `${skills.length} 个` : "" },
+        { icon: "box" as const, key: "plugin" as const, label: "插件与 MCP", value: plugins.length ? `${plugins.length} 个` : "" },
+      ],
+    },
+    {
+      label: "会话",
+      rows: [
+        { icon: "message-square" as const, key: "session" as const, label: "会话管理" },
+        { icon: "layers" as const, key: "context" as const, label: "上下文", value: `${currentWindowK}K` },
+      ],
+    },
+    {
+      label: "连接与版本",
+      rows: [
+        { icon: "server" as const, key: "connection" as const, label: "连接与配对", value: relayHost },
+        { icon: "refresh-cw" as const, key: "general" as const, label: "版本与热更新", value: `v${mobileAppVersion}` },
+      ],
+    },
+  ];
+
   return (
-    <View style={[styles.panel, wideLayout && styles.panelWide]}>
-      <View style={styles.panelHeader}>
-        <View style={styles.flex}>
-          <Text style={styles.settingsTitle}>设置中心</Text>
-          <Text style={styles.pathText}>连接、模型、会话和工具权限集中管理 · {versionLabel}</Text>
-        </View>
-        <View style={styles.rowCompact}>
-          <Pressable
-            accessibilityLabel="检查更新"
-            disabled={checkingUpdate}
-            onPress={() => void handleCheckUpdate()}
-            style={({ pressed }) =>
-              buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)
-            }
-          >
-            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "检查更新"} />
-          </Pressable>
-          <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
-            <Feather color={palette.ink1} name="x" size={13} />
-            <Text style={styles.closeButtonText}>关闭</Text>
-          </Pressable>
-        </View>
-      </View>
+    <View style={styles.settingsRoot}>
       {updateStatusMessage && activeSection !== "general" ? (
         <View style={styles.row}>
-          <Text style={[ styles.flex, updateStatusError ? styles.generationMessage : styles.generationSuccess ]}>
-            {updateStatusMessage}
-          </Text>
+          <Text style={[styles.flex, updateStatusError ? styles.generationMessage : styles.generationSuccess]}>{updateStatusMessage}</Text>
           {updateReadyToReload ? (
-            <Pressable
-              onPress={() => void Updates.reloadAsync()}
-              style={({ pressed }) => buttonFeedback(styles.primaryActionButton, pressed)}
-            >
+            <Pressable onPress={() => void Updates.reloadAsync()} style={({ pressed }) => buttonFeedback(styles.primaryActionButton, pressed)}>
               <ButtonContent text="立即重启" />
             </Pressable>
           ) : null}
         </View>
       ) : null}
-
-      <View style={[styles.settingsBox, wideLayout && styles.settingsBoxWide]}>
-        <View style={[styles.sideRail, wideLayout ? styles.sideRailWide : styles.sideRailCompact]}>
-          <ScrollView
-            horizontal={!wideLayout}
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={[styles.navList, wideLayout ? styles.navListWide : styles.navListCompact]}>
-              {settingSections.map((section) => {
-                const selected = activeSection === section.key;
-                return (
-                  <Pressable
-                    key={section.key}
-                    onPress={() => setActiveSection(section.key)}
-                    style={({ pressed }) =>
-                      buttonFeedback([styles.navItem, wideLayout && styles.navItemWide, selected && styles.navItemActive], pressed)
-                    }
-                  >
-                    <Feather
-                      color={selected ? palette.inkInverse : palette.ink2}
-                      name={section.icon}
-                      size={15}
-                    />
-                    <View style={styles.navTextBlock}>
-                      <Text style={[styles.navLabel, selected && styles.navTextActive]}>{section.label}</Text>
-                      {wideLayout ? <Text style={[styles.navMeta, selected && styles.navTextActive]}>{section.meta}</Text> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </View>
-
-        <View style={[styles.contentPane, !wideLayout && styles.contentPaneCompact]}>
-          {wideLayout ? (
-            <>
-              <View style={styles.contentHeader}>
-                <View style={styles.flex}>
-                  <Text style={styles.contentTitle}>{activeSectionMeta?.label || "设置"}</Text>
-                  <Text style={styles.settingMeta}>{activeSectionMeta?.meta || "配置中心"}</Text>
-                </View>
-              </View>
-              <ScrollView
-                contentContainerStyle={styles.contentScroll}
-                keyboardShouldPersistTaps="handled"
-                nestedScrollEnabled
-                showsVerticalScrollIndicator={false}
-              >
-                {sectionContent[activeSection]}
-              </ScrollView>
-            </>
-          ) : (
-            <View style={styles.contentScroll}>{sectionContent[activeSection]}</View>
-          )}
-        </View>
-      </View>
+      {activeSection ? (
+        <View style={styles.sectionStack}>{sectionContent[activeSection]}</View>
+      ) : (
+        <SettingsHome
+          connected={connected}
+          deviceID={deviceID}
+          groups={groups}
+          onOpenSection={onSelectSection}
+          relayHost={relayHost}
+          versionLabel={versionLabel}
+        />
+      )}
     </View>
   );
 }
 
+const settingIcons: Record<string, FeatherIconName> = { AI: "cpu", AP: "compass", MCP: "box", OTA: "refresh-cw", SK: "tool", WS: "server" };
+
 function IconBox({ label }: { label: string }) {
+  const icon = settingIcons[label];
   return (
     <View style={styles.settingIconBox}>
-      <Text style={styles.settingIconText}>{label}</Text>
+      {icon ? <Feather color={palette.ink2} name={icon} size={20} /> : <Text style={styles.settingIconText}>{label}</Text>}
     </View>
   );
 }
@@ -2827,6 +2783,9 @@ function GenerationField({
 }
 
 function ContextStat({ label, suffix, value }: { label: string; suffix: string; value?: number }) {
+  if (value === undefined || value === null) {
+    return null;
+  }
   return (
     <View style={styles.contextStat}>
       <Text style={styles.contextValue}>{value ?? "-"}</Text>
@@ -2883,6 +2842,9 @@ function CheckpointSection({ title, lines }: { title: string; lines?: string[] }
 }
 
 function HashPill({ label, value }: { label: string; value?: string }) {
+  if (!value) {
+    return null;
+  }
   return (
     <View style={styles.hashPill}>
       <Text style={styles.hashLabel}>{label}</Text>
@@ -3177,6 +3139,9 @@ function formatTraceBody(body?: string): string {
 }
 
 const styles = StyleSheet.create({
+  settingsRoot: {
+    gap: 12,
+  },
   panel: {
     backgroundColor: palette.surface1,
     borderColor: palette.hairline,
@@ -3201,7 +3166,7 @@ const styles = StyleSheet.create({
   settingsTitle: {
     color: palette.ink1,
     fontSize: font.display,
-    fontWeight: weight.heavy,
+    fontWeight: weight.semibold,
     lineHeight: 26,
   },
   closeButton: {
@@ -3220,7 +3185,7 @@ const styles = StyleSheet.create({
   closeButtonText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   settingsBox: {
     gap: 10,
@@ -3288,17 +3253,17 @@ const styles = StyleSheet.create({
   navLabel: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   navMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     marginTop: 2,
   },
   navTextActive: {
     color: palette.inkInverse,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   contentPane: {
     backgroundColor: palette.surface1,
@@ -3329,7 +3294,7 @@ const styles = StyleSheet.create({
   contentTitle: {
     color: palette.ink1,
     fontSize: font.display,
-    fontWeight: weight.heavy,
+    fontWeight: weight.semibold,
     lineHeight: 26,
   },
   sectionStack: {
@@ -3337,21 +3302,20 @@ const styles = StyleSheet.create({
   },
   pathText: {
     color: palette.ink2,
-    fontSize: font.label,
-    fontWeight: weight.bold,
+    fontSize: font.label - 0.5,
     marginTop: 3,
   },
   settingCard: {
     alignItems: "center",
     backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
-    minHeight: 74,
-    padding: 12,
+    minHeight: 70,
+    padding: 14,
   },
   settingCardCompact: {
     alignItems: "flex-start",
@@ -3361,43 +3325,39 @@ const styles = StyleSheet.create({
   },
   settingIconBox: {
     alignItems: "center",
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 48,
+    backgroundColor: palette.well,
+    borderRadius: radius.sm + 2,
+    height: 44,
     justifyContent: "center",
-    width: 56,
+    width: 44,
   },
   settingIconText: {
-    color: palette.inkInverse,
-    fontSize: font.title,
-    fontWeight: weight.bold,
+    color: palette.ink2,
+    fontFamily: fontFamily.mono,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   settingTitle: {
     color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.bold,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   settingMeta: {
     color: palette.ink2,
     flexShrink: 1,
-    fontSize: font.label,
-    fontWeight: weight.bold,
-    lineHeight: 16,
-    marginTop: 4,
+    fontSize: font.label - 0.5,
+    lineHeight: 19,
+    marginTop: 3,
   },
   settingAction: {
     alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexShrink: 0,
     justifyContent: "center",
-    minHeight: 44,
+    minHeight: 40,
     minWidth: 58,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
   },
   settingActionOnline: {
     backgroundColor: palette.okWash,
@@ -3406,9 +3366,9 @@ const styles = StyleSheet.create({
     backgroundColor: palette.brand,
   },
   input: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    backgroundColor: palette.well,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.md - 2,
     borderWidth: 1,
     color: palette.ink1,
     includeFontPadding: false,
@@ -3444,26 +3404,22 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: "center",
-    backgroundColor: palette.okWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     justifyContent: "center",
-    minHeight: 44,
+    minHeight: 42,
     paddingHorizontal: 16,
   },
   smallButton: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   smallButtonText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   disabledButton: {
     opacity: 0.45,
@@ -3479,9 +3435,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   modelChip: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 2,
     borderWidth: 1,
     flexGrow: 1,
     minWidth: 132,
@@ -3501,16 +3457,15 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   modelAction: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.xs,
-    borderWidth: 1,
-    paddingHorizontal: 7,
-    paddingVertical: 5,
+    backgroundColor: palette.well,
+    borderRadius: radius.xs + 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   modelActionActive: {
-    backgroundColor: palette.brandWashStrong,
-    borderColor: palette.brand,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modelActionDanger: {
     backgroundColor: palette.errWash,
@@ -3523,14 +3478,16 @@ const styles = StyleSheet.create({
   modelActionText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   modelChipActive: {
-    backgroundColor: palette.okWash,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modelTitle: {
     color: palette.ink1,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   modelMeta: {
     color: palette.ink2,
@@ -3541,12 +3498,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   skillCard: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    gap: 8,
-    padding: 10,
+    gap: 10,
+    padding: 12,
   },
   skillHeader: {
     alignItems: "flex-start",
@@ -3557,26 +3514,23 @@ const styles = StyleSheet.create({
   skillName: {
     color: palette.ink1,
     fontSize: font.bodyLg,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   skillDescription: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     lineHeight: 17,
     marginTop: 3,
   },
   skillBadge: {
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    color: palette.inkInverse,
+    backgroundColor: palette.well,
+    borderRadius: radius.xs,
+    color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   triggerRow: {
     flexDirection: "row",
@@ -3584,29 +3538,26 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   triggerChip: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    color: palette.ink1,
+    backgroundColor: palette.well,
+    borderRadius: radius.xs,
+    color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   skillPath: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
   },
   controlBlock: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
     gap: 10,
-    padding: 10,
+    padding: 14,
   },
   controlHeader: {
     alignItems: "center",
@@ -3616,8 +3567,8 @@ const styles = StyleSheet.create({
   },
   controlTitle: {
     color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.bold,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
   },
   generationField: {
     backgroundColor: palette.surface1,
@@ -3635,12 +3586,12 @@ const styles = StyleSheet.create({
   generationLabel: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   generationEffective: {
     color: palette.info,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   generationInputRow: {
     alignItems: "center",
@@ -3652,29 +3603,27 @@ const styles = StyleSheet.create({
   },
   inheritButton: {
     alignItems: "center",
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
+    backgroundColor: palette.well,
     borderRadius: radius.sm,
-    borderWidth: 1,
     justifyContent: "center",
     minHeight: 44,
     minWidth: 58,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
   },
   inheritButtonText: {
-    color: palette.inkInverse,
+    color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   generationMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
   },
   generationCount: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   generationLoading: {
     alignItems: "flex-start",
@@ -3688,7 +3637,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: palette.err,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     padding: 10,
   },
   generationSuccess: {
@@ -3698,7 +3647,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: palette.info,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     padding: 10,
   },
   segmentRow: {
@@ -3717,22 +3666,23 @@ const styles = StyleSheet.create({
   },
   presetChip: {
     alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 4,
     borderWidth: 1,
     minWidth: 58,
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
   segmentActive: {
-    backgroundColor: palette.brandWashStrong,
-    borderColor: palette.brand,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   segmentTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   segmentMeta: {
     color: palette.ink2,
@@ -3745,14 +3695,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   contextStat: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexGrow: 1,
     minWidth: 104,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   hashGrid: {
     flexDirection: "row",
@@ -3761,29 +3709,27 @@ const styles = StyleSheet.create({
   },
   hashPill: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexDirection: "row",
     flexGrow: 1,
     gap: 8,
     minHeight: 36,
     minWidth: 146,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   hashLabel: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     textTransform: "uppercase",
   },
   hashValue: {
     color: palette.ink1,
     flex: 1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     minWidth: 0,
   },
   contextNote: {
@@ -3795,12 +3741,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   contextSummaryBox: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    gap: 8,
-    padding: 10,
+    gap: 10,
+    padding: 12,
   },
   contextLoadingRow: {
     minHeight: 24,
@@ -3822,16 +3768,15 @@ const styles = StyleSheet.create({
   contextSummaryEmpty: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
-    lineHeight: 18,
+    lineHeight: 20,
   },
   checkpointBox: {
-    backgroundColor: palette.cyanWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    gap: 8,
-    padding: 10,
+    gap: 10,
+    padding: 12,
   },
   checkpointHeader: {
     alignItems: "center",
@@ -3842,7 +3787,7 @@ const styles = StyleSheet.create({
   checkpointToggle: {
     color: palette.cyan,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   checkpointContent: {
     gap: 8,
@@ -3853,7 +3798,7 @@ const styles = StyleSheet.create({
   checkpointSectionTitle: {
     color: palette.cyan,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   checkpointLine: {
     color: palette.ink1,
@@ -3863,7 +3808,7 @@ const styles = StyleSheet.create({
   contextNoteText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     lineHeight: 17,
   },
   compactBox: {
@@ -3883,19 +3828,17 @@ const styles = StyleSheet.create({
   compactTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   compactBadge: {
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    color: palette.inkInverse,
+    backgroundColor: palette.brandWash,
+    borderRadius: radius.xs,
+    color: palette.brandLight,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   summaryGrid: {
     flexDirection: "row",
@@ -3903,36 +3846,32 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   summaryTile: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexBasis: 150,
     flexGrow: 1,
-    minHeight: 72,
-    padding: 10,
+    minHeight: 64,
+    padding: 12,
   },
   summaryTileGood: {
-    backgroundColor: palette.okWash,
+    backgroundColor: palette.well,
   },
   summaryTileWarn: {
     backgroundColor: palette.warnWash,
-    borderColor: palette.warn,
   },
   summaryTileQuiet: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.well,
   },
   summaryLabel: {
-    color: palette.ink2,
+    color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
   },
   summaryValue: {
     color: palette.ink1,
-    fontSize: font.bodyLg,
-    fontWeight: weight.bold,
-    lineHeight: 19,
-    marginTop: 5,
+    fontSize: font.body,
+    fontWeight: weight.medium,
+    lineHeight: 20,
+    marginTop: 4,
   },
   quickActions: {
     flexDirection: "row",
@@ -3941,13 +3880,13 @@ const styles = StyleSheet.create({
   },
   contextValue: {
     color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.bold,
+    fontSize: font.body,
+    fontVariant: ["tabular-nums"],
+    fontWeight: weight.medium,
   },
   contextLabel: {
-    color: palette.ink2,
+    color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
     marginTop: 2,
   },
   sectionHeaderRow: {
@@ -3958,13 +3897,13 @@ const styles = StyleSheet.create({
   },
   sectionHeading: {
     color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.bold,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
   },
   sectionSubheading: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     marginTop: 2,
   },
   primaryActionButton: {
@@ -4010,22 +3949,20 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   activePill: {
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
+    backgroundColor: palette.brandWash,
     borderRadius: radius.xs,
-    borderWidth: 1,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   activePillText: {
-    color: palette.inkInverse,
+    color: palette.brandLight,
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   activeSessionId: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   heroDeleteBtn: {
     backgroundColor: palette.errWash,
@@ -4038,18 +3975,18 @@ const styles = StyleSheet.create({
   heroDeleteBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   activeHeroTitle: {
     color: palette.ink1,
     fontSize: font.bodyLg,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     lineHeight: 20,
   },
   activeHeroMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
   },
   heroModeRow: {
     flexDirection: "row",
@@ -4076,11 +4013,11 @@ const styles = StyleSheet.create({
   heroModeBtnText: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   heroModeBtnTextActive: {
     color: palette.inkInverse,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   modeRow: {
     flexDirection: "row",
@@ -4089,28 +4026,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   modeChip: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 2,
     borderWidth: 1,
     flexGrow: 1,
     minWidth: 120,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   modeChipActive: {
-    backgroundColor: palette.brandWashStrong,
-    borderColor: palette.brand,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modeChipTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   modeChipMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     marginTop: 2,
   },
   planSummaryBox: {
@@ -4131,12 +4069,12 @@ const styles = StyleSheet.create({
   planSummaryTitle: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   planSummaryMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     marginTop: 3,
   },
   planActionRow: {
@@ -4145,18 +4083,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   planSmallButton: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 4,
     minWidth: 56,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   planSmallButtonText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     textAlign: "center",
   },
   planExecuteButton: {
@@ -4202,10 +4138,8 @@ const styles = StyleSheet.create({
   },
   sessionAvatarBox: {
     alignItems: "center",
-    backgroundColor: palette.cyanWash,
-    borderColor: palette.hairline,
+    backgroundColor: palette.well,
     borderRadius: radius.sm,
-    borderWidth: 1,
     height: 34,
     justifyContent: "center",
     width: 34,
@@ -4234,12 +4168,12 @@ const styles = StyleSheet.create({
   sessionStreamTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   sessionStreamMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     marginTop: 2,
   },
   sessionStreamRight: {
@@ -4251,7 +4185,7 @@ const styles = StyleSheet.create({
   sessionTimeText: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
   },
   streamDeleteBtn: {
     backgroundColor: palette.errWash,
@@ -4264,7 +4198,7 @@ const styles = StyleSheet.create({
   streamDeleteBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   permissionStack: {
     gap: 8,
@@ -4272,58 +4206,52 @@ const styles = StyleSheet.create({
   },
   permissionCard: {
     alignItems: "center",
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: 12,
+    padding: 14,
   },
   permissionCardActive: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderLeftColor: palette.brandDeep,
-    borderLeftWidth: 6,
-    ...shadow.float,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   permissionCardTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   permissionCardMeta: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     marginTop: 3,
   },
   recommendBadge: {
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
+    backgroundColor: palette.brandWash,
     borderRadius: radius.xs,
-    borderWidth: 1,
-    marginLeft: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
     paddingVertical: 1,
+    marginLeft: 6,
   },
   recommendBadgeText: {
-    color: palette.inkInverse,
+    color: palette.brandLight,
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   permissionActiveBadge: {
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
+    backgroundColor: palette.brandWash,
     borderRadius: radius.xs,
-    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   permissionActiveBadgeText: {
-    color: palette.inkInverse,
+    color: palette.brandLight,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   permissionSelectBtn: {
     backgroundColor: palette.surface1,
@@ -4336,24 +4264,23 @@ const styles = StyleSheet.create({
   permissionSelectBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   deleteButtonText: {
     color: palette.err,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   emptyText: {
     color: palette.ink2,
-    fontWeight: weight.bold,
+    fontSize: font.label,
+    lineHeight: 20,
   },
   emptyBox: {
-    backgroundColor: palette.surface2,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   intentSavedBadge: {
     backgroundColor: palette.okWash,
@@ -4367,7 +4294,7 @@ const styles = StyleSheet.create({
   intentSavedBadgeText: {
     color: palette.ink1,
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentKeyStatusPill: {
     borderColor: palette.hairline,
@@ -4389,7 +4316,7 @@ const styles = StyleSheet.create({
   intentKeyStatusText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentTestButton: {
     backgroundColor: palette.cyanWash,
@@ -4411,12 +4338,12 @@ const styles = StyleSheet.create({
   intentTestBannerTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentTestBannerMeta: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
   },
   intentClearBtn: {
     minHeight: 36,
@@ -4449,7 +4376,7 @@ const styles = StyleSheet.create({
   intentStatusBadgeText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentStatusGood: {
     backgroundColor: palette.okWash,
@@ -4472,7 +4399,7 @@ const styles = StyleSheet.create({
   intentRouteBadgeText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentHttpBadge: {
     backgroundColor: palette.surface2,
@@ -4485,7 +4412,7 @@ const styles = StyleSheet.create({
   intentHttpBadgeText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   intentErrorChip: {
     backgroundColor: palette.errWash,
@@ -4498,19 +4425,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   intentTraceDetailBox: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    gap: 8,
+    gap: 10,
+    padding: 12,
     marginTop: 4,
-    padding: 10,
   },
   intentCodeText: {
     color: palette.ink1,
     fontFamily: "monospace",
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     lineHeight: 17,
   },
 });

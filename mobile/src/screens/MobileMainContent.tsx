@@ -3,7 +3,6 @@ import { ChangesPanel } from "../components/changes/ChangesPanel";
 import { ChatPanel } from "../components/chat/ChatPanel";
 import { FilesPanel } from "../components/files/FilesPanel";
 import { KnowledgeWorkspacePanel } from "../components/knowledge/KnowledgeWorkspacePanel";
-import { PermissionPrompt } from "../components/permissions/PermissionPrompt";
 import { UserQuestionPrompt } from "../components/permissions/UserQuestionPrompt";
 import { PlanPanel } from "../components/plan/PlanPanel";
 import { SettingsPanel } from "../components/settings/SettingsPanel";
@@ -25,6 +24,8 @@ export function MobileMainContent({
     <>
       {settings.setupVisible ? (
         <SettingsPanel
+          activeSection={settings.activeSection}
+          onSelectSection={settings.onSelectSection}
           activeModel={settings.activeModel}
           activeSession={settings.activeSession}
           assetBaseURL={settings.assetBaseURL}
@@ -141,6 +142,12 @@ export function MobileMainContent({
           activeAssistantID={chat.activeAssistantID}
           buttonFeedback={common.buttonFeedback}
           chatScrollRef={chat.chatScrollRef}
+          connected={chat.connected}
+          deviceID={chat.deviceID}
+          greetingName={chat.greetingName}
+          onOpenChanges={chat.onOpenChanges}
+          onPickSuggestion={chat.onPickSuggestion}
+          onScrolledChange={chat.onScrolledChange}
           loadingHistory={
             common.pendingActions.sessions &&
             Boolean(chat.pendingHistorySessionID) &&
@@ -229,14 +236,11 @@ export function MobileMainContent({
           fileParent={files.fileParent}
           filePath={files.filePath}
           filePreview={files.filePreview}
-          filePreviewAttached={files.filePreviewAttached}
-          onAttachFilePreview={files.onAttachFilePreview}
           onGoToParent={files.onGoToParent}
           onOpenFileEntry={files.onOpenFileEntry}
-          onRefreshAssets={files.onRefreshAssets}
-          onRefresh={files.onRefreshFiles}
           pendingAssets={common.pendingActions.assets}
           pendingFiles={common.pendingActions.files}
+          showPreview={files.previewOpen}
         />
       ) : null}
 
@@ -251,8 +255,6 @@ export function MobileMainContent({
           historyMessage={changes.historyMessage}
           onOpenChange={changes.onOpenChange}
           onPreviewHistory={changes.onPreviewHistory}
-          onRefreshChanges={changes.onRefreshChanges}
-          onRefreshHistory={changes.onRefreshHistory}
           onRevertHistory={changes.onRevertHistory}
           pendingChanges={common.pendingActions.changes}
           pendingDiff={common.pendingActions.diff}
@@ -263,19 +265,7 @@ export function MobileMainContent({
       ) : null}
 
       {common.viewMode === "changeDetail" ? (
-        <ChangeDetailPanel
-          buttonFeedback={common.buttonFeedback}
-          canOpenSelectedChangeFile={changes.canOpenSelectedChangeFile}
-          canRevertSelectedChange={changes.canRevertSelectedChange}
-          changeDiff={changes.changeDiff}
-          historyDiff={changes.historyDiff}
-          onBack={changes.onBackToChanges}
-          onOpenSelectedChangeFile={changes.onOpenSelectedChangeFile}
-          onRevertHistory={changes.onRevertHistory}
-          onRevertSelectedChange={changes.onRevertSelectedChange}
-          pendingFiles={common.pendingActions.files}
-          pendingRevert={common.pendingActions.revert}
-        />
+        <ChangeDetailPanel changeDiff={changes.changeDiff} historyDiff={changes.historyDiff} />
       ) : null}
 
       {common.viewMode === "sessions" ? (
@@ -295,14 +285,7 @@ export function MobileMainContent({
         />
       ) : null}
 
-      {permission.pendingPermission ? (
-        <PermissionPrompt
-          buttonFeedback={common.buttonFeedback}
-          onAllow={permission.onAllowPermission}
-          onDeny={permission.onDenyPermission}
-          permission={permission.pendingPermission}
-        />
-      ) : null}
+      {/* 权限确认改为底部弹层（见 MobileAppScreen），这里只保留需要输入的提问卡片 */}
       {permission.pendingQuestions.map((question) => (
         <UserQuestionPrompt
           key={question.questionID}
