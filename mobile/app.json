@@ -16,7 +16,7 @@
     "splash": {
       "image": "./assets/splash-character.png",
       "resizeMode": "contain",
-      "backgroundColor": "#08080A"
+      "backgroundColor": "#0F1114"
     },
     "userInterfaceStyle": "dark",
     "ios": {
@@ -27,7 +27,7 @@
       "versionCode": 9,
       "predictiveBackGestureEnabled": false,
       "navigationBar": {
-        "backgroundColor": "#08080A",
+        "backgroundColor": "#0F1114",
         "barStyle": "light-content"
       }
     },
@@ -46,7 +46,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#08080A",
+          "backgroundColor": "#0F1114",
           "image": "./assets/splash-character.png",
           "imageWidth": 260,
           "resizeMode": "contain"
