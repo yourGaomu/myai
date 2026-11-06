@@ -96,7 +96,7 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
         <Text style={styles.status}>{loadingFrames[frame].status}</Text>
         <View style={styles.progressTrack}>
           <LinearGradient
-            colors={[palette.brandLight, palette.brandDeep]}
+            colors={[palette.brandLight, palette.brand]}
             end={{ x: 1, y: 0 }}
             start={{ x: 0, y: 0 }}
             style={[styles.progressFill, { width: `${((frame + 1) / loadingFrames.length) * 100}%` }]}

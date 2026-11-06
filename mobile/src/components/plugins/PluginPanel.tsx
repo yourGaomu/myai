@@ -55,8 +55,8 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
               disabled={pending}
               onValueChange={(value) => onSetEnabled(plugin.id, value)}
               value={plugin.enabled}
-              trackColor={{ false: palette.surface4, true: palette.brandDeep }}
-              thumbColor={plugin.enabled ? palette.brandLight : palette.ink4}
+              trackColor={{ false: palette.surface4, true: palette.brand }}
+              thumbColor={palette.ink1}
             />
           </View>
         );
@@ -67,20 +67,20 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
 
 const styles = StyleSheet.create({
   stack: { gap: 10 },
-  headerCard: { alignItems: "center", backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
-  card: { alignItems: "center", backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
+  headerCard: { alignItems: "center", backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
+  card: { alignItems: "center", backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
   flex: { flex: 1, minWidth: 0 },
-  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.bold },
-  name: { color: palette.ink1, flexShrink: 1, fontSize: font.body, fontWeight: weight.bold },
+  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
+  name: { color: palette.ink1, flexShrink: 1, fontSize: font.body, fontWeight: weight.semibold },
   meta: { color: palette.ink2, fontSize: font.label, marginTop: 3 },
   nameRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   badge: { backgroundColor: palette.okWash, borderRadius: radius.sm, color: palette.ok, fontSize: font.micro, paddingHorizontal: 6, paddingVertical: 2, textTransform: "uppercase" },
-  badgeFailed: { backgroundColor: palette.surface3, color: palette.err },
+  badgeFailed: { backgroundColor: palette.errWash, color: palette.err },
   error: { color: palette.err, fontSize: font.label, marginTop: 5 },
   row: { flexDirection: "row", gap: 6 },
-  action: { backgroundColor: palette.surface2, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
+  action: { backgroundColor: palette.well, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
   primary: { backgroundColor: palette.brand, borderRadius: radius.sm, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 },
   disabled: { opacity: 0.5 },
   message: { color: palette.ink3, fontSize: font.label },
-  empty: { backgroundColor: palette.surface3, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, color: palette.ink2, fontSize: font.body, padding: 14 },
+  empty: { backgroundColor: palette.well, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, color: palette.ink2, fontSize: font.body, padding: 14 },
 });

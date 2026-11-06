@@ -280,12 +280,18 @@ export function SubagentPanel({
             <Segment label="OpenSandbox" selected={draft.isolationMode === "opensandbox"} onPress={() => setDraft((current) => ({ ...current, isolationMode: "opensandbox" }))} />
           </View>
           <View style={styles.row}>
-            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, maxTurns: value }))} placeholder="最大轮次" placeholderTextColor={palette.ink4} style={[styles.input, styles.flex]} value={draft.maxTurns} />
-            <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, timeoutSeconds: value }))} placeholder="超时秒数" placeholderTextColor={palette.ink4} style={[styles.input, styles.flex]} value={draft.timeoutSeconds} />
+            <View style={styles.numberField}>
+              <Text style={styles.fieldLabel}>最大轮次</Text>
+              <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, maxTurns: value }))} placeholder="最大轮次" placeholderTextColor={palette.ink4} style={styles.input} value={draft.maxTurns} />
+            </View>
+            <View style={styles.numberField}>
+              <Text style={styles.fieldLabel}>超时（秒）</Text>
+              <TextInput keyboardType="number-pad" onChangeText={(value) => setDraft((current) => ({ ...current, timeoutSeconds: value }))} placeholder="超时秒数" placeholderTextColor={palette.ink4} style={styles.input} value={draft.timeoutSeconds} />
+            </View>
           </View>
           <View style={styles.rowBetween}>
             <Text style={styles.fieldLabel}>启用</Text>
-            <Switch onValueChange={(value) => setDraft((current) => ({ ...current, enabled: value }))} value={draft.enabled} />
+            <Switch onValueChange={(value) => setDraft((current) => ({ ...current, enabled: value }))} thumbColor={palette.ink1} trackColor={{ false: palette.surface4, true: palette.brand }} value={draft.enabled} />
           </View>
       </ResponsiveFormModal>
     </>
@@ -498,48 +504,49 @@ function formatEventTime(value: string) {
 
 const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  badge: { backgroundColor: palette.okWash, borderRadius: radius.xs, color: palette.ok, fontSize: font.caption, fontWeight: weight.bold, paddingHorizontal: 7, paddingVertical: 4 },
-  badgeMuted: { backgroundColor: palette.surface3, color: palette.ink1 },
+  badge: { backgroundColor: palette.okWash, borderRadius: radius.xs, color: palette.ok, fontSize: font.caption, fontWeight: weight.semibold, paddingHorizontal: 7, paddingVertical: 4 },
+  badgeMuted: { backgroundColor: palette.well, color: palette.ink1 },
   body: { color: palette.ink1, fontSize: font.body, lineHeight: 19, marginTop: 7 },
   codeText: { color: palette.ink1, fontFamily: "monospace", fontSize: font.caption, marginTop: 6 },
-  dangerButton: { alignItems: "center", borderColor: palette.errBorder, borderRadius: radius.xs, borderWidth: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
-  dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.bold },
+  dangerButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, justifyContent: "center", minHeight: 38, paddingHorizontal: 12 },
+  dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.semibold },
   disabled: { opacity: 0.5 },
-  drawerIcon: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, height: 28, justifyContent: "center", width: 28 },
-  drawerIconText: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.bold, lineHeight: 18 },
+  drawerIcon: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.xs, height: 28, justifyContent: "center", width: 28 },
+  drawerIconText: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.semibold, lineHeight: 18 },
   empty: { color: palette.ink3, fontSize: font.body, paddingVertical: 12 },
   emptyResult: { color: palette.ink3, fontSize: font.label, lineHeight: 18, marginTop: 5 },
   errorText: { color: palette.err, fontSize: font.label, marginTop: 7 },
   eventContent: { color: palette.ink1, fontSize: font.label, lineHeight: 18, marginTop: 5 },
   eventItem: { borderBottomColor: palette.hairline, borderBottomWidth: 1, paddingBottom: 8, paddingTop: 8 },
-  eventKind: { color: palette.ok, fontSize: font.caption, fontWeight: weight.bold },
+  eventKind: { color: palette.brandLight, fontSize: font.caption, fontWeight: weight.medium },
   eventStatus: { color: palette.ink3, fontSize: font.caption, marginTop: 4 },
-  eventTimeline: { backgroundColor: palette.brandWash, borderColor: palette.hairline, borderRadius: radius.xs, borderWidth: 1, marginTop: 11, padding: 9 },
-  fieldLabel: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
+  eventTimeline: { backgroundColor: palette.well, borderColor: palette.hairline, borderRadius: radius.xs, borderWidth: 1, marginTop: 11, padding: 9 },
+  fieldLabel: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium },
   flex: { flex: 1 },
-  input: { backgroundColor: palette.brandWash, borderColor: palette.hairlineStrong, borderRadius: radius.xs, borderWidth: 1, color: palette.ink1, fontSize: font.body, minHeight: 42, paddingHorizontal: 11, paddingVertical: 9 },
-  item: { backgroundColor: palette.brandWash, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, padding: 12 },
-  itemTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.bold },
-  modalCancelButton: { alignItems: "center", borderColor: palette.hairlineStrong, borderRadius: radius.xs, borderWidth: 1, justifyContent: "center", minHeight: 42, minWidth: 84, paddingHorizontal: 13 },
-  modalCancelText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
-  modalSubmitButton: { minHeight: 42, minWidth: 120 },
+  input: { backgroundColor: palette.well, borderColor: palette.hairlineStrong, borderRadius: radius.md - 2, borderWidth: 1, color: palette.ink1, fontSize: font.body, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
+  item: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.lg, borderWidth: 1, padding: 14 },
+  itemTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.semibold },
+  modalCancelButton: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md, justifyContent: "center", minHeight: 44, minWidth: 88, paddingHorizontal: 14 },
+  modalCancelText: { color: palette.ink1, fontSize: font.body, fontWeight: weight.medium },
+  modalSubmitButton: { borderRadius: radius.md, minHeight: 44, minWidth: 120 },
   meta: { color: palette.ink3, fontSize: font.caption, lineHeight: 16 },
   messageComposer: { alignItems: "stretch", flexDirection: "row", gap: 8, marginTop: 11 },
   messageInput: { flex: 1, maxHeight: 100, minHeight: 42 },
+  numberField: { flex: 1, gap: 6, minWidth: 0 },
   notice: { backgroundColor: palette.okWash, borderRadius: radius.xs, color: palette.ok, fontSize: font.label, padding: 9 },
-  primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.xs, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
-  primaryButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.bold },
+  primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md - 2, justifyContent: "center", minHeight: 40, paddingHorizontal: 14 },
+  primaryButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.semibold },
   promptInput: { minHeight: 110 },
   row: { flexDirection: "row", gap: 9 },
   rowBetween: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" },
-  secondaryButton: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
-  secondaryButtonText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.bold },
-  sectionTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.bold, marginTop: 3 },
-  segment: { alignItems: "center", backgroundColor: palette.surface2, borderRadius: radius.xs, flex: 1, justifyContent: "center", minHeight: 36, paddingHorizontal: 7 },
-  segmentActive: { backgroundColor: palette.okWash, borderColor: palette.okBorder, borderWidth: 1 },
+  secondaryButton: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md - 2, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 38, paddingHorizontal: 12 },
+  secondaryButtonText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.medium },
+  sectionTitle: { color: palette.ink1, fontSize: font.body, fontWeight: weight.semibold, marginTop: 3 },
+  segment: { alignItems: "center", backgroundColor: palette.well, borderColor: palette.transparent, borderRadius: radius.sm, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 7 },
+  segmentActive: { backgroundColor: palette.brandWash, borderColor: palette.brandDeep, borderWidth: 1 },
   segmentRow: { flexDirection: "row", gap: 6 },
-  segmentText: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.bold },
-  segmentTextActive: { color: palette.ok },
+  segmentText: { color: palette.ink2, fontSize: font.caption + 0.5, fontWeight: weight.medium },
+  segmentTextActive: { color: palette.brandLight },
   stack: { gap: 10 },
   taskDrawer: { borderTopColor: palette.hairline, borderTopWidth: 1, padding: 12, paddingTop: 3 },
   taskDetail: { marginTop: 9 },
@@ -552,7 +559,7 @@ const styles = StyleSheet.create({
   taskPreviewText: { color: palette.ink1, fontSize: font.label, lineHeight: 17 },
   taskTitle: { flexShrink: 1 },
   taskTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
-  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.heavy },
+  title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
   toolbar: { alignItems: "center", flexDirection: "row", gap: 8 },
-  unreadDot: { backgroundColor: palette.infoWash, borderRadius: radius.xs, height: 7, width: 7 },
+  unreadDot: { backgroundColor: palette.brand, borderRadius: radius.pill, height: 7, width: 7 },
 });

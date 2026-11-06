@@ -24,7 +24,7 @@ import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
 import { formatDateTime } from "../../utils/format";
 import { MarkdownText } from "../chat/MarkdownText";
 import { SharedAssetCard } from "../chat/SharedAssetCard";
-import { font, palette, radius, weight } from "../../constants/theme";
+import { font, palette, radius, shadow, weight } from "../../constants/theme";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -243,7 +243,7 @@ export function SubagentInspectionModal({
                 onPress={onClose}
                 style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}
               >
-                <Feather color={palette.err} name="x" size={18} />
+                <Feather color={palette.ink2} name="x" size={18} />
               </Pressable>
             </View>
           </View>
@@ -336,7 +336,7 @@ export function SubagentInspectionModal({
                     activeTab === "process" && styles.tabButtonTextActive,
                   ]}
                 >
-                  实时过程
+                  过程
                 </Text>
               </View>
             </Pressable>
@@ -362,7 +362,7 @@ export function SubagentInspectionModal({
                     activeTab === "messages" && styles.tabButtonTextActive,
                   ]}
                 >
-                  会话历史 ({messages.length})
+                  历史 ({messages.length})
                 </Text>
               </View>
             </Pressable>
@@ -388,7 +388,7 @@ export function SubagentInspectionModal({
                     activeTab === "assets" && styles.tabButtonTextActive,
                   ]}
                 >
-                  产物与文件 ({allAssets.length})
+                  产物 ({allAssets.length})
                 </Text>
               </View>
             </Pressable>
@@ -444,7 +444,7 @@ export function SubagentInspectionModal({
                     </Pressable>
                     {thoughtExpanded ? (
                       <View style={styles.thoughtBody}>
-                        <MarkdownText text={processViewModel.reasoningText} />
+                        <MarkdownText text={processViewModel.reasoningText} tone="muted" />
                       </View>
                     ) : null}
                   </View>
@@ -696,25 +696,23 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   container: {
-    backgroundColor: palette.surface1,
-    borderTopColor: palette.hairline,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    borderTopWidth: 1,
+    backgroundColor: palette.surface2,
+    borderTopLeftRadius: radius.sheet,
+    borderTopRightRadius: radius.sheet,
     display: "flex",
     height: "88%",
     overflow: "hidden",
     width: "100%",
+    ...shadow.float,
   },
   header: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
-    borderBottomColor: palette.hairline,
-    borderBottomWidth: 1,
+    backgroundColor: palette.surface2,
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
   },
   headerLeft: {
     alignItems: "center",
@@ -724,13 +722,11 @@ const styles = StyleSheet.create({
   },
   avatarIcon: {
     alignItems: "center",
-    backgroundColor: palette.surface3,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 38,
+    backgroundColor: palette.well,
+    borderRadius: radius.sm + 2,
+    height: 40,
     justifyContent: "center",
-    width: 38,
+    width: 40,
   },
   avatarEmoji: {
     fontSize: font.display,
@@ -747,7 +743,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: palette.ink1,
     fontSize: font.title,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   headerMetaRow: {
     alignItems: "center",
@@ -757,7 +753,7 @@ const styles = StyleSheet.create({
   readOnlyBadge: {
     color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   headerSub: {
     color: palette.ink3,
@@ -770,33 +766,29 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 32,
+    backgroundColor: palette.well,
+    borderRadius: radius.pill,
+    height: 38,
     justifyContent: "center",
-    width: 32,
+    width: 38,
   },
   iconButtonText: {
     color: palette.ink1,
     fontSize: font.title,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   closeButton: {
     alignItems: "center",
-    backgroundColor: palette.errWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 32,
+    backgroundColor: palette.well,
+    borderRadius: radius.pill,
+    height: 38,
     justifyContent: "center",
-    width: 32,
+    width: 38,
   },
   closeButtonText: {
     color: palette.err,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   statusBadge: {
     borderColor: palette.hairline,
@@ -807,10 +799,10 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   statusRunning: {
-    backgroundColor: palette.cyanWash,
+    backgroundColor: palette.brandWash,
   },
   statusSucceeded: {
     backgroundColor: palette.okWash,
@@ -819,13 +811,13 @@ const styles = StyleSheet.create({
     backgroundColor: palette.errWash,
   },
   statusWaiting: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.warnWash,
   },
   statusDefault: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
   },
   metaCard: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface2,
     borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     gap: 4,
@@ -839,7 +831,7 @@ const styles = StyleSheet.create({
   metaLabel: {
     color: palette.ink3,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   metaValue: {
     color: palette.ink1,
@@ -861,7 +853,7 @@ const styles = StyleSheet.create({
   },
   warningBanner: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.warnWash,
     borderColor: palette.brandDeep,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -879,7 +871,7 @@ const styles = StyleSheet.create({
   },
   runBar: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface2,
     borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
@@ -890,10 +882,10 @@ const styles = StyleSheet.create({
   runBarLabel: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   runPill: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
     borderColor: palette.hairline,
     borderRadius: radius.xs,
     borderWidth: 1,
@@ -902,42 +894,43 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   runPillSelected: {
-    backgroundColor: palette.surface3,
+    backgroundColor: palette.brandWash,
     borderColor: palette.hairline,
   },
   runPillText: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   runPillTextSelected: {
     color: palette.ink1,
   },
   tabBar: {
-    backgroundColor: palette.surface1,
+    backgroundColor: palette.surface2,
     borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     flexDirection: "row",
+    paddingHorizontal: 8,
   },
   tabButton: {
     alignItems: "center",
-    borderRightColor: palette.hairline,
-    borderRightWidth: 1,
+    borderBottomColor: palette.transparent,
+    borderBottomWidth: 2,
     flex: 1,
-    paddingVertical: 9,
+    paddingBottom: 10,
+    paddingTop: 8,
   },
   tabButtonActive: {
-    backgroundColor: palette.surface2,
     borderBottomColor: palette.brand,
-    borderBottomWidth: 1,
   },
   tabButtonText: {
     color: palette.ink3,
-    fontSize: font.body,
-    fontWeight: weight.bold,
+    fontSize: font.label,
+    fontWeight: weight.medium,
   },
   tabButtonTextActive: {
     color: palette.ink1,
+    fontWeight: weight.semibold,
   },
   contentBody: {
     gap: 12,
@@ -949,7 +942,7 @@ const styles = StyleSheet.create({
   },
   waitingNotice: {
     alignItems: "center",
-    backgroundColor: palette.cyanWash,
+    backgroundColor: palette.well,
     borderColor: palette.okBorder,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -960,7 +953,7 @@ const styles = StyleSheet.create({
   waitingNoticeText: {
     color: palette.info,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   permissionAlert: {
     backgroundColor: palette.errWash,
@@ -973,7 +966,7 @@ const styles = StyleSheet.create({
   permissionAlertTitle: {
     color: palette.err,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   permissionAlertText: {
     color: palette.err,
@@ -982,13 +975,13 @@ const styles = StyleSheet.create({
   thoughtCard: {
     backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
     overflow: "hidden",
   },
   thoughtHeader: {
     alignItems: "center",
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 10,
@@ -997,12 +990,12 @@ const styles = StyleSheet.create({
   thoughtHeaderTitle: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   thoughtChevron: {
     color: palette.ink3,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   thoughtBody: {
     padding: 10,
@@ -1013,12 +1006,12 @@ const styles = StyleSheet.create({
   sectionHeaderTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   toolCard: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
     gap: 6,
     padding: 10,
@@ -1040,10 +1033,10 @@ const styles = StyleSheet.create({
   },
   toolStatusTagText: {
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   toolStatusRunning: {
-    backgroundColor: palette.cyanWash,
+    backgroundColor: palette.brandWash,
   },
   toolStatusSuccess: {
     backgroundColor: palette.okWash,
@@ -1054,7 +1047,7 @@ const styles = StyleSheet.create({
   toolName: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   toolCallIDMono: {
     color: palette.ink3,
@@ -1074,7 +1067,7 @@ const styles = StyleSheet.create({
   toolArgLabel: {
     color: palette.ink3,
     fontSize: font.micro,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     marginBottom: 2,
   },
   toolMonoText: {
@@ -1089,9 +1082,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   answerCard: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
     gap: 8,
     padding: 12,
@@ -1099,12 +1092,12 @@ const styles = StyleSheet.create({
   answerHeaderTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   emptyNotice: {
     alignItems: "center",
     borderColor: palette.hairline,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     borderStyle: "dashed",
     borderWidth: 1,
     flexDirection: "row",
@@ -1115,14 +1108,14 @@ const styles = StyleSheet.create({
   emptyNoticeText: {
     color: palette.ink3,
     fontSize: font.body,
-    fontWeight: weight.semibold,
+    fontWeight: weight.regular,
   },
   messagesWrap: {
     gap: 8,
   },
   loadMoreButton: {
     alignItems: "center",
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
     borderColor: palette.hairline,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -1131,10 +1124,10 @@ const styles = StyleSheet.create({
   loadMoreButtonText: {
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   messageCard: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairline,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -1142,11 +1135,11 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   messageCardUser: {
-    backgroundColor: palette.cyanWash,
+    backgroundColor: palette.bubble,
     borderColor: palette.cyanWash,
   },
   messageCardAssistant: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
   },
   messageCardTool: {
     backgroundColor: palette.surface1,
@@ -1159,7 +1152,7 @@ const styles = StyleSheet.create({
   messageRoleText: {
     color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   messageTimeText: {
     color: palette.ink3,

@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   tabs: {
-    backgroundColor: palette.surface3,
+    backgroundColor: palette.well,
     borderColor: palette.hairline,
     borderRadius: radius.pill,
     borderWidth: 1,
@@ -78,10 +78,10 @@ const styles = StyleSheet.create({
   tabText: {
     color: palette.ink2,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   tabTextActive: {
     color: palette.ink1,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
 });

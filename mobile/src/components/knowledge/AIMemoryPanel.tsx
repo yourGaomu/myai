@@ -644,7 +644,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: palette.ink1,
     fontSize: font.title,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   addBtn: {
     alignItems: "center",
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
   addBtnText: {
     color: palette.inkInverse,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   status: {
     backgroundColor: palette.okWash,
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: palette.ink1,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     padding: 8,
   },
   extractionBanner: {
@@ -685,7 +685,7 @@ const styles = StyleSheet.create({
   extractionBannerText: {
     color: palette.err,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   miniActionBtn: {
     borderColor: palette.hairlineStrong,
@@ -697,10 +697,10 @@ const styles = StyleSheet.create({
   miniActionText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   candidateBanner: {
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairlineStrong,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -716,12 +716,12 @@ const styles = StyleSheet.create({
   candidateBannerTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   candidateBannerToggle: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   candidateList: {
     borderTopColor: palette.hairline,
@@ -755,7 +755,7 @@ const styles = StyleSheet.create({
   approveBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   mergeBtn: {
     alignItems: "center",
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
   mergeBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
 
   /* Neo-Brutalism 记忆卡片样式 */
@@ -795,7 +795,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   badge: {
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
     borderColor: palette.hairlineStrong,
     borderRadius: radius.xs,
     borderWidth: 1,
@@ -805,17 +805,17 @@ const styles = StyleSheet.create({
   badgeText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   cardDate: {
     color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   cardBody: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.regular,
     lineHeight: 19,
     marginVertical: 2,
   },
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
   cardSource: {
     color: palette.ink3,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   deleteBtn: {
     alignItems: "center",
@@ -843,7 +843,7 @@ const styles = StyleSheet.create({
   deleteBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   expandedDetails: {
     borderTopColor: palette.hairline,
@@ -873,13 +873,13 @@ const styles = StyleSheet.create({
   editBtnText: {
     color: palette.ink1,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
 
   /* 底部 Dream 卡片 (虚线边框) */
   dreamCard: {
     alignItems: "center",
-    backgroundColor: palette.brandWash,
+    backgroundColor: palette.surface1,
     borderColor: palette.hairlineStrong,
     borderRadius: radius.md,
     borderStyle: "dashed",
@@ -891,7 +891,7 @@ const styles = StyleSheet.create({
   dreamTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
     textAlign: "center",
   },
   dreamSubtitle: {
@@ -947,7 +947,7 @@ const styles = StyleSheet.create({
   fieldLabel: {
     color: palette.ink2,
     fontSize: font.caption,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   detailGrid: {
     gap: 6,
@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   segmented: {
-    backgroundColor: palette.surface3,
+    backgroundColor: palette.well,
     borderColor: palette.hairlineStrong,
     borderRadius: radius.pill,
     borderWidth: 1,
@@ -985,40 +985,37 @@ const styles = StyleSheet.create({
   segmentText: {
     color: palette.ink2,
     fontSize: font.label,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   segmentTextActive: {
     color: palette.ink1,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   footerCancelButton: {
     alignItems: "center",
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    backgroundColor: palette.well,
+    borderRadius: radius.md,
     justifyContent: "center",
-    minHeight: 38,
-    minWidth: 80,
-    paddingHorizontal: 12,
+    minHeight: 44,
+    minWidth: 88,
+    paddingHorizontal: 14,
   },
   footerCancelText: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.medium,
   },
   footerSubmitButton: {
     alignItems: "center",
     backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
+    borderRadius: radius.md,
     justifyContent: "center",
-    minHeight: 38,
-    minWidth: 100,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    minWidth: 104,
+    paddingHorizontal: 16,
   },
   mergeHint: {
-    backgroundColor: palette.okWash,
+    backgroundColor: palette.well,
     borderRadius: radius.sm,
     color: palette.ok,
     fontSize: font.label,
@@ -1027,7 +1024,7 @@ const styles = StyleSheet.create({
   },
   mergeTarget: {
     alignItems: "center",
-    backgroundColor: palette.surface2,
+    backgroundColor: palette.well,
     borderColor: palette.hairlineStrong,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -1036,14 +1033,14 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   mergeTargetSelected: {
-    backgroundColor: palette.okWash,
+    backgroundColor: palette.brandWash,
     borderColor: palette.okBorder,
     borderWidth: 1,
   },
   mergeTargetTitle: {
     color: palette.ink1,
     fontSize: font.body,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
   mergeTargetGoal: {
     color: palette.ink1,
@@ -1058,6 +1055,6 @@ const styles = StyleSheet.create({
   },
   mergeCheckSelected: {
     color: palette.ok,
-    fontWeight: weight.bold,
+    fontWeight: weight.semibold,
   },
 });
