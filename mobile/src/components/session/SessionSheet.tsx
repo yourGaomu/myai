@@ -123,16 +123,18 @@ export function SessionSheet(props: Props) {
       <Text style={[styles.hint, permission === "full" && styles.hintWarn]}>{permissionHints[permission]}</Text>
 
       <Text style={styles.label}>上下文</Text>
-      <View style={[styles.group, styles.contextRow]}>
+      <View style={[styles.group, styles.context]}>
+        <View style={styles.contextRow}>
+          <Text style={styles.contextValue}>
+            {used !== undefined ? formatTokenCount(used) : "—"} / {windowK ? `${windowK}K` : "—"}
+          </Text>
+          <Pressable accessibilityRole="button" disabled={settingsDisabled} hitSlop={6} onPress={props.onCompact} style={settingsDisabled && styles.dimmed}>
+            <Text style={styles.link}>压缩</Text>
+          </Pressable>
+        </View>
         <View style={styles.bar}>
           <View style={[styles.barFill, { width: `${Math.round(ratio * 100)}%` }]} />
         </View>
-        <Text style={styles.contextValue}>
-          {used !== undefined ? formatTokenCount(used) : "—"} / {windowK ? `${windowK}K` : "—"}
-        </Text>
-        <Pressable accessibilityRole="button" disabled={settingsDisabled} hitSlop={6} onPress={props.onCompact} style={settingsDisabled && styles.dimmed}>
-          <Text style={styles.link}>压缩</Text>
-        </Pressable>
       </View>
     </BottomSheet>
   );
@@ -158,9 +160,10 @@ const styles = StyleSheet.create({
   radioSub: { color: palette.ink3, fontSize: font.caption - 0.5, marginTop: 1 },
   hint: { color: palette.ink3, fontSize: font.caption, marginLeft: 2, marginTop: 8 },
   hintWarn: { color: palette.warn },
-  contextRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 50, paddingLeft: 14, paddingRight: 14 },
-  bar: { backgroundColor: palette.hairlineStrong, borderRadius: radius.xs, flex: 1, height: 6, overflow: "hidden" },
+  context: { gap: 12, padding: 14 },
+  contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
+  bar: { backgroundColor: palette.hairlineStrong, borderRadius: radius.xs, height: 6, overflow: "hidden" },
   barFill: { backgroundColor: palette.brand, borderRadius: radius.xs, height: "100%" },
-  contextValue: { color: palette.ink2, fontFamily: fontFamily.mono, fontSize: font.caption },
+  contextValue: { color: palette.ink2, flexShrink: 1, fontFamily: fontFamily.mono, fontSize: font.caption, maxWidth: "100%" },
   link: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
 });
