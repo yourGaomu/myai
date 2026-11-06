@@ -633,6 +633,14 @@ export const styles = StyleSheet.create({
   markdownStrong: {
     fontWeight: weight.semibold,
   },
+  markdownLink: {
+    color: palette.brandLight,
+    textDecorationLine: "underline",
+  },
+  markdownLinkError: {
+    color: palette.err,
+    textDecorationLine: "none",
+  },
   markdownEmphasis: {
     fontStyle: "italic",
   },

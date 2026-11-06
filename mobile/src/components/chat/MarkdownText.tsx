@@ -1,5 +1,5 @@
-import { type ReactNode, useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { type ReactNode, useMemo, useState } from "react";
+import { Linking, ScrollView, Text, View } from "react-native";
 
 import { styles } from "./styles";
 
@@ -12,11 +12,12 @@ type MarkdownBlock =
   | { type: "quote"; lines: string[] };
 
 // tone="muted" 用于过程时间线里的思考文字：更小、更淡，和最终回答拉开层次。
+// 各段文字都设为 selectable，原生端可以长按选中复制。
 export function MarkdownText({ text, tone = "default" }: { text: string; tone?: "default" | "muted" }) {
   const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
 
   if (blocks.length === 0) {
-    return <Text style={[styles.messageText, tone === "muted" && styles.markdownMutedText]}>{text}</Text>;
+    return <Text selectable style={[styles.messageText, tone === "muted" && styles.markdownMutedText]}>{text}</Text>;
   }
 
   return (
@@ -32,6 +33,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
     return (
       <Text
         key={`heading-${index}`}
+        selectable
         style={[
           styles.markdownHeading,
           block.level === 1 && styles.markdownHeading1,
@@ -46,7 +48,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
 
   if (block.type === "paragraph") {
     return (
-      <Text key={`paragraph-${index}`} style={[styles.markdownParagraph, muted]}>
+      <Text key={`paragraph-${index}`} selectable style={[styles.markdownParagraph, muted]}>
         {renderMarkdownInline(block.text, `paragraph-${index}`)}
       </Text>
     );
@@ -58,7 +60,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
         {block.items.map((item, itemIndex) => (
           <View key={`list-${index}-${itemIndex}`} style={styles.markdownListItem}>
             <Text style={[styles.markdownListMarker, muted]}>{block.ordered ? `${itemIndex + 1}.` : "•"}</Text>
-            <Text style={[styles.markdownListText, muted]}>{renderMarkdownInline(item, `list-${index}-${itemIndex}`)}</Text>
+            <Text selectable style={[styles.markdownListText, muted]}>{renderMarkdownInline(item, `list-${index}-${itemIndex}`)}</Text>
           </View>
         ))}
       </View>
@@ -87,7 +89,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
       <View style={styles.markdownQuoteBar} />
       <View style={styles.flex}>
         {block.lines.map((line, lineIndex) => (
-          <Text key={`quote-${index}-${lineIndex}`} style={styles.markdownQuoteText}>
+          <Text key={`quote-${index}-${lineIndex}`} selectable style={styles.markdownQuoteText}>
             {renderMarkdownInline(line, `quote-${index}-${lineIndex}`)}
           </Text>
         ))}
@@ -106,7 +108,7 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
         <View style={styles.markdownTableHeaderRow}>
           {columns.map((columnIndex) => (
             <View key={`header-${columnIndex}`} style={[styles.markdownTableCell, styles.markdownTableHeaderCell]}>
-              <Text style={styles.markdownTableCellText}>{header[columnIndex] || ""}</Text>
+              <Text selectable style={styles.markdownTableCellText}>{renderMarkdownInline(header[columnIndex] || "", `table-header-${columnIndex}`)}</Text>
             </View>
           ))}
         </View>
@@ -114,7 +116,7 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
           <View key={`row-${rowIndex}`} style={[styles.markdownTableRow, rowIndex % 2 === 1 && styles.markdownTableRowAlt]}>
             {columns.map((columnIndex) => (
               <View key={`row-${rowIndex}-${columnIndex}`} style={styles.markdownTableCell}>
-                <Text style={styles.markdownTableCellText}>{row[columnIndex] || ""}</Text>
+                <Text selectable style={styles.markdownTableCellText}>{renderMarkdownInline(row[columnIndex] || "", `table-${rowIndex}-${columnIndex}`)}</Text>
               </View>
             ))}
           </View>
@@ -124,9 +126,56 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
   );
 }
 
-function renderMarkdownInline(text: string, keyPrefix: string): ReactNode[] {
+function MarkdownLink({ children, url }: { children: ReactNode; url: string }) {
+  const [failed, setFailed] = useState(false);
+  const openLink = async () => {
+    setFailed(false);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      setFailed(true);
+    }
+  };
+
+  return (
+    <Text accessibilityHint={url} accessibilityRole="link" onPress={openLink} style={styles.markdownLink}>
+      {children}
+      {failed ? <Text accessibilityLiveRegion="polite" style={styles.markdownLinkError}>（打开失败：{url}，可长按复制）</Text> : null}
+    </Text>
+  );
+}
+
+function webURL(text: string) {
+  if (!/^https?:\/\//i.test(text) || /[\s\u0000-\u001f\u007f]/.test(text)) return null;
+  try {
+    const url = new URL(text);
+    return url.hostname ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// 去掉句末标点及多出的右括号，保留网址路径里成对的括号。
+function trimURL(text: string) {
+  let end = text.length;
+  while (end > 0) {
+    const last = text[end - 1];
+    if (/[.,!?;:]/.test(last)) {
+      end -= 1;
+      continue;
+    }
+    const opening = last === ")" ? "(" : last === "]" ? "[" : last === "}" ? "{" : "";
+    if (!opening) break;
+    const value = text.slice(0, end);
+    if (value.split(last).length <= value.split(opening).length) break;
+    end -= 1;
+  }
+  return text.slice(0, end);
+}
+
+function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true): ReactNode[] {
   const parts: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!?\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"\n]*")?\)|https?:\/\/[^\s<>`"'，。！？；：、（）【】《》「」『』]+)/gi;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let partIndex = 0;
@@ -137,24 +186,46 @@ function renderMarkdownInline(text: string, keyPrefix: string): ReactNode[] {
     }
 
     const token = match[0];
+    const key = `${keyPrefix}-${partIndex}`;
     if (token.startsWith("**")) {
       parts.push(
-        <Text key={`${keyPrefix}-${partIndex}`} style={styles.markdownStrong}>
-          {token.slice(2, -2)}
+        <Text key={key} style={styles.markdownStrong}>
+          {renderMarkdownInline(token.slice(2, -2), key, allowLinks)}
         </Text>,
       );
     } else if (token.startsWith("`")) {
       parts.push(
-        <Text key={`${keyPrefix}-${partIndex}`} style={styles.markdownInlineCode}>
+        <Text key={key} style={styles.markdownInlineCode}>
           {token.slice(1, -1)}
         </Text>,
       );
-    } else {
+    } else if (token.startsWith("*")) {
       parts.push(
-        <Text key={`${keyPrefix}-${partIndex}`} style={styles.markdownEmphasis}>
-          {token.slice(1, -1)}
+        <Text key={key} style={styles.markdownEmphasis}>
+          {renderMarkdownInline(token.slice(1, -1), key, allowLinks)}
         </Text>,
       );
+    } else if (!allowLinks) {
+      parts.push(token);
+    } else if (token.startsWith("[")) {
+      const link = token.match(/^\[([^\]\n]+)\]\((.*)\)$/);
+      const target = link?.[2].replace(/\s+"[^"\n]*"$/, "").replace(/^<(.*)>$/, "$1") || "";
+      const url = webURL(target);
+      if (link && url) {
+        parts.push(<MarkdownLink key={key} url={url}>{renderMarkdownInline(link[1], `${key}-label`, false)}</MarkdownLink>);
+      } else {
+        parts.push(token);
+      }
+    } else if (token.startsWith("![")) {
+      parts.push(token);
+    } else {
+      const target = trimURL(token);
+      const url = webURL(target);
+      if (url) {
+        parts.push(<MarkdownLink key={key} url={url}>{target}</MarkdownLink>, token.slice(target.length));
+      } else {
+        parts.push(token);
+      }
     }
 
     lastIndex = match.index + token.length;
