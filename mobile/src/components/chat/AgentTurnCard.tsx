@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
@@ -38,7 +38,20 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
   }, [turn.id, turn.reasoning, turn.timeline, turn.tools]);
   // 运行中默认展开，结束后自动收起；用户手动点过之后以用户的选择为准
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle");
+  const copyRequestRef = useRef(0);
+
+  useEffect(() => {
+    setCopyState("idle");
+    return () => { copyRequestRef.current += 1; };
+  }, [turn.id]);
+
+  useEffect(() => {
+    if (copyState !== "copied" && copyState !== "failed") return;
+    const timer = setTimeout(() => setCopyState("idle"), copyState === "failed" ? 4000 : 2000);
+    return () => clearTimeout(timer);
+  }, [copyState]);
+
   const clock = useRunningClock(running, turn.startedAt);
   const tokens = useMemo(() => usageBreakdown(turn.usage), [turn.usage]);
   const files = useMemo(() => extractFileChanges(turn.tools), [turn.tools]);
@@ -64,12 +77,17 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
     );
   }
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     const content = (turn.text || turn.reasoning || "").trim();
-    if (!content || !canCopy) return;
-    void navigator.clipboard.writeText(content).catch(() => undefined);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (!content || !canCopy || copyState === "pending") return;
+    const request = ++copyRequestRef.current;
+    setCopyState("pending");
+    try {
+      await navigator.clipboard.writeText(content);
+      if (copyRequestRef.current === request) setCopyState("copied");
+    } catch {
+      if (copyRequestRef.current === request) setCopyState("failed");
+    }
   };
 
   return (
@@ -140,8 +158,19 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
       {!running && ((canCopy && hasContent) || canRegenerate || tokens) ? (
         <View style={styles.actions}>
           {canCopy && hasContent ? (
-            <Pressable accessibilityLabel="复制回答" onPress={handleCopy} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
-              <Feather color={palette.ink3} name={copied ? "check" : "copy"} size={17} />
+            <Pressable
+              accessibilityLabel={copyState === "pending" ? "正在复制" : "复制回答"}
+              accessibilityRole="button"
+              accessibilityState={{ busy: copyState === "pending", disabled: copyState === "pending" }}
+              disabled={copyState === "pending"}
+              onPress={handleCopy}
+              style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+            >
+              {copyState === "pending" ? (
+                <Spinner color={palette.ink3} size={17} />
+              ) : (
+                <Feather color={copyState === "failed" ? palette.err : palette.ink3} name={copyState === "copied" ? "check" : "copy"} size={17} />
+              )}
             </Pressable>
           ) : null}
           {canRegenerate ? (
@@ -151,6 +180,11 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
           ) : null}
           {tokens ? <Text style={styles.tokens}>{tokens.total} tokens</Text> : null}
         </View>
+      ) : null}
+      {canCopy && (copyState === "copied" || copyState === "failed") ? (
+        <Text accessibilityLiveRegion="polite" style={[styles.copyFeedback, copyState === "failed" && styles.copyFailed]}>
+          {copyState === "copied" ? "已复制" : "复制失败，请选择文字后复制"}
+        </Text>
       ) : null}
     </View>
   );
@@ -220,6 +254,8 @@ const styles = StyleSheet.create({
   noteLink: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
   actions: { alignItems: "center", flexDirection: "row", gap: 2, marginLeft: -9 },
   action: { alignItems: "center", borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
+  copyFeedback: { color: palette.ink3, fontSize: font.caption },
+  copyFailed: { color: palette.err },
   tokens: { color: palette.ink3, fontSize: font.caption, marginLeft: 6 },
   error: { alignItems: "flex-start", backgroundColor: palette.errWash, borderRadius: radius.md, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
   errorIcon: { marginTop: 2 },

@@ -80,7 +80,9 @@ export function ChatPanel({
   const scrollToTail = useCallback(
     (animated = true) => {
       requestAnimationFrame(() => {
-        chatScrollRef.current?.scrollToEnd({ animated });
+        if (followTailRef.current) {
+          chatScrollRef.current?.scrollToEnd({ animated });
+        }
       });
     },
     [chatScrollRef],
@@ -92,17 +94,19 @@ export function ChatPanel({
     setJumpOpen(false);
   }, [sessionID]);
 
-  // 软键盘弹起时，强制重置 followTail 并平滑滚动到底部，把最新的对话记录“顶”到输入框正上方
+  // 只在原本跟随最新消息时随键盘调整，回看历史时保留阅读位置。
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const sub = Keyboard.addListener(showEvent, () => {
-      followTailRef.current = true;
+      clearTimeout(timer);
+      if (!followTailRef.current) return;
       scrollToTail(true);
-      const timer = setTimeout(() => scrollToTail(false), 90);
-      return () => clearTimeout(timer);
+      timer = setTimeout(() => scrollToTail(false), 90);
     });
     return () => {
       sub.remove();
+      clearTimeout(timer);
     };
   }, [scrollToTail]);
 
