@@ -11,21 +11,23 @@ type MarkdownBlock =
   | { type: "table"; header: string[]; rows: string[][] }
   | { type: "quote"; lines: string[] };
 
-export function MarkdownText({ text }: { text: string }) {
+// tone="muted" 用于过程时间线里的思考文字：更小、更淡，和最终回答拉开层次。
+export function MarkdownText({ text, tone = "default" }: { text: string; tone?: "default" | "muted" }) {
   const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
 
   if (blocks.length === 0) {
-    return <Text style={styles.messageText}>{text}</Text>;
+    return <Text style={[styles.messageText, tone === "muted" && styles.markdownMutedText]}>{text}</Text>;
   }
 
   return (
     <View style={styles.markdownRoot}>
-      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+      {blocks.map((block, index) => renderMarkdownBlock(block, index, tone))}
     </View>
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock, index: number) {
+function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default" | "muted") {
+  const muted = tone === "muted" ? styles.markdownMutedText : null;
   if (block.type === "heading") {
     return (
       <Text
@@ -44,7 +46,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number) {
 
   if (block.type === "paragraph") {
     return (
-      <Text key={`paragraph-${index}`} style={styles.markdownParagraph}>
+      <Text key={`paragraph-${index}`} style={[styles.markdownParagraph, muted]}>
         {renderMarkdownInline(block.text, `paragraph-${index}`)}
       </Text>
     );
@@ -55,8 +57,8 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number) {
       <View key={`list-${index}`} style={styles.markdownList}>
         {block.items.map((item, itemIndex) => (
           <View key={`list-${index}-${itemIndex}`} style={styles.markdownListItem}>
-            <Text style={styles.markdownListMarker}>{block.ordered ? `${itemIndex + 1}.` : "•"}</Text>
-            <Text style={styles.markdownListText}>{renderMarkdownInline(item, `list-${index}-${itemIndex}`)}</Text>
+            <Text style={[styles.markdownListMarker, muted]}>{block.ordered ? `${itemIndex + 1}.` : "•"}</Text>
+            <Text style={[styles.markdownListText, muted]}>{renderMarkdownInline(item, `list-${index}-${itemIndex}`)}</Text>
           </View>
         ))}
       </View>

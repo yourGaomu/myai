@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Image, Pressable, Text, type StyleProp, View, type ViewStyle } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 
-import { palette } from "../../constants/theme";
+import { font, palette, radius } from "../../constants/theme";
 import type { ChatItem } from "../../types/chat";
+import { toolIcon, toolKind } from "../../utils/toolDisplay";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { MarkdownText } from "./MarkdownText";
@@ -30,47 +30,37 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   if (message.role === "tool_call" || message.role === "tool") {
     const isKnowledgeSearch = message.toolName === "knowledge_search";
     const displayName = isKnowledgeSearch ? "知识库检索" : message.toolName || "工具";
-    const dotStyle =
-      message.role === "tool_call"
-        ? styles.toolDotWarn
-        : message.toolError
-          ? styles.toolDotErr
-          : styles.toolDotOk;
+    const failed = message.role === "tool" && Boolean(message.toolError);
+    const subtitle = message.role === "tool_call" ? "调用中" : failed ? "执行错误" : "已完成";
     return (
       <View style={[styles.message, styles.toolMessage]}>
         <Pressable onPress={() => setExpanded((value) => !value)} style={({ pressed }) => buttonFeedback(styles.toolHeader, pressed)}>
-          <View style={[styles.toolDot, dotStyle]} />
+          <View style={[local.toolIcon, failed && local.toolIconError]}>
+            <Feather color={failed ? palette.err : palette.ink3} name={toolIcon(toolKind(message.toolName || ""))} size={15} />
+          </View>
           <Text numberOfLines={1} style={styles.toolTitle}>
             {displayName}
           </Text>
-          <Text numberOfLines={1} style={styles.toolSubtitle}>
-            {isKnowledgeSearch
-              ? message.role === "tool_call"
-                ? "知识库检索"
-                : "知识库结果"
-              : message.role === "tool_call"
-                ? "工具请求"
-                : message.toolError
-                  ? "执行错误"
-                  : "已完成"}
+          <Text numberOfLines={1} style={[styles.toolSubtitle, failed && styles.toolErrorText]}>
+            {subtitle}
           </Text>
-          <Feather color={palette.ink4} name={expanded ? "chevron-down" : "chevron-right"} size={13} />
+          <Feather color={palette.ink4} name={expanded ? "chevron-down" : "chevron-right"} size={14} />
         </Pressable>
         {expanded ? (
           <View style={styles.toolBody}>
             {message.toolArguments ? (
               <View style={styles.toolSection}>
-                <Text style={styles.toolSectionTitle}>参数</Text>
-                <Text style={styles.toolCode}>{message.toolArguments}</Text>
+                <Text style={styles.toolSectionTitle}>请求</Text>
+                <Text selectable style={styles.toolCode}>{message.toolArguments}</Text>
               </View>
             ) : null}
             {message.text ? (
               <View style={styles.toolSection}>
-                <Text style={styles.toolSectionTitle}>{message.toolError ? "错误" : "结果"}</Text>
-                {sharedAsset && !message.toolError ? (
+                <Text style={[styles.toolSectionTitle, failed && styles.toolErrorText]}>{failed ? "错误" : "返回"}</Text>
+                {sharedAsset && !failed ? (
                   <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
                 ) : (
-                  <Text style={[styles.toolCode, message.toolError && styles.toolErrorText]}>{message.text}</Text>
+                  <Text selectable style={[styles.toolCode, failed && styles.toolErrorText]}>{message.text}</Text>
                 )}
               </View>
             ) : null}
@@ -83,12 +73,7 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
   if (message.role === "user") {
     return (
       <View style={styles.userTurnWrapper}>
-        <LinearGradient
-          colors={[palette.brandLight, palette.brandDeep]}
-          end={{ x: 1, y: 1 }}
-          start={{ x: 0.15, y: 0 }}
-          style={[styles.message, styles.userMessage]}
-        >
+        <View style={styles.userMessage}>
           {message.text ? (
             <Text selectable style={styles.userMessageText}>
               {message.text}
@@ -97,35 +82,34 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
           {message.attachments?.length ? (
             <View style={styles.messageAttachments}>
               {message.attachments.map((attachment, index) => (
-                <ChatAttachmentCard
-                  attachment={attachment}
-                  buttonFeedback={buttonFeedback}
-                  key={`${message.id}-attachment-${index}`}
-                />
+                <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} />
               ))}
             </View>
           ) : null}
-        </LinearGradient>
-        <Text style={styles.userTurnMeta}>{message.status === "queued" ? "排队中" : "已发送"}</Text>
+        </View>
+        {message.status === "queued" ? <Text style={styles.userTurnMeta}>排队中</Text> : null}
+      </View>
+    );
+  }
+
+  if (message.role === "event" || message.role === "error") {
+    const isError = message.role === "error";
+    return (
+      <View style={[styles.message, isError ? styles.errorMessage : styles.eventMessage, local.noticeRow]}>
+        <Feather color={isError ? palette.err : palette.ink3} name={isError ? "alert-circle" : "info"} size={15} style={local.noticeIcon} />
+        <Text selectable style={[local.noticeText, isError && local.noticeTextError]}>
+          {message.text}
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={[styles.message, styles[`${message.role}Message`]]}>
-      {message.role === "assistant" ? (
-        <View style={styles.assistantHeader}>
-          <LinearGradient
-            colors={[palette.brand, palette.brandDark]}
-            end={{ x: 1, y: 1 }}
-            start={{ x: 0.15, y: 0 }}
-            style={styles.assistantAvatarRing}
-          >
-            <Image source={require("../../../assets/avatar.png")} style={styles.assistantAvatarImage} />
-          </LinearGradient>
-          <Text style={styles.assistantName}>MYAI</Text>
-        </View>
-      ) : null}
+    <View style={[styles.message, styles.assistantMessage]}>
+      <View style={styles.assistantHeader}>
+        <Image source={require("../../../assets/avatar.png")} style={styles.assistantAvatarImage} />
+        <Text style={styles.assistantName}>MyAI</Text>
+      </View>
       {message.reasoning && !hideReasoning ? (
         <ThinkingReasoning
           buttonFeedback={buttonFeedback}
@@ -139,27 +123,21 @@ export function MessageBubble({ message, buttonFeedback, hideReasoning = false, 
       {message.attachments?.length ? (
         <View style={styles.messageAttachments}>
           {message.attachments.map((attachment, index) => (
-            <ChatAttachmentCard
-              attachment={attachment}
-              buttonFeedback={buttonFeedback}
-              key={`${message.id}-attachment-${index}`}
-            />
+            <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} />
           ))}
         </View>
       ) : null}
-      {message.role === "assistant" && (showStatusText || canRegenerate) ? (
+      {showStatusText || canRegenerate ? (
         <View style={styles.messageStatusRow}>
-          {showStatusText ? <Text style={styles.messageStatusPill}>{statusText}</Text> : null}
+          {showStatusText ? <Text style={styles.messageStatusPill}>{statusText}。</Text> : null}
           {canRegenerate ? (
-            <Pressable onPress={onRegenerate} style={({ pressed }) => buttonFeedback(styles.regenerateButton, pressed)}>
+            <Pressable hitSlop={8} onPress={onRegenerate} style={({ pressed }) => buttonFeedback(styles.regenerateButton, pressed)}>
               <Text style={styles.regenerateButtonText}>重新生成</Text>
             </Pressable>
           ) : null}
         </View>
       ) : null}
-      {message.usage && usageHasValues(message.usage) ? (
-        <Text style={styles.messageMeta}>{usageSummary(message.usage)}</Text>
-      ) : null}
+      {message.usage && usageHasValues(message.usage) ? <Text style={styles.messageMeta}>{usageSummary(message.usage)}</Text> : null}
     </View>
   );
 }
@@ -171,10 +149,19 @@ function assistantStatusText(message: ChatItem) {
     case "tool_running":
       return "正在使用工具";
     case "paused":
-      return "已暂停";
+      return "已停止";
     case "error":
       return "失败";
     default:
       return "";
   }
 }
+
+const local = StyleSheet.create({
+  toolIcon: { alignItems: "center", borderRadius: radius.xs + 2, height: 27, justifyContent: "center", width: 27 },
+  toolIconError: { backgroundColor: palette.errWash },
+  noticeRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
+  noticeIcon: { marginTop: 2 },
+  noticeText: { color: palette.ink2, flex: 1, fontSize: font.label + 0.5, lineHeight: 21 },
+  noticeTextError: { color: palette.err },
+});
