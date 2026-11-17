@@ -6,6 +6,7 @@ import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { attachmentKey, attachmentTitle, isImageAttachment, isUploadedAssetAttachment } from "../../utils/attachments";
 import { radius, weight } from "../../constants/theme";
+import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
 
@@ -37,6 +38,7 @@ type Props = {
 // 输入区：Plan 模式微光外框 + 待处理授权警示条 + 多模态 4 项附件面板（文件/图片/工作区/知识库）。
 export function Composer(props: Props) {
   const { palette } = useAppTheme();
+  const { isWallpaperActive } = useWallpaper();
   const styles = useThemedStyles(makeStyles);
   const { attachedFiles, canPause, messageInput, pendingPause, pendingSend, pendingUpload, planMode } = props;
   const [focused, setFocused] = useState(false);
@@ -92,7 +94,7 @@ export function Composer(props: Props) {
         </Pressable>
       ) : null}
 
-      <View style={[styles.box, planMode && styles.boxPlan, focused && styles.boxFocused]}>
+      <View style={[styles.box, isWallpaperActive && styles.boxGlass, planMode && styles.boxPlan, focused && styles.boxFocused]}>
         {planMode ? (
           <View style={styles.planBanner}>
             <Feather color={palette.brandLight} name="compass" size={12} />
@@ -236,6 +238,10 @@ const makeStyles = ({ font, palette, shadow }: AppTheme) =>
       paddingRight: 8,
       paddingTop: 10,
       ...shadow.float,
+    },
+    boxGlass: {
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
     },
     boxPlan: {
       borderColor: palette.brandDeep,

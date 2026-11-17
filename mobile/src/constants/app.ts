@@ -3,7 +3,7 @@
 export const defaultRelayURL = "https://relay.mikasa.wiki";
 export const defaultAssetBaseURL = "https://assets.mikasa.wiki";
 export const mobileSettingsKey = "myai.mobile.settings.v1";
-export const mobileAppVersion = "1.0.4";
-export const mobileAndroidVersionCode = 8;
+export const mobileAppVersion = "1.2.0";
+export const mobileAndroidVersionCode = 10;
 export const maxAttachedFiles = 5;
 export const androidBottomInsetFallback = 26;

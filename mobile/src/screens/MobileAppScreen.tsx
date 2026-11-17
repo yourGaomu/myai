@@ -4,6 +4,7 @@ import { AppState, BackHandler, Platform, type AppStateStatus, type ScrollView }
 import { ActionBar } from "../components/layout/ActionBar";
 import { AppHeader, describeConnection } from "../components/layout/AppHeader";
 import { HeaderIconButton, ScreenHeader } from "../components/layout/ScreenHeader";
+import { ChatWallpaperLayer } from "../components/chat/ChatWallpaperLayer";
 import { ConfirmModal } from "../components/common/ConfirmModal";
 import { PermissionSheet } from "../components/permissions/PermissionSheet";
 import { SessionSheet } from "../components/session/SessionSheet";
@@ -1389,6 +1390,11 @@ export function MobileAppScreen() {
 
   return (
     <MobileScreenShell
+      backgroundLayer={
+        viewMode === "chat" ? (
+          <ChatWallpaperLayer active={!drawerVisible && !sessionSheetVisible} />
+        ) : undefined
+      }
       bottomDock={dock}
       bottomSafePadding={dock ? 0 : bottomSafePadding}
       floatingHeader={viewMode === "chat"}

@@ -6,6 +6,7 @@ import { space } from "../constants/theme";
 import { useAppTheme, useThemedStyles } from "../theme/ThemeProvider";
 
 type Props = {
+  backgroundLayer?: ReactNode;
   bottomDock: ReactNode;
   bottomSafePadding: number;
   children: ReactNode;
@@ -16,6 +17,7 @@ type Props = {
 };
 
 export function MobileScreenShell({
+  backgroundLayer,
   bottomDock,
   bottomSafePadding,
   children,
@@ -34,6 +36,7 @@ export function MobileScreenShell({
 
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.safe}>
+      {backgroundLayer}
       <KeyboardAvoidingView
         behavior={Platform.OS === "web" ? undefined : "padding"}
         keyboardVerticalOffset={0}

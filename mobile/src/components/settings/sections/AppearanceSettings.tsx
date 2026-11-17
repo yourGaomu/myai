@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import {
@@ -9,7 +10,14 @@ import {
   type AccentPreset,
   type ThemeMode,
 } from "../../../constants/theme";
+import { useWallpaper } from "../../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
+import {
+  formatWallpaperSize,
+  WALLPAPER_PRESETS,
+  type WallpaperPresetId,
+} from "../../../utils/wallpaperRegistry";
+import { ChatWallpaperLayer } from "../../chat/ChatWallpaperLayer";
 
 const themeModes: Array<{ icon: "moon" | "sun" | "smartphone"; key: ThemeMode; label: string }> = [
   { key: "dark", label: "深色", icon: "moon" },
@@ -18,10 +26,23 @@ const themeModes: Array<{ icon: "moon" | "sun" | "smartphone"; key: ThemeMode; l
 ];
 
 const fontSizeChoices = [14, 15, 16, 17, 18];
+const blurChoices = [
+  { label: "无", value: 0 },
+  { label: "轻柔", value: 16 },
+  { label: "适中", value: 36 },
+  { label: "深度", value: 64 },
+];
+const dimChoices = [
+  { label: "通透", value: 0.2 },
+  { label: "平衡", value: 0.42 },
+  { label: "护眼", value: 0.6 },
+];
 
 export function AppearanceSettings() {
   const theme = useAppTheme();
   const styles = useThemedStyles(makeStyles);
+  const wallpaper = useWallpaper();
+  const [wallpaperFeedback, setWallpaperFeedback] = useState<{ error?: boolean; text: string } | null>(null);
   const {
     accent,
     highlightUserBubble,
@@ -33,6 +54,25 @@ export function AppearanceSettings() {
     themeMode,
     updateAppearance,
   } = theme;
+
+  const wp = wallpaper.settings;
+  const activePreset = WALLPAPER_PRESETS.find((item) => item.id === wp.presetId);
+  const wallpaperStatusLabel =
+    wp.kind === "none"
+      ? "默认纯色画布"
+      : wp.kind === "preset"
+        ? `预设 · ${activePreset?.label || "渐变"}`
+        : `${wp.kind === "video" ? "视频壁纸" : "图片/动图"} · ${wp.fileName || "本地媒体"}${wp.fileSize ? ` (${formatWallpaperSize(wp.fileSize)})` : ""}`;
+
+  const handlePickWallpaper = async (filter: "video" | "image") => {
+    setWallpaperFeedback(null);
+    const result = await wallpaper.pickAndSaveWallpaper(filter);
+    if (result.ok) {
+      setWallpaperFeedback({ text: filter === "video" ? "已启用 MP4/视频对话壁纸。" : "已启用图片/动图对话壁纸。" });
+    } else if (result.error) {
+      setWallpaperFeedback({ error: true, text: result.error });
+    }
+  };
 
   return (
     <View style={styles.root}>
@@ -86,6 +126,221 @@ export function AppearanceSettings() {
             );
           })}
         </View>
+      </View>
+
+      {/* 对话背景与动态壁纸 */}
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.cardTitleCol}>
+            <Text style={styles.cardTitle}>对话背景壁纸</Text>
+            <Text style={styles.cardSub}>支持本地 .mp4 视频、GIF/WebP 动图、高清静图或氛围渐变</Text>
+          </View>
+          {wallpaper.isWallpaperActive ? (
+            <Pressable
+              onPress={() => {
+                setWallpaperFeedback(null);
+                wallpaper.clearWallpaper();
+              }}
+              style={({ pressed }) => [styles.clearChip, pressed && styles.pressed]}
+            >
+              <Text style={styles.clearChipText}>清除</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.wallpaperPreviewBox}>
+          <ChatWallpaperLayer active />
+          <View style={styles.wallpaperPreviewInner}>
+            <View style={styles.previewUserBubble}>
+              <Text style={styles.previewBubbleSmallText}>Wallpaper 视频背景测试</Text>
+            </View>
+            <View
+              style={[
+                styles.wallpaperPreviewReply,
+                wallpaper.isWallpaperActive && wp.cardBackdrop && styles.wallpaperPreviewReplyGlass,
+              ]}
+            >
+              <Text style={styles.wallpaperPreviewReplyText}>
+                回复正文支持磨砂底衬与遮罩调节，在动态视频上方依然保持清晰可读。
+              </Text>
+            </View>
+            <View style={styles.wallpaperBadge}>
+              <View style={[styles.wallpaperBadgeDot, { backgroundColor: wallpaper.isWallpaperActive ? palette.brand : palette.ink4 }]} />
+              <Text numberOfLines={1} style={styles.wallpaperBadgeText}>{wallpaperStatusLabel}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.presetGrid}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: wp.kind === "none" }}
+            onPress={() => {
+              setWallpaperFeedback(null);
+              wallpaper.clearWallpaper();
+            }}
+            style={({ pressed }) => [styles.presetChip, wp.kind === "none" && styles.presetChipActive, pressed && styles.pressed]}
+          >
+            <View style={[styles.presetSwatch, { backgroundColor: palette.canvas, borderColor: palette.hairlineStrong }]} />
+            <Text style={[styles.presetLabel, wp.kind === "none" && styles.presetLabelActive]}>默认纯色</Text>
+          </Pressable>
+          {WALLPAPER_PRESETS.map((preset) => {
+            const active = wp.kind === "preset" && wp.presetId === preset.id;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                key={preset.id}
+                onPress={() => {
+                  setWallpaperFeedback(null);
+                  wallpaper.selectPreset(preset.id as WallpaperPresetId);
+                }}
+                style={({ pressed }) => [styles.presetChip, active && styles.presetChipActive, pressed && styles.pressed]}
+              >
+                <View style={[styles.presetSwatch, { backgroundColor: isDark ? preset.swatchDark : preset.swatchLight }]} />
+                <Text style={[styles.presetLabel, active && styles.presetLabelActive]}>{preset.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.uploadRow}>
+          <Pressable
+            disabled={wallpaper.busy}
+            onPress={() => void handlePickWallpaper("video")}
+            style={({ pressed }) => [styles.uploadBtnPrimary, wallpaper.busy && styles.disabledBtn, pressed && styles.pressed]}
+          >
+            {wallpaper.busy ? (
+              <ActivityIndicator color={palette.inkInverse} size="small" />
+            ) : (
+              <Feather color={palette.inkInverse} name="video" size={15} />
+            )}
+            <Text style={styles.uploadBtnPrimaryText}>导入 MP4 视频</Text>
+          </Pressable>
+          <Pressable
+            disabled={wallpaper.busy}
+            onPress={() => void handlePickWallpaper("image")}
+            style={({ pressed }) => [styles.uploadBtnSecondary, wallpaper.busy && styles.disabledBtn, pressed && styles.pressed]}
+          >
+            <Feather color={palette.ink1} name="image" size={15} />
+            <Text style={styles.uploadBtnSecondaryText}>导入图片 / GIF</Text>
+          </Pressable>
+        </View>
+
+        <Text style={styles.wallpaperHintText}>
+          本地导入 MP4/MOV/WebM（上限 50 MB）或 PNG/JPG/GIF/WebP（上限 20 MB）；视频默认静音循环且不打断后台音乐。
+        </Text>
+
+        {wallpaperFeedback ? (
+          <View style={[styles.feedbackBox, wallpaperFeedback.error ? styles.feedbackErr : styles.feedbackOk]}>
+            <Text style={[styles.feedbackText, wallpaperFeedback.error ? styles.feedbackErrText : styles.feedbackOkText]}>
+              {wallpaperFeedback.text}
+            </Text>
+          </View>
+        ) : null}
+
+        {wallpaper.isWallpaperActive ? (
+          <View style={styles.tuneSection}>
+            <View style={styles.divider} />
+
+            <View style={styles.tuneBlock}>
+              <View style={styles.tuneHeaderRow}>
+                <Text style={styles.tuneLabel}>护眼遮罩浓度</Text>
+                <View style={styles.stepRow}>
+                  <Pressable
+                    onPress={() => wallpaper.updateWallpaper({ dimOpacity: wp.dimOpacity - 0.08 })}
+                    style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
+                  >
+                    <Feather color={palette.ink1} name="minus" size={13} />
+                  </Pressable>
+                  <Text style={styles.tuneValue}>{Math.round(wp.dimOpacity * 100)}%</Text>
+                  <Pressable
+                    onPress={() => wallpaper.updateWallpaper({ dimOpacity: wp.dimOpacity + 0.08 })}
+                    style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
+                  >
+                    <Feather color={palette.ink1} name="plus" size={13} />
+                  </Pressable>
+                </View>
+              </View>
+              <View style={styles.choiceRow}>
+                {dimChoices.map((item) => {
+                  const active = Math.abs(wp.dimOpacity - item.value) < 0.05;
+                  return (
+                    <Pressable
+                      key={item.label}
+                      onPress={() => wallpaper.updateWallpaper({ dimOpacity: item.value })}
+                      style={({ pressed }) => [styles.choiceChip, active && styles.choiceChipActive, pressed && styles.pressed]}
+                    >
+                      <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.tuneBlock}>
+              <View style={styles.tuneHeaderRow}>
+                <Text style={styles.tuneLabel}>背景高斯模糊</Text>
+                <Text style={styles.tuneValue}>{wp.blurAmount === 0 ? "关闭" : `强度 ${wp.blurAmount}`}</Text>
+              </View>
+              <View style={styles.choiceRow}>
+                {blurChoices.map((item) => {
+                  const active =
+                    item.value === 0 ? wp.blurAmount === 0 : Math.abs(wp.blurAmount - item.value) <= 10;
+                  return (
+                    <Pressable
+                      key={item.label}
+                      onPress={() => wallpaper.updateWallpaper({ blurAmount: item.value })}
+                      style={({ pressed }) => [styles.choiceChip, active && styles.choiceChipActive, pressed && styles.pressed]}
+                    >
+                      <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {wp.kind === "image" || wp.kind === "video" ? (
+              <View style={styles.tuneBlock}>
+                <View style={styles.tuneHeaderRow}>
+                  <Text style={styles.tuneLabel}>画面填充方式</Text>
+                </View>
+                <View style={styles.choiceRow}>
+                  {(
+                    [
+                      { key: "cover", label: "铺满裁切" },
+                      { key: "contain", label: "完整居中" },
+                    ] as const
+                  ).map((item) => {
+                    const active = wp.resizeMode === item.key;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        onPress={() => wallpaper.updateWallpaper({ resizeMode: item.key })}
+                        style={({ pressed }) => [styles.choiceChip, active && styles.choiceChipActive, pressed && styles.pressed]}
+                      >
+                        <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{item.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.switchRow}>
+              <View style={styles.switchTextCol}>
+                <Text style={styles.switchTitle}>回复文字阅读底衬</Text>
+                <Text style={styles.switchSub}>为 Agent 长回复叠加轻透磨砂衬底，避免动态背景花屏干扰阅读</Text>
+              </View>
+              <Switch
+                onValueChange={(value) => wallpaper.updateWallpaper({ cardBackdrop: value })}
+                thumbColor={wp.cardBackdrop ? palette.brand : palette.ink3}
+                trackColor={{ false: palette.surface3, true: palette.brandWashStrong }}
+                value={wp.cardBackdrop}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
 
       {/* 排版与对话展示 */}
@@ -180,6 +435,262 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       color: palette.ink2,
       fontSize: font.caption,
       marginTop: -6,
+    },
+    cardHeaderRow: {
+      alignItems: "flex-start",
+      flexDirection: "row",
+      gap: 10,
+      justifyContent: "space-between",
+    },
+    cardTitleCol: {
+      flex: 1,
+      gap: 6,
+    },
+    clearChip: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    clearChipText: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    wallpaperPreviewBox: {
+      backgroundColor: palette.canvas,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      height: 168,
+      overflow: "hidden",
+      position: "relative",
+    },
+    wallpaperPreviewInner: {
+      flex: 1,
+      gap: 8,
+      justifyContent: "space-between",
+      padding: 12,
+    },
+    previewBubbleSmallText: {
+      color: palette.ink1,
+      fontSize: font.label,
+      lineHeight: 19,
+    },
+    wallpaperPreviewReply: {
+      alignSelf: "stretch",
+      borderRadius: radius.md,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    wallpaperPreviewReplyGlass: {
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderWidth: 1,
+    },
+    wallpaperPreviewReplyText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      lineHeight: 18,
+    },
+    wallpaperBadge: {
+      alignItems: "center",
+      alignSelf: "flex-start",
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 6,
+      maxWidth: "100%",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    wallpaperBadgeDot: {
+      borderRadius: radius.pill,
+      height: 6,
+      width: 6,
+    },
+    wallpaperBadgeText: {
+      color: palette.ink2,
+      fontSize: 11,
+      fontWeight: weight.medium,
+    },
+    presetGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    presetChip: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flexBasis: "48%",
+      flexDirection: "row",
+      flexGrow: 1,
+      gap: 8,
+      minHeight: 40,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    presetChipActive: {
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+    },
+    presetSwatch: {
+      borderColor: "transparent",
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      height: 16,
+      width: 16,
+    },
+    presetLabel: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    presetLabelActive: {
+      color: palette.ink1,
+    },
+    uploadRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    uploadBtnPrimary: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderRadius: radius.md,
+      flex: 1,
+      flexDirection: "row",
+      gap: 7,
+      justifyContent: "center",
+      minHeight: 42,
+      paddingHorizontal: 12,
+    },
+    uploadBtnPrimaryText: {
+      color: palette.inkInverse,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    uploadBtnSecondary: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flex: 1,
+      flexDirection: "row",
+      gap: 7,
+      justifyContent: "center",
+      minHeight: 42,
+      paddingHorizontal: 12,
+    },
+    uploadBtnSecondaryText: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    disabledBtn: {
+      opacity: 0.55,
+    },
+    wallpaperHintText: {
+      color: palette.ink3,
+      fontSize: 11.5,
+      lineHeight: 17,
+    },
+    feedbackBox: {
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    feedbackOk: {
+      backgroundColor: palette.okWash,
+      borderColor: palette.okBorder,
+    },
+    feedbackErr: {
+      backgroundColor: palette.errWash,
+      borderColor: palette.errBorder,
+    },
+    feedbackText: {
+      fontSize: font.caption,
+      fontWeight: weight.medium,
+      lineHeight: 17,
+    },
+    feedbackOkText: {
+      color: palette.ok,
+    },
+    feedbackErrText: {
+      color: palette.err,
+    },
+    tuneSection: {
+      gap: 12,
+    },
+    tuneBlock: {
+      gap: 8,
+    },
+    tuneHeaderRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    tuneLabel: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    tuneValue: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+      minWidth: 42,
+      textAlign: "center",
+    },
+    stepRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    stepBtn: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      height: 28,
+      justifyContent: "center",
+      width: 28,
+    },
+    choiceRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    choiceChip: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flex: 1,
+      height: 34,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+    },
+    choiceChipActive: {
+      backgroundColor: palette.brandWashStrong,
+      borderColor: palette.brand,
+    },
+    choiceText: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    choiceTextActive: {
+      color: palette.brandLight,
     },
     segmentedRow: {
       flexDirection: "row",
