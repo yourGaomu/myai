@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyAI · 在手机上指挥电脑里的 AI 编程助手</title>
+<meta name="description" content="MyAI：Go 实现的 AI 编程 Agent，支持手机远程控制、Plan 模式、子代理、RAG 混合检索、AI 记忆与工作区回滚。">
+<style>
+  :root {
+    --canvas: #08080A;
+    --surface1: #101014;
+    --surface2: #17171B;
+    --surface3: #1C1C22;
+    --line: rgba(242, 240, 236, 0.08);
+    --line-strong: rgba(242, 240, 236, 0.16);
+    --ink1: #F2F0EC;
+    --ink2: #9C978D;
+    --ink3: #8A8479;
+    --brand: #F6D45C;
+    --brand-light: #F9DC72;
+    --brand-deep: #E9B93F;
+    --cyan: #5BC8DE;
+    --mint: #7FD1A8;
+    --err: #E08D7D;
+    --radius: 18px;
+    --sans: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink1);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: rgba(246, 212, 92, 0.3); }
+
+  /* ---------- 背景层 ---------- */
+  #stars {
+    position: fixed; inset: 0; z-index: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .glow {
+    position: fixed; z-index: 0; pointer-events: none;
+    border-radius: 50%; filter: blur(110px); opacity: 0.38;
+    animation: drift 22s ease-in-out infinite alternate;
+  }
+  .glow.g1 { width: 560px; height: 560px; background: #E9B93F; top: -180px; left: -140px; opacity: 0.22; }
+  .glow.g2 { width: 520px; height: 520px; background: #2a6f82; top: 30%; right: -200px; animation-delay: -8s; }
+  .glow.g3 { width: 420px; height: 420px; background: #3d2f12; bottom: -160px; left: 30%; animation-delay: -14s; }
+  @keyframes drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(60px, 40px) scale(1.12); }
+  }
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+  }
+
+  main, nav, footer { position: relative; z-index: 1; }
+  .wrap { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
+
+  /* ---------- 导航 ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    background: rgba(8, 8, 10, 0.62);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: 0.5px; font-size: 18px; }
+  .logo svg { width: 30px; height: 30px; }
+  .nav-links { display: flex; gap: 28px; font-size: 14px; color: var(--ink2); }
+  .nav-links a { position: relative; transition: color .2s; }
+  .nav-links a:hover { color: var(--ink1); }
+  .nav-links a::after {
+    content: ""; position: absolute; left: 0; bottom: -6px; height: 2px; width: 0;
+    background: var(--brand); transition: width .25s;
+  }
+  .nav-links a:hover::after { width: 100%; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--line-strong); transition: transform .2s, box-shadow .2s, background .2s;
+    cursor: pointer; background: transparent; color: var(--ink1); font-family: inherit;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-primary {
+    color: #241F14; border: none;
+    background: linear-gradient(135deg, var(--brand-light), var(--brand-deep));
+    box-shadow: 0 8px 30px -8px rgba(246, 212, 92, 0.6);
+  }
+  .btn-primary:hover { box-shadow: 0 14px 40px -8px rgba(246, 212, 92, 0.75); }
+  .btn-ghost:hover { background: rgba(242, 240, 236, 0.06); }
+  .btn svg { width: 16px; height: 16px; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 88px 0 72px; }
+  .hero .wrap { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+  .hero .wrap > * { min-width: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 6px 14px 6px 6px; border-radius: 999px; font-size: 13px; color: var(--ink2);
+    border: 1px solid var(--line-strong); background: rgba(23, 23, 27, 0.7);
+  }
+  .pill b {
+    padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 12px;
+    color: #241F14; background: var(--brand);
+  }
+  .dot-live {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--mint);
+    box-shadow: 0 0 0 0 rgba(127, 209, 168, .7); animation: ping 2s infinite;
+  }
+  @keyframes ping {
+    0% { box-shadow: 0 0 0 0 rgba(127, 209, 168, .7); }
+    80%, 100% { box-shadow: 0 0 0 10px rgba(127, 209, 168, 0); }
+  }
+  h1 {
+    margin: 24px 0 18px; font-size: clamp(48px, 7.4vw, 96px); line-height: 0.98;
+    letter-spacing: -3px; font-weight: 900;
+  }
+  .shine {
+    background: linear-gradient(110deg, var(--brand-deep) 0%, var(--brand-light) 30%, #fff8dc 45%, var(--brand) 60%, var(--brand-deep) 100%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shine 6s linear infinite;
+  }
+  @keyframes shine { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+  .hero-sub { font-size: 22px; font-weight: 600; margin: 0 0 14px; min-height: 1.6em; }
+  .typed { color: var(--brand); }
+  .caret {
+    display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; vertical-align: -3px;
+    background: var(--brand); animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .hero-desc { color: var(--ink2); font-size: 16px; max-width: 520px; margin: 0 0 32px; }
+  .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
+
+  /* 终端窗口 */
+  .terminal {
+    position: relative; border-radius: var(--radius); overflow: hidden;
+    background: linear-gradient(180deg, rgba(28, 28, 34, 0.92), rgba(16, 16, 20, 0.96));
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .9), 0 0 0 1px rgba(246, 212, 92, .06), 0 0 80px -20px rgba(246, 212, 92, .25);
+    transform: perspective(1400px) rotateY(-7deg) rotateX(3deg);
+    transition: transform .6s cubic-bezier(.2, .8, .2, 1);
+  }
+  .terminal:hover { transform: perspective(1400px) rotateY(0) rotateX(0); }
+  .term-bar {
+    display: flex; align-items: center; gap: 8px; padding: 13px 16px;
+    border-bottom: 1px solid var(--line); background: rgba(8, 8, 10, .45);
+  }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .term-bar i:nth-child(1) { background: #E08D7D; }
+  .term-bar i:nth-child(2) { background: #F0CE68; }
+  .term-bar i:nth-child(3) { background: #7FD1A8; }
+  .term-bar span { margin-left: 10px; font: 12px var(--mono); color: var(--ink3); }
+  .term-bar em { margin-left: auto; font: 11px var(--mono); color: var(--ink3); font-style: normal;
+    padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 6px; }
+  .term-body {
+    padding: 18px 20px 22px; font: 13px/1.85 var(--mono); min-height: 372px; white-space: pre-wrap;
+  }
+  .term-body .ln { display: block; opacity: 0; transform: translateY(4px); animation: lnIn .35s forwards; }
+  @keyframes lnIn { to { opacity: 1; transform: none; } }
+  .c-dim { color: var(--ink3); }
+  .c-brand { color: var(--brand); }
+  .c-cyan { color: var(--cyan); }
+  .c-mint { color: var(--mint); }
+  .c-err { color: var(--err); }
+  .c-ink { color: var(--ink1); }
+
+  /* ---------- 数据条 ---------- */
+  .stats { padding: 8px 0 40px; }
+  .stats-row {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: rgba(16, 16, 20, .6); backdrop-filter: blur(8px);
+  }
+  .stat { padding: 26px 20px; text-align: center; border-right: 1px solid var(--line); }
+  .stat:last-child { border-right: none; }
+  .stat b { display: block; font-size: 38px; font-weight: 900; letter-spacing: -1px; line-height: 1.2;
+    background: linear-gradient(180deg, var(--ink1), #b9b3a6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stat b sup { font-size: 18px; margin-left: 2px; vertical-align: super; line-height: 0;
+    -webkit-text-fill-color: var(--brand); }
+  .stat > span { color: var(--ink2); font-size: 13px; }
+
+  /* ---------- 通用段落 ---------- */
+  section.block { padding: 96px 0; }
+  .eyebrow {
+    display: inline-block; font: 600 12px var(--mono); letter-spacing: 3px; text-transform: uppercase;
+    color: var(--brand); margin-bottom: 14px;
+  }
+  h2 { font-size: clamp(32px, 4.2vw, 52px); line-height: 1.1; letter-spacing: -1.5px; margin: 0 0 16px; font-weight: 850; }
+  .lead { color: var(--ink2); font-size: 17px; max-width: 640px; margin: 0; }
+  .head { margin-bottom: 52px; }
+  .head.center { text-align: center; }
+  .head.center .lead { margin: 0 auto; }
+
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .8s ease, transform .8s cubic-bezier(.2, .8, .2, 1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- 能力卡片 ---------- */
+  .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+  .card {
+    position: relative; overflow: hidden; border-radius: var(--radius);
+    padding: 28px; background: rgba(23, 23, 27, .72); border: 1px solid var(--line);
+    transition: border-color .3s, transform .3s;
+    --mx: 50%; --my: 50%;
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s;
+    background: radial-gradient(420px circle at var(--mx) var(--my), rgba(246, 212, 92, .13), transparent 45%);
+  }
+  .card:hover { border-color: rgba(246, 212, 92, .35); transform: translateY(-4px); }
+  .card:hover::before { opacity: 1; }
+  .card.w3 { grid-column: span 3; }
+  .card.w2 { grid-column: span 2; }
+  .card.w4 { grid-column: span 4; }
+  .ico {
+    width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(246, 212, 92, .2), rgba(246, 212, 92, .04));
+    border: 1px solid rgba(246, 212, 92, .25);
+  }
+  .ico svg { width: 22px; height: 22px; stroke: var(--brand); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .card h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.3px; }
+  .card p { margin: 0; color: var(--ink2); font-size: 14.5px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .tags span {
+    font: 11.5px var(--mono); color: var(--ink2); padding: 4px 10px; border-radius: 7px;
+    background: rgba(8, 8, 10, .55); border: 1px solid var(--line);
+  }
+
+  /* RAG 卡片里的迷你检索流 */
+  .mini-flow { display: flex; align-items: center; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+  .mini-flow .node {
+    font: 12px var(--mono); padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--line-strong); background: rgba(8, 8, 10, .6);
+  }
+  .mini-flow .node.hl { border-color: rgba(246, 212, 92, .5); color: var(--brand); }
+  .mini-flow .arr { color: var(--ink3); font-family: var(--mono); }
+
+  /* ---------- 架构图 ---------- */
+  .arch-box {
+    border-radius: 24px; border: 1px solid var(--line); padding: 28px;
+    background: radial-gradient(ellipse at top, rgba(246, 212, 92, .07), transparent 60%), rgba(16, 16, 20, .7);
+  }
+  .arch-box svg { width: 100%; height: auto; display: block; }
+  .arch-node rect { fill: #17171B; stroke: rgba(242, 240, 236, .14); stroke-width: 1.2; }
+  .arch-node.main rect { stroke: rgba(246, 212, 92, .55); fill: #1a1810; }
+  .arch-node .t { fill: var(--ink1); font: 700 17px var(--sans); }
+  .arch-node .s { fill: var(--ink3); font: 12px var(--mono); }
+  .arch-node.store rect { fill: #121216; }
+  .arch-node.store .t { font-size: 14px; }
+  .wire { fill: none; stroke: rgba(242, 240, 236, .14); stroke-width: 1.4; }
+  .wire.flow { stroke: rgba(246, 212, 92, .55); stroke-dasharray: 6 8; animation: dash 1.4s linear infinite; }
+  .wire.flow.back { stroke: rgba(91, 200, 222, .55); animation-direction: reverse; }
+  @keyframes dash { to { stroke-dashoffset: -28; } }
+  .wire-label { fill: var(--ink3); font: 11px var(--mono); }
+  .legend { display: flex; gap: 22px; justify-content: center; margin-top: 18px; font-size: 13px; color: var(--ink2); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 22px; height: 2px; vertical-align: middle; margin-right: 8px; }
+
+  /* ---------- Agent Loop ---------- */
+  .loop { display: grid; grid-template-columns: 440px 1fr; gap: 56px; align-items: center; }
+  .orbit svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .orbit .ring { fill: none; stroke: rgba(242, 240, 236, .1); stroke-width: 1.5; stroke-dasharray: 3 7; }
+  .orbit .ring-glow { fill: none; stroke: url(#ringGrad); stroke-width: 2.5; stroke-linecap: round;
+    transform-origin: 220px 220px; animation: spin 8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .orbit .step circle { fill: #17171B; stroke: rgba(242, 240, 236, .16); stroke-width: 1.5; transition: all .4s; }
+  .orbit .step text { fill: var(--ink2); font: 700 13px var(--mono); text-anchor: middle; dominant-baseline: central; transition: fill .4s; }
+  .orbit .step.on circle { fill: #2a2412; stroke: var(--brand); stroke-width: 2; filter: drop-shadow(0 0 12px rgba(246, 212, 92, .6)); }
+  .orbit .step.on text { fill: var(--brand); }
+  .orbit .core-t { fill: var(--ink1); font: 800 22px var(--sans); text-anchor: middle; }
+  .orbit .core-s { fill: var(--ink3); font: 12px var(--mono); text-anchor: middle; }
+  .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .steps li {
+    display: grid; grid-template-columns: 38px 1fr; gap: 14px; align-items: start;
+    padding: 14px 18px; border-radius: 14px; border: 1px solid transparent;
+    transition: background .35s, border-color .35s; cursor: pointer;
+  }
+  .steps li .n { font: 700 13px var(--mono); color: var(--ink3); padding-top: 2px; }
+  .steps li h4 { margin: 0; font-size: 16px; }
+  .steps li p { margin: 2px 0 0; color: var(--ink2); font-size: 13.5px; }
+  .steps li.on { background: rgba(246, 212, 92, .07); border-color: rgba(246, 212, 92, .3); }
+  .steps li.on .n { color: var(--brand); }
+
+  /* ---------- 技术栈跑马灯 ---------- */
+  .marquee { overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+  .track { display: flex; gap: 14px; width: max-content; animation: scroll 38s linear infinite; padding: 6px 0; }
+  .track.rev { animation-direction: reverse; animation-duration: 44s; margin-top: 14px; }
+  .marquee:hover .track { animation-play-state: paused; }
+  @keyframes scroll { to { transform: translateX(-50%); } }
+  .chip {
+    display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px;
+    border: 1px solid var(--line); background: rgba(23, 23, 27, .75); font-weight: 600; font-size: 15px; white-space: nowrap;
+  }
+  .chip i { width: 9px; height: 9px; border-radius: 3px; display: block; }
+
+  /* ---------- 快速开始 ---------- */
+  .quick { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; align-items: start; }
+  .cmd-list { display: grid; gap: 10px; margin-top: 28px; }
+  .cmd-list div { display: grid; grid-template-columns: 170px 1fr; gap: 12px; font-size: 14px; color: var(--ink2); }
+  .cmd-list code { font-family: var(--mono); color: var(--brand); font-size: 13px; }
+  .code-box { border-radius: var(--radius); border: 1px solid var(--line-strong); background: rgba(16, 16, 20, .9); overflow: hidden; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); background: rgba(8, 8, 10, .5); }
+  .tab {
+    padding: 14px 20px; font: 600 13px var(--sans); color: var(--ink2); background: none; border: none;
+    border-bottom: 2px solid transparent; cursor: pointer; font-family: inherit;
+  }
+  .tab.on { color: var(--brand); border-bottom-color: var(--brand); }
+  .copy { margin-left: auto; margin-right: 12px; align-self: center; padding: 6px 12px; font-size: 12px; }
+  pre { margin: 0; padding: 22px 24px; font: 13.5px/1.8 var(--mono); overflow-x: auto; display: none; color: var(--ink1); }
+  pre.on { display: block; }
+  pre .k { color: var(--cyan); }
+  pre .f { color: var(--brand); }
+  pre .cm { color: var(--ink3); }
+
+  /* ---------- CTA 与页脚 ---------- */
+  .cta-final {
+    text-align: center; padding: 76px 32px; border-radius: 28px; position: relative; overflow: hidden;
+    border: 1px solid rgba(246, 212, 92, .25);
+    background: radial-gradient(ellipse at 50% 120%, rgba(246, 212, 92, .22), transparent 60%), rgba(16, 16, 20, .8);
+  }
+  .cta-final h2 { margin-bottom: 14px; }
+  .cta-final .hero-cta { justify-content: center; margin-top: 30px; }
+  footer { border-top: 1px solid var(--line); padding: 34px 0; color: var(--ink3); font-size: 13px; margin-top: 96px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width: 980px) {
+    .hero .wrap, .loop, .quick { grid-template-columns: minmax(0, 1fr); }
+    .loop > *, .quick > * { min-width: 0; }
+    .terminal { transform: none; }
+    .term-body { font-size: 11.5px; white-space: pre; overflow-x: auto; min-height: 330px; }
+    .hero { padding: 56px 0 48px; }
+    nav .btn { padding: 9px 14px; }
+    .nav-links { display: none; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .stat { border-bottom: 1px solid var(--line); }
+    .bento { grid-template-columns: 1fr; }
+    .card.w2, .card.w3, .card.w4 { grid-column: auto; }
+    .orbit { max-width: 420px; margin: 0 auto; }
+    .cmd-list div { grid-template-columns: 1fr; gap: 2px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; }
+    .term-body .ln { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="stars"></canvas>
+<div class="glow g1"></div>
+<div class="glow g2"></div>
+<div class="glow g3"></div>
+<div class="grid-bg"></div>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#F9DC72"/><stop offset="1" stop-color="#D9A62F"/>
+          </linearGradient>
+        </defs>
+        <path d="M16 2 28 9v14l-12 7L4 23V9z" fill="url(#lg)"/>
+        <path d="M10.5 20.5v-9l5.5 5 5.5-5v9" fill="none" stroke="#241F14" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      MyAI
+    </a>
+    <div class="nav-links">
+      <a href="#features">能力</a>
+      <a href="#arch">架构</a>
+      <a href="#loop">Agent Loop</a>
+      <a href="#stack">技术栈</a>
+      <a href="#start">快速开始</a>
+    </div>
+    <a class="btn btn-ghost" href="#start">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="pill"><b>Go 1.25</b><span class="dot-live"></span>Agent · Relay · Mobile 三端联动</span>
+        <h1><span class="shine">MyAI</span></h1>
+        <p class="hero-sub"><span class="typed" id="typed"></span><span class="caret"></span></p>
+        <p class="hero-desc">
+          跑在你电脑上的 AI 编程 Agent。读代码、改文件、跑测试，敏感操作推到手机上审批；
+          Plan 模式拆解任务，子代理并行调研，知识库与 AI 记忆让它越用越懂你的项目。
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#start">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            快速开始
+          </a>
+          <a class="btn btn-ghost" href="#arch">查看架构</a>
+        </div>
+      </div>
+
+      <div class="terminal" aria-label="终端演示">
+        <div class="term-bar"><i></i><i></i><i></i><span>~/myai — myai chat</span><em>演示</em></div>
+        <div class="term-body" id="term"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 数据条 -->
+  <section class="stats">
+    <div class="wrap">
+      <div class="stats-row reveal">
+        <div class="stat"><b><span data-count="100">0</span><sup>K+</sup></b><span>行 Go 代码</span></div>
+        <div class="stat"><b><span data-count="108">0</span></b><span>个测试包通过</span></div>
+        <div class="stat"><b><span data-count="5">0</span></b><span>种模型协议</span></div>
+        <div class="stat"><b><span data-count="20">0</span><sup>+</sup></b><span>个内置工具</span></div>
+        <div class="stat"><b><span data-count="3">0</span></b><span>路检索融合</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 能力 -->
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="eyebrow">Capabilities</span>
+        <h2>不只是聊天，<br>是一个会干活的 Agent</h2>
+        <p class="lead">从上下文管理到权限审批，从任务规划到长期记忆，每一层都按生产级 Agent 的标准实现。</p>
+      </div>
+
+      <div class="bento">
+        <article class="card w4 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg></div>
+          <h3>手机远程指挥，敏感操作一键审批</h3>
+          <p>Relay 只做配对、鉴权和转发，业务全部在你的电脑上执行。写文件、跑命令前推送到手机确认，Files 和 Changes 面板随时查看工作区与 diff。</p>
+          <div class="tags"><span>WebSocket</span><span>permission_ask</span><span>token 只存哈希</span><span>可撤销授权</span></div>
+        </article>
+
+        <article class="card w2 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg></div>
+          <h3>Plan 模式</h3>
+          <p>只读调研后产出计划，按依赖就绪批次执行，失败自动重试与重新规划。</p>
+          <div class="tags"><span>依赖并行 ×3</span><span>Revision</span></div>
+        </article>
+
+        <article class="card w2 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg></div>
+          <h3>子代理</h3>
+          <p>执行租约 + 续约 watcher，跨实例取消可感知；可写子代理强制隔离工作区，变更显式 apply。</p>
+          <div class="tags"><span>深度 4</span><span>扇出 8</span><span>lease 30s</span></div>
+        </article>
+
+        <article class="card w4 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6M11 8v6"/></svg></div>
+          <h3>本地优先的混合检索 RAG</h3>
+          <p>向量与关键词双路召回，RRF 融合；本地质量门不达标时才回退远端 Milvus，并可把结果缓存回本地。</p>
+          <div class="mini-flow">
+            <span class="node">sqlite-vec</span><span class="arr">+</span>
+            <span class="node">FTS5</span><span class="arr">→</span>
+            <span class="node hl">RRF k=60</span><span class="arr">→</span>
+            <span class="node">质量门</span><span class="arr">⇢</span>
+            <span class="node">Milvus 回退</span>
+          </div>
+        </article>
+
+        <article class="card w3 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3Z"/><path d="M9 21h6"/></svg></div>
+          <h3>AI 记忆</h3>
+          <p>每次运行结束后抽取经验候选，人工审核后入库；dream 合并相近记忆，人工锁定的记忆不会被改写。</p>
+          <div class="tags"><span>CAS + 租约</span><span>human lock</span><span>多样性召回</span></div>
+        </article>
+
+        <article class="card w3 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg></div>
+          <h3>工作区检查点与回滚</h3>
+          <p>文件工具逐文件记录，shell 前后快照对比，按任务查看 diff、一键恢复，formatter 和代码生成的间接修改也不漏。</p>
+          <div class="tags"><span>SQLite</span><span>按任务回滚</span><span>敏感文件不入库</span></div>
+        </article>
+
+        <article class="card w2 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10M7 13h6"/></svg></div>
+          <h3>结构化上下文压缩</h3>
+          <p>11 字段 JSON checkpoint，附来源哈希，历史一旦改动就不会误用旧摘要。</p>
+        </article>
+
+        <article class="card w2 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></div>
+          <h3>MCP · Skill · Hook</h3>
+          <p>stdio 与 HTTP 双传输的 MCP，原子热重载；Skill 目录热加载；7 类生命周期 Hook。</p>
+        </article>
+
+        <article class="card w2 reveal">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <h3>分级权限</h3>
+          <p>readonly / ask / full 等模式，Plan 阶段只读；OpenSandbox 会话提供真正的隔离执行。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 架构 -->
+  <section class="block" id="arch">
+    <div class="wrap">
+      <div class="head center reveal">
+        <span class="eyebrow">Architecture</span>
+        <h2>三个进程，各司其职</h2>
+        <p class="lead">手机只负责交互，Relay 只负责转发，所有 AI 业务都在你自己的电脑上完成。</p>
+      </div>
+
+      <div class="arch-box reveal">
+        <svg viewBox="0 0 1000 420" role="img" aria-label="MyAI 架构图">
+          <!-- 主链路 -->
+          <path id="w1" class="wire flow" d="M230 172 H405"/>
+          <path id="w2" class="wire flow back" d="M230 202 H405"/>
+          <path id="w3" class="wire flow" d="M595 172 H770"/>
+          <path id="w4" class="wire flow back" d="M595 202 H770"/>
+          <text class="wire-label" x="318" y="160" text-anchor="middle">/ws/client</text>
+          <text class="wire-label" x="682" y="160" text-anchor="middle">/ws/agent</text>
+
+          <!-- Agent 到存储 -->
+          <path id="b1" class="wire" d="M865 245 C865 290 432 285 432 322"/>
+          <path id="b2" class="wire" d="M865 245 C865 290 550 285 550 322"/>
+          <path id="b3" class="wire" d="M865 245 C865 290 668 285 668 322"/>
+          <path id="b4" class="wire" d="M865 245 C865 290 786 285 786 322"/>
+          <path id="b5" class="wire" d="M865 245 C865 290 904 285 904 322"/>
+
+          <!-- 移动的数据包 -->
+          <circle r="4" fill="#F6D45C"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+          <circle r="4" fill="#F6D45C"><animateMotion dur="2.2s" begin="1.1s" repeatCount="indefinite"><mpath href="#w3"/></animateMotion></circle>
+          <circle r="4" fill="#5BC8DE"><animateMotion dur="2.4s" begin=".6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w4"/></animateMotion></circle>
+          <circle r="4" fill="#5BC8DE"><animateMotion dur="2.4s" begin="1.6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w2"/></animateMotion></circle>
+          <circle r="3" fill="#7FD1A8"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#b1"/></animateMotion></circle>
+          <circle r="3" fill="#7FD1A8"><animateMotion dur="2.6s" begin=".5s" repeatCount="indefinite"><mpath href="#b2"/></animateMotion></circle>
+          <circle r="3" fill="#7FD1A8"><animateMotion dur="2.6s" begin="1s" repeatCount="indefinite"><mpath href="#b3"/></animateMotion></circle>
+          <circle r="3" fill="#7FD1A8"><animateMotion dur="2.6s" begin="1.5s" repeatCount="indefinite"><mpath href="#b4"/></animateMotion></circle>
+          <circle r="3" fill="#7FD1A8"><animateMotion dur="2.6s" begin="2s" repeatCount="indefinite"><mpath href="#b5"/></animateMotion></circle>
+
+          <!-- 节点 -->
+          <g class="arch-node">
+            <rect x="40" y="130" width="190" height="115" rx="16"/>
+            <text class="t" x="135" y="178" text-anchor="middle">📱 手机端</text>
+            <text class="s" x="135" y="202" text-anchor="middle">Expo React Native</text>
+            <text class="s" x="135" y="222" text-anchor="middle">聊天 · 审批 · diff</text>
+          </g>
+          <g class="arch-node">
+            <rect x="405" y="130" width="190" height="115" rx="16"/>
+            <text class="t" x="500" y="178" text-anchor="middle">🛰 Relay</text>
+            <text class="s" x="500" y="202" text-anchor="middle">配对 · 鉴权 · 转发</text>
+            <text class="s" x="500" y="222" text-anchor="middle">不执行业务</text>
+          </g>
+          <g class="arch-node main">
+            <rect x="770" y="130" width="190" height="115" rx="16"/>
+            <text class="t" x="865" y="178" text-anchor="middle">⚡ PC Agent</text>
+            <text class="s" x="865" y="202" text-anchor="middle">Go · Agent Loop</text>
+            <text class="s" x="865" y="222" text-anchor="middle">工具 · Plan · 子代理</text>
+          </g>
+
+          <g class="arch-node store"><rect x="380" y="322" width="104" height="64" rx="12"/><text class="t" x="432" y="352" text-anchor="middle">LLM</text><text class="s" x="432" y="372" text-anchor="middle">5 协议</text></g>
+          <g class="arch-node store"><rect x="498" y="322" width="104" height="64" rx="12"/><text class="t" x="550" y="352" text-anchor="middle">MongoDB</text><text class="s" x="550" y="372" text-anchor="middle">会话 · 消息</text></g>
+          <g class="arch-node store"><rect x="616" y="322" width="104" height="64" rx="12"/><text class="t" x="668" y="352" text-anchor="middle">Redis</text><text class="s" x="668" y="372" text-anchor="middle">当前会话</text></g>
+          <g class="arch-node store"><rect x="734" y="322" width="104" height="64" rx="12"/><text class="t" x="786" y="352" text-anchor="middle">SQLite</text><text class="s" x="786" y="372" text-anchor="middle">历史 · 向量</text></g>
+          <g class="arch-node store"><rect x="852" y="322" width="104" height="64" rx="12"/><text class="t" x="904" y="352" text-anchor="middle">MCP</text><text class="s" x="904" y="372" text-anchor="middle">外部工具</text></g>
+
+          <text class="wire-label" x="40" y="60">PROCESS · 01</text>
+          <text class="wire-label" x="405" y="60">PROCESS · 02</text>
+          <text class="wire-label" x="770" y="60">PROCESS · 03</text>
+          <line x1="40" y1="72" x2="230" y2="72" stroke="rgba(242,240,236,.1)"/>
+          <line x1="405" y1="72" x2="595" y2="72" stroke="rgba(242,240,236,.1)"/>
+          <line x1="770" y1="72" x2="960" y2="72" stroke="rgba(246,212,92,.4)"/>
+        </svg>
+        <div class="legend">
+          <span><i style="background:#F6D45C"></i>请求</span>
+          <span><i style="background:#5BC8DE"></i>流式事件 / 审批</span>
+          <span><i style="background:#7FD1A8"></i>存储与模型调用</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Agent Loop -->
+  <section class="block" id="loop">
+    <div class="wrap">
+      <div class="head reveal">
+        <span class="eyebrow">Agent Loop</span>
+        <h2>模型 → 工具 → 模型，<br>直到任务完成</h2>
+        <p class="lead">每一轮都重新构建上下文快照、重新计算预算，工具结果回写后再交给模型决策。</p>
+      </div>
+
+      <div class="loop">
+        <div class="orbit reveal">
+          <svg viewBox="0 0 440 440" aria-hidden="true">
+            <defs>
+              <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#F6D45C" stop-opacity="0"/>
+                <stop offset=".7" stop-color="#F6D45C" stop-opacity=".9"/>
+                <stop offset="1" stop-color="#F9DC72"/>
+              </linearGradient>
+              <radialGradient id="coreGrad">
+                <stop offset="0" stop-color="#2a2412"/><stop offset="1" stop-color="#101014"/>
+              </radialGradient>
+            </defs>
+            <circle class="ring" cx="220" cy="220" r="165"/>
+            <path class="ring-glow" d="M220 55 A165 165 0 0 1 385 220"/>
+            <circle cx="220" cy="220" r="86" fill="url(#coreGrad)" stroke="rgba(246,212,92,.3)"/>
+            <text class="core-t" x="220" y="214">Agent Loop</text>
+            <text class="core-s" x="220" y="240">≤ 32 rounds</text>
+            <g id="orbitSteps"></g>
+          </svg>
+        </div>
+        <ol class="steps reveal" id="steps"></ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 技术栈 -->
+  <section class="block" id="stack">
+    <div class="wrap">
+      <div class="head center reveal">
+        <span class="eyebrow">Tech Stack</span>
+        <h2>站在可靠的基础设施上</h2>
+      </div>
+    </div>
+    <div class="marquee reveal">
+      <div class="track" id="track1"></div>
+      <div class="track rev" id="track2"></div>
+    </div>
+  </section>
+
+  <!-- 快速开始 -->
+  <section class="block" id="start">
+    <div class="wrap">
+      <div class="quick">
+        <div class="reveal">
+          <span class="eyebrow">Quick Start</span>
+          <h2>三条命令，<br>跑起来</h2>
+          <p class="lead">本地直接聊天只需要一条命令；需要手机控制时，再启动 Relay 和 Agent。</p>
+          <div class="cmd-list">
+            <div><code>myai chat</code><span>终端里直接对话</span></div>
+            <div><code>myai relay</code><span>启动手机与 Agent 之间的中继</span></div>
+            <div><code>myai agent</code><span>启动 PC Agent 并连接 Relay</span></div>
+            <div><code>myai skill</code><span>列出、搜索、安装 Skill</span></div>
+            <div><code>myai sandbox doctor</code><span>OpenSandbox 冒烟测试</span></div>
+          </div>
+        </div>
+
+        <div class="code-box reveal">
+          <div class="tabs">
+            <button class="tab on" data-tab="0">本地聊天</button>
+            <button class="tab" data-tab="1">Relay</button>
+            <button class="tab" data-tab="2">PC Agent</button>
+            <button class="btn btn-ghost copy" id="copy">复制</button>
+          </div>
+<pre class="on"><span class="cm"># 查看全部命令</span>
+<span class="k">go</span> run . help
+
+<span class="cm"># 在终端里直接和 Agent 对话</span>
+<span class="k">go</span> run . chat</pre>
+<pre><span class="cm"># 启动 Relay，绑定 Agent 身份与 token</span>
+<span class="k">go</span> run . relay <span class="f">--addr</span> 0.0.0.0:18080 \
+  <span class="f">--agent-token</span> "replace-with-a-strong-token" \
+  <span class="f">--agent-user</span> local <span class="f">--agent-device</span> pc-local</pre>
+<pre><span class="cm"># 启动 PC Agent，选择手机端可浏览的工作区</span>
+<span class="k">go</span> run . agent <span class="f">--server</span> ws://127.0.0.1:18080/ws/agent \
+  <span class="f">--relay-token</span> "replace-with-a-strong-token" \
+  <span class="f">--user</span> local <span class="f">--device</span> pc-local \
+  <span class="f">--workspace</span> D:\Go_All\myai</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" style="padding-top: 0">
+    <div class="wrap">
+      <div class="cta-final reveal">
+        <span class="eyebrow">Your code, your machine</span>
+        <h2>让 AI 在你的电脑上干活，<br>你只需要在手机上点一下</h2>
+        <p class="lead" style="margin: 0 auto">代码不离开本机，执行看得见，变更可回滚。</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#start">开始使用</a>
+          <a class="btn btn-ghost" href="#features">了解更多能力</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© MyAI · Go Agent · Relay · Expo</span>
+    <span>Built with Go 1.25 · MongoDB · Redis · SQLite · Milvus</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- 星点连线背景 ---------- */
+  const canvas = document.getElementById("stars");
+  const ctx = canvas.getContext("2d");
+  let points = [], w = 0, h = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const mouse = { x: -9999, y: -9999 };
+
+  function resize() {
+    w = canvas.clientWidth; h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const count = Math.min(90, Math.floor((w * h) / 16000));
+    points = Array.from({ length: count }, () => ({
+      x: Math.random() * w, y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.25, vy: (Math.random() - 0.5) * 0.25,
+      r: Math.random() * 1.4 + 0.4
+    }));
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of points) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > w) p.vx *= -1;
+      if (p.y < 0 || p.y > h) p.vy *= -1;
+    }
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i];
+      for (let j = i + 1; j < points.length; j++) {
+        const b = points[j];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (d < 130) {
+          ctx.strokeStyle = `rgba(246, 212, 92, ${0.12 * (1 - d / 130)})`;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+      }
+      const md = Math.hypot(a.x - mouse.x, a.y - mouse.y);
+      if (md < 180) {
+        ctx.strokeStyle = `rgba(91, 200, 222, ${0.35 * (1 - md / 180)})`;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(242, 240, 236, 0.55)";
+      ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2); ctx.fill();
+    }
+    if (!document.hidden) requestAnimationFrame(frame);
+  }
+
+  resize();
+  addEventListener("resize", resize);
+  addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !reduced) requestAnimationFrame(frame); });
+  if (reduced) frame(); else requestAnimationFrame(frame);
+
+  /* ---------- 标题打字效果 ---------- */
+  const phrases = [
+    "在手机上指挥你电脑里的 AI",
+    "读代码、改文件、跑测试",
+    "敏感操作，一键审批",
+    "Plan 拆解，子代理并行",
+    "越用越懂你的项目"
+  ];
+  const typed = document.getElementById("typed");
+  let pi = 0, ci = 0, deleting = false;
+  function typeLoop() {
+    const text = phrases[pi];
+    typed.textContent = text.slice(0, ci);
+    if (!deleting && ci < text.length) { ci++; setTimeout(typeLoop, 85); }
+    else if (!deleting) { deleting = true; setTimeout(typeLoop, 1700); }
+    else if (ci > 0) { ci--; setTimeout(typeLoop, 38); }
+    else { deleting = false; pi = (pi + 1) % phrases.length; setTimeout(typeLoop, 300); }
+  }
+  if (reduced) typed.textContent = phrases[0]; else typeLoop();
+
+  /* ---------- 终端演示 ---------- */
+  const script = [
+    ['<span class="c-mint">$</span> <span class="c-ink">myai chat</span>', 500],
+    ['<span class="c-brand">›</span> <span class="c-ink">帮我给 relay 的 /pair 加上限流</span>', 900],
+    ['<span class="c-dim">  analyzing workspace · context 3.2K / 128K</span>', 700],
+    ['<span class="c-brand">◆ plan</span>  1. 阅读 pair.go 与 registry.go', 350],
+    ['        2. 按 IP 增加令牌桶限流', 300],
+    ['        3. 补充测试并运行', 700],
+    ['<span class="c-cyan">⚙ read_file</span>    core/remote/relay/pair.go   <span class="c-mint">✓ 58 lines</span>', 550],
+    ['<span class="c-cyan">⚙ search_files</span> "getAgentByBindCode"        <span class="c-mint">✓ 2 matches</span>', 550],
+    ['<span class="c-cyan">⚙ edit_file</span>    core/remote/relay/pair.go   <span class="c-mint">✓ +24 −1</span>', 700],
+    ['<span class="c-brand">? permission</span>  shell · go test ./core/remote/relay', 650],
+    ['<span class="c-dim">  ↳ 已推送到手机 … </span><span class="c-mint">已批准</span>', 800],
+    ['<span class="c-cyan">⚙ shell</span>        go test ./core/remote/relay <span class="c-mint">✓ ok 2.31s</span>', 800],
+    ['<span class="c-mint">✔ 完成</span> /pair 已按 IP 限流，测试通过', 300],
+    ['<span class="c-dim">  变更已记录到检查点 #a3f2 · 可在手机端一键回滚</span>', 4200]
+  ];
+  const term = document.getElementById("term");
+  function runTerm() {
+    term.innerHTML = "";
+    let i = 0;
+    const next = () => {
+      if (i >= script.length) { setTimeout(runTerm, 400); return; }
+      const [html, delay] = script[i++];
+      const ln = document.createElement("span");
+      ln.className = "ln"; ln.innerHTML = html;
+      term.appendChild(ln);
+      setTimeout(next, delay);
+    };
+    next();
+  }
+  if (reduced) term.innerHTML = script.map(([html]) => `<span class="ln">${html}</span>`).join("");
+  else runTerm();
+
+  /* ---------- 滚动出现 + 数字递增 ---------- */
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      e.target.classList.add("in");
+      e.target.querySelectorAll("[data-count]").forEach(countUp);
+      io.unobserve(e.target);
+    }
+  }, { threshold: 0.15 });
+  document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+
+  function countUp(el) {
+    const target = +el.dataset.count;
+    if (reduced) { el.textContent = target; return; }
+    const start = performance.now(), dur = 1400;
+    const tick = now => {
+      const t = Math.min(1, (now - start) / dur);
+      el.textContent = Math.round(target * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- 卡片聚光 ---------- */
+  document.querySelectorAll(".card").forEach(card => {
+    card.addEventListener("mousemove", e => {
+      const r = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${e.clientX - r.left}px`);
+      card.style.setProperty("--my", `${e.clientY - r.top}px`);
+    });
+  });
+
+  /* ---------- Agent Loop 轨道 ---------- */
+  const steps = [
+    ["接收输入", "会话加锁，追加用户消息；需要时自动进入规划。"],
+    ["构建上下文", "固定 system + 压缩摘要 + 按 token 预算挑选历史。"],
+    ["模型推理", "流式输出思考与回答，决定是否调用工具。"],
+    ["权限判断", "Hook → Plan 只读限制 → 会话权限模式，必要时推到手机审批。"],
+    ["执行工具", "只读工具并行，写操作互斥；文件变更写入任务检查点。"],
+    ["回写结果", "工具结果按预算截断后回写，进入下一轮，直到不再调用工具。"]
+  ];
+  const og = document.getElementById("orbitSteps");
+  const list = document.getElementById("steps");
+  const NS = "http://www.w3.org/2000/svg";
+  steps.forEach(([title, desc], i) => {
+    const angle = -Math.PI / 2 + (i / steps.length) * Math.PI * 2;
+    const x = 220 + 165 * Math.cos(angle), y = 220 + 165 * Math.sin(angle);
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("class", "step");
+    g.innerHTML = `<circle cx="${x}" cy="${y}" r="27"/><text x="${x}" y="${y}">0${i + 1}</text>`;
+    og.appendChild(g);
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="n">0${i + 1}</span><div><h4>${title}</h4><p>${desc}</p></div>`;
+    li.addEventListener("mouseenter", () => { activate(i); hold = true; });
+    li.addEventListener("mouseleave", () => { hold = false; });
+    list.appendChild(li);
+  });
+  let active = 0, hold = false;
+  function activate(i) {
+    active = i;
+    og.querySelectorAll(".step").forEach((s, k) => s.classList.toggle("on", k === i));
+    list.querySelectorAll("li").forEach((s, k) => s.classList.toggle("on", k === i));
+  }
+  activate(0);
+  if (!reduced) setInterval(() => { if (!hold) activate((active + 1) % steps.length); }, 1800);
+
+  /* ---------- 技术栈跑马灯 ---------- */
+  const stack1 = [["Go 1.25", "#5BC8DE"], ["Cobra", "#9C978D"], ["langchaingo", "#F6D45C"], ["MongoDB", "#7FD1A8"],
+    ["Redis", "#E08D7D"], ["SQLite", "#5BC8DE"], ["sqlite-vec", "#F6D45C"], ["FTS5", "#9C978D"]];
+  const stack2 = [["Milvus", "#5BC8DE"], ["MinIO", "#E08D7D"], ["gRPC", "#7FD1A8"], ["Expo", "#F2F0EC"],
+    ["React Native", "#5BC8DE"], ["WebSocket", "#F6D45C"], ["MCP", "#7FD1A8"], ["OpenSandbox", "#E9B93F"]];
+  const fill = (id, items) => {
+    const html = items.map(([n, c]) => `<span class="chip"><i style="background:${c}"></i>${n}</span>`).join("");
+    document.getElementById(id).innerHTML = html + html;
+  };
+  fill("track1", stack1); fill("track2", stack2);
+
+  /* ---------- 代码标签与复制 ---------- */
+  const tabs = document.querySelectorAll(".tab");
+  const pres = document.querySelectorAll(".code-box pre");
+  tabs.forEach(t => t.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("on"));
+    pres.forEach(x => x.classList.remove("on"));
+    t.classList.add("on");
+    pres[+t.dataset.tab].classList.add("on");
+  }));
+  const copy = document.getElementById("copy");
+  copy.addEventListener("click", async () => {
+    const text = document.querySelector(".code-box pre.on").innerText
+      .split("\n").filter(l => !l.trim().startsWith("#")).join("\n").trim();
+    try { await navigator.clipboard.writeText(text); copy.textContent = "已复制"; }
+    catch { copy.textContent = "复制失败"; }
+    setTimeout(() => (copy.textContent = "复制"), 1500);
+  });
+})();
+</script>
+</body>
+</html>
