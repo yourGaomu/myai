@@ -8,12 +8,14 @@ import (
 	"sync"
 
 	runtimeservice "myai/core/application/runtime/service"
+	outbox "myai/core/port/outbox"
 )
 
 type queuedSessionTask struct {
-	run     func() error
-	result  chan error
-	started bool
+	run      func() error
+	result   chan error
+	started  bool
+	sequence int64
 }
 
 type sessionTaskQueue struct {
@@ -31,6 +33,11 @@ type SessionQueue struct {
 	mu      sync.Mutex
 	queues  map[string]*sessionTaskQueue
 	changed chan struct{}
+
+	journal outbox.Journal
+	sink    outbox.Sink
+	blocked map[string]bool
+	active  map[string]bool
 }
 
 func NewSessionQueue(async runtimeservice.AsyncTaskService) *SessionQueue {
@@ -48,6 +55,9 @@ func (q *SessionQueue) SubmitTask(sessionID string, task func() error) error {
 	if q == nil || task == nil {
 		return errors.New("session queue and task are required")
 	}
+	if q.journal != nil {
+		return outbox.ErrClosureNotDurable
+	}
 	return q.submitEntry(sessionID, &queuedSessionTask{run: task})
 }
 
@@ -60,7 +70,27 @@ func (q *SessionQueue) submitEntry(sessionID string, task *queuedSessionTask) er
 	if q.queues == nil {
 		q.queues = make(map[string]*sessionTaskQueue)
 	}
+	if q.blocked[sessionID] {
+		q.mu.Unlock()
+		return outbox.ErrBlocked
+	}
+	if q.journal != nil {
+		blocked, err := q.journal.Blocked(context.Background(), sessionID)
+		if err != nil {
+			q.mu.Unlock()
+			return err
+		}
+		if blocked {
+			q.mu.Unlock()
+			return outbox.ErrBlocked
+		}
+	}
 	queue := q.queues[sessionID]
+	if task.result != nil && queue != nil && queue.err != nil {
+		err := fmt.Errorf("earlier persistence task failed: %w", queue.err)
+		q.mu.Unlock()
+		return err
+	}
 	if queue == nil {
 		queue = &sessionTaskQueue{}
 		q.queues[sessionID] = queue
@@ -127,8 +157,8 @@ func (q *SessionQueue) SubmitAndWait(ctx context.Context, sessionID string, task
 func (q *SessionQueue) drain(sessionID string, queue *sessionTaskQueue) {
 	for {
 		q.mu.Lock()
-		if q.queues[sessionID] != queue || len(queue.tasks) == 0 {
-			if q.queues[sessionID] == queue {
+		if q.queues[sessionID] != queue || len(queue.tasks) == 0 || q.blocked[sessionID] {
+			if q.queues[sessionID] == queue && len(queue.tasks) == 0 {
 				delete(q.queues, sessionID)
 			}
 			queue.running = false
@@ -138,9 +168,14 @@ func (q *SessionQueue) drain(sessionID string, queue *sessionTaskQueue) {
 		}
 		task := queue.tasks[0]
 		task.started = true
+		if q.active == nil {
+			q.active = make(map[string]bool)
+		}
+		q.active[sessionID] = true
 		q.mu.Unlock()
 		err := q.runTask(sessionID, task.run)
 		q.mu.Lock()
+		delete(q.active, sessionID)
 		if task.result != nil {
 			task.result <- err
 			// Synchronous mutations own rollback and are never retried later.
@@ -188,7 +223,7 @@ func (q *SessionQueue) Flush(ctx context.Context) error {
 	q.mu.Lock()
 	var workers []worker
 	for id, queue := range q.queues {
-		if !queue.running && len(queue.tasks) > 0 {
+		if !queue.running && len(queue.tasks) > 0 && !q.blocked[id] {
 			queue.running, queue.err = true, nil
 			workers = append(workers, worker{id, queue})
 		}
@@ -208,7 +243,20 @@ func (q *SessionQueue) Flush(ctx context.Context) error {
 			}
 		}
 		if !running {
+			for _, queue := range q.queues {
+				if len(queue.tasks) > 0 && queue.err == nil {
+					errs = append(errs, outbox.ErrBlocked)
+				}
+			}
 			q.mu.Unlock()
+			if q.journal != nil {
+				stats, err := q.journal.Stats(ctx)
+				if err != nil {
+					errs = append(errs, err)
+				} else if stats.Invalid > 0 {
+					errs = append(errs, outbox.ErrInvalidRecord)
+				}
+			}
 			return errors.Join(errs...)
 		}
 		if q.changed == nil {
@@ -234,7 +282,8 @@ func (q *SessionQueue) notifyLocked() {
 func (q *SessionQueue) runTask(sessionID string, task func() error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("session persistence task panicked for %q: %v", sessionID, recovered)
+			// Backend panics can contain message bodies or connection credentials.
+			err = errors.New("session persistence task panicked")
 			if q.OnPanic != nil {
 				q.OnPanic(err)
 			}

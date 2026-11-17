@@ -173,7 +173,7 @@ func TestPlanExecutionServiceReplansAfterFailure(t *testing.T) {
 	if err != nil || result.Plan == nil || result.Plan.Status != agentplan.StatusDone {
 		t.Fatalf("expected replan to complete plan, result=%#v err=%v", result, err)
 	}
-	if recovery.calls != 1 || generation.calls != 2 || len(result.Plan.Steps) != 2 || result.Plan.Steps[0].Status != agentplan.StepStatusSkipped || result.Plan.Steps[1].Status != agentplan.StepStatusDone {
+	if recovery.calls != 1 || generation.calls != 2 || len(result.Plan.Steps) != 1 || result.Plan.Steps[0].ID != "replacement" || result.Plan.Steps[0].Status != agentplan.StepStatusDone {
 		t.Fatalf("unexpected replan execution: recovery=%d generation=%d plan=%#v", recovery.calls, generation.calls, result.Plan)
 	}
 }

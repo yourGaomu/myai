@@ -10,6 +10,7 @@ import (
 	lifecyclecommand "myai/core/application/session/lifecycle/command"
 	lifecycleport "myai/core/application/session/lifecycle/port"
 	lifecycleresult "myai/core/application/session/lifecycle/result"
+	"myai/core/session"
 )
 
 type UseCase struct {
@@ -113,8 +114,31 @@ func (u UseCase) Restore(ctx context.Context, command lifecyclecommand.RestoreSe
 	return lifecycleresult.Lifecycle{SessionID: sessionID, Action: lifecycleresult.ActionRestore}, nil
 }
 
+func (u UseCase) RestoreDeleted(ctx context.Context, command lifecyclecommand.RestoreSession) (lifecycleresult.Lifecycle, error) {
+	restorer, ok := u.Lifecycle.(lifecycleport.DeletedSessionRestorer)
+	if !ok {
+		return lifecycleresult.Lifecycle{}, errors.New("lifecycle does not support verified deleted-session restore")
+	}
+	sessionID, err := restorer.RestoreDeletedSession(ctx, command)
+	if err != nil {
+		return lifecycleresult.Lifecycle{}, err
+	}
+	u.publish(ctx, sessionID, lifecycleresult.ActionRestore)
+	return lifecycleresult.Lifecycle{SessionID: sessionID, Action: lifecycleresult.ActionRestore}, nil
+}
+
 func (u UseCase) Clear(ctx context.Context, command lifecyclecommand.ClearSession) (lifecycleresult.Lifecycle, error) {
-	current, err := u.Lifecycle.ClearCurrent(ctx)
+	var current *session.Session
+	var err error
+	if sessionID := strings.TrimSpace(command.SessionID); sessionID != "" {
+		clearer, ok := u.Lifecycle.(lifecycleport.TargetedClearService)
+		if !ok {
+			return lifecycleresult.Lifecycle{}, errors.New("lifecycle does not support clearing a captured session id")
+		}
+		current, err = clearer.ClearSession(ctx, sessionID)
+	} else {
+		current, err = u.Lifecycle.ClearCurrent(ctx)
+	}
 	if err != nil {
 		return lifecycleresult.Lifecycle{}, err
 	}

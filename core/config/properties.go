@@ -15,6 +15,19 @@ type Properties struct {
 	Hooks            HookProperties
 	MCP              MCPProperties
 	WorkspaceHistory WorkspaceHistoryProperties
+	Persistence      PersistenceProperties
+}
+
+type PersistenceProperties struct {
+	Outbox OutboxProperties
+}
+
+type OutboxProperties struct {
+	Path       string
+	MaxPending int
+	MaxEntries int
+	MaxBytes   int64
+	RetainDone int
 }
 
 type WorkspaceHistoryProperties struct {

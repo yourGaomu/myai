@@ -55,7 +55,10 @@ type AgentLoopService struct {
 	PendingInput        generationport.PendingTurnInput
 	OnPendingInputError func(error)
 	// 1. 持久化运行期间追加的上下文、mailbox 与中间回答，保持恢复后的消息顺序。
-	OnMessagesAppended      func(current *session.Session, messages []domainmessage.Message)
+	OnMessagesAppended func(current *session.Session, messages []domainmessage.Message)
+	// OnMessagesAccepted takes precedence over the legacy notification callback.
+	// A rejection ends the turn before another model sample or tool round.
+	OnMessagesAccepted      func(context.Context, *session.Session, []domainmessage.Message) error
 	MaxToolRounds           int
 	MaxKnowledgeSearchCalls int
 	MaxMemorySearchCalls    int
@@ -128,7 +131,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 		if mailboxPhase.shouldDrain() {
 			// 3. 只有显式 phase 允许时才领取 mailbox，避免工具执行中途改变上下文。
-			pending, drainErr := s.drainPendingInput(command.Session)
+			pending, drainErr := s.drainPendingInput(runCtx, command.Session)
 			consumedPending = append(consumedPending, pending...)
 			// 3.1 一批消息进入当前上下文后回到 deferred，下一次迁移必须由新的事件触发。
 			mailboxPhase = MailboxDeferred
@@ -157,7 +160,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			}
 			if s.hasPendingInput(command.Session) {
 				// 5.1 回答边界也属于历史，必须先保留回答，再领取下一批输入。
-				if err := s.appendMessages(command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil)); err != nil {
+				if err := s.appendMessages(runCtx, command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil)); err != nil {
 					return modelport.ChatResult{}, err
 				}
 				// 5. 回答边界后迁移到 next_turn，下一轮再把 queue 消息加入上下文。
@@ -196,17 +199,19 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		if appendErr != nil {
 			return modelport.ChatResult{}, errors.Join(err, appendErr)
 		}
+		var persistErr error
 		if s.ToolRecords != nil {
-			s.ToolRecords.RecordToolExecution(ctx, generationcommand.ToolExecutionRecord{
+			persistErr = s.acceptToolExecution(runCtx, generationcommand.ToolExecutionRecord{
 				SessionID: command.Session.ID, Messages: appended,
 				Entries: toolResult.Entries, Assets: toolResult.Assets,
 			})
 		} else {
-			s.persistMessages(command.Session, appended)
+			persistErr = s.persistMessages(runCtx, command.Session, appended)
 		}
-		if err != nil {
-			// 工具批次可部分完成；已经执行的记录必须先提交，再终止本轮避免模型重试副作用工具。
-			return modelport.ChatResult{}, err
+		if err != nil || persistErr != nil {
+			// The executed evidence already lives in memory. Stop before another
+			// sample instead of retrying a tool after a rejected durable write.
+			return modelport.ChatResult{}, errors.Join(err, persistErr)
 		}
 		if hook := generationcommand.AfterToolRoundFrom(runCtx); hook != nil {
 			if hookErr := hook(runCtx, command.Session); hookErr != nil {
@@ -233,7 +238,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 	}
 
-	pending, drainErr := s.drainPendingInput(command.Session)
+	pending, drainErr := s.drainPendingInput(runCtx, command.Session)
 	consumedPending = append(consumedPending, pending...)
 	if drainErr != nil {
 		return modelport.ChatResult{}, drainErr
@@ -290,7 +295,7 @@ func (s AgentLoopService) toolsForSession(current *session.Session, forceChatMod
 	return s.Tools.ToolsForSession(current, forceChatMode)
 }
 
-func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaingeneration.PendingTurnInputItem, error) {
+func (s AgentLoopService) drainPendingInput(ctx context.Context, current *session.Session) ([]domaingeneration.PendingTurnInputItem, error) {
 	if s.PendingInput == nil || current == nil || strings.TrimSpace(current.ID) == "" {
 		return nil, nil
 	}
@@ -333,7 +338,7 @@ func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaing
 			message.SourceTaskID = item.SourceTaskID
 			appended = append(appended, message)
 		}
-		if appendErr := s.appendMessages(current, appended...); appendErr != nil {
+		if appendErr := s.appendMessages(ctx, current, appended...); appendErr != nil {
 			return items, errors.Join(conflictErr, appendErr)
 		}
 		return items, conflictErr
@@ -342,7 +347,7 @@ func (s AgentLoopService) drainPendingInput(current *session.Session) ([]domaing
 		appended = append(appended, domainmessage.Text(domainmessage.RoleUser, content))
 		items = append(items, domaingeneration.PendingTurnInputItem{Content: content})
 	}
-	return items, s.appendMessages(current, appended...)
+	return items, s.appendMessages(ctx, current, appended...)
 }
 
 func (s AgentLoopService) acknowledgePendingInput(sessionID string, items []domaingeneration.PendingTurnInputItem) {
@@ -445,7 +450,7 @@ func (s AgentLoopService) continueAfterStopHook(ctx context.Context, command gen
 		return false, nil
 	}
 	// 1. Hook 要求继续时，先记录已完成回答，再追加 Hook 的补充输入。
-	if err := s.appendMessages(command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil), message); err != nil {
+	if err := s.appendMessages(ctx, command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil), message); err != nil {
 		return false, err
 	}
 	*stopContinuations++
@@ -459,15 +464,29 @@ func (s AgentLoopService) executeTools(ctx context.Context, command generationco
 	return s.ToolExecutor.Execute(ctx, command)
 }
 
-func (s AgentLoopService) recordToolExecution(ctx context.Context, result generationresult.ToolExecution) {
-	if s.ToolRecords == nil || len(result.Entries) == 0 && len(result.Assets) == 0 {
-		return
+func (s AgentLoopService) acceptToolExecution(ctx context.Context, command generationcommand.ToolExecutionRecord) error {
+	if s.ToolRecords == nil {
+		return nil
 	}
-	s.ToolRecords.RecordToolExecution(ctx, generationcommand.ToolExecutionRecord{Entries: result.Entries, Assets: result.Assets})
+	if durable, ok := s.ToolRecords.(generationport.DurableToolExecutionRecordSink); ok {
+		if err := durable.AcceptToolExecution(ctx, command); err != nil {
+			return fmt.Errorf("accept executed tool records: %w", err)
+		}
+	} else {
+		s.ToolRecords.RecordToolExecution(ctx, command)
+	}
+	return nil
 }
 
-func (s AgentLoopService) RecordToolExecution(ctx context.Context, result generationresult.ToolExecution) {
-	s.recordToolExecution(ctx, result)
+func (s AgentLoopService) recordToolExecution(ctx context.Context, result generationresult.ToolExecution) error {
+	if len(result.Entries) == 0 && len(result.Assets) == 0 {
+		return nil
+	}
+	return s.acceptToolExecution(ctx, generationcommand.ToolExecutionRecord{Entries: result.Entries, Assets: result.Assets})
+}
+
+func (s AgentLoopService) RecordToolExecution(ctx context.Context, result generationresult.ToolExecution) error {
+	return s.recordToolExecution(ctx, result)
 }
 
 func finalizeResult(result modelport.ChatResult, usage modelport.TokenUsage, reasoningParts []string) modelport.ChatResult {

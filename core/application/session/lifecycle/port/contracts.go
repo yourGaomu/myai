@@ -52,6 +52,16 @@ type EventPublisher interface {
 	SessionChanged(ctx context.Context, sessionID string, reason string)
 }
 
+type TargetedClearService interface {
+	ClearSession(ctx context.Context, sessionID string) (*session.Session, error)
+}
+
+// DeletedSessionRestorer verifies durable deletion before permitting a new
+// outbox epoch; an interrupted clear must not be mistaken for a deletion.
+type DeletedSessionRestorer interface {
+	RestoreDeletedSession(ctx context.Context, command lifecyclecommand.RestoreSession) (string, error)
+}
+
 type LifecycleService interface {
 	NewSession(ctx context.Context) (*session.Session, error)
 	LoadSession(ctx context.Context, sessionID string) (*session.Session, error)

@@ -25,6 +25,7 @@ type TaskService struct {
 	// TaskService creates the request-scoped checkpoint and Agent run before delegating generation.
 	Sessions           sessionport.TranscriptStore
 	OnMessagesAppended func(*session.Session, []domainmessage.Message)
+	OnMessagesAccepted func(context.Context, *session.Session, []domainmessage.Message) error
 	RequestIDs         generationport.RequestIDGenerator
 	Recorders          generationport.TaskRecorderFactory
 	Generator          generationapi.Generator
@@ -270,17 +271,27 @@ func (s TaskService) applyTurnHook(ctx context.Context, command generationcomman
 	if !message.IsSynthetic() {
 		return nil
 	}
+	var appended []domainmessage.Message
 	if s.Sessions != nil {
-		snapshot, appended, err := s.Sessions.AppendMessagesTo(command.Session.ID, message)
+		snapshot, messages, err := s.Sessions.AppendMessagesTo(command.Session.ID, message)
 		if err != nil {
 			return err
 		}
 		replaceRunSnapshot(command.Session, snapshot)
-		if s.OnMessagesAppended != nil && len(appended) > 0 {
+		appended = messages
+	} else {
+		start := len(command.Session.Messages)
+		command.Session.AppendMessage(message)
+		appended = domainmessage.CloneAll(command.Session.Messages[start:])
+	}
+	if len(appended) > 0 {
+		if s.OnMessagesAccepted != nil {
+			if err := s.OnMessagesAccepted(ctx, command.Session, domainmessage.CloneAll(appended)); err != nil {
+				return fmt.Errorf("accept turn hook context: %w", err)
+			}
+		} else if s.OnMessagesAppended != nil {
 			s.OnMessagesAppended(command.Session, appended)
 		}
-	} else {
-		appendHookContext(command.Session, outcome.Continuation)
 	}
 	return nil
 }

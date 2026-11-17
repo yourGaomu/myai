@@ -20,6 +20,10 @@ type UserMessagePersistence struct {
 }
 
 func (p UserMessagePersistence) PersistUserMessage(command generationcommand.PersistUserMessage) {
+	if p.Queue.Durable() {
+		p.report(p.AcceptUserMessage(context.Background(), command))
+		return
+	}
 	command.SessionSnapshot = session.Clone(command.SessionSnapshot)
 	command.AppendedMessages = domainmessage.CloneAll(command.AppendedMessages)
 	if command.CreatedAt.IsZero() {

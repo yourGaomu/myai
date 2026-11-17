@@ -70,4 +70,8 @@ type ChatDependencies struct {
 	// when generation fails and can be retried by a later event or recovery.
 	OnPendingTurnError func(error)
 	FlushPersistence   func(context.Context) error
+	// BlockSession persists a session tombstone before destructive store writes.
+	// ResumeSession starts a new epoch after a successful clear or restore.
+	BlockSession  func(context.Context, string) error
+	ResumeSession func(context.Context, string) error
 }

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -28,6 +30,13 @@ func (acknowledger AgentMessageAcknowledger) Acknowledge(messageID string) error
 		if ownerID == "" {
 			ownerID = "parent-message-ack"
 		}
+		// Each attempt owns a distinct claim, including simultaneous ACKs on
+		// the same process and configurations without an instance owner ID.
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return err
+		}
+		ownerID += ":" + fmt.Sprintf("%x", nonce)
 		ttl := acknowledger.LeaseTTL
 		if ttl <= 0 {
 			ttl = 2 * time.Minute
@@ -36,15 +45,20 @@ func (acknowledger AgentMessageAcknowledger) Acknowledge(messageID string) error
 		if _, err := parentRepository.ClaimParentCompletion(context.Background(), messageID, ownerID, now, ttl); err != nil {
 			// Completion is idempotent: another worker may have completed it
 			// between the model response and this acknowledgement.
-			if errors.Is(err, subagentport.ErrTaskStateConflict) {
+			if errors.Is(err, subagentport.ErrTaskStateConflict) || errors.Is(err, subagentport.ErrExecutionLeaseNotAcquired) {
 				if message, getErr := acknowledger.Repository.GetAgentMessage(context.Background(), messageID); getErr == nil && message.Status == domainsubagent.AgentMessageDelivered {
 					return nil
 				}
 			}
 			return err
 		}
-		// 2. 只有 claim 成功后才将消息标记为 delivered；失败会保留为可重试状态。
-		return parentRepository.CompleteParentCompletion(context.Background(), messageID, ownerID, now)
+		// A failed commit releases this attempt's claim so a retry does not
+		// wait for the lease TTL. Release cannot undo an already committed ACK.
+		if err := parentRepository.CompleteParentCompletion(context.Background(), messageID, ownerID, time.Now().UTC()); err != nil {
+			_ = parentRepository.ReleaseParentCompletion(context.Background(), messageID, ownerID, err.Error())
+			return err
+		}
+		return nil
 	}
 	return acknowledger.Repository.MarkAgentMessageDelivered(context.Background(), messageID, time.Now().UTC())
 }
@@ -112,7 +126,7 @@ func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent
 	messageID := domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID)
 	if service.AgentMessages != nil {
 		if existing, err := service.AgentMessages.GetAgentMessage(context.Background(), messageID); err == nil {
-			return existing, nil
+			return service.boundParentCompletion(context.Background(), existing)
 		} else if !errors.Is(err, subagentport.ErrNotFound) {
 			return domainsubagent.AgentMessage{}, err
 		}
@@ -148,6 +162,17 @@ func (service *Service) prepareParentCompletionMessageLocked(task domainsubagent
 	return message, nil
 }
 
+func (service *Service) boundParentCompletion(ctx context.Context, message domainsubagent.AgentMessage) (domainsubagent.AgentMessage, error) {
+	bounded, err := domainsubagent.BoundParentCompletionMessage(message)
+	if err != nil || bounded.Content == message.Content {
+		return bounded, err
+	}
+	if repository, ok := service.AgentMessages.(subagentport.ParentCompletionContentRepository); ok {
+		return repository.BoundParentCompletion(ctx, message.ID)
+	}
+	return bounded, nil
+}
+
 // RecoverPendingAgentMessages rehydrates parent input after a process restart.
 // The durable message is the source of truth; the in-memory parent queue is
 // only an execution optimization.
@@ -160,6 +185,10 @@ func (service *Service) RecoverPendingAgentMessages(ctx context.Context) error {
 		return err
 	}
 	for _, message := range messages {
+		message, err = service.boundParentCompletion(ctx, message)
+		if err != nil {
+			return err
+		}
 		// 1. 进程启动后先领取 durable message，避免多个实例重复恢复同一事件。
 		if repository, ok := service.AgentMessages.(subagentport.ParentCompletionMessageRepository); ok {
 			ownerID := service.MessageOwnerID

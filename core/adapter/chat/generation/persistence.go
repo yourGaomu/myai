@@ -23,6 +23,10 @@ type Persistence struct {
 }
 
 func (p Persistence) PersistAssistant(current *session.Session, result modelport.ChatResult) {
+	if p.Queue.Durable() {
+		p.report(p.AcceptAssistant(context.Background(), current, result))
+		return
+	}
 	snapshot := session.Clone(current)
 	if snapshot == nil {
 		return

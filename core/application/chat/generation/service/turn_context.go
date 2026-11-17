@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,13 +11,12 @@ import (
 	"myai/core/session"
 )
 
-func (s AgentLoopService) appendMessages(current *session.Session, messages ...domainmessage.Message) error {
+func (s AgentLoopService) appendMessages(ctx context.Context, current *session.Session, messages ...domainmessage.Message) error {
 	appended, err := s.appendSessionMessages(current, messages...)
 	if err != nil {
 		return err
 	}
-	s.persistMessages(current, appended)
-	return nil
+	return s.persistMessages(ctx, current, appended)
 }
 
 func (s AgentLoopService) appendSessionMessages(current *session.Session, messages ...domainmessage.Message) ([]domainmessage.Message, error) {
@@ -52,13 +52,21 @@ func replaceRunSnapshot(current, snapshot *session.Session) {
 	current.AgentMode = mode
 }
 
-func (s AgentLoopService) persistMessages(current *session.Session, messages []domainmessage.Message) {
-	if len(messages) > 0 && s.OnMessagesAppended != nil {
+func (s AgentLoopService) persistMessages(ctx context.Context, current *session.Session, messages []domainmessage.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	if s.OnMessagesAccepted != nil {
+		if err := s.OnMessagesAccepted(ctx, current, domainmessage.CloneAll(messages)); err != nil {
+			return fmt.Errorf("accept appended messages: %w", err)
+		}
+	} else if s.OnMessagesAppended != nil {
 		s.OnMessagesAppended(current, domainmessage.CloneAll(messages))
 	}
+	return nil
 }
 
-func (s AgentLoopService) appendPlanContext(current *session.Session, messages []domainmessage.Message) bool {
+func (s AgentLoopService) appendPlanContext(ctx context.Context, current *session.Session, messages []domainmessage.Message) (bool, error) {
 	// 1. 在已选历史中查找最新计划快照；状态未变时不重复注入。
 	text := planSnapshot(current.CurrentPlan)
 	previous := ""
@@ -68,17 +76,19 @@ func (s AgentLoopService) appendPlanContext(current *session.Session, messages [
 		}
 	}
 	if text == "" && previous == "" {
-		return false
+		return false, nil
 	}
 	if text == "" {
 		text = "Current execution plan snapshot:\nNo active plan."
 	}
 	if previous == text {
-		return false
+		return false, nil
 	}
 	// 2. 计划推进只追加状态事件，不修改 System Prompt 或已发送的历史前缀。
-	s.appendMessages(current, domainmessage.SyntheticUserText(domainmessage.SyntheticReasonPlanContext, text))
-	return true
+	if err := s.appendMessages(ctx, current, domainmessage.SyntheticUserText(domainmessage.SyntheticReasonPlanContext, text)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func planSnapshot(current *agentplan.Plan) string {

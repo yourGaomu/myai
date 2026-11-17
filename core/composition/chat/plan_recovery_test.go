@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -12,8 +13,12 @@ import (
 	"testing"
 	"time"
 
+	generationadapter "myai/core/adapter/chat/generation"
 	agentrunmemory "myai/core/adapter/persistence/memory/agentrun"
+	outboxjournal "myai/core/adapter/persistence/outbox/journal"
+	outboxrepository "myai/core/adapter/persistence/outbox/repository"
 	memorysession "myai/core/adapter/session/memory"
+	runtimeservice "myai/core/application/runtime/service"
 	domainagentrun "myai/core/domain/agentrun"
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
@@ -21,6 +26,7 @@ import (
 	agentplan "myai/core/plan"
 	historyport "myai/core/port/history"
 	modelport "myai/core/port/model"
+	outbox "myai/core/port/outbox"
 	persistenceport "myai/core/port/persistence"
 	repository "myai/core/port/repository"
 	chatservice "myai/core/service"
@@ -305,6 +311,7 @@ type planRecoveryHarness struct {
 	tools     *tool.RegisterTools
 	runs      *agentrunmemory.Repository
 	sessionID string
+	queue     *generationadapter.SessionQueue
 }
 
 func newPlanRecoveryHarness(t *testing.T) *planRecoveryHarness {
@@ -330,10 +337,25 @@ func newPlanRecoveryHarness(t *testing.T) *planRecoveryHarness {
 }
 
 func (h *planRecoveryHarness) configuration(t *testing.T) Configuration {
+	t.Helper()
+	journal, err := outboxjournal.Open(filepath.Join(t.TempDir(), "journal", "pending.db"), outboxjournal.Options{
+		Scope: outbox.Hash([]byte("plan-recovery-fixture")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Close() })
+	h.queue, err = generationadapter.NewDurableSessionQueue(
+		runtimeservice.AsyncTaskService{Executor: h.async}, journal,
+		outboxrepository.Writer{Messages: h.store, Assets: h.store, Metadata: h.store, Sessions: h.store},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return Configuration{
 		Sessions: h.memory, Store: h.store, Async: h.async, DefaultModel: planRecoveryModelID,
 		Models: &planRecoveryRegistry{model: h.model}, Tools: h.tools, AgentRuns: h.runs,
-		HistoryStoreFactory: planRecoveryNoHistory{t: t},
+		HistoryStoreFactory: planRecoveryNoHistory{t: t}, PersistenceQueue: h.queue,
 	}
 }
 
@@ -382,6 +404,10 @@ func (h *planRecoveryHarness) assertMessagesDelayed(t *testing.T, ctx context.Co
 	}
 	if len(messages) != 0 || h.async.pending() == 0 {
 		t.Fatalf("message queue was not actually delayed: durable messages=%d scheduled drains=%d", len(messages), h.async.pending())
+	}
+	stats, err := h.queue.Stats(ctx)
+	if err != nil || stats.Pending == 0 {
+		t.Fatalf("delayed records were not durably accepted: stats=%+v error=%v", stats, err)
 	}
 }
 

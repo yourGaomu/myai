@@ -92,6 +92,9 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 	if !agentplan.IsExecutableStatus(currentPlan.Status) {
 		return planresult.Execution{}, fmt.Errorf("current plan cannot execute from status %s", currentPlan.Status)
 	}
+	if err := agentplan.Validate(currentPlan); err != nil {
+		return planresult.Execution{}, fmt.Errorf("invalid plan: %w", err)
+	}
 
 	runID := agentrunruntime.RunID(ctx)
 	ownsRun := false
@@ -208,7 +211,13 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			combined = s.combine(combined, item.Response)
 			executedSteps++
 		}
+		if firstFailure != nil && errors.Is(firstFailure.Err, errPlanInputPersistence) {
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, firstFailure.Index, firstFailure.Err, updates)
+		}
 		if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+			if firstFailure != nil {
+				return planresult.Execution{}, s.finishWithError(current, currentPlan, firstFailure.Index, errors.Join(firstFailure.Err, err), updates)
+			}
 			return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
 		}
 		if firstFailure == nil {
@@ -247,14 +256,20 @@ func (s ExecutionService) Execute(ctx context.Context, command plancommand.Execu
 			replacement, recoveryErr := s.Recovery.Recover(ctx, plancommand.RecoveryRequest{
 				Plan: currentPlan, Step: currentPlan.Steps[index], Error: firstFailure.Err.Error(), Attempt: replans + 1,
 			})
-			if recoveryErr == nil && replacement != nil && len(replacement.Steps) > 0 {
-				currentPlan = mergeRecoveryPlan(currentPlan, replacement, index, firstFailure.Err.Error())
-				replans++
-				if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
-					return planresult.Execution{}, s.finishWithError(current, currentPlan, index, err, updates)
+			if recoveryErr == nil {
+				merged, mergeErr := mergeRecoveryPlan(currentPlan, replacement, index, firstFailure.Err.Error())
+				if mergeErr != nil {
+					recoveryErr = mergeErr
+				} else {
+					currentPlan = merged
+					replans++
+					if currentPlan, err = s.savePlanState(ctx, current, currentPlan, updates); err != nil {
+						return planresult.Execution{}, s.finishWithError(current, currentPlan, -1, err, updates)
+					}
+					continue
 				}
-				continue
 			}
+			return planresult.Execution{}, s.finishWithError(current, currentPlan, index, errors.Join(firstFailure.Err, fmt.Errorf("plan recovery: %w", recoveryErr)), updates)
 		}
 		return planresult.Execution{}, s.finishWithError(current, currentPlan, index, firstFailure.Err, updates)
 	}
@@ -278,23 +293,6 @@ func (s ExecutionService) maxParallelSteps(currentPlan *agentplan.Plan) int {
 	// Shared-session steps execute serially until independent child transcripts
 	// and merge ownership are available.
 	return 1
-}
-
-func planHasDependencies(currentPlan *agentplan.Plan) bool {
-	if currentPlan == nil {
-		return false
-	}
-	for _, step := range currentPlan.Steps {
-		if len(step.Dependencies) > 0 {
-			return true
-		}
-	}
-	// A structured plan can legitimately contain only independent steps. The
-	// dependency slices are then empty, so use the preserved raw payload to
-	// distinguish it from legacy Markdown plans, which remain sequential for
-	// backwards compatibility.
-	return len(agentplan.ExtractSteps(currentPlan.RawContent)) == len(currentPlan.Steps) &&
-		strings.Contains(currentPlan.RawContent, "\"steps\"")
 }
 
 type stepExecutionResult struct {
@@ -448,7 +446,7 @@ func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline
 		if titleFirst {
 			title = "Execute plan"
 		}
-		s.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+		err = persistPreparedUserMessage(ctx, s.UserMessages, generationcommand.PersistUserMessage{
 			SessionID: prepared.Session.ID, Model: prepared.Session.Model, Title: title, Input: input,
 			RuntimeInstruction: prepared.RuntimeInstruction, SyntheticReason: domainmessage.SyntheticReasonPlanStep,
 			AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(prepared.Session),
@@ -465,6 +463,22 @@ func (s ExecutionService) preparePlanStep(ctx context.Context, current, baseline
 	return generationcommand.GenerationTask{
 		Session: stepSession, LatestInput: input, Title: title, Reason: "execute plan step", ForceChatMode: true,
 	}, nil
+}
+
+var errPlanInputPersistence = errors.New("plan input persistence failed")
+
+func persistPreparedUserMessage(ctx context.Context, persistence planport.UserMessagePersistence, command generationcommand.PersistUserMessage) error {
+	if persistence == nil {
+		return nil
+	}
+	if acceptor, ok := persistence.(planport.UserMessageAcceptor); ok {
+		if err := acceptor.AcceptUserMessage(ctx, command); err != nil {
+			return errors.Join(errPlanInputPersistence, err)
+		}
+		return nil
+	}
+	persistence.PersistUserMessage(command)
+	return nil
 }
 
 func readyStepIndexes(currentPlan *agentplan.Plan) []int {
@@ -485,19 +499,12 @@ func readyStepIndexes(currentPlan *agentplan.Plan) []int {
 
 func dependenciesSatisfied(currentPlan *agentplan.Plan, step agentplan.Step) bool {
 	for _, dependency := range step.Dependencies {
-		dependency = strings.TrimSpace(dependency)
-		found := false
-		for _, candidate := range currentPlan.Steps {
-			if candidate.ID != dependency && fmt.Sprintf("%d", candidate.Order) != dependency {
-				continue
-			}
-			found = true
-			if candidate.Status != agentplan.StepStatusDone && candidate.Status != agentplan.StepStatusSkipped {
-				return false
-			}
-			break
+		index, err := agentplan.DependencyIndex(currentPlan, dependency)
+		if err != nil {
+			return false
 		}
-		if !found {
+		candidate := currentPlan.Steps[index]
+		if candidate.Status != agentplan.StepStatusDone && candidate.Status != agentplan.StepStatusSkipped {
 			return false
 		}
 	}
@@ -528,50 +535,153 @@ func firstUnfinishedStep(currentPlan *agentplan.Plan) int {
 	return -1
 }
 
-func mergeRecoveryPlan(current *agentplan.Plan, replacement *agentplan.Plan, failedIndex int, failure string) *agentplan.Plan {
+func mergeRecoveryPlan(current *agentplan.Plan, replacement *agentplan.Plan, failedIndex int, failure string) (*agentplan.Plan, error) {
+	if err := agentplan.Validate(current); err != nil {
+		return nil, fmt.Errorf("invalid original plan: %w", err)
+	}
+	if failedIndex < 0 || failedIndex >= len(current.Steps) {
+		return nil, errors.New("recovery has no failed step to replace")
+	}
+	if replacement == nil || len(replacement.Steps) == 0 {
+		return nil, errors.New("recovery produced no replacement steps")
+	}
+	if len(current.Steps)-1+len(replacement.Steps) > 12 {
+		return nil, errors.New("recovery exceeds the 12 step limit")
+	}
 	merged := agentplan.Clone(current)
-	if merged == nil {
-		return agentplan.Clone(replacement)
-	}
-	if failedIndex >= 0 && failedIndex < len(merged.Steps) {
-		merged.Steps[failedIndex].Status = agentplan.StepStatusSkipped
-		merged.Steps[failedIndex].LastError = strings.TrimSpace(failure)
-	}
-	failedTitle := ""
-	if failedIndex >= 0 && failedIndex < len(merged.Steps) {
-		failedTitle = strings.ToLower(strings.TrimSpace(merged.Steps[failedIndex].Title))
-	}
-	seen := make(map[string]struct{}, len(merged.Steps))
-	for _, step := range merged.Steps {
-		seen[strings.ToLower(strings.TrimSpace(step.Title))] = struct{}{}
-	}
-	for _, step := range replacement.Steps {
-		titleKey := strings.ToLower(strings.TrimSpace(step.Title))
-		if titleKey == "" || titleKey == failedTitle {
-			continue
+	work := agentplan.Clone(replacement)
+	// Resolve legacy order references before insertion changes the orders.
+	for index := range merged.Steps {
+		for depIndex, reference := range merged.Steps[index].Dependencies {
+			target, err := agentplan.DependencyIndex(current, reference)
+			if err != nil {
+				return nil, err
+			}
+			merged.Steps[index].Dependencies[depIndex] = current.Steps[target].ID
 		}
-		if _, exists := seen[titleKey]; exists {
-			continue
+	}
+	seenTitles := make(map[string]bool, len(current.Steps)+len(work.Steps))
+	usedIDs := make(map[string]bool, len(current.Steps)+len(work.Steps))
+	for _, step := range current.Steps {
+		seenTitles[strings.ToLower(strings.TrimSpace(step.Title))] = true
+		usedIDs[step.ID] = true
+	}
+	for index := range work.Steps {
+		step := &work.Steps[index]
+		key := strings.ToLower(strings.TrimSpace(step.Title))
+		if key == "" || seenTitles[key] {
+			return nil, errors.New("recovery produced empty or duplicate replacement titles")
 		}
-		step.ID = strings.TrimSpace(step.ID)
-		if step.ID == "" {
+		seenTitles[key] = true
+		if strings.TrimSpace(step.ID) == "" {
 			step.ID = uuid.NewString()
 		}
-		step.Order = len(merged.Steps) + 1
+		if step.Order == 0 {
+			step.Order = index + 1
+		}
 		step.Status = agentplan.StepStatusPending
 		step.RetryCount = 0
 		step.LastError = ""
-		merged.Steps = append(merged.Steps, step)
-		seen[titleKey] = struct{}{}
-		if len(merged.Steps) >= 12 {
-			break
+		step.AgentTaskID = ""
+		step.StartedAt = nil
+		step.CompletedAt = nil
+	}
+	// Validate identities before remapping collisions with the original plan.
+	shape := agentplan.Clone(work)
+	for index := range shape.Steps {
+		shape.Steps[index].Dependencies = nil
+	}
+	if err := agentplan.Validate(shape); err != nil {
+		return nil, fmt.Errorf("invalid recovery plan: %w", err)
+	}
+	newIDs := make([]string, len(work.Steps))
+	localReferences := make(map[string]bool, len(work.Steps)*2)
+	for _, step := range work.Steps {
+		// Reserve all replacement IDs before generating collision-free IDs.
+		localReferences[step.ID] = true
+		localReferences[fmt.Sprint(step.Order)] = true
+	}
+	for index, step := range work.Steps {
+		id := step.ID
+		for usedIDs[id] || (id != step.ID && localReferences[id]) {
+			id = uuid.NewString()
 		}
+		newIDs[index] = id
+		usedIDs[id] = true
+	}
+	inherited := merged.Steps[failedIndex].Dependencies
+	failedID := merged.Steps[failedIndex].ID
+	referenced := make([]bool, len(work.Steps))
+	nextSteps := make([]agentplan.Step, len(work.Steps))
+	for index, step := range work.Steps {
+		dependencies := append([]string(nil), inherited...)
+		for _, reference := range step.Dependencies {
+			if localReferences[strings.TrimSpace(reference)] {
+				target, err := agentplan.DependencyIndex(work, reference)
+				if err != nil {
+					return nil, fmt.Errorf("invalid recovery dependency: %w", err)
+				}
+				dependencies = append(dependencies, newIDs[target])
+				referenced[target] = true
+			} else {
+				target, err := agentplan.DependencyIndex(current, reference)
+				if err != nil {
+					return nil, fmt.Errorf("invalid recovery dependency: %w", err)
+				}
+				if target == failedIndex {
+					return nil, errors.New("recovery depends on the step it replaces")
+				}
+				dependencies = append(dependencies, current.Steps[target].ID)
+			}
+		}
+		step.ID = newIDs[index]
+		step.Dependencies = uniqueDependencies(dependencies)
+		nextSteps[index] = step
+	}
+	var terminals []string
+	for index, id := range newIDs {
+		if !referenced[index] {
+			terminals = append(terminals, id)
+		}
+	}
+	for index := range merged.Steps {
+		var dependencies []string
+		for _, dependency := range merged.Steps[index].Dependencies {
+			if dependency == failedID {
+				dependencies = append(dependencies, terminals...)
+			} else {
+				dependencies = append(dependencies, dependency)
+			}
+		}
+		merged.Steps[index].Dependencies = uniqueDependencies(dependencies)
+	}
+	steps := append([]agentplan.Step(nil), merged.Steps[:failedIndex]...)
+	steps = append(steps, nextSteps...)
+	steps = append(steps, merged.Steps[failedIndex+1:]...)
+	merged.Steps = steps
+	for index := range merged.Steps {
+		merged.Steps[index].Order = index + 1
+	}
+	if err := agentplan.Validate(merged); err != nil {
+		return nil, fmt.Errorf("invalid merged recovery plan: %w", err)
 	}
 	merged.Status = agentplan.StatusRunning
 	if strings.TrimSpace(replacement.RawContent) != "" {
-		merged.RawContent = strings.TrimSpace(merged.RawContent + "\n\nRecovery plan:\n" + replacement.RawContent)
+		merged.RawContent = strings.TrimSpace(merged.RawContent + "\n\nRecovery for " + failedID + " (" + strings.TrimSpace(failure) + "):\n" + replacement.RawContent)
 	}
-	return merged
+	return merged, nil
+}
+
+func uniqueDependencies(values []string) []string {
+	var result []string
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 type runPlanUpdateSink struct {

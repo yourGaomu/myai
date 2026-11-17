@@ -16,6 +16,7 @@ import (
 	generationresult "myai/core/application/chat/generation/result"
 	plancommand "myai/core/application/chat/plan/command"
 	planresult "myai/core/application/chat/plan/result"
+	planstatecommand "myai/core/application/plan/command"
 	messagecommand "myai/core/application/session/message/command"
 	messageresult "myai/core/application/session/message/result"
 	domainagentrun "myai/core/domain/agentrun"
@@ -465,6 +466,540 @@ func TestExecutionPreservesPermissionsAndInteractionForEveryStep(t *testing.T) {
 			}
 			if len(questions) != 2 || !reflect.DeepEqual(questions, wantQuestions) {
 				t.Fatalf("user questions changed: got %#v, want %#v", questions, wantQuestions)
+			}
+		})
+	}
+}
+
+func TestExecutionRejectsInvalidGraphBeforeAnySideEffects(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		steps []agentplan.Step
+		want  string
+	}{
+		{name: "unknown_dependency_after_ready_step", want: "unknown", steps: []agentplan.Step{
+			{ID: "ready", Order: 1, Title: "ready", Status: agentplan.StepStatusPending},
+			{ID: "blocked", Order: 2, Title: "blocked", Dependencies: []string{"missing"}, Status: agentplan.StepStatusPending},
+		}},
+		{name: "cycle_after_ready_step", want: "cyclic", steps: []agentplan.Step{
+			{ID: "ready", Order: 1, Title: "ready", Status: agentplan.StepStatusPending},
+			{ID: "a", Order: 2, Title: "a", Dependencies: []string{"b"}, Status: agentplan.StepStatusPending},
+			{ID: "b", Order: 3, Title: "b", Dependencies: []string{"a"}, Status: agentplan.StepStatusPending},
+		}},
+		{name: "self_dependency", want: "self", steps: []agentplan.Step{
+			{ID: "a", Order: 1, Title: "a", Dependencies: []string{"a"}, Status: agentplan.StepStatusPending},
+		}},
+		{name: "duplicate_id", want: "duplicate step ID", steps: []agentplan.Step{
+			{ID: "a", Order: 1, Title: "first", Status: agentplan.StepStatusPending},
+			{ID: "a", Order: 2, Title: "second", Status: agentplan.StepStatusPending},
+		}},
+		{name: "duplicate_order", want: "duplicate order", steps: []agentplan.Step{
+			{ID: "a", Order: 5, Title: "first", Status: agentplan.StepStatusPending},
+			{ID: "b", Order: 5, Title: "second", Status: agentplan.StepStatusPending},
+			{ID: "c", Order: 6, Title: "third", Dependencies: []string{"5"}, Status: agentplan.StepStatusPending},
+		}},
+		{name: "ambiguous_id_order", want: "ambiguous", steps: []agentplan.Step{
+			{ID: "2", Order: 1, Title: "first", Status: agentplan.StepStatusPending},
+			{ID: "b", Order: 2, Title: "second", Status: agentplan.StepStatusPending},
+			{ID: "c", Order: 3, Title: "third", Dependencies: []string{"2"}, Status: agentplan.StepStatusPending},
+		}},
+		{name: "empty_id", want: "ID", steps: []agentplan.Step{{Order: 1, Title: "first"}}},
+		{name: "invalid_order", want: "order", steps: []agentplan.Step{{ID: "a", Title: "first"}}},
+		{name: "empty_dependency", want: "empty", steps: []agentplan.Step{{ID: "a", Order: 1, Title: "first", Dependencies: []string{" "}}}},
+		{name: "unknown_status", want: "status", steps: []agentplan.Step{{ID: "a", Order: 1, Title: "first", Status: "unexpected"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", CurrentPlan: &agentplan.Plan{
+				ID: "invalid", SessionID: "session-1", Status: agentplan.StatusDraft, Revision: 7, Steps: test.steps,
+			}}
+			before := session.Clone(current)
+			models := &countingPlanModels{}
+			messages := &appendingMessages{current: current}
+			generation := &recordingGenerationService{}
+			states := &countingPlanStates{}
+			userMessages := &acceptingPlanUserMessages{}
+			events := &countingPlanEvents{}
+			runIDs := &planRunIDs{}
+			updates, runs, tools, recoveries := 0, 0, 0, 0
+			execution := ExecutionService{
+				Models: models, Sessions: fakeSessionLoader{current: current}, Messages: messages,
+				Generation: generation, PlanStates: states, UserMessages: userMessages, Events: events,
+				Runs: agentrunservice.CommandService{Repository: agentrunmemory.New(), IDs: runIDs},
+				Recovery: planRecoveryFunc(func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+					recoveries++
+					return nil, nil
+				}),
+			}
+			_, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID, Stream: modelport.ChatStreamHandler{
+				OnPlanUpdate: func(*agentplan.Plan) { updates++ },
+				OnRunStarted: func(domainagentrun.Run) { runs++ },
+				OnToolCall:   func(string, string) { tools++ },
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("invalid graph error = %v, want %q", err, test.want)
+			}
+			if models.calls != 0 || generation.calls != 0 || tools != 0 || len(messages.commands) != 0 || states.calls != 0 || userMessages.accepted != 0 || userMessages.legacy != 0 || events.count != 0 || updates != 0 || runs != 0 || runIDs.next != 0 || recoveries != 0 {
+				t.Fatalf("invalid graph produced side effects: model=%d generation=%d tools=%d messages=%d states=%d accepted=%d legacy=%d events=%d updates=%d runs=%d runIDs=%d recovery=%d", models.calls, generation.calls, tools, len(messages.commands), states.calls, userMessages.accepted, userMessages.legacy, events.count, updates, runs, runIDs.next, recoveries)
+			}
+			if !reflect.DeepEqual(session.Clone(current), before) {
+				t.Fatal("invalid graph mutated the loaded session")
+			}
+		})
+	}
+}
+
+func TestExecutionIgnoresInjectedCompletionAndSupportsLegacyDependencies(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{name: "injected_completion", content: `{"status":"done","steps":[{"id":"first","title":"First","status":"done"},{"id":"second","title":"Second","status":"skipped","depends_on":["first"]}]}`, want: []string{"first", "second"}},
+		{name: "legacy_orders", content: `{"steps":[{"id":"second","order":2,"title":"Second","dependencies":["1"]},{"id":"first","order":1,"title":"First"}]}`, want: []string{"first", "second"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", CurrentPlan: agentplan.NewDraft("session-1", "work", test.content, time.Now())}
+			var generated []string
+			execution := ExecutionService{
+				Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: fakeMessageAppender{current: current},
+				Generation: planGenerationFunc(func(ctx context.Context, task generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+					generated = append(generated, agentrunruntime.MetadataFrom(ctx).StepID)
+					return generationresult.GenerationResponse{SessionID: task.Session.ID}, nil
+				}),
+			}
+			result, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+			if err != nil || result.Plan == nil || result.Plan.Status != agentplan.StatusDone || !reflect.DeepEqual(generated, test.want) {
+				t.Fatalf("expected every real step in dependency order: result=%#v steps=%v err=%v", result.Plan, generated, err)
+			}
+		})
+	}
+}
+
+func TestExecutionRejectsLoadedRunningPlanOrStep(t *testing.T) {
+	for _, planRunning := range []bool{false, true} {
+		current := &session.Session{ID: "session-1", CurrentPlan: &agentplan.Plan{
+			ID: "plan", Status: agentplan.StatusApproved,
+			Steps: []agentplan.Step{{ID: "work", Order: 1, Title: "Work", Status: agentplan.StepStatusRunning}},
+		}}
+		if planRunning {
+			current.CurrentPlan.Status = agentplan.StatusRunning
+			current.CurrentPlan.Steps[0].Status = agentplan.StepStatusPending
+		}
+		before := session.Clone(current)
+		generation := &recordingGenerationService{}
+		messages := &appendingMessages{current: current}
+		states := &countingPlanStates{}
+		_, err := (ExecutionService{
+			Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: messages, Generation: generation, PlanStates: states,
+		}).Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+		if err == nil || !strings.Contains(err.Error(), "interrupted running") || generation.calls != 0 || states.calls != 0 || len(messages.commands) != 0 || !reflect.DeepEqual(session.Clone(current), before) {
+			t.Fatalf("interrupted execution was restarted: generation=%d messages=%d states=%d err=%v", generation.calls, len(messages.commands), states.calls, err)
+		}
+	}
+}
+
+type countingPlanModels struct{ calls int }
+
+func (models *countingPlanModels) GetModel(string) modelport.ChatModelPort {
+	models.calls++
+	return nil
+}
+
+type countingPlanStates struct {
+	calls int
+	err   error
+	plans []*agentplan.Plan
+}
+
+func (states *countingPlanStates) Save(_ context.Context, command planstatecommand.SaveState) (*agentplan.Plan, error) {
+	states.calls++
+	states.plans = append(states.plans, agentplan.Clone(command.Plan))
+	if states.err != nil {
+		return nil, states.err
+	}
+	p := agentplan.Clone(command.Plan)
+	p.Revision++
+	return p, nil
+}
+
+type acceptingPlanUserMessages struct {
+	accepted int
+	legacy   int
+	err      error
+	commands []generationcommand.PersistUserMessage
+}
+
+func (messages *acceptingPlanUserMessages) PersistUserMessage(generationcommand.PersistUserMessage) {
+	messages.legacy++
+}
+
+func (messages *acceptingPlanUserMessages) AcceptUserMessage(_ context.Context, command generationcommand.PersistUserMessage) error {
+	messages.accepted++
+	messages.commands = append(messages.commands, command)
+	return messages.err
+}
+
+type countingPlanEvents struct{ count int }
+
+func (events *countingPlanEvents) SessionChanged(context.Context, string, string) { events.count++ }
+
+type planRecoveryFunc func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error)
+
+func (recover planRecoveryFunc) Recover(ctx context.Context, command plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+	return recover(ctx, command)
+}
+
+func TestExecutionRecoveryPreservesDependenciesAndWaitsForEveryTerminal(t *testing.T) {
+	for _, diamond := range []bool{false, true} {
+		t.Run(fmt.Sprintf("diamond_%t", diamond), func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", CurrentPlan: &agentplan.Plan{
+				ID: "plan", SessionID: "session-1", Status: agentplan.StatusApproved,
+				Steps: []agentplan.Step{
+					{ID: "upstream", Order: 1, Title: "Upstream", Status: agentplan.StepStatusPending},
+					{ID: "failed", Order: 2, Title: "Original work", Dependencies: []string{"1"}, Status: agentplan.StepStatusPending},
+					{ID: "downstream", Order: 3, Title: "Downstream", Dependencies: []string{"2"}, Status: agentplan.StepStatusPending},
+				},
+			}}
+			replacement := &agentplan.Plan{RawContent: "recovery steps", Steps: []agentplan.Step{
+				{ID: "left", Order: 1, Title: "Alternate left", Status: agentplan.StepStatusDone},
+				{ID: "right", Order: 2, Title: "Alternate right", Status: agentplan.StepStatusSkipped},
+			}}
+			want := []string{"upstream", "failed", "left", "right", "downstream"}
+			terminals := []string{"left", "right"}
+			if diamond {
+				replacement.Steps = append(replacement.Steps, agentplan.Step{ID: "join", Order: 3, Title: "Alternate join", Dependencies: []string{"left", "right"}})
+				want = []string{"upstream", "failed", "left", "right", "join", "downstream"}
+				terminals = []string{"join"}
+			}
+			replacementBefore := agentplan.Clone(replacement)
+			failure := errors.New("original failed")
+			var generated []string
+			recoveryCalls := 0
+			execution := ExecutionService{
+				Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: &appendingMessages{current: current}, MaxParallelSteps: 8,
+				Generation: planGenerationFunc(func(ctx context.Context, task generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+					id := agentrunruntime.MetadataFrom(ctx).StepID
+					generated = append(generated, id)
+					if id == "failed" {
+						return generationresult.GenerationResponse{}, failure
+					}
+					if id != "upstream" {
+						if err := agentplan.Validate(task.Session.CurrentPlan); err != nil {
+							return generationresult.GenerationResponse{}, fmt.Errorf("invalid executing recovery graph: %w", err)
+						}
+						for _, step := range task.Session.CurrentPlan.Steps {
+							if step.ID == "failed" {
+								return generationresult.GenerationResponse{}, errors.New("failed step was not replaced")
+							}
+						}
+					}
+					if id == "downstream" {
+						for _, terminal := range terminals {
+							index, err := agentplan.DependencyIndex(task.Session.CurrentPlan, terminal)
+							if err != nil || task.Session.CurrentPlan.Steps[index].Status != agentplan.StepStatusDone {
+								return generationresult.GenerationResponse{}, errors.New("downstream started before replacement terminal completed")
+							}
+						}
+					}
+					return generationresult.GenerationResponse{SessionID: task.Session.ID, Result: modelport.ChatResult{Content: id}}, nil
+				}),
+				Recovery: planRecoveryFunc(func(_ context.Context, request plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+					recoveryCalls++
+					if request.Step.ID != "failed" || request.Attempt != 1 || request.Error != failure.Error() || request.Plan.Steps[0].Status != agentplan.StepStatusDone {
+						t.Errorf("incorrect recovery request: %#v", request)
+					}
+					return replacement, nil
+				}),
+			}
+			result, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+			if err != nil || result.Plan == nil || result.Plan.Status != agentplan.StatusDone || recoveryCalls != 1 || !reflect.DeepEqual(generated, want) {
+				t.Fatalf("recovery execution order: steps=%v want=%v calls=%d result=%#v err=%v", generated, want, recoveryCalls, result.Plan, err)
+			}
+			for _, id := range []string{"left", "right"} {
+				index, _ := agentplan.DependencyIndex(result.Plan, id)
+				if !reflect.DeepEqual(result.Plan.Steps[index].Dependencies, []string{"upstream"}) {
+					t.Fatalf("replacement %s lost upstream dependencies: %#v", id, result.Plan.Steps[index])
+				}
+			}
+			downstream, _ := agentplan.DependencyIndex(result.Plan, "downstream")
+			if !reflect.DeepEqual(result.Plan.Steps[downstream].Dependencies, terminals) {
+				t.Fatalf("downstream must wait for replacement terminals: %#v", result.Plan.Steps[downstream])
+			}
+			if !reflect.DeepEqual(replacement, replacementBefore) {
+				t.Fatal("merge changed the recovery planner's candidate")
+			}
+		})
+	}
+}
+
+func TestExecutionRejectsInvalidRecoveryWithoutRunningLaterWork(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		steps []agentplan.Step
+		want  string
+	}{
+		{name: "all_replacements_deduplicated", want: "duplicate", steps: []agentplan.Step{{ID: "again", Title: " Original work "}}},
+		{name: "partly_duplicate_is_not_partial_success", want: "duplicate", steps: []agentplan.Step{{ID: "new", Title: "Alternate work"}, {ID: "again", Title: "Downstream"}}},
+		{name: "unknown_dependency", want: "unknown", steps: []agentplan.Step{{ID: "new", Title: "Alternate work", Dependencies: []string{"missing"}}}},
+		{name: "removed_failed_dependency", want: "replaces", steps: []agentplan.Step{{ID: "new", Title: "Alternate work", Dependencies: []string{"failed"}}}},
+		{name: "cycle", want: "cyclic", steps: []agentplan.Step{{ID: "a", Title: "Alternate A", Dependencies: []string{"b"}}, {ID: "b", Title: "Alternate B", Dependencies: []string{"a"}}}},
+		{name: "self_dependency", want: "self", steps: []agentplan.Step{{ID: "a", Title: "Alternate A", Dependencies: []string{"a"}}}},
+		{name: "duplicate_id", want: "duplicate step ID", steps: []agentplan.Step{{ID: "a", Title: "Alternate A"}, {ID: "a", Title: "Alternate B"}}},
+		{name: "duplicate_order", want: "duplicate order", steps: []agentplan.Step{{ID: "a", Order: 2, Title: "Alternate A"}, {ID: "b", Order: 2, Title: "Alternate B"}}},
+		{name: "cycle_through_downstream", want: "cyclic", steps: []agentplan.Step{{ID: "new", Title: "Alternate work", Dependencies: []string{"downstream"}}}},
+		{name: "empty", want: "no replacement"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", CurrentPlan: &agentplan.Plan{
+				ID: "plan", SessionID: "session-1", Status: agentplan.StatusApproved,
+				Steps: []agentplan.Step{
+					{ID: "failed", Order: 1, Title: "Original work", Status: agentplan.StepStatusPending},
+					{ID: "downstream", Order: 2, Title: "Downstream", Dependencies: []string{"failed"}, Status: agentplan.StepStatusPending},
+				},
+			}}
+			failure := errors.New("original step failed")
+			var generated []string
+			messages := &appendingMessages{current: current}
+			recoveries := 0
+			execution := ExecutionService{
+				Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: messages,
+				Generation: planGenerationFunc(func(ctx context.Context, _ generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+					generated = append(generated, agentrunruntime.MetadataFrom(ctx).StepID)
+					return generationresult.GenerationResponse{}, failure
+				}),
+				Recovery: planRecoveryFunc(func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+					recoveries++
+					return &agentplan.Plan{Steps: test.steps}, nil
+				}),
+			}
+			_, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+			if !errors.Is(err, failure) || !strings.Contains(err.Error(), test.want) || recoveries != 1 || !reflect.DeepEqual(generated, []string{"failed"}) || len(messages.commands) != 1 {
+				t.Fatalf("invalid recovery ran later work or lost failure: steps=%v recovery=%d messages=%d err=%v", generated, recoveries, len(messages.commands), err)
+			}
+			if got := planUpdateState(current.CurrentPlan); got != "failed:failed,pending" || current.CurrentPlan.Steps[0].ID != "failed" {
+				t.Fatalf("invalid recovery must leave original failure visible: %s %#v", got, current.CurrentPlan)
+			}
+		})
+	}
+}
+
+func TestExecutionDoesNotCompleteWhenEverySingleStepReplacementIsDuplicate(t *testing.T) {
+	current := &session.Session{ID: "session-1", CurrentPlan: &agentplan.Plan{
+		ID: "plan", SessionID: "session-1", Status: agentplan.StatusApproved,
+		Steps: []agentplan.Step{{ID: "original", Order: 1, Title: "Work", Status: agentplan.StepStatusPending}},
+	}}
+	failure := errors.New("work failed")
+	calls, recoveryCalls := 0, 0
+	var updates []*agentplan.Plan
+	_, err := (ExecutionService{
+		Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: fakeMessageAppender{current: current},
+		Generation: planGenerationFunc(func(context.Context, generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+			calls++
+			return generationresult.GenerationResponse{}, failure
+		}),
+		Recovery: planRecoveryFunc(func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+			recoveryCalls++
+			return &agentplan.Plan{Steps: []agentplan.Step{{ID: "retry", Title: " work "}, {ID: "retry-2", Title: "WORK"}}}, nil
+		}),
+	}).Execute(context.Background(), plancommand.Execute{SessionID: current.ID, Stream: modelport.ChatStreamHandler{OnPlanUpdate: func(p *agentplan.Plan) { updates = append(updates, agentplan.Clone(p)) }}}, nil)
+	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "duplicate") || calls != 1 || recoveryCalls != 1 || planUpdateState(current.CurrentPlan) != "failed:failed" || current.CurrentPlan.Steps[0].ID != "original" {
+		t.Fatalf("duplicate-only recovery hid the original failed work: calls=%d recovery=%d plan=%#v err=%v", calls, recoveryCalls, current.CurrentPlan, err)
+	}
+	for _, update := range updates {
+		if update.Status == agentplan.StatusDone || update.Steps[0].Status == agentplan.StepStatusSkipped {
+			t.Fatalf("duplicate-only recovery published false completion: %#v", update)
+		}
+	}
+}
+
+func TestExecutionRecoveryFailureKeepsDownstreamBlockedAndCanResume(t *testing.T) {
+	current := &session.Session{ID: "session-1", CurrentPlan: &agentplan.Plan{
+		ID: "plan", SessionID: "session-1", Status: agentplan.StatusApproved,
+		Steps: []agentplan.Step{
+			{ID: "failed", Order: 1, Title: "Original work", Status: agentplan.StepStatusPending},
+			{ID: "downstream", Order: 2, Title: "Downstream", Dependencies: []string{"failed"}, Status: agentplan.StepStatusPending},
+		},
+	}}
+	failure := errors.New("step failed")
+	var generated []string
+	execution := ExecutionService{
+		Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: fakeMessageAppender{current: current},
+		Generation: planGenerationFunc(func(ctx context.Context, _ generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+			generated = append(generated, agentrunruntime.MetadataFrom(ctx).StepID)
+			return generationresult.GenerationResponse{}, failure
+		}),
+		Recovery: planRecoveryFunc(func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+			return &agentplan.Plan{Steps: []agentplan.Step{{ID: "alternate", Title: "Alternate work"}}}, nil
+		}),
+	}
+	_, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+	if !errors.Is(err, failure) || !reflect.DeepEqual(generated, []string{"failed", "alternate"}) || planUpdateState(current.CurrentPlan) != "failed:failed,pending" || current.CurrentPlan.Steps[0].ID != "alternate" {
+		t.Fatalf("failed replacement allowed downstream work: generated=%v plan=%#v err=%v", generated, current.CurrentPlan, err)
+	}
+	generated = nil
+	execution.Recovery = nil
+	execution.Generation = planGenerationFunc(func(ctx context.Context, task generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+		generated = append(generated, agentrunruntime.MetadataFrom(ctx).StepID)
+		return generationresult.GenerationResponse{SessionID: task.Session.ID}, nil
+	})
+	result, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID}, nil)
+	if err != nil || result.Plan.Status != agentplan.StatusDone || !reflect.DeepEqual(generated, []string{"alternate", "downstream"}) {
+		t.Fatalf("resume failed replacement: generated=%v result=%#v err=%v", generated, result.Plan, err)
+	}
+}
+
+func TestMergeRecoveryPlanRemapsIDsAndPreservesInputs(t *testing.T) {
+	now := time.Now()
+	current := &agentplan.Plan{Status: agentplan.StatusRunning, Steps: []agentplan.Step{
+		{ID: "upstream", Order: 1, Title: "Upstream", Status: agentplan.StepStatusDone},
+		{ID: "failed", Order: 2, Title: "Original work", Dependencies: []string{"upstream"}, Status: agentplan.StepStatusRunning},
+		{ID: "downstream", Order: 3, Title: "Downstream", Dependencies: []string{"2"}, Status: agentplan.StepStatusPending},
+	}}
+	replacement := &agentplan.Plan{Steps: []agentplan.Step{
+		{ID: "upstream", Order: 1, Title: "Alternate work", Status: agentplan.StepStatusDone, RetryCount: 9, LastError: "old", AgentTaskID: "old-task", StartedAt: &now, CompletedAt: &now},
+		{ID: "finish", Order: 2, Title: "Alternate finish", Dependencies: []string{"upstream"}},
+	}}
+	before, replacementBefore := agentplan.Clone(current), agentplan.Clone(replacement)
+	merged, err := mergeRecoveryPlan(current, replacement, 1, "failed")
+	if err != nil || merged == nil {
+		t.Fatalf("merge collision: %v", err)
+	}
+	if err := agentplan.Validate(merged); err != nil {
+		t.Fatalf("merged graph is invalid: %v", err)
+	}
+	first := merged.Steps[1]
+	if first.ID == "upstream" || first.ID == "failed" || first.Status != agentplan.StepStatusPending || first.RetryCount != 0 || first.LastError != "" || first.AgentTaskID != "" || first.StartedAt != nil || first.CompletedAt != nil || !reflect.DeepEqual(first.Dependencies, []string{"upstream"}) {
+		t.Fatalf("replacement retained stale identity/state or lost upstream: %#v", first)
+	}
+	if !reflect.DeepEqual(merged.Steps[2].Dependencies, []string{"upstream", first.ID}) || !reflect.DeepEqual(merged.Steps[3].Dependencies, []string{"finish"}) {
+		t.Fatalf("replacement ID remapping lost edges: %#v", merged.Steps)
+	}
+	if !reflect.DeepEqual(current, before) || !reflect.DeepEqual(replacement, replacementBefore) {
+		t.Fatal("merge must not mutate either input")
+	}
+}
+
+func TestMergeRecoveryPlanChecksLimitBeforeReplacing(t *testing.T) {
+	current := &agentplan.Plan{Status: agentplan.StatusRunning}
+	for index := 0; index < 12; index++ {
+		current.Steps = append(current.Steps, agentplan.Step{ID: fmt.Sprintf("s%d", index), Order: index + 1, Title: fmt.Sprintf("Step %d", index), Status: agentplan.StepStatusPending})
+	}
+	before := agentplan.Clone(current)
+	replacement := &agentplan.Plan{Steps: []agentplan.Step{{ID: "r1", Title: "Alternate first"}, {ID: "r2", Title: "Alternate second"}}}
+	if merged, err := mergeRecoveryPlan(current, replacement, 0, "failed"); err == nil || merged != nil || !reflect.DeepEqual(current, before) {
+		t.Fatalf("oversized replacement was partially merged: %#v err=%v", merged, err)
+	}
+	replacement.Steps = replacement.Steps[:1]
+	merged, err := mergeRecoveryPlan(current, replacement, 0, "failed")
+	if err != nil || len(merged.Steps) != 12 || merged.Steps[0].ID != "r1" {
+		t.Fatalf("one-for-one replacement at the limit must work: %#v err=%v", merged, err)
+	}
+}
+
+func TestExecutionStopsBeforeGenerationWhenInputPersistenceFails(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		failure error
+		status  string
+	}{
+		{name: "failed", failure: errors.New("user queue rejected input"), status: agentplan.StatusFailed},
+		{name: "canceled", failure: context.Canceled, status: agentplan.StatusCanceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", CurrentPlan: &agentplan.Plan{
+				ID: "plan", SessionID: "session-1", Status: agentplan.StatusApproved,
+				Steps: []agentplan.Step{
+					{ID: "first", Order: 1, Title: "First", Status: agentplan.StepStatusPending, MaxRetries: 3},
+					{ID: "second", Order: 2, Title: "Second", Status: agentplan.StepStatusPending},
+				},
+			}}
+			generation := &recordingGenerationService{}
+			messages := &appendingMessages{current: current, runtimeInstruction: true}
+			userMessages := &acceptingPlanUserMessages{err: test.failure}
+			states := &countingPlanStates{}
+			recoveryCalls, tools := 0, 0
+			execution := ExecutionService{
+				Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: messages,
+				Generation: generation, UserMessages: userMessages, PlanStates: states,
+				Recovery: planRecoveryFunc(func(context.Context, plancommand.RecoveryRequest) (*agentplan.Plan, error) {
+					recoveryCalls++
+					return nil, nil
+				}),
+			}
+			_, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID, Stream: modelport.ChatStreamHandler{OnToolCall: func(string, string) { tools++ }}}, nil)
+			if !errors.Is(err, test.failure) || !errors.Is(err, errPlanInputPersistence) || generation.calls != 0 || userMessages.accepted != 1 || userMessages.legacy != 0 || recoveryCalls != 0 || tools != 0 || len(messages.commands) != 1 {
+				t.Fatalf("input rejection did not stop the execution: generation=%d accepted=%d legacy=%d recovery=%d tools=%d messages=%d err=%v", generation.calls, userMessages.accepted, userMessages.legacy, recoveryCalls, tools, len(messages.commands), err)
+			}
+			if current.CurrentPlan.Status != test.status || states.plans[len(states.plans)-1].Status != test.status || current.CurrentPlan.Steps[0].RetryCount != 0 || current.CurrentPlan.Steps[1].StartedAt != nil {
+				t.Fatalf("input rejection left incorrect terminal state: %#v", current.CurrentPlan)
+			}
+			command := userMessages.commands[0]
+			if command.SessionSnapshot == current || command.SessionID != current.ID || command.Model != current.Model || command.SyntheticReason != domainmessage.SyntheticReasonPlanStep || len(command.AppendedMessages) != 2 || command.RuntimeInstruction == "" || command.Input != command.AppendedMessages[1].Text() {
+				t.Fatalf("input acceptance did not receive the prepared turn: %#v", command)
+			}
+		})
+	}
+}
+
+func TestExecutionReportsInputAndTerminalPersistenceFailures(t *testing.T) {
+	inputErr, stateErr := errors.New("input rejected"), errors.New("plan state unavailable")
+	current := &session.Session{ID: "session-1", CurrentPlan: &agentplan.Plan{ID: "plan", Status: agentplan.StatusApproved, Steps: []agentplan.Step{{ID: "first", Order: 1, Title: "First", Status: agentplan.StepStatusPending}}}}
+	userMessages := &acceptingPlanUserMessages{err: inputErr}
+	states := &countingPlanStates{}
+	generation := &recordingGenerationService{}
+	updates := 0
+	execution := ExecutionService{
+		Models: fakeModelProvider{}, Sessions: fakeSessionLoader{current: current}, Messages: fakeMessageAppender{current: current},
+		Generation: generation, UserMessages: userMessages, PlanStates: states,
+	}
+	_, err := execution.Execute(context.Background(), plancommand.Execute{SessionID: current.ID, Stream: modelport.ChatStreamHandler{OnPlanUpdate: func(plan *agentplan.Plan) {
+		updates++
+		if len(plan.Steps) == 1 && plan.Steps[0].Status == agentplan.StepStatusRunning {
+			states.err = stateErr
+		}
+	}}}, nil)
+	if !errors.Is(err, inputErr) || !errors.Is(err, stateErr) || generation.calls != 0 || userMessages.accepted != 1 || current.CurrentPlan.Status != agentplan.StatusFailed || updates < 3 {
+		t.Fatalf("input/terminal persistence failure was lost: generation=%d accepted=%d plan=%#v updates=%d err=%v", generation.calls, userMessages.accepted, current.CurrentPlan, updates, err)
+	}
+}
+
+func TestRecoveryPlannerAcceptsPreparedInputBeforeGeneration(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reject_%t", reject), func(t *testing.T) {
+			current := &session.Session{ID: "session-1", Model: "model-1", AgentMode: session.AgentModeChat}
+			messages := &appendingMessages{current: current, runtimeInstruction: true}
+			inputErr := errors.New("recovery queue rejected input")
+			userMessages := &acceptingPlanUserMessages{}
+			if reject {
+				userMessages.err = inputErr
+			}
+			calls := 0
+			planner := GenerationRecoveryPlanner{
+				Messages: messages, UserMessages: userMessages,
+				Generation: planGenerationFunc(func(_ context.Context, task generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+					calls++
+					if userMessages.accepted != 1 || !task.Internal || !task.CapturePlan || task.ForceChatMode || task.Session.AgentMode != session.AgentModePlan {
+						return generationresult.GenerationResponse{}, errors.New("recovery lost acceptance order or planning boundary")
+					}
+					return generationresult.GenerationResponse{Plan: agentplan.NewDraft(current.ID, "recover", "## Plan\n1. Alternate work", time.Now())}, nil
+				}),
+			}
+			result, err := planner.Recover(context.Background(), plancommand.RecoveryRequest{
+				Plan: &agentplan.Plan{ID: "plan", SessionID: current.ID}, Step: agentplan.Step{ID: "failed", Title: "Original"}, Attempt: 1,
+			})
+			if reject {
+				if !errors.Is(err, inputErr) || result != nil || calls != 0 {
+					t.Fatalf("rejected recovery input generated work: result=%#v calls=%d err=%v", result, calls, err)
+				}
+			} else if err != nil || result == nil || len(result.Steps) != 1 || calls != 1 {
+				t.Fatalf("accepted recovery input did not generate: result=%#v calls=%d err=%v", result, calls, err)
+			}
+			if userMessages.accepted != 1 || userMessages.legacy != 0 || len(messages.commands) != 1 || current.AgentMode != session.AgentModeChat {
+				t.Fatalf("recovery acceptance duplicated input or changed live mode: accepted=%d legacy=%d messages=%d mode=%s", userMessages.accepted, userMessages.legacy, len(messages.commands), current.AgentMode)
+			}
+			command := userMessages.commands[0]
+			if command.SyntheticReason != domainmessage.SyntheticReasonAutonomousPlanning || len(command.AppendedMessages) != 2 || command.RuntimeInstruction == "" || command.SessionSnapshot == current {
+				t.Fatalf("recovery acceptance lost prepared context: %#v", command)
 			}
 		})
 	}

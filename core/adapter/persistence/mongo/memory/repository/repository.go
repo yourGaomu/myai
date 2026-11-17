@@ -47,6 +47,7 @@ func (repository *Repository) EnsureIndexes(ctx context.Context) error {
 	indexes := map[string][]gomongo.IndexModel{
 		memoriesCollection: {
 			{Keys: bson.D{{Key: "status", Value: 1}, {Key: "updated_at", Value: -1}}},
+			{Keys: bson.D{{Key: "status", Value: 1}, {Key: "revisions.created_at", Value: -1}, {Key: "_id", Value: 1}}},
 			{Keys: bson.D{{Key: "tags", Value: 1}}},
 			{Keys: bson.D{{Key: "scope.type", Value: 1}, {Key: "scope.key", Value: 1}}},
 		},
@@ -107,13 +108,25 @@ func (repository *Repository) List(ctx context.Context, filter memoryport.ListFi
 			bson.M{"revisions.content.verification": regex},
 		}
 	}
-	limit := filter.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 50
+	if len(filter.SearchTerms) > 0 {
+		search := memorySearchQuery(filter.SearchTerms)
+		if textQuery, exists := query["$or"]; exists {
+			delete(query, "$or")
+			query["$and"] = bson.A{bson.M{"$or": textQuery}, search}
+		} else {
+			query["$or"] = search["$or"]
+		}
+	}
+	limit := memoryport.NormalizeListLimit(filter.Limit)
+	sort := bson.D{{Key: "updated_at", Value: -1}}
+	if filter.OrderByContent {
+		// Descending array sort uses the latest revision timestamp. This works
+		// with existing documents even if legacy usage inflated updated_at.
+		sort = bson.D{{Key: "revisions.created_at", Value: -1}, {Key: "_id", Value: 1}}
 	}
 	var documents []po.MemoryDocument
 	if err := repository.template.FindAll(ctx, memoriesCollection, query, &documents,
-		options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}}).SetLimit(int64(limit))); err != nil {
+		options.Find().SetSort(sort).SetLimit(int64(limit))); err != nil {
 		return nil, err
 	}
 	items := make([]domainmemory.Memory, 0, len(documents))
@@ -121,6 +134,32 @@ func (repository *Repository) List(ctx context.Context, filter memoryport.ListFi
 		items = append(items, mapper.MemoryDomainFromDocument(document))
 	}
 	return items, nil
+}
+
+func memorySearchQuery(terms []string) bson.M {
+	patterns := make([]string, 0, len(terms))
+	for _, term := range terms {
+		patterns = append(patterns, domainmemory.SearchTermPattern(term))
+	}
+	pattern := strings.Join(patterns, "|")
+	regex := bson.M{"$regex": pattern, "$options": "i"}
+	content := bson.A{}
+	for _, field := range []string{"goal", "applicable_context", "approach", "result", "pain_points", "root_cause", "lessons", "verification"} {
+		content = append(content, bson.M{"$ifNull": bson.A{"$$revision.content." + field, ""}}, "\n")
+	}
+	// Retired revisions must not fill the bounded pool with content the
+	// ranking step will reject. This reads the existing revision schema.
+	currentRevisionMatches := bson.M{"$expr": bson.M{"$anyElementTrue": bson.A{
+		bson.M{"$map": bson.M{
+			"input": bson.M{"$ifNull": bson.A{"$revisions", bson.A{}}},
+			"as":    "revision",
+			"in": bson.M{"$and": bson.A{
+				bson.M{"$eq": bson.A{"$$revision.version", "$current_version"}},
+				bson.M{"$regexMatch": bson.M{"input": bson.M{"$concat": content}, "regex": pattern, "options": "i"}},
+			}},
+		}},
+	}}}
+	return bson.M{"$or": bson.A{bson.M{"title": regex}, bson.M{"tags": regex}, currentRevisionMatches}}
 }
 
 func (repository *Repository) Save(ctx context.Context, memory domainmemory.Memory) error {
@@ -260,7 +299,7 @@ func (repository *Repository) RecordUse(ctx context.Context, memoryID string, us
 		"_id": memoryID, "status": string(domainmemory.StatusActive),
 	}, bson.M{
 		"$inc": bson.M{"use_count": 1},
-		"$set": bson.M{"last_used_at": usedAt, "updated_at": usedAt},
+		"$set": bson.M{"last_used_at": usedAt},
 	})
 	if err != nil {
 		return translateError(err)

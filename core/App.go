@@ -15,6 +15,7 @@ import (
 
 	adapterthreadpool "myai/core/adapter/async/threadpool"
 	adapterredis "myai/core/adapter/cache/redis"
+	generationadapter "myai/core/adapter/chat/generation"
 	grpcprocessor "myai/core/adapter/documentprocessor/grpc"
 	assetsource "myai/core/adapter/documentsource/asset"
 	embeddingmemory "myai/core/adapter/embedding/memory"
@@ -37,6 +38,7 @@ import (
 	memorymongo "myai/core/adapter/persistence/mongo/memory/repository"
 	adaptermongo "myai/core/adapter/persistence/mongo/repository"
 	subagentmongo "myai/core/adapter/persistence/mongo/subagent/repository"
+	outboxjournal "myai/core/adapter/persistence/outbox/journal"
 	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	opensandboxadapter "myai/core/adapter/sandbox/opensandbox"
 	memorysession "myai/core/adapter/session/memory"
@@ -156,6 +158,8 @@ type Application struct {
 	knowledgeDocumentService    documentapi.Service
 	knowledgeService            *service.KnowledgeService
 	chatService                 *service.ChatService
+	persistenceQueue            *generationadapter.SessionQueue
+	outboxJournal               *outboxjournal.Journal
 	toolRegister                *tool.RegisterTools
 	skillManager                *skill.Manager
 	hookManager                 *hook.Manager
@@ -769,6 +773,9 @@ func (app *Application) InitWorkspaceIsolation() {
 }
 
 func (app *Application) InitChatService() {
+	if err := app.initPersistenceQueue(); err != nil {
+		panic(fmt.Errorf("init pending persistence journal failed: %w", err))
+	}
 	var intentRepository intentport.Store = intentstore.NewMemory()
 	if app.mongoDb != nil {
 		mongoStore, err := intentstore.NewMongo(context.Background(), app.mongoDb, app.properties.Mongo.Database)
@@ -798,6 +805,7 @@ func (app *Application) InitChatService() {
 		AgentRuns:           app.agentRunRepository,
 		AgentRunObserver:    app.memoryRunObserver(),
 		HistoryStoreFactory: app.HistoryStoreFactory(),
+		PersistenceQueue:    app.persistenceQueue,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -979,6 +987,9 @@ func (app *Application) CloseContext(ctx context.Context) error {
 	if err := errors.Join(errs...); err != nil {
 		// Keep dependencies open when producers did not stop or writes did not flush.
 		return err
+	}
+	if app.outboxJournal != nil {
+		errs = append(errs, closeResource("persistence journal", app.outboxJournal.Close))
 	}
 	if app.pluginManager != nil {
 		errs = append(errs, closeResource("plugins", app.pluginManager.Close))

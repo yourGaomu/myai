@@ -515,6 +515,13 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 	service.resumeClaims[task.ID] = struct{}{}
 	claimed := domainsubagent.CloneTask(task)
 	claimed.Unread = false
+	if service.AgentMessages != nil {
+		if _, err := service.prepareParentCompletionMessageLocked(claimed); err != nil {
+			delete(service.resumeClaims, task.ID)
+			service.mu.Unlock()
+			return subagentresult.Resume{Task: task}, err
+		}
+	}
 	service.mu.Unlock()
 
 	var continuation subagentport.ParentContinuationResult
@@ -530,18 +537,21 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 			Task: claimed, MessageID: domainsubagent.AgentResultMessageID(claimed.ID, claimed.CurrentRunID), Stream: command.Stream,
 		})
 	}
-	if continueErr != nil {
-		restored, restoreErr := service.restoreUnreadResult(claimed.ID, operationID)
-		service.mu.Lock()
-		delete(service.resumeClaims, claimed.ID)
-		service.mu.Unlock()
-		return subagentresult.Resume{Task: restored}, errors.Join(continueErr, restoreErr)
+	if continueErr == nil && service.AgentMessages != nil {
+		continueErr = (AgentMessageAcknowledger{Repository: service.AgentMessages, OwnerID: service.MessageOwnerID, LeaseTTL: service.leaseTTL()}).Acknowledge(
+			domainsubagent.AgentResultMessageID(claimed.ID, claimed.CurrentRunID))
 	}
 
 	service.mu.Lock()
+	defer service.mu.Unlock()
 	delete(service.resumeClaims, claimed.ID)
 	current, persistErr := service.Tasks.GetTask(context.Background(), claimed.ID)
-	if persistErr == nil && current.Unread {
+	if continueErr != nil {
+		// Unread was never persisted as false before success. Do not restore
+		// it here: another consumer may have ACKed, or a new run may exist.
+		return subagentresult.Resume{Task: current}, errors.Join(continueErr, persistErr)
+	}
+	if persistErr == nil && service.AgentMessages == nil && current.Unread && domainsubagent.CompletionResultRevision(current) == domainsubagent.CompletionResultRevision(claimed) {
 		expectedRunID, expectedUpdatedAt := current.CurrentRunID, current.UpdatedAt
 		current.Unread = false
 		current.UpdatedAt = service.now()
@@ -550,35 +560,12 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 			service.publish(context.Background(), current)
 		}
 	}
-	service.mu.Unlock()
 	if persistErr != nil {
 		return subagentresult.Resume{Task: claimed}, persistErr
 	}
-
 	return subagentresult.Resume{
-		Task: claimed, Content: continuation.Content, Reasoning: continuation.Reasoning, Usage: continuation.Usage,
+		Task: current, Content: continuation.Content, Reasoning: continuation.Reasoning, Usage: continuation.Usage,
 	}, nil
-}
-
-func (service *Service) restoreUnreadResult(taskID, operationID string) (domainsubagent.Task, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	task, err := service.Tasks.GetTask(context.Background(), taskID)
-	if err != nil {
-		return domainsubagent.Task{}, err
-	}
-	if task.Unread {
-		return domainsubagent.CloneTask(task), nil
-	}
-	expectedRunID, expectedUpdatedAt := task.CurrentRunID, task.UpdatedAt
-	task.Unread = true
-	task.UpdatedAt = service.now()
-	if err := service.saveTaskMutation(context.Background(), task, expectedRunID, expectedUpdatedAt, operationID); err != nil {
-		return domainsubagent.CloneTask(task), err
-	}
-	service.publish(context.Background(), task)
-	return domainsubagent.CloneTask(task), nil
 }
 
 func (service *Service) ApplyChanges(ctx context.Context, command subagentcommand.ApplyTaskChanges) (subagentresult.Task, error) {

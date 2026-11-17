@@ -177,6 +177,21 @@ func TestSessionQueueRetainsFailedWriteForFlushRetryInOrder(t *testing.T) {
 	}
 }
 
+func TestSessionQueuePanicDoesNotExposePayload(t *testing.T) {
+	queue := NewSessionQueue(runtimeservice.AsyncTaskService{})
+	var reported error
+	queue.OnPanic = func(err error) { reported = err }
+	if err := queue.SubmitTask("session", func() error { panic("private payload sentinel") }); err != nil {
+		t.Fatal(err)
+	}
+	if reported == nil || reported.Error() != "session persistence task panicked" {
+		t.Fatalf("panic error=%v", reported)
+	}
+	if err := queue.Flush(context.Background()); err == nil {
+		t.Fatal("panic lost pending work")
+	}
+}
+
 func TestSessionQueueCancelsQueuedMutationBeforeExecution(t *testing.T) {
 	executor := &signalingExecutor{tasks: make(chan func(), 1)}
 	queue := NewSessionQueue(runtimeservice.AsyncTaskService{Executor: executor})

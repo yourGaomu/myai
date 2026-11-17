@@ -21,8 +21,9 @@ import (
 // an execution step fails. It uses a plan-mode child turn, so recovery can
 // inspect the workspace but cannot mutate it before execution resumes.
 type GenerationRecoveryPlanner struct {
-	Messages   planport.MessageAppender
-	Generation generationapi.TaskService
+	Messages     planport.MessageAppender
+	Generation   generationapi.TaskService
+	UserMessages planport.UserMessagePersistence
 }
 
 var _ planport.RecoveryPlanner = GenerationRecoveryPlanner{}
@@ -48,6 +49,13 @@ func (p GenerationRecoveryPlanner) Recover(ctx context.Context, request plancomm
 	planningSession := session.Clone(prepared.Session)
 	if planningSession == nil {
 		return nil, errors.New("plan recovery session is nil")
+	}
+	if err := persistPreparedUserMessage(ctx, p.UserMessages, generationcommand.PersistUserMessage{
+		SessionID: planningSession.ID, Model: planningSession.Model, Input: input,
+		RuntimeInstruction: prepared.RuntimeInstruction, SyntheticReason: domainmessage.SyntheticReasonAutonomousPlanning,
+		AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(planningSession),
+	}); err != nil {
+		return nil, err
 	}
 	planningSession.AgentMode = session.AgentModePlan
 	metadata := agentrunruntime.MetadataFrom(ctx)

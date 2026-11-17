@@ -49,6 +49,7 @@ import (
 	cacheport "myai/core/port/cache"
 	historyport "myai/core/port/history"
 	modelport "myai/core/port/model"
+	outboxport "myai/core/port/outbox"
 	persistenceport "myai/core/port/persistence"
 	repository "myai/core/port/repository"
 	"myai/core/service"
@@ -85,6 +86,7 @@ type Configuration struct {
 	AgentRunObserver    agentrunport.CompletionObserver
 	IntentController    *service.IntentController
 	HistoryStoreFactory historyport.StoreFactory
+	PersistenceQueue    *generationadapter.SessionQueue
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -163,7 +165,14 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		IDs:         uuidadapter.Generator{},
 	}
 	asyncTasks := runtimeservice.AsyncTaskService{Executor: configuration.Async}
-	sessionQueue := generationadapter.NewSessionQueue(asyncTasks)
+	sessionQueue := configuration.PersistenceQueue
+	if sessionQueue == nil {
+		sessionQueue = generationadapter.NewSessionQueue(asyncTasks)
+	}
+	var submitRecords func(context.Context, outboxport.Batch) error
+	if sessionQueue.Durable() {
+		submitRecords = sessionQueue.SubmitRecords
+	}
 	sessionQueue.OnPanic = func(err error) {
 		log.Print(err)
 	}
@@ -230,6 +239,15 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		Compactor:    compactor,
 		TurnHooks:    turnHooks,
 		PendingInput: turnInputQueue,
+		OnMessagesAccepted: func(ctx context.Context, current *session.Session, messages []domainmessage.Message) error {
+			if current == nil || len(messages) == 0 {
+				return nil
+			}
+			return userMessages.AcceptUserMessage(ctx, generationcommand.PersistUserMessage{
+				SessionID: current.ID, Model: current.Model, Input: messages[len(messages)-1].Text(),
+				AppendedMessages: domainmessage.CloneAll(messages), SessionSnapshot: session.Clone(current),
+			})
+		},
 		OnMessagesAppended: func(current *session.Session, messages []domainmessage.Message) {
 			// 1. 将环境、计划、mailbox 和中间回答写入同一持久化队列，保持会话顺序。
 			if current == nil || len(messages) == 0 {
@@ -246,6 +264,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 			log.Printf("auto compact failed: %v", err)
 		},
 		ToolRecords: toolrecordsrepository.Recorder{
+			SubmitRecords:      submitRecords,
 			Persistence:        configuration.Store,
 			IDs:                uuidadapter.Generator{},
 			RunAsync:           asyncTasks.Submit,
@@ -279,6 +298,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	generationTasks := generationservice.TaskService{
 		Sessions:           configuration.Sessions,
 		OnMessagesAppended: agentLoop.OnMessagesAppended,
+		OnMessagesAccepted: agentLoop.OnMessagesAccepted,
 		RequestIDs:         uuidadapter.Generator{},
 		Recorders:          taskrecorder.Factory{StoreFactory: configuration.HistoryStoreFactory},
 		Generator:          assistantGeneration,
@@ -351,7 +371,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		PlanStates:       planStates,
 		UserMessages:     userMessages,
 		Events:           events,
-		Recovery:         planservice.GenerationRecoveryPlanner{Messages: messageCommands, Generation: generationTasks},
+		Recovery:         planservice.GenerationRecoveryPlanner{Messages: messageCommands, Generation: generationTasks, UserMessages: userMessages},
 		MaxReplans:       1,
 		MaxParallelSteps: 3,
 		Runs:             runCommands,
@@ -369,6 +389,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	return service.ChatDependencies{
 		ContinuationControl: continuationControl,
 		FlushPersistence:    sessionQueue.Flush,
+		BlockSession:        sessionQueue.BlockSession,
+		ResumeSession:       sessionQueue.ResumeSession,
 		Models:              configuration.Models,
 		AutoPlanEnabled:     true,
 		AutoPlanClassifier:  classifier,

@@ -28,6 +28,12 @@ type UserMessagePersistence interface {
 	PersistUserMessage(command generationcommand.PersistUserMessage)
 }
 
+// UserMessageAcceptor reports whether persistence accepted the prepared turn.
+// Callers prefer it when available and stop before generation on failure.
+type UserMessageAcceptor interface {
+	AcceptUserMessage(ctx context.Context, command generationcommand.PersistUserMessage) error
+}
+
 type SessionEventPublisher interface {
 	SessionChanged(ctx context.Context, sessionID string, reason string)
 }

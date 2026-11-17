@@ -19,11 +19,20 @@ type AgentMessageRepository interface {
 	MarkAgentMessageFailed(ctx context.Context, messageID string, reason string) error
 }
 
+// CompleteParentCompletion atomically marks the message delivered and clears
+// only the matching completed task result's Unread flag. Repeated completion
+// of an already delivered message succeeds without changing newer results.
 type ParentCompletionMessageRepository interface {
 	EnqueueParentCompletion(ctx context.Context, taskID string, message domainsubagent.AgentMessage) (domainsubagent.AgentMessage, error)
 	ClaimParentCompletion(ctx context.Context, messageID, ownerID string, now time.Time, ttl time.Duration) (domainsubagent.AgentMessage, error)
 	ReleaseParentCompletion(ctx context.Context, messageID, ownerID, reason string) error
 	CompleteParentCompletion(ctx context.Context, messageID, ownerID string, deliveredAt time.Time) error
+}
+
+// ParentCompletionContentRepository upgrades only oversized legacy envelope
+// content with compare-and-swap. It preserves all identity and delivery state.
+type ParentCompletionContentRepository interface {
+	BoundParentCompletion(ctx context.Context, messageID string) (domainsubagent.AgentMessage, error)
 }
 
 // ChildAgentMessageRepository keeps the durable message and the child task's

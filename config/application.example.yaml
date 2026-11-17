@@ -82,6 +82,15 @@ thread:
 workspace_history:
   path: "/var/lib/myai/history"
 
+persistence:
+  outbox:
+    # Empty selects a private per-workspace database in the user config directory.
+    path: ""
+    max_pending: 10000
+    max_entries: 20000
+    max_bytes: 67108864
+    retain_done: 10000
+
 asset:
   shortener_base_url: ""
   api_key: ""

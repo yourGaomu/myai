@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -83,7 +84,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
 	}
-	// 模型成功返回后先提交内存状态，再异步保存 assistant 消息和当前会话指针。
+	// Preserve the completed answer in memory before accepting its durable write.
 	commitResult, err := s.ResponseCommitter.Commit(generationcommand.Commit{
 		Session: command.Session, LatestInput: command.LatestInput, Result: result, CapturePlan: command.CapturePlan,
 		Internal: command.Internal,
@@ -94,8 +95,12 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	if commitResult.Session != nil {
 		command.Session = commitResult.Session
 	}
-	if s.Persistence != nil {
-		if !command.Internal {
+	if s.Persistence != nil && !command.Internal {
+		if durable, ok := s.Persistence.(generationport.DurablePersistence); ok {
+			if persistErr := durable.AcceptAssistant(ctx, command.Session, result); persistErr != nil {
+				err = errors.Join(err, fmt.Errorf("accept assistant persistence: %w", persistErr))
+			}
+		} else {
 			s.Persistence.PersistAssistant(command.Session, result)
 		}
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -96,25 +97,72 @@ func (s LifecycleService) RestoreSession(ctx context.Context, command lifecyclec
 	return sessionID, nil
 }
 
+// RestoreDeletedSession checks the store before changing it. A session left
+// blocked by a partial clear remains blocked across restart and must be cleared
+// again explicitly rather than resuming an uncertain transcript.
+func (s LifecycleService) RestoreDeletedSession(ctx context.Context, command lifecyclecommand.RestoreSession) (string, error) {
+	sessionID := strings.TrimSpace(command.SessionID)
+	if sessionID == "" {
+		return "", errors.New("session id is empty")
+	}
+	if s.Sessions == nil {
+		return "", errors.New("store is nil")
+	}
+	record, err := s.Sessions.GetSession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if !record.Deleted {
+		return "", fmt.Errorf("session %s is not deleted in the store; retry ClearSession to recover blocked persistence", sessionID)
+	}
+	return s.RestoreSession(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID})
+}
+
 func (s LifecycleService) ClearCurrent(ctx context.Context) (*session.Session, error) {
 	if s.Memory == nil {
 		return nil, errors.New("session manager is nil")
 	}
+	return s.ClearSession(ctx, s.Memory.CurrentSessionId())
+}
 
-	current, err := s.Memory.Current()
+func (s LifecycleService) ClearSession(ctx context.Context, sessionID string) (*session.Session, error) {
+	if s.Memory == nil {
+		return nil, errors.New("session manager is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	current, err := s.Memory.GetSession(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	// Clear 与 Delete 不同：保留 Session ID 和设置，只清空消息、摘要、用量和 Plan。
+	clearer, targeted := s.Memory.(interface{ ClearSession(string) error })
+	if !targeted && s.Memory.CurrentSessionId() != sessionID {
+		return nil, errors.New("memory store does not support clearing a non-current session")
+	}
+	if s.Sessions != nil {
+		record, err := s.Sessions.GetSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if record.Deleted {
+			return nil, errors.New("cannot clear a deleted session; restore it explicitly first")
+		}
+	}
+	// Keep the captured ID even if another operation switches the current session.
 	if s.Messages != nil {
-		if err := s.Messages.ClearMessages(ctx, current.ID); err != nil {
+		if err := s.Messages.ClearMessages(ctx, sessionID); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.Memory.ClearCurrent(); err != nil {
+	if targeted {
+		err = clearer.ClearSession(sessionID)
+	} else {
+		err = s.Memory.ClearCurrent()
+	}
+	if err != nil {
 		return nil, err
 	}
-	return current, nil
+	// Production memory stores return snapshots, so fetch the cleared aggregate.
+	return s.Memory.GetSession(current.ID)
 }
 
 func (s LifecycleService) now() time.Time {

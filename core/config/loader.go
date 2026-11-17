@@ -157,6 +157,13 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 		WorkspaceHistory: WorkspaceHistoryProperties{
 			Path: strings.TrimSpace(v.GetString("workspace_history.path")),
 		},
+		Persistence: PersistenceProperties{Outbox: OutboxProperties{
+			Path:       strings.TrimSpace(v.GetString("persistence.outbox.path")),
+			MaxPending: v.GetInt("persistence.outbox.max_pending"),
+			MaxEntries: v.GetInt("persistence.outbox.max_entries"),
+			MaxBytes:   v.GetInt64("persistence.outbox.max_bytes"),
+			RetainDone: v.GetInt("persistence.outbox.retain_done"),
+		}},
 		Asset: AssetProperties{
 			BaseURL:              strings.TrimSpace(v.GetString("asset.shortener_base_url")),
 			APIKey:               strings.TrimSpace(v.GetString("asset.api_key")),
@@ -192,6 +199,9 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			Enabled: pluginEnabled(v),
 			Root:    strings.TrimSpace(v.GetString("plugin.root")),
 		},
+	}
+	if err := normalizeOutboxProperties(&properties.Persistence.Outbox); err != nil {
+		return Properties{}, err
 	}
 	if properties.Model.ID == "" {
 		properties.Model.ID = DefaultModelID

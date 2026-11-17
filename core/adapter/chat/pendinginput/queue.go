@@ -13,7 +13,7 @@ import (
 
 const (
 	MaxPendingMessages = 8
-	MaxPendingRunes    = 8000
+	MaxPendingRunes    = domainsubagent.ParentCompletionMaxRunes
 )
 
 type Queue struct {
