@@ -503,6 +503,7 @@ type PermissionAskPayload struct {
 type PermissionResultPayload struct {
 	ApprovalID string `json:"approval_id"`
 	Allowed    bool   `json:"allowed"`
+	Scope      string `json:"scope,omitempty"`
 }
 
 type UserQuestionItemPayload struct {
@@ -1348,6 +1349,8 @@ type ChangeEntry struct {
 	Deleted        bool   `json:"deleted"`
 	Renamed        bool   `json:"renamed"`
 	Restorable     bool   `json:"restorable"`
+	AddedLines     int    `json:"added_lines,omitempty"`
+	RemovedLines   int    `json:"removed_lines,omitempty"`
 }
 
 type ChangesListResultPayload struct {

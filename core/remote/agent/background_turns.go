@@ -68,6 +68,27 @@ func (a *Agent) forwardBackgroundTurns(ctx context.Context, conn *websocket.Conn
 				}
 				return
 			}
+			if event.Kind == "permission_ask" && event.Permission != nil {
+				if a.isSessionPermissionAllowed(event.SessionID, event.Permission.Name, string(event.Permission.Permission)) {
+					if control, ok := a.chatService.(BackgroundPermissionControl); ok {
+						if control.ResolveBackgroundPermission(ctx, event.SessionID, event.TurnID, event.ApprovalID, true) == nil {
+							continue
+						}
+					}
+				}
+				if a.permissionWaiters != nil {
+					a.permissionWaiters.rememberBackground(
+						bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID),
+						permissionRuleTarget{
+							sessionID:  event.SessionID,
+							toolName:   event.Permission.Name,
+							permission: string(event.Permission.Permission),
+						},
+					)
+				}
+			} else if event.Kind == "permission_resolved" && event.ApprovalID != "" && a.permissionWaiters != nil {
+				a.permissionWaiters.forgetBackground(bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID))
+			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeBackgroundTurnEvent, event.TurnID, event.SessionID, backgroundTurnPayload(event)); err != nil {
 				log.Printf("forward background turn failed: %v", err)
 				_ = conn.Close()

@@ -447,11 +447,44 @@ func writeTestFile(t *testing.T, root string, path string, content string) {
 	}
 }
 
-func hasChange(entries []protocol.ChangeEntry, path string) bool {
+func findChange(entries []protocol.ChangeEntry, path string) (protocol.ChangeEntry, bool) {
 	for _, entry := range entries {
 		if entry.Path == path {
-			return true
+			return entry, true
 		}
 	}
-	return false
+	return protocol.ChangeEntry{}, false
+}
+
+func hasChange(entries []protocol.ChangeEntry, path string) bool {
+	_, ok := findChange(entries, path)
+	return ok
+}
+
+func TestListReportsAddedAndRemovedLineCounts(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "mod.txt", "line1\nline2\nline3\n")
+	writeTestFile(t, root, "del.txt", "gone1\ngone2\n")
+
+	service := newTestService(t, root)
+
+	writeTestFile(t, root, "mod.txt", "line1\nchanged2\nextra\nline3\n")
+	writeTestFile(t, root, "add.txt", "a\nb\nc\n")
+	if err := os.Remove(filepath.Join(root, "del.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.List(context.Background(), protocol.ChangesListPayload{})
+	if err != nil {
+		t.Fatalf("list changes failed: %v", err)
+	}
+	if mod, ok := findChange(result.Entries, "mod.txt"); !ok || mod.AddedLines != 2 || mod.RemovedLines != 1 {
+		t.Fatalf("unexpected mod.txt counts: %+v", mod)
+	}
+	if add, ok := findChange(result.Entries, "add.txt"); !ok || add.AddedLines != 3 || add.RemovedLines != 0 {
+		t.Fatalf("unexpected add.txt counts: %+v", add)
+	}
+	if del, ok := findChange(result.Entries, "del.txt"); !ok || del.AddedLines != 0 || del.RemovedLines != 2 {
+		t.Fatalf("unexpected del.txt counts: %+v", del)
+	}
 }

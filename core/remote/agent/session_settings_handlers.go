@@ -94,6 +94,9 @@ func (a *Agent) handleSessionPermissionSet(ctx context.Context, conn *websocket.
 	if err := a.chatService.SetPermissionModeForSession(ctx, sessionID, payload.Mode); err != nil {
 		return err
 	}
+	if payload.Mode == string(session.PermissionModeAsk) || payload.Mode == string(session.PermissionModeReadonly) {
+		runtime.clearPermissionRules()
+	}
 	info, err := a.chatService.ContextInfoForSession(ctx, sessionID)
 	if err != nil {
 		return err

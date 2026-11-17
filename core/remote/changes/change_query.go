@@ -39,12 +39,14 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 	entries := make([]protocol.ChangeEntry, 0)
 	for path, base := range baseline {
 		if _, ok := current[path]; !ok {
+			_, removed := entryLineCounts(&base, nil)
 			entries = append(entries, protocol.ChangeEntry{
-				Path:       path,
-				Status:     "deleted",
-				Deleted:    true,
-				Unstaged:   true,
-				Restorable: base.Available,
+				Path:         path,
+				Status:       "deleted",
+				Deleted:      true,
+				Unstaged:     true,
+				Restorable:   base.Available,
+				RemovedLines: removed,
 			})
 		}
 	}
@@ -52,19 +54,24 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 		base, ok := baseline[path]
 		switch {
 		case !ok:
+			added, _ := entryLineCounts(nil, &now)
 			entries = append(entries, protocol.ChangeEntry{
 				Path:       path,
 				Status:     "added",
 				Untracked:  true,
 				Unstaged:   true,
 				Restorable: true,
+				AddedLines: added,
 			})
 		case base.Hash != now.Hash || base.Size != now.Size || base.Binary != now.Binary || base.TooLarge != now.TooLarge:
+			added, removed := entryLineCounts(&base, &now)
 			entries = append(entries, protocol.ChangeEntry{
-				Path:       path,
-				Status:     "modified",
-				Unstaged:   true,
-				Restorable: base.Available,
+				Path:         path,
+				Status:       "modified",
+				Unstaged:     true,
+				Restorable:   base.Available,
+				AddedLines:   added,
+				RemovedLines: removed,
 			})
 		}
 	}
