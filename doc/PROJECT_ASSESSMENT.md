@@ -1,6 +1,6 @@
 # MyAI 项目功能评估报告
 
-> 修复进展：本报告保留修复前审计结论。2026-11-06 起的实际修改、验收证据与剩余边界见 [优先问题修复记录](PRIORITY_FIXES_20261106.md)；升级前请阅读 [部署安全迁移说明](DEPLOYMENT_SECURITY_MIGRATION.md)。
+> 修复进展：本报告保留修复前审计结论。2026-11-06 起的实际修改见 [第一轮修复记录](PRIORITY_FIXES_20261106.md)；Plan、子代理结果、Memory 和磁盘待写日志的后续修复见 [第二轮修复与验收](FOLLOWUP_FIXES_20261110.md)。升级前请阅读 [部署安全迁移说明](DEPLOYMENT_SECURITY_MIGRATION.md)。
 
 > 评估日期：2026-11-05
 >

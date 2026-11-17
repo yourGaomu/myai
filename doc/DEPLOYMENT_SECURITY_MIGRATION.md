@@ -201,7 +201,20 @@ MinIO API/Console 仍默认只发布到宿主 `127.0.0.1`；容器应走共享�
 
 自动 `short_links` MCP 是 `required: false`、`permission: execute`，离线、缺 key 或鉴权失败会告警并跳过，不阻止首次启动。显式配置的同名服务器优先；若旧 YAML 仍为 `required: true`，离线依然会阻止启动。运行中的重载对失败候选保留旧工具与客户端。
 
-## 7. 验证边界
+## 7. 2026-11-10：磁盘待写日志升级
+
+配置 Mongo 的 Agent 现在默认将已接受、尚未写入数据库的消息与工具记录保存到私有 SQLite outbox。默认目录是用户配置目录的 `myai/outbox/<工作区哈希>.db`，容器位于 `/home/myai/.config/myai/outbox/`，由本指南中的 `agent-user-config` 卷保留。未配置 Mongo 的纯内存模式不启用它。
+
+- 不要将 outbox 放入工具工作区或共享可写目录。显式 `PERSISTENCE_OUTBOX_PATH` 必须是工作区外的绝对路径，并单独确认持久卷和权限。
+- 日志绑定目标数据库端点、库名和工作区身份。更换目标之前，应先使用原配置让待写记录排空；scope/version 缺失或不匹配会拒绝打开。不要删改元数据来强行认领旧记录。
+- 同一日志只允许一个 Agent 进程打开。多个工作区默认使用不同哈希文件；同工作区多实例不能共享同一文件并同时启动。
+- 升级或迁移时，停止 Agent 后备份整个私有 outbox 目录以及 SQLite 侧文件，不从运行中的进程只复制主数据库。记录可能含完整聊天和工具内容，备份按秘密数据保护。
+- 容量默认 64 MiB 主数据库、10000 pending、20000 总条目、10000 完成回执。日志满或无法提交时明确报错，不通过丢弃 pending 继续运行。临时回滚日志不计入主数据库页上限。
+- 清空和删除先提交持久屏障，旧 pending 被取消，避免重启后恢复已删除内容。失败的清空保持阻止写入，应重试该会话清空；恢复只针对真实已删除会话，不绕过失败清空的屏障。
+
+实现、测试证据和 at-least-once/非 exactly-once 限制见 [第二轮修复与验收](FOLLOWUP_FIXES_20261110.md)。本指南仅描述迁移步骤，本轮未执行线上迁移。
+
+## 8. 验证边界
 
 本轮离线验证仅读取模板与源码，纯 YAML 解析通过 `compose.prod.yaml`、`compose.build.yaml`、`config/application.example.yaml` 与 MinIO Compose；配置 loader/mapper、UrlShortener 启动前校验和临时 history 存储测试通过。无密钥探针在禁用网络传输的条件下确认可选 shortlink 初始注册失败仍可继续启动。
 
