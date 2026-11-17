@@ -127,7 +127,7 @@ const makeStyles = ({ palette }: AppTheme) =>
       right: -2,
       width: 18,
     },
-    headText: { flex: 1 },
+    headText: { flex: 1, minWidth: 0 },
     title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold, lineHeight: 23 },
     sub: { color: palette.ink2, fontSize: font.label, marginTop: 2 },
     cmd: {
@@ -144,7 +144,7 @@ const makeStyles = ({ palette }: AppTheme) =>
     kv: { gap: 6, marginTop: 12 },
     kvRow: { flexDirection: "row", gap: 14 },
     kvKey: { color: palette.ink3, fontSize: font.label - 0.5, minWidth: 28 },
-    kvValue: { color: palette.ink1, flex: 1, fontFamily: fontFamily.mono, fontSize: font.caption },
+    kvValue: { color: palette.ink1, flex: 1, fontFamily: fontFamily.mono, fontSize: font.caption, minWidth: 0 },
     buttons: { flexDirection: "row", gap: 10, marginTop: 18 },
     button: { alignItems: "center", borderRadius: radius.md, flex: 1, justifyContent: "center", minHeight: 46 },
     deny: { backgroundColor: palette.well, borderColor: palette.hairline, borderWidth: 1 },
@@ -166,6 +166,7 @@ const makeStyles = ({ palette }: AppTheme) =>
     },
     sessionAllowText: {
       color: palette.brandLight,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },

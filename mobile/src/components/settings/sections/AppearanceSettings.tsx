@@ -439,12 +439,14 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     cardHeaderRow: {
       alignItems: "flex-start",
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 10,
       justifyContent: "space-between",
     },
     cardTitleCol: {
       flex: 1,
       gap: 6,
+      minWidth: 160,
     },
     clearChip: {
       backgroundColor: palette.surface2,
@@ -515,6 +517,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     wallpaperBadgeText: {
       color: palette.ink2,
+      flexShrink: 1,
       fontSize: 11,
       fontWeight: weight.medium,
     },
@@ -534,6 +537,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       flexGrow: 1,
       gap: 8,
       minHeight: 40,
+      minWidth: 132,
       paddingHorizontal: 10,
       paddingVertical: 7,
     },
@@ -550,6 +554,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     presetLabel: {
       color: palette.ink2,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },
@@ -558,6 +563,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     uploadRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 8,
     },
     uploadBtnPrimary: {
@@ -569,10 +575,13 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       gap: 7,
       justifyContent: "center",
       minHeight: 42,
+      minWidth: 132,
       paddingHorizontal: 12,
+      paddingVertical: 8,
     },
     uploadBtnPrimaryText: {
       color: palette.inkInverse,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },
@@ -587,10 +596,13 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       gap: 7,
       justifyContent: "center",
       minHeight: 42,
+      minWidth: 132,
       paddingHorizontal: 12,
+      paddingVertical: 8,
     },
     uploadBtnSecondaryText: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },
@@ -636,10 +648,13 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     tuneHeaderRow: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
     },
     tuneLabel: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },
@@ -667,6 +682,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     choiceRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 8,
     },
     choiceChip: {
@@ -675,9 +691,10 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderColor: palette.hairline,
       borderRadius: radius.md,
       borderWidth: 1,
-      flex: 1,
+      flexGrow: 1,
       height: 34,
       justifyContent: "center",
+      minWidth: 80,
       paddingHorizontal: 8,
     },
     choiceChipActive: {
@@ -694,6 +711,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     segmentedRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 8,
     },
     modeBtn: {
@@ -702,12 +720,14 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderColor: palette.hairline,
       borderRadius: radius.md,
       borderWidth: 1,
-      flex: 1,
+      flexGrow: 1,
       flexDirection: "row",
       gap: 6,
       justifyContent: "center",
       minHeight: 40,
+      minWidth: 92,
       paddingHorizontal: 10,
+      paddingVertical: 8,
     },
     modeBtnActive: {
       backgroundColor: palette.brand,
@@ -736,6 +756,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       flexDirection: "row",
       flexGrow: 1,
       gap: 10,
+      minWidth: 132,
       padding: 10,
     },
     accentCardActive: {
@@ -765,6 +786,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     fontRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 8,
     },
     fontChip: {
@@ -773,9 +795,11 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderColor: palette.hairline,
       borderRadius: radius.md,
       borderWidth: 1,
-      flex: 1,
+      flexGrow: 1,
       height: 36,
       justifyContent: "center",
+      minWidth: 72,
+      paddingHorizontal: 8,
     },
     fontChipActive: {
       backgroundColor: palette.brandWashStrong,

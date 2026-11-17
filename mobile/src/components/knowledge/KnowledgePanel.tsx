@@ -1343,12 +1343,15 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     protoSectionHeader: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
       marginBottom: 4,
       paddingHorizontal: 2,
     },
     protoSectionTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.title,
       fontWeight: weight.semibold,
     },
@@ -1481,11 +1484,14 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     docPanelHeader: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
       paddingBottom: 4,
     },
     docPanelTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.body,
       fontWeight: weight.semibold,
     },
@@ -1528,6 +1534,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       flex: 1,
       gap: 3,
       marginRight: 8,
+      minWidth: 0,
     },
     docTitle: {
       color: palette.ink1,
@@ -1542,6 +1549,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     docActions: {
       alignItems: "center",
       flexDirection: "row",
+      flexShrink: 0,
       gap: 6,
     },
     docStatusBadge: {

@@ -343,15 +343,20 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     previewTopBar: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
       justifyContent: "space-between",
     },
     previewBadge: {
       alignItems: "center",
       flexDirection: "row",
+      flexShrink: 1,
       gap: 6,
+      minWidth: 0,
     },
     previewBadgeText: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.label,
       fontWeight: weight.semibold,
     },
@@ -530,10 +535,12 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     slotTitleRow: {
       alignItems: "center",
       flexDirection: "row",
-      gap: 8,
+      flexWrap: "wrap",
+      gap: 6,
     },
     slotTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.body,
       fontWeight: weight.semibold,
     },
@@ -620,10 +627,13 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     adjustRow: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
     },
     adjustLabel: {
       color: palette.ink2,
+      flexShrink: 1,
       fontSize: font.caption,
       fontWeight: weight.semibold,
     },
@@ -659,6 +669,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     cropRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 6,
     },
     cropChip: {
@@ -667,7 +678,9 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderColor: palette.hairline,
       borderRadius: radius.sm,
       borderWidth: 1,
-      flex: 1,
+      flexGrow: 1,
+      minWidth: 84,
+      paddingHorizontal: 8,
       paddingVertical: 6,
     },
     cropChipActive: {

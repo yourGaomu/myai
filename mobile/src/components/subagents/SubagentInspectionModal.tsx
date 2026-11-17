@@ -715,6 +715,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       alignItems: "center",
       backgroundColor: palette.surface2,
       flexDirection: "row",
+      gap: 10,
       justifyContent: "space-between",
       paddingHorizontal: 16,
       paddingTop: 16,
@@ -725,6 +726,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       flex: 1,
       flexDirection: "row",
       gap: 10,
+      minWidth: 0,
     },
     avatarIcon: {
       alignItems: "center",
@@ -740,20 +742,24 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     headerTitleWrap: {
       flex: 1,
       gap: 2,
+      minWidth: 0,
     },
     headerTitleRow: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 8,
     },
     headerTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.title,
       fontWeight: weight.semibold,
     },
     headerMetaRow: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 4,
     },
     readOnlyBadge: {
@@ -763,6 +769,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     },
     headerSub: {
       color: palette.ink3,
+      flexShrink: 1,
       fontSize: font.caption,
     },
     headerActions: {
@@ -844,13 +851,16 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       color: palette.ink1,
       flex: 1,
       fontSize: font.label,
+      minWidth: 0,
     },
     idRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       gap: 12,
     },
     idText: {
       color: palette.ink3,
+      flexShrink: 1,
       fontSize: font.caption,
     },
     idMono: {
@@ -1026,12 +1036,16 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     toolHeader: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
       justifyContent: "space-between",
     },
     toolHeaderLeft: {
       alignItems: "center",
+      flex: 1,
       flexDirection: "row",
       gap: 6,
+      minWidth: 0,
     },
     toolStatusTag: {
       borderRadius: radius.xs,
@@ -1054,11 +1068,13 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     },
     toolName: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.body,
       fontWeight: weight.semibold,
     },
     toolCallIDMono: {
       color: palette.ink3,
+      flexShrink: 1,
       fontFamily: monoFont,
       fontSize: font.micro,
     },
