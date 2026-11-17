@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鹈鹕骑自行车 · SVG 动画</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(circle at 50% 0%, #2b3a55 0%, #141b2b 70%);
+    color: #e8edf5;
+  }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: .08em; }
+  .stage {
+    width: min(960px, 100%);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .06);
+  }
+  svg { display: block; width: 100%; height: auto; }
+  .controls {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-size: 14px;
+  }
+  .controls label { display: flex; align-items: center; gap: 8px; }
+  button {
+    font: inherit;
+    color: #0f1626;
+    background: #7ec8f2;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: #a3d8f6; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #ffd95a; outline-offset: 3px; }
+  input[type="range"] { accent-color: #7ec8f2; width: 160px; }
+  output { min-width: 3em; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<h1>鹈鹕骑自行车</h1>
+
+<div class="stage">
+<svg id="scene" viewBox="0 0 800 500" role="img" aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">鹈鹕骑自行车</title>
+  <desc id="svgDesc">一只戴着红围巾的白色鹈鹕骑着绿色自行车在乡间公路上前进，云朵、山丘和树木不断向后移动。</desc>
+
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fc0ee"/>
+      <stop offset="0.6" stop-color="#c9ecfb"/>
+      <stop offset="1" stop-color="#ffe8c4"/>
+    </linearGradient>
+    <radialGradient id="sunGlow">
+      <stop offset="0" stop-color="#fff7c2" stop-opacity="0.95"/>
+      <stop offset="0.35" stop-color="#ffe680" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffe680" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bodyGrad" cx="0.42" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.7" stop-color="#f6f2e9"/>
+      <stop offset="1" stop-color="#e4dccb"/>
+    </radialGradient>
+    <linearGradient id="wingGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6dfcf"/>
+    </linearGradient>
+    <linearGradient id="billGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd25e"/>
+      <stop offset="1" stop-color="#f4a62a"/>
+    </linearGradient>
+    <linearGradient id="pouchGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7ae5a"/>
+      <stop offset="1" stop-color="#ec8a3a"/>
+    </linearGradient>
+    <linearGradient id="roadGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5d636c"/>
+      <stop offset="1" stop-color="#474c54"/>
+    </linearGradient>
+
+    <g id="cloud">
+      <ellipse cx="0" cy="0" rx="62" ry="20"/>
+      <circle cx="-26" cy="-12" r="22"/>
+      <circle cx="8" cy="-22" r="28"/>
+      <circle cx="36" cy="-8" r="20"/>
+    </g>
+
+    <path id="farHill" d="M0 330 Q100 250 200 300 T400 290 T600 300 T800 330 V500 H0 Z"/>
+    <path id="nearHill" d="M0 360 C100 320 180 315 280 345 S460 300 560 335 S720 370 800 360 V500 H0 Z"/>
+
+    <g id="tree">
+      <rect x="-4" y="-46" width="8" height="48" rx="3" fill="#8a5d3b"/>
+      <circle cx="0" cy="-60" r="24" fill="#4c9a4a"/>
+      <circle cx="-14" cy="-48" r="15" fill="#58a955"/>
+      <circle cx="14" cy="-50" r="16" fill="#3f8a40"/>
+      <circle cx="-6" cy="-68" r="10" fill="#6cbc63" opacity="0.8"/>
+    </g>
+    <g id="bush">
+      <ellipse cx="0" cy="0" rx="18" ry="10" fill="#5ea956"/>
+      <ellipse cx="12" cy="2" rx="12" ry="8" fill="#4f9a49"/>
+    </g>
+    <g id="treeTile">
+      <use href="#tree" transform="translate(60 400) scale(0.9)"/>
+      <use href="#bush" transform="translate(150 404)"/>
+      <use href="#tree" transform="translate(250 398) scale(1.15)"/>
+      <use href="#tree" transform="translate(305 402) scale(0.75)"/>
+      <use href="#bush" transform="translate(420 405) scale(1.3)"/>
+      <use href="#tree" transform="translate(540 400)"/>
+      <use href="#tree" transform="translate(700 399) scale(1.05)"/>
+      <use href="#bush" transform="translate(760 406) scale(0.9)"/>
+    </g>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <circle cx="680" cy="85" r="110" fill="url(#sunGlow)"/>
+  <circle cx="680" cy="85" r="36" fill="#ffd95a"/>
+  <g id="clouds" fill="#ffffff" opacity="0.92"></g>
+  <g id="farHills" fill="#b4dbc1">
+    <use href="#farHill"/>
+    <use href="#farHill" x="800"/>
+  </g>
+  <g id="nearHills" fill="#8bc77f">
+    <use href="#nearHill"/>
+    <use href="#nearHill" x="800"/>
+  </g>
+  <rect y="388" width="800" height="50" fill="#9fd47c"/>
+  <g id="trees">
+    <use href="#treeTile"/>
+    <use href="#treeTile" x="800"/>
+  </g>
+  <rect y="424" width="800" height="9" fill="#cfc4a2"/>
+  <rect y="432" width="800" height="68" fill="url(#roadGrad)"/>
+  <rect y="432" width="800" height="3" fill="#3e434a"/>
+  <g id="dashes" fill="#f3efe3"></g>
+
+  <g id="speedLines" stroke="#ffffff" stroke-width="3" stroke-linecap="round"></g>
+  <g id="dust" fill="#d6c9a6"></g>
+
+  <!-- 自行车 + 鹈鹕 -->
+  <g id="rig">
+    <ellipse cx="390" cy="437" rx="175" ry="7" fill="#000000" opacity="0.22"/>
+
+    <!-- 远侧曲柄、脚踏、腿 -->
+    <line id="crankFar" stroke="#33383e" stroke-width="7" stroke-linecap="round"/>
+    <rect id="pedalFar" width="24" height="7" rx="2" fill="#26292d"/>
+    <g id="legFar" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path data-part="shinO" stroke="#8f4412" stroke-width="9"/>
+      <path data-part="shin" stroke="#cf6e25" stroke-width="6"/>
+      <path data-part="foot" fill="#cf6e25" stroke="#8f4412" stroke-width="1.8"
+            d="M-14 -4 C-8 -9 2 -9 8 -7 L22 -9 L19 -4 L27 -2 L20 1 L25 5 L8 4 C0 6 -10 4 -14 -1 Z"/>
+      <path data-part="thighO" stroke="#b5ac98" stroke-width="20"/>
+      <path data-part="thigh" stroke="#e4ddcf" stroke-width="16"/>
+    </g>
+
+    <!-- 后轮 -->
+    <g>
+      <circle cx="270" cy="360" r="70" fill="none" stroke="#25282c" stroke-width="8"/>
+      <circle cx="270" cy="360" r="64" fill="none" stroke="#c3ccd3" stroke-width="3"/>
+      <g id="spinRear">
+        <g id="spokesRear" stroke="#d7dde2" stroke-width="1.4"></g>
+        <circle cx="270" cy="360" r="70" fill="none" stroke="#40454b" stroke-width="3" stroke-dasharray="5 9"/>
+        <rect x="268" y="292" width="4" height="7" fill="#8a939b"/>
+      </g>
+      <circle cx="270" cy="360" r="8" fill="#9aa4ad" stroke="#6b747c" stroke-width="2"/>
+    </g>
+
+    <!-- 前轮 -->
+    <g>
+      <circle cx="510" cy="360" r="70" fill="none" stroke="#25282c" stroke-width="8"/>
+      <circle cx="510" cy="360" r="64" fill="none" stroke="#c3ccd3" stroke-width="3"/>
+      <g id="spinFront">
+        <g id="spokesFront" stroke="#d7dde2" stroke-width="1.4"></g>
+        <circle cx="510" cy="360" r="70" fill="none" stroke="#40454b" stroke-width="3" stroke-dasharray="5 9"/>
+        <rect x="508" y="292" width="4" height="7" fill="#8a939b"/>
+      </g>
+      <circle cx="510" cy="360" r="8" fill="#9aa4ad" stroke="#6b747c" stroke-width="2"/>
+    </g>
+
+    <!-- 车架 -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="270" cy="360" r="9" fill="#7d868e" stroke="#4a5056" stroke-width="2"/>
+      <path id="chain" d="M370 344 L270 351 M270 369 L370 386" stroke="#3b3f44" stroke-width="2.6" stroke-dasharray="3 2"/>
+      <g stroke="#128c7e" stroke-width="9">
+        <path d="M270 360 L370 365 L352 262 Z"/>
+        <path d="M352 264 L480 266"/>
+        <path d="M370 365 L487 294"/>
+        <path d="M489 300 Q500 330 510 360" stroke-width="7"/>
+      </g>
+      <path d="M478 258 L490 302" stroke="#0b6157" stroke-width="13"/>
+      <path d="M352 262 L347 246" stroke="#a7b0b8" stroke-width="6"/>
+      <path d="M480 260 L475 238" stroke="#a7b0b8" stroke-width="6"/>
+      <path d="M466 240 L492 235 Q506 233 505 247" stroke="#2c2f33" stroke-width="6"/>
+      <path d="M505 240 L504 252" stroke="#1d1f22" stroke-width="9"/>
+    </g>
+    <path d="M322 245 C334 238 360 238 372 243 C368 250 340 252 322 249 Z" fill="#24272b"/>
+
+    <!-- 牙盘 -->
+    <g id="chainring">
+      <circle cx="370" cy="365" r="21" fill="#d7dde2" stroke="#4a5056" stroke-width="3"/>
+      <circle cx="370" cy="365" r="23" fill="none" stroke="#4a5056" stroke-width="3" stroke-dasharray="2.5 2.5"/>
+      <path d="M370 349 L370 381 M354 365 L386 365 M359 354 L381 376 M381 354 L359 376" stroke="#9aa4ad" stroke-width="3"/>
+    </g>
+
+    <!-- 近侧曲柄、脚踏 -->
+    <line id="crankNear" stroke="#3b4046" stroke-width="7" stroke-linecap="round"/>
+    <rect id="pedalNear" width="24" height="7" rx="2" fill="#2a2d31"/>
+    <circle cx="370" cy="365" r="5" fill="#8a939b"/>
+
+    <!-- 鹈鹕：脖子、尾巴、身体 -->
+    <g class="bob">
+      <g class="headbob">
+        <path d="M385 178 C378 142 412 136 414 110 C415 100 418 94 424 90" fill="none" stroke="#bfb6a3" stroke-width="31" stroke-linecap="round"/>
+        <path d="M385 178 C378 142 412 136 414 110 C415 100 418 94 424 90" fill="none" stroke="#fbfaf6" stroke-width="26" stroke-linecap="round"/>
+      </g>
+      <path d="M276 196 L236 182 L252 198 L230 206 L256 210 L240 222 L282 214 Z"
+            fill="#f1ece1" stroke="#bfb6a3" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M268 200 C284 160 330 145 370 150 C405 155 420 185 406 212 C392 240 352 250 316 245 C290 241 268 226 268 200 Z"
+            fill="url(#bodyGrad)" stroke="#bfb6a3" stroke-width="2.5"/>
+      <path d="M300 222 q8 6 16 2 M326 232 q8 6 16 2 M290 204 q8 6 16 2" fill="none" stroke="#e0d8c6" stroke-width="1.6" stroke-linecap="round"/>
+    </g>
+
+    <!-- 近侧腿 -->
+    <g id="legNear" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path data-part="shinO" stroke="#a9501a" stroke-width="9"/>
+      <path data-part="shin" stroke="#f08a2c" stroke-width="6"/>
+      <path data-part="foot" fill="#f08a2c" stroke="#a9501a" stroke-width="1.8"
+            d="M-14 -4 C-8 -9 2 -9 8 -7 L22 -9 L19 -4 L27 -2 L20 1 L25 5 L8 4 C0 6 -10 4 -14 -1 Z"/>
+      <path data-part="thighO" stroke="#bfb6a3" stroke-width="20"/>
+      <path data-part="thigh" stroke="#fbfaf6" stroke-width="16"/>
+    </g>
+
+    <!-- 鹈鹕：翅膀、头部 -->
+    <g class="bob">
+      <path d="M356 206 C388 222 420 234 450 240 C472 246 492 250 506 244 C500 256 476 260 452 256 C420 250 384 236 358 218 Z"
+            fill="#2e2f34"/>
+      <path d="M332 170 C372 148 425 165 458 196 C478 214 494 228 505 240 C492 248 468 244 448 236 C418 226 382 214 352 204 C330 196 318 182 332 170 Z"
+            fill="url(#wingGrad)" stroke="#bfb6a3" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M372 176 C398 182 420 194 440 210 M362 190 C392 198 420 210 446 224" fill="none" stroke="#d8d0bf" stroke-width="1.6" stroke-linecap="round"/>
+
+      <g class="headbob">
+        <path id="scarfTail2" fill="#b8202f"/>
+        <path id="scarfTail1" fill="#e63946"/>
+        <path d="M381 136 Q396 144 411 133 L413 144 Q397 156 380 147 Z" fill="#e63946" stroke="#b8202f" stroke-width="1.6" stroke-linejoin="round"/>
+
+        <path d="M410 76 C398 66 400 54 410 52 C410 60 416 66 424 70 Z" fill="#f2df9a" stroke="#cdb66a" stroke-width="1.4"/>
+        <ellipse cx="432" cy="90" rx="27" ry="23" fill="url(#bodyGrad)" stroke="#bfb6a3" stroke-width="2.5"/>
+        <ellipse cx="424" cy="74" rx="12" ry="5" fill="#f6e7b0" opacity="0.7"/>
+        <ellipse cx="437" cy="101" rx="6" ry="3.5" fill="#ff9e9e" opacity="0.45"/>
+        <path d="M431 73 Q439 69 447 74" fill="none" stroke="#8a8070" stroke-width="2" stroke-linecap="round"/>
+        <g id="eye">
+          <circle cx="439" cy="83" r="6.5" fill="#f5c9a0"/>
+          <circle cx="439" cy="83" r="4" fill="#1d1b1a"/>
+          <circle cx="440.5" cy="81.5" r="1.4" fill="#ffffff"/>
+        </g>
+
+        <g id="pouch">
+          <path d="M450 99 C495 104 545 112 586 119 C572 138 534 160 498 158 C468 156 450 138 444 112 Z"
+                fill="url(#pouchGrad)" stroke="#c4661c" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M488 136 q16 -11 32 0 q-16 11 -32 0 Z M490 136 l-9 -7 l0 14 Z" fill="#c4661c" opacity="0.35"/>
+        </g>
+        <path d="M448 79 C495 82 548 95 590 108 C597 111 596 119 588 119 C548 113 495 104 450 99 Z"
+              fill="url(#billGrad)" stroke="#c97a12" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M455 86 C500 90 548 100 585 111" fill="none" stroke="#d98e1f" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M584 107 C596 107 600 117 591 124 C589 119 586 117 581 117 Z" fill="#e0532b"/>
+      </g>
+    </g>
+  </g>
+</svg>
+</div>
+
+<div class="controls">
+  <button id="toggle" type="button" aria-pressed="false">暂停</button>
+  <label for="speed">速度
+    <input id="speed" type="range" min="0.2" max="2" step="0.1" value="1">
+  </label>
+  <output id="speedOut" for="speed">1.0×</output>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = (id) => document.getElementById(id);
+  const mod = (a, n) => ((a % n) + n) % n;
+  const f = (n) => n.toFixed(2);
+  const set = (el, attrs) => { for (const k in attrs) el.setAttribute(k, attrs[k]); };
+  const make = (tag, parent, attrs = {}) => {
+    const el = document.createElementNS(NS, tag);
+    set(el, attrs);
+    parent.appendChild(el);
+    return el;
+  };
+
+  const BB = { x: 370, y: 365 };
+  const CRANK_LEN = 32;
+  const THIGH = 90;
+  const SHIN = 88;
+  const WHEEL_R = 74;
+  const GEAR = 2.2;
+  const BASE_CADENCE = Math.PI * 2 * 0.6;
+
+  const state = {
+    crank: 0,
+    wheel: 0,
+    dist: 0,
+    time: 0,
+    scarf: 0,
+    speed: 1,
+    paused: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  };
+
+  function buildSpokes(group, cx, cy) {
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      const b = a + (i % 2 ? 0.2 : -0.2);
+      make('line', group, {
+        x1: f(cx + Math.cos(a) * 8), y1: f(cy + Math.sin(a) * 8),
+        x2: f(cx + Math.cos(b) * 63), y2: f(cy + Math.sin(b) * 63),
+      });
+    }
+  }
+  buildSpokes($('spokesRear'), 270, 360);
+  buildSpokes($('spokesFront'), 510, 360);
+
+  for (let x = 0; x <= 880; x += 80) {
+    make('rect', $('dashes'), { x, y: 465, width: 38, height: 5, rx: 2.5 });
+  }
+
+  const clouds = [
+    { x: 60, y: 70, s: 1 },
+    { x: 320, y: 125, s: 0.65 },
+    { x: 520, y: 55, s: 0.85 },
+    { x: 800, y: 110, s: 0.75 },
+    { x: 980, y: 60, s: 0.55 },
+  ].map((c) => ({ ...c, el: make('use', $('clouds'), { href: '#cloud' }) }));
+
+  const speedLines = [
+    { y: 168, off: 0, len: 46 },
+    { y: 200, off: 60, len: 32 },
+    { y: 236, off: 125, len: 54 },
+    { y: 290, off: 30, len: 28 },
+    { y: 322, off: 160, len: 40 },
+  ].map((s) => ({ ...s, el: make('line', $('speedLines')) }));
+
+  function getLeg(id) {
+    const g = $(id);
+    const q = (p) => g.querySelector(`[data-part="${p}"]`);
+    return { thighO: q('thighO'), thigh: q('thigh'), shinO: q('shinO'), shin: q('shin'), foot: q('foot') };
+  }
+  const legNear = getLeg('legNear');
+  const legFar = getLeg('legFar');
+
+  // 两段式腿的反向运动学，膝盖朝前弯曲
+  function solveKnee(hx, hy, tx, ty) {
+    const dx = tx - hx;
+    const dy = ty - hy;
+    const raw = Math.hypot(dx, dy) || 1;
+    const ux = dx / raw;
+    const uy = dy / raw;
+    const d = Math.min(THIGH + SHIN - 0.5, Math.max(Math.abs(THIGH - SHIN) + 0.5, raw));
+    const a = (THIGH * THIGH - SHIN * SHIN + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, THIGH * THIGH - a * a));
+    return { x: hx + ux * a + uy * h, y: hy + uy * a - ux * h };
+  }
+
+  function drawLeg(leg, hip, angle, crankEl, pedalEl) {
+    const px = BB.x + Math.cos(angle) * CRANK_LEN;
+    const py = BB.y + Math.sin(angle) * CRANK_LEN;
+    set(crankEl, { x1: BB.x, y1: BB.y, x2: f(px), y2: f(py) });
+    set(pedalEl, { x: f(px - 12), y: f(py - 3.5) });
+
+    const ankDeg = Math.sin(angle + 0.6) * 10 - 4;
+    const r = ankDeg * Math.PI / 180;
+    const c = Math.cos(r);
+    const s = Math.sin(r);
+    const fx = px;
+    const fy = py - 5;
+    const ax = fx + (-8) * c - (-6) * s;
+    const ay = fy + (-8) * s + (-6) * c;
+
+    const knee = solveKnee(hip.x, hip.y, ax, ay);
+    const thighD = `M${f(hip.x)} ${f(hip.y)} L${f(knee.x)} ${f(knee.y)}`;
+    const shinD = `M${f(knee.x)} ${f(knee.y)} L${f(ax)} ${f(ay)}`;
+    leg.thighO.setAttribute('d', thighD);
+    leg.thigh.setAttribute('d', thighD);
+    leg.shinO.setAttribute('d', shinD);
+    leg.shin.setAttribute('d', shinD);
+    leg.foot.setAttribute('transform', `translate(${f(fx)} ${f(fy)}) rotate(${f(ankDeg)})`);
+  }
+
+  function ribbon(x0, y0, n, seg, w0, w1, phase, amp) {
+    const top = [];
+    const bot = [];
+    let tipY = y0;
+    for (let i = 0; i <= n; i++) {
+      const s = i / n;
+      const x = x0 - i * seg;
+      const y = y0 - s * 8 + Math.sin(state.scarf - i * 0.75 + phase) * (0.5 + s * amp);
+      const hw = (w0 + (w1 - w0) * s) / 2;
+      top.push(`${f(x)} ${f(y - hw)}`);
+      bot.push(`${f(x)} ${f(y + hw)}`);
+      tipY = y;
+    }
+    const tipX = x0 - n * seg + seg * 0.9;
+    return `M${top.join(' L')} L${f(tipX)} ${f(tipY)} L${bot.reverse().join(' L')} Z`;
+  }
+
+  const dustG = $('dust');
+  const dust = [];
+  let dustTimer = 0;
+  function updateDust(dt) {
+    dustTimer += dt * state.speed;
+    while (dustTimer > 0.07) {
+      dustTimer -= 0.07;
+      dust.push({
+        el: make('circle', dustG),
+        x: 262 + Math.random() * 10,
+        y: 431 - Math.random() * 4,
+        vx: -(120 + Math.random() * 80) * state.speed,
+        vy: -(10 + Math.random() * 25),
+        r: 2 + Math.random() * 2.5,
+        life: 0,
+        max: 0.6 + Math.random() * 0.5,
+      });
+    }
+    for (let i = dust.length - 1; i >= 0; i--) {
+      const p = dust[i];
+      p.life += dt;
+      if (p.life >= p.max) {
+        p.el.remove();
+        dust.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 15 * dt;
+      const k = p.life / p.max;
+      set(p.el, { cx: f(p.x), cy: f(p.y), r: f(p.r * (1 + k * 1.5)), opacity: f((1 - k) * 0.55) });
+    }
+  }
+
+  const el = {
+    rig: $('rig'),
+    spinRear: $('spinRear'),
+    spinFront: $('spinFront'),
+    chainring: $('chainring'),
+    chain: $('chain'),
+    crankNear: $('crankNear'),
+    crankFar: $('crankFar'),
+    pedalNear: $('pedalNear'),
+    pedalFar: $('pedalFar'),
+    pouch: $('pouch'),
+    eye: $('eye'),
+    tail1: $('scarfTail1'),
+    tail2: $('scarfTail2'),
+    farHills: $('farHills'),
+    nearHills: $('nearHills'),
+    trees: $('trees'),
+    dashes: $('dashes'),
+    bob: document.querySelectorAll('.bob'),
+    headbob: document.querySelectorAll('.headbob'),
+  };
+
+  function render() {
+    const { crank, wheel, dist, time } = state;
+
+    const wheelDeg = f(wheel * 180 / Math.PI);
+    el.spinRear.setAttribute('transform', `rotate(${wheelDeg} 270 360)`);
+    el.spinFront.setAttribute('transform', `rotate(${wheelDeg} 510 360)`);
+    el.chainring.setAttribute('transform', `rotate(${f(crank * 180 / Math.PI)} 370 365)`);
+    el.chain.setAttribute('stroke-dashoffset', f(crank * 21));
+    el.rig.setAttribute('transform', `translate(0 ${f(Math.sin(dist * 0.11) * 0.5)})`);
+
+    const bob = Math.sin(crank * 2) * 1.6;
+    const headBob = Math.sin(crank * 2 + 0.9) * 1.8;
+    const headRot = Math.sin(crank * 2 + 0.3) * 1.5;
+    el.bob.forEach((g) => g.setAttribute('transform', `translate(0 ${f(bob)})`));
+    el.headbob.forEach((g) => g.setAttribute('transform', `translate(0 ${f(headBob)}) rotate(${f(headRot)} 392 172)`));
+
+    drawLeg(legFar, { x: 356, y: 220 + bob }, crank + Math.PI, el.crankFar, el.pedalFar);
+    drawLeg(legNear, { x: 348, y: 224 + bob }, crank, el.crankNear, el.pedalNear);
+
+    const pouchScale = 1 + Math.sin(crank * 2 + 1.4) * 0.05;
+    el.pouch.setAttribute('transform', `translate(515 110) scale(1 ${f(pouchScale)}) translate(-515 -110)`);
+
+    const blinkPhase = time % 3.6;
+    const eyeScale = blinkPhase < 0.14 ? Math.max(0.08, Math.abs(1 - blinkPhase / 0.07)) : 1;
+    el.eye.setAttribute('transform', `translate(439 83) scale(1 ${f(eyeScale)}) translate(-439 -83)`);
+
+    const amp = 4 + 3 * state.speed;
+    el.tail2.setAttribute('d', ribbon(384, 147, 10, 8, 8, 5, 1.2, amp));
+    el.tail1.setAttribute('d', ribbon(384, 141, 12, 8.5, 9, 6, 0, amp));
+
+    el.farHills.setAttribute('transform', `translate(${f(-mod(dist * 0.08, 800))} 0)`);
+    el.nearHills.setAttribute('transform', `translate(${f(-mod(dist * 0.2, 800))} 0)`);
+    el.trees.setAttribute('transform', `translate(${f(-mod(dist * 0.45, 800))} 0)`);
+    el.dashes.setAttribute('transform', `translate(${f(-mod(dist, 80))} 0)`);
+
+    clouds.forEach((c) => {
+      const x = mod(c.x - dist * 0.03 * c.s, 1200) - 200;
+      c.el.setAttribute('transform', `translate(${f(x)} ${c.y}) scale(${c.s})`);
+    });
+
+    speedLines.forEach((s) => {
+      const p = mod(dist * 0.6 + s.off, 220) / 220;
+      const x = 228 - p * 180;
+      set(s.el, {
+        x1: f(x), y1: s.y, x2: f(x - s.len), y2: s.y,
+        opacity: f(Math.sin(p * Math.PI) * 0.6 * Math.min(1, state.speed)),
+      });
+    });
+  }
+
+  let last = performance.now();
+  function tick(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (!state.paused) {
+      const cadence = BASE_CADENCE * state.speed;
+      state.crank += cadence * dt;
+      state.wheel += cadence * GEAR * dt;
+      state.dist += cadence * GEAR * WHEEL_R * dt;
+      state.time += dt;
+      state.scarf += dt * (5 + 6 * state.speed);
+      updateDust(dt);
+      render();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  const toggle = $('toggle');
+  const speedInput = $('speed');
+  const speedOut = $('speedOut');
+  const syncToggle = () => {
+    toggle.textContent = state.paused ? '继续' : '暂停';
+    toggle.setAttribute('aria-pressed', String(state.paused));
+  };
+  toggle.addEventListener('click', () => {
+    state.paused = !state.paused;
+    syncToggle();
+  });
+  speedInput.addEventListener('input', () => {
+    state.speed = Number(speedInput.value);
+    speedOut.textContent = `${state.speed.toFixed(1)}×`;
+  });
+
+  syncToggle();
+  render();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
