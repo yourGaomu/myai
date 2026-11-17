@@ -16,7 +16,8 @@ import type {
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 export type AIMemoryPanelProps = {
   buttonFeedback: ButtonFeedback;
@@ -28,6 +29,7 @@ export type AIMemoryPanelProps = {
   onApproveCandidate: (candidate: AIMemoryCandidate, memoryID?: string) => boolean;
   onCreateMemory: (memory: AIMemoryInput) => boolean;
   onDeleteMemory: (memoryID: string) => boolean;
+  onInsertReference?: (snippet: string) => void;
   onRefreshCandidates: () => boolean;
   onRefreshDreamRuns: () => boolean;
   onRefreshExtractionJobs: () => boolean;
@@ -60,6 +62,7 @@ export function AIMemoryPanel({
   onApproveCandidate,
   onCreateMemory,
   onDeleteMemory,
+  onInsertReference,
   onRefreshExtractionJobs,
   onRejectCandidate,
   onRestoreMemory,
@@ -68,6 +71,8 @@ export function AIMemoryPanel({
   onUpdateMemory,
   pending,
 }: AIMemoryPanelProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const [expandedID, setExpandedID] = useState("");
   const [showCandidates, setShowCandidates] = useState(false);
   const [editingID, setEditingID] = useState("");
@@ -283,18 +288,33 @@ export function AIMemoryPanel({
                 </View>
               ) : null}
 
-              {/* 卡片底部: 来源 + [删除] 按钮 */}
+              {/* 卡片底部: 来源 + 引用 + [删除] 按钮 */}
               <View style={styles.cardFooter}>
-                <Text style={styles.cardSource}>来源: {sourceText}</Text>
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    onDeleteMemory(memory.id);
-                  }}
-                  style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
-                >
-                  <Text style={styles.deleteBtnText}>删除</Text>
-                </Pressable>
+                <Text numberOfLines={1} style={styles.cardSource}>来源: {sourceText}</Text>
+                <View style={styles.cardFooterActions}>
+                  {onInsertReference ? (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        const title = memory.title?.trim() || getCategoryTag(memory);
+                        onInsertReference(`[引用记忆 · ${title}]\n${bodyText}`);
+                      }}
+                      style={({ pressed }) => buttonFeedback(styles.refBtn, pressed)}
+                    >
+                      <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                      <Text style={styles.refBtnText}>引用</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      onDeleteMemory(memory.id);
+                    }}
+                    style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
+                  >
+                    <Text style={styles.deleteBtnText}>删除</Text>
+                  </Pressable>
+                </View>
               </View>
             </Pressable>
           );
@@ -377,6 +397,8 @@ function MergeMemoryModal({
   query: string;
   selectedID: string;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <ResponsiveFormModal
       buttonFeedback={buttonFeedback}
@@ -448,6 +470,8 @@ function MemoryEditor({
   pending: boolean;
   visible: boolean;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const setContent = (key: keyof AIMemoryInput["content"], value: string) =>
     onChange({ ...draft, content: { ...draft.content, [key]: value } });
 
@@ -511,6 +535,8 @@ function MemoryEditor({
 }
 
 function EditorField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.editorFieldWrapper}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -527,6 +553,7 @@ function EditorField({ label, onChange, value }: { label: string; onChange: (val
 }
 
 function MemoryContentView({ content }: { content: AIMemoryInput["content"] }) {
+  const styles = useThemedStyles(createStyles);
   const rows = [
     ["适用条件", content.applicable_context],
     ["方案", content.approach],
@@ -620,441 +647,466 @@ function scopeLabel(scope: AIMemoryScope): string {
   return scope.type === "global" ? "全局" : `${scope.type}:${scope.key || "未指定"}`;
 }
 
-const styles = StyleSheet.create({
-  content: {
-    backgroundColor: palette.canvas,
-    gap: 10,
-    paddingTop: 10,
-    paddingBottom: 40,
-  },
-  flex: {
-    flex: 1,
-  },
-  iconRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  headerTitle: {
-    color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.semibold,
-  },
-  addBtn: {
-    alignItems: "center",
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  addBtnText: {
-    color: palette.inkInverse,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  status: {
-    backgroundColor: palette.okWash,
-    borderColor: palette.okBorder,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-    padding: 8,
-  },
-  extractionBanner: {
-    alignItems: "center",
-    backgroundColor: palette.errWash,
-    borderColor: palette.errBorder,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 10,
-  },
-  extractionBannerText: {
-    color: palette.err,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  miniActionBtn: {
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  miniActionText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  candidateBanner: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  candidateBannerHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  candidateBannerTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  candidateBannerToggle: {
-    color: palette.ink2,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  candidateList: {
-    borderTopColor: palette.hairline,
-    borderTopWidth: 1,
-    gap: 8,
-    padding: 10,
-  },
-  candidateCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    padding: 10,
-  },
-  candidateActions: {
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "flex-end",
-    marginTop: 8,
-  },
-  approveBtn: {
-    alignItems: "center",
-    backgroundColor: palette.okWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  approveBtnText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  mergeBtn: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  mergeBtnText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    content: {
+      backgroundColor: palette.canvas,
+      gap: 10,
+      paddingTop: 10,
+      paddingBottom: 40,
+    },
+    flex: {
+      flex: 1,
+    },
+    iconRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    headerRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 4,
+    },
+    headerTitle: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    addBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      minHeight: 34,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+    },
+    addBtnText: {
+      color: palette.inkInverse,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    status: {
+      backgroundColor: palette.okWash,
+      borderColor: palette.okBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+      padding: 8,
+    },
+    extractionBanner: {
+      alignItems: "center",
+      backgroundColor: palette.errWash,
+      borderColor: palette.errBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      padding: 10,
+    },
+    extractionBannerText: {
+      color: palette.err,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    miniActionBtn: {
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    miniActionText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    candidateBanner: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      overflow: "hidden",
+    },
+    candidateBannerHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    candidateBannerTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    candidateBannerToggle: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    candidateList: {
+      borderTopColor: palette.hairline,
+      borderTopWidth: 1,
+      gap: 8,
+      padding: 10,
+    },
+    candidateCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      padding: 10,
+    },
+    candidateActions: {
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "flex-end",
+      marginTop: 8,
+    },
+    approveBtn: {
+      alignItems: "center",
+      backgroundColor: palette.okWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    approveBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    mergeBtn: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    mergeBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
 
-  /* Neo-Brutalism 记忆卡片样式 */
-  memoryCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderLeftColor: palette.brandDeep,
-    borderLeftWidth: 1,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    gap: 6,
-    padding: 12,
-    ...shadow.card,
-  },
-  cardPressed: {
-    opacity: 0.92,
-    transform: [{ translateY: 1 }],
-  },
-  cardHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  badge: {
-    backgroundColor: palette.well,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.xs,
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  badgeText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  cardDate: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  cardBody: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.regular,
-    lineHeight: 19,
-    marginVertical: 2,
-  },
-  cardFooter: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 2,
-  },
-  cardSource: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  deleteBtn: {
-    alignItems: "center",
-    backgroundColor: palette.errWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  deleteBtnText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  expandedDetails: {
-    borderTopColor: palette.hairline,
-    borderTopWidth: 1,
-    gap: 8,
-    marginTop: 6,
-    paddingTop: 8,
-  },
-  expandedMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  cardMeta: {
-    color: palette.ink3,
-    fontSize: font.caption,
-  },
-  editBtn: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  editBtnText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
+    /* Neo-Brutalism 记忆卡片样式 */
+    memoryCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderLeftColor: palette.brandDeep,
+      borderLeftWidth: 1,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      gap: 6,
+      padding: 12,
+      ...shadow.card,
+    },
+    cardPressed: {
+      opacity: 0.92,
+      transform: [{ translateY: 1 }],
+    },
+    cardHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    badge: {
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.xs,
+      borderWidth: 1,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    badgeText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    cardDate: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    cardBody: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.regular,
+      lineHeight: 19,
+      marginVertical: 2,
+    },
+    cardFooter: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "space-between",
+      marginTop: 2,
+    },
+    cardFooterActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    cardSource: {
+      color: palette.ink3,
+      flex: 1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    refBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      justifyContent: "center",
+      paddingHorizontal: 9,
+      paddingVertical: 3,
+    },
+    refBtnText: {
+      color: palette.brandLight,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    deleteBtn: {
+      alignItems: "center",
+      backgroundColor: palette.errWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    deleteBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    expandedDetails: {
+      borderTopColor: palette.hairline,
+      borderTopWidth: 1,
+      gap: 8,
+      marginTop: 6,
+      paddingTop: 8,
+    },
+    expandedMetaRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginTop: 4,
+    },
+    cardMeta: {
+      color: palette.ink3,
+      fontSize: font.caption,
+    },
+    editBtn: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    editBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
 
-  /* 底部 Dream 卡片 (虚线边框) */
-  dreamCard: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.md,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    gap: 6,
-    marginTop: 6,
-    padding: 16,
-  },
-  dreamTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-    textAlign: "center",
-  },
-  dreamSubtitle: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    lineHeight: 16,
-    textAlign: "center",
-  },
-  dreamBtn: {
-    alignItems: "center",
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    marginTop: 4,
-    minHeight: 38,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-  },
+    /* 底部 Dream 卡片 (虚线边框) */
+    dreamCard: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderStyle: "dashed",
+      borderWidth: 1,
+      gap: 6,
+      marginTop: 6,
+      padding: 16,
+    },
+    dreamTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+      textAlign: "center",
+    },
+    dreamSubtitle: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      lineHeight: 16,
+      textAlign: "center",
+    },
+    dreamBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      marginTop: 4,
+      minHeight: 38,
+      paddingHorizontal: 18,
+      paddingVertical: 8,
+    },
 
-  /* 通用表单与弹窗样式 */
-  emptyContainer: {
-    alignItems: "center",
-    paddingVertical: 32,
-  },
-  emptyText: {
-    color: palette.ink3,
-    fontSize: font.label,
-    textAlign: "center",
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  input: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    color: palette.ink1,
-    fontSize: font.body,
-    minHeight: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  textarea: {
-    minHeight: 70,
-    textAlignVertical: "top",
-  },
-  editorFieldWrapper: {
-    gap: 4,
-  },
-  fieldLabel: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  detailGrid: {
-    gap: 6,
-  },
-  detailItem: {
-    gap: 2,
-  },
-  detailText: {
-    color: palette.ink1,
-    fontSize: font.label,
-    lineHeight: 17,
-  },
-  segmented: {
-    backgroundColor: palette.well,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 2,
-    padding: 2,
-  },
-  segment: {
-    alignItems: "center",
-    borderRadius: radius.pill,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 30,
-    paddingHorizontal: 6,
-  },
-  segmentActive: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderWidth: 1,
-  },
-  segmentText: {
-    color: palette.ink2,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  segmentTextActive: {
-    color: palette.ink1,
-    fontWeight: weight.semibold,
-  },
-  footerCancelButton: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderRadius: radius.md,
-    justifyContent: "center",
-    minHeight: 44,
-    minWidth: 88,
-    paddingHorizontal: 14,
-  },
-  footerCancelText: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.medium,
-  },
-  footerSubmitButton: {
-    alignItems: "center",
-    backgroundColor: palette.brand,
-    borderRadius: radius.md,
-    justifyContent: "center",
-    minHeight: 44,
-    minWidth: 104,
-    paddingHorizontal: 16,
-  },
-  mergeHint: {
-    backgroundColor: palette.well,
-    borderRadius: radius.sm,
-    color: palette.ok,
-    fontSize: font.label,
-    lineHeight: 18,
-    padding: 8,
-  },
-  mergeTarget: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 10,
-    padding: 10,
-  },
-  mergeTargetSelected: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.okBorder,
-    borderWidth: 1,
-  },
-  mergeTargetTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  mergeTargetGoal: {
-    color: palette.ink1,
-    fontSize: font.label,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  mergeCheck: {
-    color: palette.ink3,
-    fontSize: font.title,
-    width: 22,
-  },
-  mergeCheckSelected: {
-    color: palette.ok,
-    fontWeight: weight.semibold,
-  },
-});
+    /* 通用表单与弹窗样式 */
+    emptyContainer: {
+      alignItems: "center",
+      paddingVertical: 32,
+    },
+    emptyText: {
+      color: palette.ink3,
+      fontSize: font.label,
+      textAlign: "center",
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+    input: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      color: palette.ink1,
+      fontSize: font.body,
+      minHeight: 40,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    textarea: {
+      minHeight: 70,
+      textAlignVertical: "top",
+    },
+    editorFieldWrapper: {
+      gap: 4,
+    },
+    fieldLabel: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    detailGrid: {
+      gap: 6,
+    },
+    detailItem: {
+      gap: 2,
+    },
+    detailText: {
+      color: palette.ink1,
+      fontSize: font.label,
+      lineHeight: 17,
+    },
+    segmented: {
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 2,
+      padding: 2,
+    },
+    segment: {
+      alignItems: "center",
+      borderRadius: radius.pill,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: 30,
+      paddingHorizontal: 6,
+    },
+    segmentActive: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderWidth: 1,
+    },
+    segmentText: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    segmentTextActive: {
+      color: palette.ink1,
+      fontWeight: weight.semibold,
+    },
+    footerCancelButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 44,
+      minWidth: 88,
+      paddingHorizontal: 14,
+    },
+    footerCancelText: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.medium,
+    },
+    footerSubmitButton: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 44,
+      minWidth: 104,
+      paddingHorizontal: 16,
+    },
+    mergeHint: {
+      backgroundColor: palette.well,
+      borderRadius: radius.sm,
+      color: palette.ok,
+      fontSize: font.label,
+      lineHeight: 18,
+      padding: 8,
+    },
+    mergeTarget: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 10,
+      padding: 10,
+    },
+    mergeTargetSelected: {
+      backgroundColor: palette.brandWash,
+      borderColor: palette.okBorder,
+      borderWidth: 1,
+    },
+    mergeTargetTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    mergeTargetGoal: {
+      color: palette.ink1,
+      fontSize: font.label,
+      lineHeight: 16,
+      marginTop: 2,
+    },
+    mergeCheck: {
+      color: palette.ink3,
+      fontSize: font.title,
+      width: 22,
+    },
+    mergeCheckSelected: {
+      color: palette.ok,
+      fontWeight: weight.semibold,
+    },
+  });

@@ -546,9 +546,12 @@ export type PermissionAskPayload = {
   permission?: string;
 };
 
+export type PermissionApprovalScope = "once" | "session_tool" | "session_permission";
+
 export type PermissionResultPayload = {
   approval_id: string;
   allowed: boolean;
+  scope?: PermissionApprovalScope;
 };
 
 export type UserQuestionItemPayload = {
@@ -1577,6 +1580,8 @@ export type ChangeEntry = {
   deleted?: boolean;
   renamed?: boolean;
   restorable?: boolean;
+  added_lines?: number;
+  removed_lines?: number;
 };
 
 export type ChangesListResultPayload = {

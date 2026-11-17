@@ -1,15 +1,17 @@
 import { Fragment, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import type { ChangeEntry, HistoryCheckpoint } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { changeLabel } from "../../utils/changes";
-import { formatShortTime } from "../../utils/format";
+import { formatDateTime, formatShortTime } from "../../utils/format";
 import { shortID } from "../../utils/ids";
 import { baseName, dirName } from "../../utils/toolDisplay";
-import { palette } from "../../constants/theme";
-import { list } from "../common/listStyles";
+import { fontFamily, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { ConfirmModal } from "../common/ConfirmModal";
+import { useListStyles } from "../common/listStyles";
 import { Segmented } from "../common/Segmented";
 
 type Props = {
@@ -30,17 +32,21 @@ type Props = {
   selectedChange: string;
 };
 
-function letterStyle(entry: ChangeEntry) {
-  if (entry.deleted) return list.letterDel;
-  if (entry.untracked || entry.status === "added") return list.letterAdd;
-  if (entry.renamed) return list.letterRen;
-  return list.letterMod;
-}
-
-// 变更页：未提交（对比工作区基线）/ 历史快照两组。顶栏刷新会同时刷新两组。
+// 变更页：展示未提交文件的 +X/-Y 行统计 + 历史快照回滚（带统一确认弹窗）。
 export function ChangesPanel(props: Props) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  const styles = useThemedStyles(makeStyles);
   const { changes, clientToken, historyCheckpoints, pendingDiff } = props;
   const [tab, setTab] = useState<"now" | "history">("now");
+  const [confirmCheckpoint, setConfirmCheckpoint] = useState<HistoryCheckpoint | null>(null);
+
+  function letterStyle(entry: ChangeEntry) {
+    if (entry.deleted) return list.letterDel;
+    if (entry.untracked || entry.status === "added") return list.letterAdd;
+    if (entry.renamed) return list.letterRen;
+    return list.letterMod;
+  }
 
   return (
     <View>
@@ -56,6 +62,8 @@ export function ChangesPanel(props: Props) {
           <View style={list.bleed}>
             {changes.map((entry) => {
               const dir = dirName(entry.path);
+              const added = entry.added_lines || 0;
+              const removed = entry.removed_lines || 0;
               return (
                 <Pressable
                   disabled={pendingDiff}
@@ -68,6 +76,12 @@ export function ChangesPanel(props: Props) {
                     {baseName(entry.path)}
                     {dir ? <Text style={list.meta}>  {dir}</Text> : null}
                   </Text>
+                  {added > 0 || removed > 0 ? (
+                    <View style={styles.stats}>
+                      {added > 0 ? <Text style={styles.statAdd}>+{added}</Text> : null}
+                      {removed > 0 ? <Text style={styles.statDel}>−{removed}</Text> : null}
+                    </View>
+                  ) : null}
                   {pendingDiff && props.selectedChange === entry.path ? (
                     <ActivityIndicator color={palette.ink3} size="small" />
                   ) : (
@@ -94,10 +108,20 @@ export function ChangesPanel(props: Props) {
                     <Text numberOfLines={2} style={list.title}>{checkpoint.title || `快照 ${shortID(checkpoint.id)}`}</Text>
                     <Text style={list.sub}>{checkpoint.change_count} 个文件</Text>
                     <View style={{ flexDirection: "row", gap: 20, marginTop: 4 }}>
-                      <Pressable disabled={pendingDiff} hitSlop={6} onPress={() => props.onPreviewHistory(checkpoint.id)} style={[list.textButton, pendingDiff && list.disabled]}>
+                      <Pressable
+                        disabled={pendingDiff}
+                        hitSlop={6}
+                        onPress={() => props.onPreviewHistory(checkpoint.id)}
+                        style={[list.textButton, pendingDiff && list.disabled]}
+                      >
                         <Text style={list.textLink}>对比</Text>
                       </Pressable>
-                      <Pressable disabled={props.pendingRevert} hitSlop={6} onPress={() => props.onRevertHistory(checkpoint.id)} style={[list.textButton, props.pendingRevert && list.disabled]}>
+                      <Pressable
+                        disabled={props.pendingRevert}
+                        hitSlop={6}
+                        onPress={() => setConfirmCheckpoint(checkpoint)}
+                        style={[list.textButton, props.pendingRevert && list.disabled]}
+                      >
                         <Text style={list.textDanger}>回滚到此</Text>
                       </Pressable>
                     </View>
@@ -108,11 +132,29 @@ export function ChangesPanel(props: Props) {
           </View>
         </>
       )}
+
+      <ConfirmModal
+        confirmLabel="回滚快照"
+        danger
+        icon="rotate-ccw"
+        message={`确定恢复「${confirmCheckpoint?.title || `快照 ${shortID(confirmCheckpoint?.id || "")}`}」吗？\n将还原 ${confirmCheckpoint?.change_count || 0} 个文件至 ${formatDateTime(confirmCheckpoint?.created_at)} 的状态。`}
+        onCancel={() => setConfirmCheckpoint(null)}
+        onConfirm={() => {
+          if (confirmCheckpoint) {
+            props.onRevertHistory(confirmCheckpoint.id);
+          }
+          setConfirmCheckpoint(null);
+        }}
+        title="回滚历史快照"
+        visible={Boolean(confirmCheckpoint)}
+      />
     </View>
   );
 }
 
 function Loading() {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
   return (
     <View style={list.loading}>
       <ActivityIndicator color={palette.ink2} size="small" />
@@ -120,3 +162,10 @@ function Loading() {
     </View>
   );
 }
+
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    stats: { alignItems: "center", flexDirection: "row", gap: 5 },
+    statAdd: { color: palette.diffAdd, fontFamily: fontFamily.mono, fontSize: 11.5, fontWeight: weight.semibold },
+    statDel: { color: palette.diffDel, fontFamily: fontFamily.mono, fontSize: 11.5, fontWeight: weight.semibold },
+  });

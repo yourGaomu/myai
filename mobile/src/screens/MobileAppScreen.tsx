@@ -4,13 +4,14 @@ import { AppState, BackHandler, Platform, type AppStateStatus, type ScrollView }
 import { ActionBar } from "../components/layout/ActionBar";
 import { AppHeader, describeConnection } from "../components/layout/AppHeader";
 import { HeaderIconButton, ScreenHeader } from "../components/layout/ScreenHeader";
+import { ConfirmModal } from "../components/common/ConfirmModal";
 import { PermissionSheet } from "../components/permissions/PermissionSheet";
 import { SessionSheet } from "../components/session/SessionSheet";
 import { settingsSectionTitles, type SettingsSection } from "../components/settings/SettingsHome";
 import { PairingScreen } from "../components/startup/PairingScreen";
 import { BottomDock } from "../components/layout/BottomDock";
 import { SideDrawer } from "../components/navigation/SideDrawer";
-import { useAndroidNavigationBar } from "../hooks/useAndroidNavigationBar";
+import type { ChangeEntry } from "../protocol";
 import { useAssetState } from "../hooks/useAssetState";
 import { useAgentRunState } from "../hooks/useAgentRunState";
 import { useChangeHistoryActions } from "../hooks/useChangeHistoryActions";
@@ -56,14 +57,15 @@ import { SubagentInspectionModal } from "../components/subagents/SubagentInspect
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
+import { agentActivity } from "../utils/agentActivity";
 import { historyMessageToChatItem } from "../utils/chatHistory";
 import { newRequestID } from "../utils/ids";
 import { formatBytes } from "../utils/format";
+import { activityToMotionSlot } from "../utils/motionRegistry";
 import { modelDisplayName, permissionLabel } from "../utils/session";
 import { baseName, dirName, toolTarget } from "../utils/toolDisplay";
 
 export function MobileAppScreen() {
-  useAndroidNavigationBar();
 
   // 页面本身只充当 composition root：状态、协议和业务动作分别由专用 Hook 管理。
   const {
@@ -252,7 +254,10 @@ export function MobileAppScreen() {
   // 新版布局的页面级状态：会话设置弹层、对话是否滚动（顶栏分隔线）、权限确认是否收起、设置详情页、文件预览
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
   const [chatScrolled, setChatScrolled] = useState(false);
+  const [chatNearHeader, setChatNearHeader] = useState(false);
+  const [confirmRevertFile, setConfirmRevertFile] = useState(false);
   const [minimizedPermissionID, setMinimizedPermissionID] = useState("");
+  const changeDetailReturnToRef = useRef<"chat" | "changes">("changes");
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   const [filePreviewOpen, setFilePreviewOpen] = useState(false);
   const sessionFromPermissionRef = useRef(false);
@@ -630,6 +635,7 @@ export function MobileAppScreen() {
     stopPending,
   });
   const {
+    executeRevertSelectedChange,
     openChangeEntry,
     previewHistoryCheckpoint,
     revertHistoryCheckpoint,
@@ -659,7 +665,15 @@ export function MobileAppScreen() {
     startPending,
     stopPending,
   });
-  const { answerUserQuestion, allowPermission, denyPermission, pauseSession, regenerateSession, sendUserMessage } = useChatActions({
+  const {
+    answerUserQuestion,
+    allowPermission,
+    allowPermissionSession,
+    denyPermission,
+    pauseSession,
+    regenerateSession,
+    sendUserMessage,
+  } = useChatActions({
     activeRequestIDRef,
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addUserMessage: (targetSessionID, message, requestID, attachments) => addMessage(targetSessionID, "user", message, requestID, attachments),
@@ -1038,6 +1052,7 @@ export function MobileAppScreen() {
     openKnowledge,
     openPlan,
     openSessions,
+    openTrash,
     selectSession,
   } = useNavigationActions({
     fileEntriesCount: fileEntries.length,
@@ -1052,10 +1067,80 @@ export function MobileAppScreen() {
     setViewMode,
   });
 
+  const openChangeFromList = useCallback(
+    (entry: ChangeEntry) => {
+      changeDetailReturnToRef.current = "changes";
+      openChangeEntry(entry);
+    },
+    [openChangeEntry],
+  );
+
+  const openChangeByPath = useCallback(
+    (rawPath: string) => {
+      const normalized = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
+      const matched = changes.find(
+        (entry) =>
+          entry.path === normalized ||
+          normalized.endsWith(`/${entry.path}`) ||
+          entry.path.endsWith(`/${normalized}`),
+      );
+      changeDetailReturnToRef.current = "chat";
+      openChangeEntry(
+        matched || {
+          path: normalized,
+          restorable: true,
+          status: "modified",
+        },
+      );
+    },
+    [changes, openChangeEntry],
+  );
+
   const pendingPermission = currentChat.pendingPermission;
   const permissionSheetVisible = Boolean(pendingPermission) && minimizedPermissionID !== pendingPermission?.requestID;
   const sessionRunning = currentRuns.some(({ run }) => run.status === "running");
-  const chatBusy = Boolean(currentChat.pendingRequestID) || sessionRunning;
+  const runningSubagentCount = useMemo(
+    () =>
+      subagentTasks.filter((t) =>
+        t.status === "running" ||
+        t.status === "queued" ||
+        t.status === "waiting_permission" ||
+        t.status === "waiting_subagents",
+      ).length,
+    [subagentTasks],
+  );
+  const currentActivity = useMemo(
+    () =>
+      agentActivity({
+        connected,
+        messages: currentChat.messages,
+        pendingPermission: Boolean(pendingPermission),
+        pendingQuestion: currentChat.pendingQuestions.length > 0,
+        pendingRequestID: currentChat.pendingRequestID,
+        planRunning: activeSession?.current_plan?.status === "running",
+        runningSubagentCount,
+        runs: currentRuns,
+        uploading: pendingActions.upload,
+      }),
+    [
+      activeSession?.current_plan?.status,
+      connected,
+      currentChat.messages,
+      currentChat.pendingQuestions.length,
+      currentChat.pendingRequestID,
+      currentRuns,
+      pendingActions.upload,
+      pendingPermission,
+      runningSubagentCount,
+    ],
+  );
+  const currentActivitySlot = activityToMotionSlot(currentActivity);
+  const isEmptyHome =
+    currentChat.messages.length === 0 &&
+    currentRuns.length === 0 &&
+    !activeSession?.current_plan &&
+    currentChat.pendingQuestions.length === 0;
+  const chatBusy = Boolean(currentChat.pendingRequestID) || sessionRunning || runningSubagentCount > 0;
   const planMode = activeSession?.agent_mode === "plan";
   const activePermissionLabel = permissionLabel(activeSession?.permission_mode);
   const connectionLabel = describeConnection(status, connected, deviceID).label;
@@ -1091,7 +1176,7 @@ export function MobileAppScreen() {
         return true;
       }
       if (viewMode === "changeDetail") {
-        openChanges();
+        (changeDetailReturnToRef.current === "chat" ? openChat : openChanges)();
         return true;
       }
       if (viewMode !== "chat") {
@@ -1123,6 +1208,13 @@ export function MobileAppScreen() {
     openChat();
   }, [newSession, openChat]);
   const pickSuggestion = useCallback((text: string) => setMessageInput(text), [setMessageInput]);
+  const insertReference = useCallback((snippet: string) => {
+    const clean = snippet.trim();
+    if (!clean) return;
+    const existing = messageInput.trim();
+    setMessageInput(existing ? `${existing}\n\n${clean}` : clean);
+    openChat();
+  }, [messageInput, openChat, setMessageInput]);
 
   const sessionHasRunningAgent = useMemo(() => {
     return currentRuns.some(({ run }) => run.status === "running");
@@ -1163,18 +1255,20 @@ export function MobileAppScreen() {
   if (viewMode === "chat") {
     header = (
       <AppHeader
+        activity={currentActivity}
         busy={chatBusy}
         connected={connected}
         deviceID={deviceID}
+        emptyHome={isEmptyHome}
+        nearHeader={chatNearHeader}
         onNewSession={startNewSession}
         onOpenMenu={() => setDrawerVisible(true)}
         onOpenSession={openSessionSheet}
         planMode={planMode}
-        scrolled={chatScrolled}
         status={status}
         title={activeSession?.title?.trim() || "新对话"}
         topInset={topSafePadding}
-        waiting={Boolean(pendingPermission)}
+        waiting={Boolean(pendingPermission) || currentChat.pendingQuestions.length > 0}
       />
     );
   } else {
@@ -1197,10 +1291,13 @@ export function MobileAppScreen() {
     } else if (viewMode === "changeDetail") {
       title = changeDiff ? baseName(changeDiff.path) : historyDiff ? "快照对比" : "差异";
       subtitle = changeDiff ? dirName(changeDiff.path) || undefined : undefined;
-      onBack = openChanges;
+      onBack = changeDetailReturnToRef.current === "chat" ? openChat : openChanges;
     } else if (viewMode === "sessions") {
       title = "全部对话";
       right = refreshButton(() => { requestSessions(); requestDeletedSessions(); }, pendingActions.sessions);
+    } else if (viewMode === "trash") {
+      title = "回收站";
+      right = refreshButton(() => requestDeletedSessions(), pendingActions.sessions);
     } else if (viewMode === "knowledge") {
       title = "知识库与记忆";
       right = refreshButton(() => { requestCatalog(); requestProfiles(); }, pendingActions.knowledge);
@@ -1223,6 +1320,7 @@ export function MobileAppScreen() {
         canPause={canPauseSession}
         messageInput={messageInput}
         modelLabel={activeModel ? modelDisplayName(activeModel) : activeSession?.model || "模型"}
+        onBrowseKnowledge={openKnowledge}
         onBrowseWorkspace={openFiles}
         onChangeMessage={setMessageInput}
         onFocus={() => {
@@ -1267,7 +1365,20 @@ export function MobileAppScreen() {
       <ActionBar
         actions={changeDiff ? [
           { disabled: !canOpenSelectedChangeFile, icon: "file-text", label: "打开文件", loading: pendingActions.files, onPress: openSelectedChangeFile, tone: "secondary" },
-          { disabled: !canRevertSelectedChange, icon: "rotate-ccw", label: "还原此文件", loading: pendingActions.revert, onPress: revertSelectedChange, tone: "danger" },
+          {
+            disabled: !canRevertSelectedChange,
+            icon: "rotate-ccw",
+            label: "还原此文件",
+            loading: pendingActions.revert,
+            onPress: () => {
+              if (!changeDiff.expected_hash) {
+                revertSelectedChange();
+              } else {
+                setConfirmRevertFile(true);
+              }
+            },
+            tone: "danger",
+          },
         ] : [
           { icon: "rotate-ccw", label: "回滚到这个快照", loading: pendingActions.revert, onPress: () => historyDiff && revertHistoryCheckpoint(historyDiff.checkpoint_id), tone: "danger" },
         ]}
@@ -1280,8 +1391,9 @@ export function MobileAppScreen() {
     <MobileScreenShell
       bottomDock={dock}
       bottomSafePadding={dock ? 0 : bottomSafePadding}
+      floatingHeader={viewMode === "chat"}
       header={header}
-      scrollEnabled={viewMode !== "chat"}
+      scrollEnabled={viewMode !== "chat" && viewMode !== "changeDetail"}
     >
       <MobileMainContent
         changes={{
@@ -1295,7 +1407,7 @@ export function MobileAppScreen() {
           historyDiff,
           historyMessage,
           onBackToChanges: openChanges,
-          onOpenChange: openChangeEntry,
+          onOpenChange: openChangeFromList,
           onOpenSelectedChangeFile: openSelectedChangeFile,
           onPreviewHistory: previewHistoryCheckpoint,
           onRefreshChanges: requestChanges,
@@ -1306,21 +1418,33 @@ export function MobileAppScreen() {
         }}
         chat={{
           activeAssistantID: currentChat.activeAssistantID,
+          activePlan: activeSession?.current_plan,
+          activitySlot: currentActivitySlot,
+          changesCount: changes.length,
           chatScrollRef,
           connected,
           deviceID,
           greetingName: userID.trim() && userID.trim() !== "local" ? userID.trim() : "",
+          onAnswerUserQuestion: answerUserQuestion,
+          onExecutePlan: executePlan,
+          onNearHeaderChange: setChatNearHeader,
+          onOpenChangePath: openChangeByPath,
           onOpenChanges: openChanges,
+          onOpenPlan: openPlan,
           onPickSuggestion: pickSuggestion,
           onScrolledChange: setChatScrolled,
           messages: currentChat.messages,
           onInspectSubagent: openInspection,
           onRegenerate: regenerateSession,
           pendingHistorySessionID: pendingHistorySessionIDRef.current,
+          pendingPlan: pendingActions.plan,
+          pendingQuestions: currentChat.pendingQuestions,
           pendingRequestID: currentChat.pendingRequestID,
           runs: currentRuns,
           sessionID,
           subagentTasks,
+          topClearance: topSafePadding + 88,
+          workspaceChanges: changes,
         }}
         common={{
           buttonFeedback,
@@ -1330,6 +1454,7 @@ export function MobileAppScreen() {
         }}
         files={{
           assets,
+          changes,
           fileEntries,
           fileParent,
           filePath,
@@ -1355,6 +1480,7 @@ export function MobileAppScreen() {
           onDeleteCategory: deleteCategory,
           onDeleteDocument: deleteDocument,
           onDeleteKnowledgeBase: deleteKnowledgeBase,
+          onInsertReference: insertReference,
           onMoveCategory: moveCategory,
           onRefresh: () => { requestCatalog(); requestProfiles(); },
           onRefreshDocuments: () => requestDocuments(selectedKnowledgeBaseID),
@@ -1540,13 +1666,14 @@ export function MobileAppScreen() {
         visible={Boolean(inspectedTaskID)}
       />
 
-      {/* 全局侧栏：新对话、文件、变更、知识库、按日期分组的会话、设置 */}
+      {/* 全局侧栏：新对话、文件、变更、知识库、按日期分组的会话、设置、回收站 */}
       <SideDrawer
         activeSessionID={sessionID}
         busySessionID={chatBusy ? sessionID : undefined}
         buttonFeedback={buttonFeedback}
         changesCount={changes.length}
         connected={connected}
+        deletedCount={deletedSessions.length}
         deviceID={deviceID}
         onClose={() => setDrawerVisible(false)}
         onNewSession={startNewSession}
@@ -1557,6 +1684,7 @@ export function MobileAppScreen() {
         onSelectSession={(targetSessionID) => {
           setDrawerVisible(false);
           setChatScrolled(false);
+          setChatNearHeader(false);
           handleLoadSession(targetSessionID);
           openChat();
         }}
@@ -1567,7 +1695,10 @@ export function MobileAppScreen() {
           else if (mode === "changes") openChanges();
           else if (mode === "knowledge") openKnowledge();
           else if (mode === "sessions") openSessions();
-          else if (mode === "settings") setViewMode("settings");
+          else if (mode === "trash") {
+            requestDeletedSessions();
+            openTrash();
+          } else if (mode === "settings") setViewMode("settings");
         }}
         sessions={sessions}
         unreadSessionIDs={unreadSessionIDs}
@@ -1576,12 +1707,16 @@ export function MobileAppScreen() {
         visible={drawerVisible}
       />
 
-      {/* 工具调用权限确认：点遮罩收成输入框上方的提示条，请求保持待确认 */}
+      {/* 工具调用权限确认：拒绝 / 允许本次 / 本会话始终允许同类操作 */}
       <PermissionSheet
         deviceID={deviceID}
         onAllow={() => {
           setMinimizedPermissionID("");
           allowPermission();
+        }}
+        onAllowSession={() => {
+          setMinimizedPermissionID("");
+          allowPermissionSession();
         }}
         onDeny={() => {
           setMinimizedPermissionID("");
@@ -1596,6 +1731,21 @@ export function MobileAppScreen() {
         permission={pendingPermission}
         policyLabel={activePermissionLabel}
         visible={permissionSheetVisible}
+      />
+
+      <ConfirmModal
+        confirmLabel="还原文件"
+        danger
+        icon="rotate-ccw"
+        message={`确定将「${changeDiff?.path || selectedChange}」恢复为修改前的基线版本吗？未保存内容将被覆盖。`}
+        onCancel={() => setConfirmRevertFile(false)}
+        onConfirm={() => {
+          setConfirmRevertFile(false);
+          executeRevertSelectedChange();
+        }}
+        pending={pendingActions.revert}
+        title="确认还原文件"
+        visible={confirmRevertFile}
       />
 
       {/* 会话设置：模型、对话/规划、工具权限、上下文 */}

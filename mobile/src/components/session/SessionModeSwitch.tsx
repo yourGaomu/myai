@@ -2,7 +2,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import type { SessionAgentMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -18,6 +19,8 @@ const modes: Array<{ label: string; mode: SessionAgentMode }> = [
 ];
 
 export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pending }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.wrapper}>
       <View accessibilityRole="tablist" style={styles.control}>
@@ -57,40 +60,41 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 2,
-  },
-  control: {
-    backgroundColor: palette.surface2,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 2,
-    padding: 3,
-  },
-  button: {
-    alignItems: "center",
-    borderRadius: radius.pill,
-    height: 32,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  buttonActive: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderWidth: 1,
-    ...shadow.card,
-  },
-  buttonText: {
-    color: palette.ink2,
-    fontSize: font.label,
-    fontWeight: weight.bold,
-  },
-  buttonTextActive: {
-    color: palette.ink1,
-  },
-});
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    wrapper: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 2,
+    },
+    control: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 2,
+      padding: 3,
+    },
+    button: {
+      alignItems: "center",
+      borderRadius: radius.pill,
+      height: 32,
+      justifyContent: "center",
+      paddingHorizontal: 16,
+    },
+    buttonActive: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderWidth: 1,
+      ...shadow.card,
+    },
+    buttonText: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.bold,
+    },
+    buttonTextActive: {
+      color: palette.ink1,
+    },
+  });

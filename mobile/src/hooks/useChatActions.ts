@@ -2,7 +2,7 @@ import { useCallback, type RefObject } from "react";
 
 import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment } from "../types/chat";
-import type { PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
+import type { PermissionApprovalScope, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
 import { userMessageEcho } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
 
@@ -97,7 +97,7 @@ export function useChatActions({
   ]);
 
   const sendPermissionResult = useCallback(
-    (allowed: boolean) => {
+    (allowed: boolean, scope?: PermissionApprovalScope) => {
       if (!pendingPermission) {
         return;
       }
@@ -110,7 +110,11 @@ export function useChatActions({
         addEventMessage(permissionSessionID, "授权请求缺少审批 ID，请等待电脑端重新发送。");
         return;
       }
-      const payload: PermissionResultPayload = { allowed, approval_id: pendingPermission.approvalID };
+      const payload: PermissionResultPayload = {
+        allowed,
+        approval_id: pendingPermission.approvalID,
+        ...(scope ? { scope } : {}),
+      };
       const sent = sendEnvelope("permission_result", {
         request_id: pendingPermission.requestID,
         session_id: permissionSessionID,
@@ -126,7 +130,11 @@ export function useChatActions({
     },
     [addEventMessage, pendingPermission, requestSessionMapRef, sendEnvelope, sessionID],
   );
-  const allowPermission = useCallback(() => sendPermissionResult(true), [sendPermissionResult]);
+  const allowPermission = useCallback(() => sendPermissionResult(true, "once"), [sendPermissionResult]);
+  const allowPermissionSession = useCallback(() => {
+    const scope: PermissionApprovalScope = pendingPermission?.permission ? "session_permission" : "session_tool";
+    sendPermissionResult(true, scope);
+  }, [pendingPermission?.permission, sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);
 
   const answerUserQuestion = useCallback(
@@ -208,6 +216,7 @@ export function useChatActions({
   return {
     answerUserQuestion,
     allowPermission,
+    allowPermissionSession,
     denyPermission,
     pauseSession,
     regenerateSession,

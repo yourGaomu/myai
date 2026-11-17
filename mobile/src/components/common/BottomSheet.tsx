@@ -2,20 +2,21 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { palette, radius, shadow } from "../../constants/theme";
+import { radius } from "../../constants/theme";
+import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   accessibilityLabel: string;
   children: ReactNode;
-  // 点遮罩或按安卓返回键时调用。权限确认用它把弹层收成提示条，而不是直接取消请求。
   onDismiss: () => void;
   visible: boolean;
 };
 
 const hiddenOffset = 640;
 
-// 底部弹层：遮罩淡入，面板从底部滑入；关闭时先播放退出动画再卸载。
+// 底部弹层：遮罩淡入，面板从底部滑入；自适应深浅主题。
 export function BottomSheet({ accessibilityLabel, children, onDismiss, visible }: Props) {
+  const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
@@ -44,7 +45,6 @@ export function BottomSheet({ accessibilityLabel, children, onDismiss, visible }
         setMounted(false);
       }
     });
-    // mounted 只用于判断是否需要播放退出动画，不作为依赖重新触发
   }, [fade, offset, visible]);
 
   if (!mounted) {
@@ -87,32 +87,35 @@ export function BottomSheet({ accessibilityLabel, children, onDismiss, visible }
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  scrim: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: palette.scrim,
-  },
-  sheet: {
-    backgroundColor: palette.surface2,
-    borderTopLeftRadius: radius.sheet,
-    borderTopRightRadius: radius.sheet,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    ...shadow.float,
-  },
-  grabber: {
-    alignSelf: "center",
-    backgroundColor: palette.hairlineStrong,
-    borderRadius: radius.xxs,
-    height: 4,
-    marginBottom: 14,
-    width: 36,
-  },
-  scroll: {
-    flexGrow: 0,
-  },
-});
+const makeStyles = ({ palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    scrim: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: palette.scrim,
+    },
+    sheet: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+      borderWidth: 1,
+      borderBottomWidth: 0,
+      paddingTop: 10,
+      ...shadow.float,
+    },
+    grabber: {
+      alignSelf: "center",
+      backgroundColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      height: 4,
+      marginBottom: 10,
+      width: 38,
+    },
+    scroll: {
+      paddingHorizontal: 18,
+    },
+  });

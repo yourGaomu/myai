@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import { fontFamily, font, palette, radius, weight } from "../../constants/theme";
+import { fontFamily, font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { CharacterAvatar } from "../common/CharacterAvatar";
 
 type Props = {
   bindCode: string;
@@ -19,12 +21,13 @@ type Props = {
 
 const cells = [0, 1, 2, 3, 4, 5];
 
-// 首次启动 / 未配对时的全屏引导。配对成功后 client_token 写入，外层自动发起连接并进入对话页。
+// 首次启动 / 未配对时的全屏引导：绑定动态角色、适应深浅主题。
 export function PairingScreen(props: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
   const { bindCode, pending } = props;
   const inputRef = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
-  // Agent 可以用 --bind-code 指定任意配对码，所以保留自定义输入
   const [custom, setCustom] = useState(false);
   const [editingRelay, setEditingRelay] = useState(false);
   const code = bindCode.trim();
@@ -37,7 +40,7 @@ export function PairingScreen(props: Props) {
         contentContainerStyle={[styles.content, { paddingBottom: props.bottomInset + 16, paddingTop: props.topInset + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Image source={require("../../../assets/hero-character.png")} style={styles.hero} />
+        <CharacterAvatar accessibilityLabel="MyAI 角色" height={176} size={160} slot="idle" variant="full" />
         <Text style={styles.title}>连接你的电脑</Text>
         <Text style={styles.sub}>在电脑上启动 MyAI Agent，{"\n"}输入终端里显示的配对码。</Text>
 
@@ -120,72 +123,72 @@ export function PairingScreen(props: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { backgroundColor: palette.canvas, flex: 1 },
-  content: { alignItems: "center", flexGrow: 1, paddingHorizontal: 24 },
-  hero: { height: 176, width: 176 },
-  title: { color: palette.ink1, fontSize: font.display + 2, fontWeight: weight.semibold, marginTop: 4 },
-  sub: { color: palette.ink2, fontSize: font.body - 1, lineHeight: 22, marginTop: 8, textAlign: "center" },
-  otp: { flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 26, maxWidth: 320, width: "100%" },
-  cell: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    flex: 1,
-    height: 54,
-    justifyContent: "center",
-    maxWidth: 46,
-  },
-  cellActive: { borderColor: palette.brand, borderWidth: 2 },
-  cellText: { color: palette.ink1, fontFamily: fontFamily.mono, fontSize: font.display, fontWeight: weight.semibold },
-  hiddenInput: { ...StyleSheet.absoluteFill, color: palette.transparent, opacity: 0.02 },
-  customInput: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    color: palette.ink1,
-    fontFamily: fontFamily.mono,
-    fontSize: font.title,
-    height: 54,
-    marginTop: 26,
-    maxWidth: 320,
-    paddingHorizontal: 16,
-    textAlign: "center",
-    width: "100%",
-  },
-  switchLink: { color: palette.ink3, fontSize: font.caption, marginTop: 12 },
-  button: {
-    alignItems: "center",
-    backgroundColor: palette.brand,
-    borderRadius: radius.lg,
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    marginTop: 22,
-    maxWidth: 360,
-    minHeight: 52,
-    width: "100%",
-  },
-  buttonDisabled: { backgroundColor: palette.well },
-  pressed: { opacity: 0.85 },
-  buttonText: { color: palette.inkInverse, fontSize: font.bodyLg, fontWeight: weight.semibold },
-  buttonTextDisabled: { color: palette.ink4 },
-  error: { color: palette.err, fontSize: font.label, lineHeight: 20, marginTop: 12, textAlign: "center" },
-  spacer: { flex: 1, minHeight: 24 },
-  relay: { alignItems: "center", flexDirection: "row", gap: 6, maxWidth: "100%" },
-  relayText: { color: palette.ink3, flexShrink: 1, fontSize: font.caption },
-  relayEdit: { alignItems: "center", flexDirection: "row", gap: 10, width: "100%" },
-  relayInput: {
-    backgroundColor: palette.surface1,
-    borderRadius: radius.md - 2,
-    color: palette.ink1,
-    flex: 1,
-    fontSize: font.label,
-    height: 44,
-    paddingHorizontal: 12,
-  },
-  link: { color: palette.brandLight, fontSize: font.label },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    root: { backgroundColor: palette.canvas, flex: 1 },
+    content: { alignItems: "center", flexGrow: 1, paddingHorizontal: 24 },
+    title: { color: palette.ink1, fontSize: font.display + 2, fontWeight: weight.semibold, marginTop: 4 },
+    sub: { color: palette.ink2, fontSize: font.body - 1, lineHeight: 22, marginTop: 8, textAlign: "center" },
+    otp: { flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 26, maxWidth: 320, width: "100%" },
+    cell: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flex: 1,
+      height: 54,
+      justifyContent: "center",
+      maxWidth: 46,
+    },
+    cellActive: { borderColor: palette.brand, borderWidth: 2 },
+    cellText: { color: palette.ink1, fontFamily: fontFamily.mono, fontSize: font.display, fontWeight: weight.semibold },
+    hiddenInput: { ...StyleSheet.absoluteFill, color: palette.transparent, opacity: 0.02 },
+    customInput: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      color: palette.ink1,
+      fontFamily: fontFamily.mono,
+      fontSize: font.title,
+      height: 54,
+      marginTop: 26,
+      maxWidth: 320,
+      paddingHorizontal: 16,
+      textAlign: "center",
+      width: "100%",
+    },
+    switchLink: { color: palette.ink3, fontSize: font.caption, marginTop: 12 },
+    button: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderRadius: radius.lg,
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "center",
+      marginTop: 22,
+      maxWidth: 360,
+      minHeight: 52,
+      width: "100%",
+    },
+    buttonDisabled: { backgroundColor: palette.well },
+    pressed: { opacity: 0.85 },
+    buttonText: { color: palette.inkInverse, fontSize: font.bodyLg, fontWeight: weight.semibold },
+    buttonTextDisabled: { color: palette.ink4 },
+    error: { color: palette.err, fontSize: font.label, lineHeight: 20, marginTop: 12, textAlign: "center" },
+    spacer: { flex: 1, minHeight: 24 },
+    relay: { alignItems: "center", flexDirection: "row", gap: 6, maxWidth: "100%" },
+    relayText: { color: palette.ink3, flexShrink: 1, fontSize: font.caption },
+    relayEdit: { alignItems: "center", flexDirection: "row", gap: 10, width: "100%" },
+    relayInput: {
+      backgroundColor: palette.surface1,
+      borderRadius: radius.md - 2,
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.label,
+      height: 44,
+      paddingHorizontal: 12,
+    },
+    link: { color: palette.brandLight, fontSize: font.label },
+  });

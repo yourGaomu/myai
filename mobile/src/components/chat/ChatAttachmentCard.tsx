@@ -4,7 +4,7 @@ import type { ChatAttachment } from "../../types/chat";
 import { formatBytes } from "../../utils/format";
 import { isUploadedAssetAttachment } from "../../utils/attachments";
 import { SharedAssetCard } from "./SharedAssetCard";
-import { styles } from "./styles";
+import { useChatStyles } from "./styles";
 
 type Props = {
   attachment: ChatAttachment;
@@ -12,6 +12,7 @@ type Props = {
 };
 
 export function ChatAttachmentCard({ attachment, buttonFeedback }: Props) {
+  const styles = useChatStyles();
   if (isUploadedAssetAttachment(attachment)) {
     return (
       <SharedAssetCard

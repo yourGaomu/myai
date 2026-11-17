@@ -9,7 +9,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { styles } from "./styles";
+import { useChatStyles } from "./styles";
 
 type Props = {
   containerStyle?: StyleProp<ViewStyle>;
@@ -17,6 +17,7 @@ type Props = {
 };
 
 export function ShimmerLabel({ containerStyle, label }: Props) {
+  const styles = useChatStyles();
   const progress = useRef(new Animated.Value(0)).current;
   const labelOpacity = useRef(new Animated.Value(1)).current;
   const [reduceMotion, setReduceMotion] = useState(false);

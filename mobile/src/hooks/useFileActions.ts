@@ -125,14 +125,14 @@ export function useFileActions({
     setViewMode("chat");
   }, [addErrorMessage, filePreview, setAttachedFiles, setViewMode]);
 
-  const uploadLocalFile = useCallback(async () => {
+  const uploadLocalFile = useCallback(async (kind: "all" | "image" = "all") => {
     // 手机文件先上传 Asset 服务，聊天消息只携带短链接元数据，避免大文件经过 WebSocket。
     if (!assetBaseURL.trim()) {
-      addErrorMessage("请先在设置中填写资源服务地址，再上传手机文件。");
+      addErrorMessage("请先在「设置 › 连接与配对」填写 Asset 服务地址，再上传手机文件。");
       return;
     }
     if (!assetAPIKey.trim()) {
-      addErrorMessage("请先在设置中填写独立的 Asset API Key，再上传手机文件（仅本次运行保存）。");
+      addErrorMessage("请先在「设置 › 连接与配对」填写独立的 Asset API Key，再上传手机文件（仅本次运行保存）。");
       return;
     }
 
@@ -141,7 +141,7 @@ export function useFileActions({
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: false,
-        type: ["image/*", "*/*"],
+        type: kind === "image" ? ["image/*"] : ["image/*", "*/*"],
       });
       if (result.canceled || !result.assets?.[0]) {
         return;

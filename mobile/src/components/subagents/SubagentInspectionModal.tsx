@@ -24,7 +24,8 @@ import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
 import { formatDateTime } from "../../utils/format";
 import { MarkdownText } from "../chat/MarkdownText";
 import { SharedAssetCard } from "../chat/SharedAssetCard";
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -81,6 +82,8 @@ export function SubagentInspectionModal({
   selectedRunID,
   onSelectRun,
 }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const [activeTab, setActiveTab] = useState<TabType>("process");
   const [thoughtExpanded, setThoughtExpanded] = useState(true);
 
@@ -190,7 +193,7 @@ export function SubagentInspectionModal({
 
   const isRunning = task.status === "running";
   const statusLabel = formatStatusLabel(task.status);
-  const statusBadgeStyle = getStatusBadgeStyle(task.status);
+  const statusBadgeStyle = getStatusBadgeStyle(task.status, styles);
 
   return (
     <Modal
@@ -666,7 +669,9 @@ function formatStatusLabel(status?: string): string {
   }
 }
 
-function getStatusBadgeStyle(status?: string) {
+type InspectionStyles = ReturnType<typeof createStyles>;
+
+function getStatusBadgeStyle(status: string | undefined, styles: InspectionStyles) {
   switch (status) {
     case "running":
       return styles.statusRunning;
@@ -684,481 +689,484 @@ function getStatusBadgeStyle(status?: string) {
 
 const monoFont = Platform.OS === "ios" ? "Menlo" : "monospace";
 
-const styles = StyleSheet.create({
-  backdrop: {
-    backgroundColor: palette.scrim,
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  iconRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 5,
-  },
-  container: {
-    backgroundColor: palette.surface2,
-    borderTopLeftRadius: radius.sheet,
-    borderTopRightRadius: radius.sheet,
-    display: "flex",
-    height: "88%",
-    overflow: "hidden",
-    width: "100%",
-    ...shadow.float,
-  },
-  header: {
-    alignItems: "center",
-    backgroundColor: palette.surface2,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 10,
-  },
-  headerLeft: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-  },
-  avatarIcon: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderRadius: radius.sm + 2,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  avatarEmoji: {
-    fontSize: font.display,
-  },
-  headerTitleWrap: {
-    flex: 1,
-    gap: 2,
-  },
-  headerTitleRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  headerTitle: {
-    color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.semibold,
-  },
-  headerMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 4,
-  },
-  readOnlyBadge: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  headerSub: {
-    color: palette.ink3,
-    fontSize: font.caption,
-  },
-  headerActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  iconButton: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderRadius: radius.pill,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  iconButtonText: {
-    color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.semibold,
-  },
-  closeButton: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderRadius: radius.pill,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  closeButtonText: {
-    color: palette.err,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  statusBadge: {
-    borderColor: palette.hairline,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: 7,
-    paddingVertical: 1,
-  },
-  statusBadgeText: {
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  statusRunning: {
-    backgroundColor: palette.brandWash,
-  },
-  statusSucceeded: {
-    backgroundColor: palette.okWash,
-  },
-  statusFailed: {
-    backgroundColor: palette.errWash,
-  },
-  statusWaiting: {
-    backgroundColor: palette.warnWash,
-  },
-  statusDefault: {
-    backgroundColor: palette.well,
-  },
-  metaCard: {
-    backgroundColor: palette.surface2,
-    borderBottomColor: palette.hairline,
-    borderBottomWidth: 1,
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  metaRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  metaLabel: {
-    color: palette.ink3,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  metaValue: {
-    color: palette.ink1,
-    flex: 1,
-    fontSize: font.label,
-  },
-  idRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  idText: {
-    color: palette.ink3,
-    fontSize: font.caption,
-  },
-  idMono: {
-    color: palette.ink2,
-    fontFamily: monoFont,
-    fontSize: font.caption,
-  },
-  warningBanner: {
-    alignItems: "center",
-    backgroundColor: palette.warnWash,
-    borderColor: palette.brandDeep,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  warningBannerText: {
-    color: palette.warn,
-    flex: 1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  runBar: {
-    alignItems: "center",
-    backgroundColor: palette.surface2,
-    borderBottomColor: palette.hairline,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  runBarLabel: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  runPill: {
-    backgroundColor: palette.well,
-    borderColor: palette.hairline,
-    borderRadius: radius.xs,
-    borderWidth: 1,
-    marginRight: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  runPillSelected: {
-    backgroundColor: palette.brandWash,
-    borderColor: palette.hairline,
-  },
-  runPillText: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  runPillTextSelected: {
-    color: palette.ink1,
-  },
-  tabBar: {
-    backgroundColor: palette.surface2,
-    borderBottomColor: palette.hairline,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    paddingHorizontal: 8,
-  },
-  tabButton: {
-    alignItems: "center",
-    borderBottomColor: palette.transparent,
-    borderBottomWidth: 2,
-    flex: 1,
-    paddingBottom: 10,
-    paddingTop: 8,
-  },
-  tabButtonActive: {
-    borderBottomColor: palette.brand,
-  },
-  tabButtonText: {
-    color: palette.ink3,
-    fontSize: font.label,
-    fontWeight: weight.medium,
-  },
-  tabButtonTextActive: {
-    color: palette.ink1,
-    fontWeight: weight.semibold,
-  },
-  contentBody: {
-    gap: 12,
-    padding: 14,
-    paddingBottom: 40,
-  },
-  processWrap: {
-    gap: 12,
-  },
-  waitingNotice: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderColor: palette.okBorder,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    padding: 10,
-  },
-  waitingNoticeText: {
-    color: palette.info,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  permissionAlert: {
-    backgroundColor: palette.errWash,
-    borderColor: palette.errBorder,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    gap: 4,
-    padding: 10,
-  },
-  permissionAlertTitle: {
-    color: palette.err,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  permissionAlertText: {
-    color: palette.err,
-    fontSize: font.label,
-  },
-  thoughtCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  thoughtHeader: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  thoughtHeaderTitle: {
-    color: palette.ink2,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  thoughtChevron: {
-    color: palette.ink3,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  thoughtBody: {
-    padding: 10,
-  },
-  toolsSection: {
-    gap: 8,
-  },
-  sectionHeaderTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  toolCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 6,
-    padding: 10,
-  },
-  toolHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  toolHeaderLeft: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  toolStatusTag: {
-    borderRadius: radius.xs,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  toolStatusTagText: {
-    fontSize: font.micro,
-    fontWeight: weight.semibold,
-  },
-  toolStatusRunning: {
-    backgroundColor: palette.brandWash,
-  },
-  toolStatusSuccess: {
-    backgroundColor: palette.okWash,
-  },
-  toolStatusFailed: {
-    backgroundColor: palette.errWash,
-  },
-  toolName: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  toolCallIDMono: {
-    color: palette.ink3,
-    fontFamily: monoFont,
-    fontSize: font.micro,
-  },
-  toolArgBox: {
-    backgroundColor: palette.surface1,
-    borderRadius: radius.xs,
-    padding: 6,
-  },
-  toolResultBox: {
-    backgroundColor: palette.surface1,
-    borderRadius: radius.xs,
-    padding: 6,
-  },
-  toolArgLabel: {
-    color: palette.ink3,
-    fontSize: font.micro,
-    fontWeight: weight.semibold,
-    marginBottom: 2,
-  },
-  toolMonoText: {
-    color: palette.ink1,
-    fontFamily: monoFont,
-    fontSize: font.caption,
-  },
-  toolErrorText: {
-    color: palette.err,
-  },
-  assetsSection: {
-    gap: 8,
-  },
-  answerCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 8,
-    padding: 12,
-  },
-  answerHeaderTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  emptyNotice: {
-    alignItems: "center",
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    paddingVertical: 24,
-  },
-  emptyNoticeText: {
-    color: palette.ink3,
-    fontSize: font.body,
-    fontWeight: weight.regular,
-  },
-  messagesWrap: {
-    gap: 8,
-  },
-  loadMoreButton: {
-    alignItems: "center",
-    backgroundColor: palette.well,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingVertical: 8,
-  },
-  loadMoreButtonText: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  messageCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    gap: 4,
-    padding: 10,
-  },
-  messageCardUser: {
-    backgroundColor: palette.bubble,
-    borderColor: palette.cyanWash,
-  },
-  messageCardAssistant: {
-    backgroundColor: palette.surface1,
-  },
-  messageCardTool: {
-    backgroundColor: palette.surface1,
-  },
-  messageHeaderRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  messageRoleText: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  messageTimeText: {
-    color: palette.ink3,
-    fontSize: font.micro,
-  },
-  assetsWrap: {
-    gap: 10,
-  },
-});
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    backdrop: {
+      backgroundColor: palette.scrim,
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    iconRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 5,
+    },
+    container: {
+      backgroundColor: palette.surface2,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+      display: "flex",
+      height: "88%",
+      overflow: "hidden",
+      width: "100%",
+      ...shadow.float,
+    },
+    header: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 10,
+    },
+    headerLeft: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 10,
+    },
+    avatarIcon: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.sm + 2,
+      height: 40,
+      justifyContent: "center",
+      width: 40,
+    },
+    avatarEmoji: {
+      fontSize: font.display,
+    },
+    headerTitleWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    headerTitleRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    headerTitle: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    headerMetaRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 4,
+    },
+    readOnlyBadge: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    headerSub: {
+      color: palette.ink3,
+      fontSize: font.caption,
+    },
+    headerActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    iconButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.pill,
+      height: 38,
+      justifyContent: "center",
+      width: 38,
+    },
+    iconButtonText: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    closeButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.pill,
+      height: 38,
+      justifyContent: "center",
+      width: 38,
+    },
+    closeButtonText: {
+      color: palette.err,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    statusBadge: {
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: 7,
+      paddingVertical: 1,
+    },
+    statusBadgeText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    statusRunning: {
+      backgroundColor: palette.brandWash,
+    },
+    statusSucceeded: {
+      backgroundColor: palette.okWash,
+    },
+    statusFailed: {
+      backgroundColor: palette.errWash,
+    },
+    statusWaiting: {
+      backgroundColor: palette.warnWash,
+    },
+    statusDefault: {
+      backgroundColor: palette.well,
+    },
+    metaCard: {
+      backgroundColor: palette.surface2,
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    metaRow: {
+      flexDirection: "row",
+      gap: 6,
+    },
+    metaLabel: {
+      color: palette.ink3,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    metaValue: {
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.label,
+    },
+    idRow: {
+      flexDirection: "row",
+      gap: 12,
+    },
+    idText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+    },
+    idMono: {
+      color: palette.ink2,
+      fontFamily: monoFont,
+      fontSize: font.caption,
+    },
+    warningBanner: {
+      alignItems: "center",
+      backgroundColor: palette.warnWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 6,
+      marginTop: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    warningBannerText: {
+      color: palette.warn,
+      flex: 1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    runBar: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+    },
+    runBarLabel: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    runPill: {
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.xs,
+      borderWidth: 1,
+      marginRight: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    runPillSelected: {
+      backgroundColor: palette.brandWash,
+      borderColor: palette.hairline,
+    },
+    runPillText: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    runPillTextSelected: {
+      color: palette.ink1,
+    },
+    tabBar: {
+      backgroundColor: palette.surface2,
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      flexDirection: "row",
+      paddingHorizontal: 8,
+    },
+    tabButton: {
+      alignItems: "center",
+      borderBottomColor: palette.transparent,
+      borderBottomWidth: 2,
+      flex: 1,
+      paddingBottom: 10,
+      paddingTop: 8,
+    },
+    tabButtonActive: {
+      borderBottomColor: palette.brand,
+    },
+    tabButtonText: {
+      color: palette.ink3,
+      fontSize: font.label,
+      fontWeight: weight.medium,
+    },
+    tabButtonTextActive: {
+      color: palette.ink1,
+      fontWeight: weight.semibold,
+    },
+    contentBody: {
+      gap: 12,
+      padding: 14,
+      paddingBottom: 40,
+    },
+    processWrap: {
+      gap: 12,
+    },
+    waitingNotice: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.okBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      padding: 10,
+    },
+    waitingNoticeText: {
+      color: palette.info,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    permissionAlert: {
+      backgroundColor: palette.errWash,
+      borderColor: palette.errBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      gap: 4,
+      padding: 10,
+    },
+    permissionAlertTitle: {
+      color: palette.err,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    permissionAlertText: {
+      color: palette.err,
+      fontSize: font.label,
+    },
+    thoughtCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      overflow: "hidden",
+    },
+    thoughtHeader: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    thoughtHeaderTitle: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    thoughtChevron: {
+      color: palette.ink3,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    thoughtBody: {
+      padding: 10,
+    },
+    toolsSection: {
+      gap: 8,
+    },
+    sectionHeaderTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    toolCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 6,
+      padding: 10,
+    },
+    toolHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    toolHeaderLeft: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    toolStatusTag: {
+      borderRadius: radius.xs,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+    },
+    toolStatusTagText: {
+      color: palette.ink1,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    toolStatusRunning: {
+      backgroundColor: palette.brandWash,
+    },
+    toolStatusSuccess: {
+      backgroundColor: palette.okWash,
+    },
+    toolStatusFailed: {
+      backgroundColor: palette.errWash,
+    },
+    toolName: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    toolCallIDMono: {
+      color: palette.ink3,
+      fontFamily: monoFont,
+      fontSize: font.micro,
+    },
+    toolArgBox: {
+      backgroundColor: palette.surface1,
+      borderRadius: radius.xs,
+      padding: 6,
+    },
+    toolResultBox: {
+      backgroundColor: palette.surface1,
+      borderRadius: radius.xs,
+      padding: 6,
+    },
+    toolArgLabel: {
+      color: palette.ink3,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+      marginBottom: 2,
+    },
+    toolMonoText: {
+      color: palette.ink1,
+      fontFamily: monoFont,
+      fontSize: font.caption,
+    },
+    toolErrorText: {
+      color: palette.err,
+    },
+    assetsSection: {
+      gap: 8,
+    },
+    answerCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 8,
+      padding: 12,
+    },
+    answerHeaderTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    emptyNotice: {
+      alignItems: "center",
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderStyle: "dashed",
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "center",
+      paddingVertical: 24,
+    },
+    emptyNoticeText: {
+      color: palette.ink3,
+      fontSize: font.body,
+      fontWeight: weight.regular,
+    },
+    messagesWrap: {
+      gap: 8,
+    },
+    loadMoreButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingVertical: 8,
+    },
+    loadMoreButtonText: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    messageCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      gap: 4,
+      padding: 10,
+    },
+    messageCardUser: {
+      backgroundColor: palette.bubble,
+      borderColor: palette.cyanWash,
+    },
+    messageCardAssistant: {
+      backgroundColor: palette.surface1,
+    },
+    messageCardTool: {
+      backgroundColor: palette.surface1,
+    },
+    messageHeaderRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    messageRoleText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    messageTimeText: {
+      color: palette.ink3,
+      fontSize: font.micro,
+    },
+    assetsWrap: {
+      gap: 10,
+    },
+  });

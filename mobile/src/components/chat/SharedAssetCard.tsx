@@ -4,8 +4,8 @@ import { Feather } from "@expo/vector-icons";
 
 import { isPreviewableImageAsset, type SharedAsset } from "../../utils/toolAssets";
 import { formatBytes, formatDateTime } from "../../utils/format";
-import { styles } from "./styles";
-import { palette } from "../../constants/theme";
+import { useChatStyles } from "./styles";
+import { useAppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   asset: SharedAsset;
@@ -14,6 +14,8 @@ type Props = {
 };
 
 export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useChatStyles();
   const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
   const [fullScreenVisible, setFullScreenVisible] = useState(false);

@@ -2,16 +2,20 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import type { SubagentTask } from "../../../protocol";
-import { font, palette, radius, weight } from "../../../constants/theme";
+import { font, radius, weight } from "../../../constants/theme";
+import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
 
 type Props = {
   onInspect?: (taskID: string) => void;
   task: SubagentTask;
 };
 
-// 工具行下方的子代理摘要：状态 + 最近输出，点开进入只读实时详情。
+// 工具行下方的单条子代理摘要：状态 + 最近输出，点开进入只读实时详情。
 export function SubagentSummary({ onInspect, task }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
   const snippet = task.result || task.reasoning || task.instruction;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -20,7 +24,7 @@ export function SubagentSummary({ onInspect, task }: Props) {
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <View style={styles.head}>
-        <View style={[styles.dot, dotStyle(task.status)]} />
+        <View style={[styles.dot, dotStyle(task.status, styles)]} />
         <Text numberOfLines={1} style={styles.name}>
           {task.agent_nickname || task.title || "子代理"}
         </Text>
@@ -41,7 +45,7 @@ export function SubagentSummary({ onInspect, task }: Props) {
   );
 }
 
-function dotStyle(status?: string) {
+function dotStyle(status: string | undefined, styles: ReturnType<typeof makeStyles>) {
   if (status === "running") return styles.dotRunning;
   if (status === "succeeded") return styles.dotOk;
   if (status === "failed") return styles.dotFailed;
@@ -70,61 +74,64 @@ export function subagentStatusLabel(status?: string) {
   }
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: palette.surface1,
-    borderRadius: radius.md - 2,
-    gap: 4,
-    marginBottom: 6,
-    marginLeft: 35,
-    marginTop: 2,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  pressed: {
-    backgroundColor: palette.pressed,
-  },
-  head: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  dot: {
-    backgroundColor: palette.ink4,
-    borderRadius: radius.pill,
-    height: 7,
-    width: 7,
-  },
-  dotRunning: {
-    backgroundColor: palette.brand,
-  },
-  dotOk: {
-    backgroundColor: palette.ok,
-  },
-  dotFailed: {
-    backgroundColor: palette.err,
-  },
-  dotWaiting: {
-    backgroundColor: palette.warn,
-  },
-  name: {
-    color: palette.ink1,
-    flex: 1,
-    fontSize: font.label + 0.5,
-    fontWeight: weight.medium,
-  },
-  status: {
-    color: palette.ink3,
-    fontSize: font.caption,
-  },
-  link: {
-    color: palette.brandLight,
-    fontSize: font.label - 0.5,
-    marginLeft: 4,
-  },
-  snippet: {
-    color: palette.ink2,
-    fontSize: font.caption + 0.5,
-    lineHeight: 19,
-  },
-});
+const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md - 2,
+      borderWidth: 1,
+      gap: 4,
+      marginBottom: 6,
+      marginLeft: 35,
+      marginTop: 2,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    pressed: {
+      backgroundColor: palette.pressed,
+    },
+    head: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    dot: {
+      backgroundColor: palette.ink4,
+      borderRadius: radius.pill,
+      height: 7,
+      width: 7,
+    },
+    dotRunning: {
+      backgroundColor: palette.brand,
+    },
+    dotOk: {
+      backgroundColor: palette.ok,
+    },
+    dotFailed: {
+      backgroundColor: palette.err,
+    },
+    dotWaiting: {
+      backgroundColor: palette.warn,
+    },
+    name: {
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.label + 0.5,
+      fontWeight: weight.medium,
+    },
+    status: {
+      color: palette.ink3,
+      fontSize: font.caption,
+    },
+    link: {
+      color: palette.brandLight,
+      fontSize: font.label - 0.5,
+      marginLeft: 4,
+    },
+    snippet: {
+      color: palette.ink2,
+      fontSize: font.caption + 0.5,
+      lineHeight: 19,
+    },
+  });

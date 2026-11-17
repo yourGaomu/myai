@@ -3,9 +3,12 @@ import { Fragment } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import { font, palette, radius, weight } from "../../constants/theme";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 
 export type SettingsSection =
+  | "appearance"
+  | "motion"
   | "general"
   | "connection"
   | "model"
@@ -35,12 +38,14 @@ type Props = {
 };
 
 export const settingsSectionTitles: Record<SettingsSection, string> = {
+  appearance: "外观与主题",
   autoplan: "自动规划",
   connection: "连接与配对",
   context: "上下文",
   general: "版本与热更新",
   generation: "生成参数与回复风格",
   model: "模型",
+  motion: "角色动效与 GIF",
   permission: "工具权限",
   plugin: "插件与 MCP",
   session: "会话管理",
@@ -50,6 +55,9 @@ export const settingsSectionTitles: Record<SettingsSection, string> = {
 
 // 设置首页：设备卡片 + 分组列表，点一行进入对应详情。
 export function SettingsHome({ connected, deviceID, groups, onOpenSection, relayHost, versionLabel }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <View>
       <Pressable onPress={() => onOpenSection("connection")} style={({ pressed }) => [styles.device, pressed && styles.pressed]}>
@@ -93,36 +101,37 @@ export function SettingsHome({ connected, deviceID, groups, onOpenSection, relay
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1, minWidth: 0 },
-  pressed: { backgroundColor: palette.pressed },
-  device: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.lg + 2,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    padding: 14,
-  },
-  deviceIcon: { alignItems: "center", backgroundColor: palette.brandWash, borderRadius: radius.md, height: 44, justifyContent: "center", width: 44 },
-  deviceName: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.semibold },
-  deviceStatus: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 2 },
-  dot: { backgroundColor: palette.ok, borderRadius: radius.pill, height: 7, width: 7 },
-  dotOff: { backgroundColor: palette.err },
-  deviceMeta: { color: palette.ink2, flexShrink: 1, fontSize: font.caption },
-  groupLabel: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium, paddingBottom: 7, paddingLeft: 16, paddingTop: 22 },
-  group: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.lg + 2,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 50, paddingHorizontal: 14 },
-  divider: { backgroundColor: palette.hairline, height: 1, left: 45, position: "absolute", right: 0, top: 0 },
-  rowLabel: { color: palette.ink1, flex: 1, fontSize: font.body },
-  rowValue: { color: palette.ink3, fontSize: font.label + 0.5, maxWidth: "46%" },
-  version: { color: palette.ink4, fontSize: font.caption, paddingBottom: 8, paddingTop: 22, textAlign: "center" },
-});
+const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    flex: { flex: 1, minWidth: 0 },
+    pressed: { backgroundColor: palette.pressed },
+    device: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.lg + 2,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 12,
+      padding: 14,
+    },
+    deviceIcon: { alignItems: "center", backgroundColor: palette.brandWash, borderRadius: radius.md, height: 44, justifyContent: "center", width: 44 },
+    deviceName: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.semibold },
+    deviceStatus: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 2 },
+    dot: { backgroundColor: palette.ok, borderRadius: radius.pill, height: 7, width: 7 },
+    dotOff: { backgroundColor: palette.err },
+    deviceMeta: { color: palette.ink2, flexShrink: 1, fontSize: font.caption },
+    groupLabel: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium, paddingBottom: 7, paddingLeft: 16, paddingTop: 22 },
+    group: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.lg + 2,
+      borderWidth: 1,
+      overflow: "hidden",
+    },
+    row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 50, paddingHorizontal: 14 },
+    divider: { backgroundColor: palette.hairline, height: 1, left: 45, position: "absolute", right: 0, top: 0 },
+    rowLabel: { color: palette.ink1, flex: 1, fontSize: font.body },
+    rowValue: { color: palette.ink3, fontSize: font.label + 0.5, maxWidth: "46%" },
+    version: { color: palette.ink4, fontSize: font.caption, paddingBottom: 8, paddingTop: 22, textAlign: "center" },
+  });

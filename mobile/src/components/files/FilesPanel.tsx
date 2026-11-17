@@ -1,12 +1,14 @@
-import { Fragment, useState, type ComponentProps } from "react";
-import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
+import { Fragment, useMemo, useState, type ComponentProps } from "react";
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import type { AssetSummary, FileEntry, FileReadResultPayload } from "../../protocol";
+import type { AssetSummary, ChangeEntry, FileEntry, FileReadResultPayload } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
+import { copyToClipboard } from "../../utils/clipboard";
 import { formatBytes, formatShortTime } from "../../utils/format";
-import { palette } from "../../constants/theme";
-import { list } from "../common/listStyles";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { useListStyles } from "../common/listStyles";
 import { Segmented } from "../common/Segmented";
 import { FilePreview } from "./FilePreview";
 
@@ -15,6 +17,7 @@ type FeatherName = ComponentProps<typeof Feather>["name"];
 type Props = {
   assets: AssetSummary[];
   buttonFeedback: ButtonFeedback;
+  changes?: ChangeEntry[];
   clientToken: string;
   fileEntries: FileEntry[];
   fileParent: string;
@@ -24,20 +27,53 @@ type Props = {
   onOpenFileEntry: (entry: FileEntry) => void;
   pendingAssets: boolean;
   pendingFiles: boolean;
-  // 预览由外层决定（顶栏返回要回到列表），这里只负责渲染
   showPreview: boolean;
 };
 
-// 文件页：工作区目录 / 会话资源两组，点文件进入预览。顶栏的刷新和返回由外层提供。
+// 文件页：支持文件名检索、叠加工作区变更角标 (M/A)、长按复制路径、会话共享资源浏览。
 export function FilesPanel(props: Props) {
-  const { assets, clientToken, fileEntries, fileParent, filePath, pendingFiles } = props;
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  const styles = useThemedStyles(makeStyles);
+  const { assets, changes = [], clientToken, fileEntries, fileParent, filePath, pendingFiles } = props;
   const [tab, setTab] = useState<"workspace" | "assets">("workspace");
+  const [query, setQuery] = useState("");
+  const [copiedPath, setCopiedPath] = useState("");
+
+  const changeByPath = useMemo(() => {
+    const map = new Map<string, ChangeEntry>();
+    for (const c of changes) {
+      map.set(c.path.replace(/\\/g, "/"), c);
+    }
+    return map;
+  }, [changes]);
+
+  const filteredEntries = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return fileEntries;
+    return fileEntries.filter((entry) => entry.name.toLowerCase().includes(q) || entry.path.toLowerCase().includes(q));
+  }, [fileEntries, query]);
+
+  const filteredAssets = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return assets;
+    return assets.filter((asset) =>
+      `${asset.file_name || ""} ${asset.path || ""}`.toLowerCase().includes(q),
+    );
+  }, [assets, query]);
 
   if (props.showPreview) {
     return <FilePreview loading={pendingFiles} preview={props.filePreview} />;
   }
 
   const segments = filePath.split(/[/\\]/).filter(Boolean);
+
+  const handleCopyPath = async (targetPath: string) => {
+    if (await copyToClipboard(targetPath)) {
+      setCopiedPath(targetPath);
+      setTimeout(() => setCopiedPath(""), 1800);
+    }
+  };
 
   return (
     <View>
@@ -46,6 +82,24 @@ export function FilesPanel(props: Props) {
         options={[{ key: "workspace", label: "工作区" }, { key: "assets", label: "会话资源" }]}
         value={tab}
       />
+
+      <View style={styles.searchBox}>
+        <Feather color={palette.ink3} name="search" size={15} />
+        <TextInput
+          onChangeText={setQuery}
+          placeholder={tab === "workspace" ? "过滤当前目录文件名…" : "过滤会话资源名称…"}
+          placeholderTextColor={palette.ink4}
+          style={styles.searchInput}
+          value={query}
+        />
+        {query ? (
+          <Pressable hitSlop={6} onPress={() => setQuery("")}>
+            <Feather color={palette.ink3} name="x" size={14} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {copiedPath ? <Text style={styles.copiedTip}>已复制路径：{copiedPath}</Text> : null}
 
       {tab === "workspace" ? (
         <>
@@ -65,26 +119,59 @@ export function FilesPanel(props: Props) {
             {fileParent ? (
               <Row disabled={pendingFiles} icon="corner-left-up" onPress={props.onGoToParent} sub="上一级" title=".." />
             ) : null}
-            {fileEntries.length === 0 ? (
+            {filteredEntries.length === 0 ? (
               pendingFiles ? (
                 <Loading text="正在加载目录…" />
               ) : (
-                <Text style={list.empty}>{clientToken ? "这个目录是空的" : "请先完成配对"}</Text>
+                <Text style={list.empty}>
+                  {!clientToken ? "请先完成配对" : query ? "当前目录没有匹配项" : "这个目录是空的"}
+                </Text>
               )
             ) : (
-              fileEntries.map((entry, index) => (
-                <Fragment key={entry.path}>
-                  {index > 0 || fileParent ? <View style={list.divider} /> : null}
-                  <Row
-                    accent={entry.type === "dir"}
-                    disabled={pendingFiles}
-                    icon={entry.type === "dir" ? "folder" : "file-text"}
-                    onPress={() => props.onOpenFileEntry(entry)}
-                    sub={[entry.type === "dir" ? "" : formatBytes(entry.size || 0), entry.modified_at ? formatShortTime(entry.modified_at) : ""].filter(Boolean).join(" · ")}
-                    title={entry.name}
-                  />
-                </Fragment>
-              ))
+              filteredEntries.map((entry, index) => {
+                const rel = entry.path.replace(/\\/g, "/");
+                const exactChange = changeByPath.get(rel);
+                const dirHasChanges =
+                  entry.type === "dir" &&
+                  changes.some((c) => c.path.replace(/\\/g, "/").startsWith(rel.endsWith("/") ? rel : `${rel}/`));
+                const badgeText = exactChange
+                  ? exactChange.untracked || exactChange.status === "added"
+                    ? "新增"
+                    : exactChange.deleted
+                      ? "删除"
+                      : "已修改"
+                  : dirHasChanges
+                    ? "有改动"
+                    : undefined;
+                const badgeTone =
+                  exactChange?.untracked || exactChange?.status === "added"
+                    ? "new"
+                    : badgeText
+                      ? "mod"
+                      : undefined;
+
+                return (
+                  <Fragment key={entry.path}>
+                    {index > 0 || fileParent ? <View style={list.divider} /> : null}
+                    <Row
+                      accent={entry.type === "dir"}
+                      badge={badgeText}
+                      badgeTone={badgeTone}
+                      disabled={pendingFiles}
+                      icon={entry.type === "dir" ? "folder" : "file-text"}
+                      onLongPress={() => void handleCopyPath(entry.path)}
+                      onPress={() => props.onOpenFileEntry(entry)}
+                      sub={[
+                        entry.type === "dir" ? "长按复制路径" : formatBytes(entry.size || 0),
+                        entry.modified_at ? formatShortTime(entry.modified_at) : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      title={entry.name}
+                    />
+                  </Fragment>
+                );
+              })
             )}
           </View>
         </>
@@ -92,16 +179,28 @@ export function FilesPanel(props: Props) {
         <>
           <Text style={list.hint}>本会话上传和生成的文件，点开用浏览器查看。</Text>
           <View style={list.bleed}>
-            {assets.length === 0 ? (
-              props.pendingAssets ? <Loading text="正在加载…" /> : <Text style={list.empty}>{clientToken ? "还没有会话资源" : "请先完成配对"}</Text>
+            {filteredAssets.length === 0 ? (
+              props.pendingAssets ? (
+                <Loading text="正在加载…" />
+              ) : (
+                <Text style={list.empty}>
+                  {!clientToken ? "请先完成配对" : query ? "没有匹配的会话资源" : "还没有会话资源"}
+                </Text>
+              )
             ) : (
-              assets.map((asset, index) => (
+              filteredAssets.map((asset, index) => (
                 <Fragment key={asset.id || asset.short_url}>
                   {index > 0 ? <View style={list.divider} /> : null}
                   <Row
                     icon={(asset.content_type || "").startsWith("image/") ? "image" : "file"}
+                    onLongPress={() => void handleCopyPath(asset.short_url)}
                     onPress={() => void Linking.openURL(asset.short_url)}
-                    sub={[asset.size !== undefined ? formatBytes(asset.size) : "", asset.created_at ? formatShortTime(asset.created_at) : ""].filter(Boolean).join(" · ")}
+                    sub={[
+                      asset.size !== undefined ? formatBytes(asset.size) : "",
+                      asset.created_at ? formatShortTime(asset.created_at) : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                     title={asset.file_name || asset.path || "共享文件"}
                     trailing="external-link"
                   />
@@ -115,17 +214,39 @@ export function FilesPanel(props: Props) {
   );
 }
 
-function Row({ accent, disabled, icon, onPress, sub, title, trailing = "chevron-right" }: {
+function Row({
+  accent,
+  badge,
+  badgeTone,
+  disabled,
+  icon,
+  onLongPress,
+  onPress,
+  sub,
+  title,
+  trailing = "chevron-right",
+}: {
   accent?: boolean;
+  badge?: string;
+  badgeTone?: "new" | "mod";
   disabled?: boolean;
   icon: FeatherName;
+  onLongPress?: () => void;
   onPress: () => void;
   sub?: string;
   title: string;
   trailing?: FeatherName;
 }) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+
   return (
-    <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => [list.row, pressed && list.pressed]}>
+    <Pressable
+      disabled={disabled}
+      onLongPress={onLongPress}
+      onPress={onPress}
+      style={({ pressed }) => [list.row, pressed && list.pressed]}
+    >
       <View style={[list.iconBox, accent && list.iconBoxAccent]}>
         <Feather color={accent ? palette.brandLight : palette.ink2} name={icon} size={17} />
       </View>
@@ -133,12 +254,17 @@ function Row({ accent, disabled, icon, onPress, sub, title, trailing = "chevron-
         <Text numberOfLines={1} style={list.title}>{title}</Text>
         {sub ? <Text numberOfLines={1} style={list.sub}>{sub}</Text> : null}
       </View>
+      {badge ? (
+        <Text style={[list.tag, badgeTone === "new" ? list.tagNew : list.tagMod]}>{badge}</Text>
+      ) : null}
       <Feather color={palette.ink4} name={trailing} size={16} />
     </Pressable>
   );
 }
 
 function Loading({ text }: { text: string }) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
   return (
     <View style={list.loading}>
       <ActivityIndicator color={palette.ink2} size="small" />
@@ -146,3 +272,27 @@ function Loading({ text }: { text: string }) {
     </View>
   );
 }
+
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    searchBox: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      height: 38,
+      marginBottom: 8,
+      marginTop: 10,
+      paddingHorizontal: 11,
+    },
+    searchInput: { color: palette.ink1, flex: 1, fontSize: font.label, padding: 0 },
+    copiedTip: {
+      color: palette.ok,
+      fontSize: font.caption,
+      fontWeight: weight.medium,
+      marginBottom: 6,
+    },
+  });

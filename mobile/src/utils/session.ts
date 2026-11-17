@@ -49,13 +49,27 @@ export function modelDisplayName(model: ModelSummary) {
   return model.name || model.model_name || model.id;
 }
 
-export function normalizePermission(mode?: string): "readonly" | "ask" | "full" {
-  return mode === "readonly" || mode === "full" ? mode : "ask";
+export function normalizePermission(mode?: string): "readonly" | "ask" | "read_write" | "execute" | "full" {
+  if (mode === "readonly" || mode === "read_write" || mode === "execute" || mode === "full") {
+    return mode;
+  }
+  return "ask";
 }
 
 export function permissionLabel(mode?: string) {
-  const normalized = normalizePermission(mode);
-  return normalized === "readonly" ? "只读" : normalized === "full" ? "完全开放" : "询问";
+  switch (normalizePermission(mode)) {
+    case "readonly":
+      return "只读";
+    case "read_write":
+      return "仅读写";
+    case "execute":
+      return "允许执行";
+    case "full":
+      return "完全开放";
+    case "ask":
+    default:
+      return "谨慎询问";
+  }
 }
 
 const protocolLabels: Record<string, string> = {

@@ -18,7 +18,7 @@
       "resizeMode": "contain",
       "backgroundColor": "#0F1114"
     },
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
@@ -63,7 +63,8 @@
       "expo-updates",
       "expo-sqlite",
       "./plugins/withRelayForegroundService",
-      "expo-font"
+      "expo-font",
+      "expo-image"
     ],
     "extra": {
       "eas": {

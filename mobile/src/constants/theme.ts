@@ -1,43 +1,184 @@
 import { Platform } from "react-native";
 
-// 设计 token 单一来源。所有组件禁止出现颜色字面量，必须引用这里的值。
-// 命名约定：语义名，不含具体颜色（不要出现 yellow/black 之类的名字，否则换主题时没法用）。
-// 当前主题：石墨深色画布 + 取自角色发色的青色强调。强调色只用于主操作、选中态和链接。
+// 设计 token 单一来源。静态导出保留默认值以兼容未迁移组件，动态主题请通过 useAppTheme() 获取。
 
-export const palette = {
-  // —— 中性色阶（深色画布，由深到浅）
-  canvas: "#0F1114", // 最底层背景
-  surface1: "#171A1F", // 一级容器（卡片、列表分组）
-  surface2: "#1A1D23", // 二级容器（底部弹层、侧栏、浮起的卡片）
-  surface3: "#23272E", // 三级容器（凹槽、用户气泡、次要按钮）
-  surface4: "#383D47", // 分段控件选中块、按下态
-  bubble: "#23272E", // 用户消息气泡
-  well: "#23272E", // 凹槽：分段控件底、代码块、输入框内层
+export type ThemeMode = "dark" | "light" | "system";
+export type AccentPreset = "cyan" | "blue" | "mint" | "amber";
 
-  // —— 描边（深色底下必须用透明度，不能用实色）
-  hairline: "rgba(255,255,255,0.075)", // 默认分隔线 / 1px 边框
-  hairlineStrong: "rgba(255,255,255,0.14)", // 需要强调的边框（输入框外框）
-  hairlineSoft: "rgba(255,255,255,0.05)", // 极弱分隔
-  pressed: "rgba(255,255,255,0.06)", // 行按下反馈
+export type AppearanceSettings = {
+  accent: AccentPreset;
+  highlightUserBubble: boolean;
+  keepThinkingExpanded: boolean;
+  readingFontSize: number;
+  themeMode: ThemeMode;
+};
 
-  // —— 文字（四级层次）
-  ink1: "#ECEEF1", // 主文字（正文、标题）
-  ink2: "#A3A9B4", // 次文字（说明、副标题）
-  ink3: "#868D99", // 弱文字（元信息、时间戳）
-  ink4: "#5E6573", // 极弱（占位符、禁用态）。禁止用于正文
-  inkInverse: "#03232C", // 放在强调色填充上的文字
+export const defaultAppearanceSettings: AppearanceSettings = {
+  accent: "cyan",
+  highlightUserBubble: false,
+  keepThinkingExpanded: false,
+  readingFontSize: 16,
+  themeMode: "dark",
+};
 
-  // —— 品牌色（青色，唯一强调色）
-  brand: "#3CCBE8", // 填充：发送按钮、主按钮、进度
-  brandLight: "#67D6EE", // 文字用强调色：链接、选中文字、运行中状态
-  brandDeep: "rgba(60,203,232,0.42)", // 强调描边
-  brandDark: "#2AA9C4", // 头像光圈暗端
-  brandWash: "rgba(60,203,232,0.14)", // 淡底（选中标签背景）
-  brandWashStrong: "rgba(60,203,232,0.20)",
-  brandCode: "#23272E", // 行内代码底
-  brandGlow: "rgba(60,203,232,0.35)", // 光晕
+export const accentOptions: Array<{
+  description: string;
+  key: AccentPreset;
+  label: string;
+  swatchDark: string;
+  swatchLight: string;
+}> = [
+  { key: "cyan", label: "冰川青", description: "MyAI 默认发色灵感", swatchDark: "#3CCBE8", swatchLight: "#0891B2" },
+  { key: "blue", label: "深空蓝", description: "冷静沉稳工程感", swatchDark: "#5B9BFF", swatchLight: "#2563EB" },
+  { key: "mint", label: "薄荷绿", description: "轻盈低疲劳阅读", swatchDark: "#38D399", swatchLight: "#0D9488" },
+  { key: "amber", label: "琥珀金", description: "暖调高对比聚焦", swatchDark: "#F2B84B", swatchLight: "#D97706" },
+];
 
-  // —— 状态色（取自角色配饰：黄色发珠、珊瑚色星星）
+type AccentTokens = {
+  brand: string;
+  brandLight: string;
+  brandDeep: string;
+  brandDark: string;
+  brandWash: string;
+  brandWashStrong: string;
+  brandGlow: string;
+  inkInverse: string;
+  cyan: string;
+  cyanWash: string;
+  ambientGlow: string;
+};
+
+const darkAccentMap: Record<AccentPreset, AccentTokens> = {
+  cyan: {
+    brand: "#3CCBE8",
+    brandLight: "#67D6EE",
+    brandDeep: "rgba(60,203,232,0.42)",
+    brandDark: "#2AA9C4",
+    brandWash: "rgba(60,203,232,0.14)",
+    brandWashStrong: "rgba(60,203,232,0.20)",
+    brandGlow: "rgba(60,203,232,0.35)",
+    inkInverse: "#03232C",
+    cyan: "#67D6EE",
+    cyanWash: "rgba(60,203,232,0.14)",
+    ambientGlow: "rgba(60,203,232,0.14)",
+  },
+  blue: {
+    brand: "#5B9BFF",
+    brandLight: "#84B6FF",
+    brandDeep: "rgba(91,155,255,0.44)",
+    brandDark: "#3B7BE3",
+    brandWash: "rgba(91,155,255,0.15)",
+    brandWashStrong: "rgba(91,155,255,0.22)",
+    brandGlow: "rgba(91,155,255,0.34)",
+    inkInverse: "#061D42",
+    cyan: "#84B6FF",
+    cyanWash: "rgba(91,155,255,0.15)",
+    ambientGlow: "rgba(91,155,255,0.14)",
+  },
+  mint: {
+    brand: "#38D399",
+    brandLight: "#6AE2B6",
+    brandDeep: "rgba(56,211,153,0.42)",
+    brandDark: "#1FA977",
+    brandWash: "rgba(56,211,153,0.14)",
+    brandWashStrong: "rgba(56,211,153,0.20)",
+    brandGlow: "rgba(56,211,153,0.32)",
+    inkInverse: "#052B1E",
+    cyan: "#6AE2B6",
+    cyanWash: "rgba(56,211,153,0.14)",
+    ambientGlow: "rgba(56,211,153,0.14)",
+  },
+  amber: {
+    brand: "#F2B84B",
+    brandLight: "#F7CF79",
+    brandDeep: "rgba(242,184,75,0.45)",
+    brandDark: "#CE9324",
+    brandWash: "rgba(242,184,75,0.14)",
+    brandWashStrong: "rgba(242,184,75,0.22)",
+    brandGlow: "rgba(242,184,75,0.32)",
+    inkInverse: "#2B1B03",
+    cyan: "#F7CF79",
+    cyanWash: "rgba(242,184,75,0.14)",
+    ambientGlow: "rgba(242,184,75,0.14)",
+  },
+};
+
+const lightAccentMap: Record<AccentPreset, AccentTokens> = {
+  cyan: {
+    brand: "#0891B2",
+    brandLight: "#0E7490",
+    brandDeep: "rgba(8,145,178,0.34)",
+    brandDark: "#155E75",
+    brandWash: "rgba(8,145,178,0.10)",
+    brandWashStrong: "rgba(8,145,178,0.16)",
+    brandGlow: "rgba(8,145,178,0.22)",
+    inkInverse: "#FFFFFF",
+    cyan: "#0E7490",
+    cyanWash: "rgba(8,145,178,0.10)",
+    ambientGlow: "rgba(8,145,178,0.10)",
+  },
+  blue: {
+    brand: "#2563EB",
+    brandLight: "#1D4ED8",
+    brandDeep: "rgba(37,99,235,0.34)",
+    brandDark: "#1E40AF",
+    brandWash: "rgba(37,99,235,0.10)",
+    brandWashStrong: "rgba(37,99,235,0.16)",
+    brandGlow: "rgba(37,99,235,0.22)",
+    inkInverse: "#FFFFFF",
+    cyan: "#1D4ED8",
+    cyanWash: "rgba(37,99,235,0.10)",
+    ambientGlow: "rgba(37,99,235,0.10)",
+  },
+  mint: {
+    brand: "#0D9488",
+    brandLight: "#0F766E",
+    brandDeep: "rgba(13,148,136,0.34)",
+    brandDark: "#115E59",
+    brandWash: "rgba(13,148,136,0.10)",
+    brandWashStrong: "rgba(13,148,136,0.16)",
+    brandGlow: "rgba(13,148,136,0.22)",
+    inkInverse: "#FFFFFF",
+    cyan: "#0F766E",
+    cyanWash: "rgba(13,148,136,0.10)",
+    ambientGlow: "rgba(13,148,136,0.10)",
+  },
+  amber: {
+    brand: "#D97706",
+    brandLight: "#B45309",
+    brandDeep: "rgba(217,119,6,0.36)",
+    brandDark: "#92400E",
+    brandWash: "rgba(217,119,6,0.11)",
+    brandWashStrong: "rgba(217,119,6,0.17)",
+    brandGlow: "rgba(217,119,6,0.22)",
+    inkInverse: "#FFFFFF",
+    cyan: "#B45309",
+    cyanWash: "rgba(217,119,6,0.11)",
+    ambientGlow: "rgba(217,119,6,0.10)",
+  },
+};
+
+const darkBasePalette = {
+  canvas: "#0F1114",
+  surface1: "#171A1F",
+  surface2: "#1A1D23",
+  surface3: "#23272E",
+  surface4: "#383D47",
+  bubble: "#23272E",
+  well: "#23272E",
+
+  hairline: "rgba(255,255,255,0.075)",
+  hairlineStrong: "rgba(255,255,255,0.14)",
+  hairlineSoft: "rgba(255,255,255,0.05)",
+  pressed: "rgba(255,255,255,0.06)",
+
+  ink1: "#ECEEF1",
+  ink2: "#A3A9B4",
+  ink3: "#868D99",
+  ink4: "#5E6573",
+
+  brandCode: "#23272E",
+
   ok: "#5CD69B",
   okWash: "rgba(92,214,155,0.12)",
   okBorder: "rgba(92,214,155,0.30)",
@@ -48,35 +189,94 @@ export const palette = {
   errBorder: "rgba(255,138,117,0.32)",
   info: "#8FB8FF",
   infoWash: "rgba(143,184,255,0.12)",
-  // 运行中 / 进行中，与强调色同色系
-  cyan: "#67D6EE",
-  cyanWash: "rgba(60,203,232,0.14)",
 
-  // —— diff 专用：只给底色和 +/− 号上色，正文保持主文字色
   diffAdd: "#5CD69B",
   diffAddBg: "rgba(92,214,155,0.10)",
   diffDel: "#FF8A75",
   diffDelBg: "rgba(255,138,117,0.10)",
 
-  // —— 浮层底色（旧名保留：原为毛玻璃，现统一为不透明面）
   glassTint: "#1A1D23",
   glassTintStrong: "#1A1D23",
   glassTintSoft: "#171A1F",
   glassEdge: "rgba(255,255,255,0.075)",
   glassInner: "rgba(255,255,255,0.05)",
+  floatingGlass: "rgba(23,26,31,0.82)",
+  floatingGlassBorder: "rgba(255,255,255,0.11)",
 
-  // —— 遮罩
-  scrim: "rgba(0,0,0,0.55)", // 抽屉/弹窗背后的遮罩
-  scrimHeavy: "rgba(4,4,6,0.92)", // 全屏图片查看
-
+  scrim: "rgba(0,0,0,0.55)",
+  scrimHeavy: "rgba(4,4,6,0.92)",
   transparent: "transparent",
-
-  // —— 下凹区域（工具结果体、代码块内部）
   recessed: "#23272E",
+};
 
-  // —— 角色插画背后的柔光
-  ambientGlow: "rgba(60,203,232,0.14)",
-} as const;
+const lightBasePalette = {
+  canvas: "#F5F7FA",
+  surface1: "#FFFFFF",
+  surface2: "#EEF2F6",
+  surface3: "#E3E9F0",
+  surface4: "#CED8E5",
+  bubble: "#E8EEF5",
+  well: "#EAEFF5",
+
+  hairline: "rgba(15,23,42,0.08)",
+  hairlineStrong: "rgba(15,23,42,0.16)",
+  hairlineSoft: "rgba(15,23,42,0.05)",
+  pressed: "rgba(15,23,42,0.05)",
+
+  ink1: "#11161D",
+  ink2: "#4B5565",
+  ink3: "#687486",
+  ink4: "#94A3B8",
+
+  brandCode: "#E6ECF3",
+
+  ok: "#139A5C",
+  okWash: "rgba(19,154,92,0.10)",
+  okBorder: "rgba(19,154,92,0.28)",
+  warn: "#C4840D",
+  warnWash: "rgba(196,132,13,0.12)",
+  err: "#D94B38",
+  errWash: "rgba(217,75,56,0.10)",
+  errBorder: "rgba(217,75,56,0.28)",
+  info: "#2563EB",
+  infoWash: "rgba(37,99,235,0.10)",
+
+  diffAdd: "#139A5C",
+  diffAddBg: "rgba(19,154,92,0.10)",
+  diffDel: "#D94B38",
+  diffDelBg: "rgba(217,75,56,0.10)",
+
+  glassTint: "#FFFFFF",
+  glassTintStrong: "#FFFFFF",
+  glassTintSoft: "#F8FAFC",
+  glassEdge: "rgba(15,23,42,0.08)",
+  glassInner: "rgba(255,255,255,0.75)",
+  floatingGlass: "rgba(255,255,255,0.88)",
+  floatingGlassBorder: "rgba(15,23,42,0.10)",
+
+  scrim: "rgba(15,23,42,0.42)",
+  scrimHeavy: "rgba(15,23,42,0.86)",
+  transparent: "transparent",
+  recessed: "#E8EEF4",
+};
+
+export type ThemePalette = typeof darkBasePalette & AccentTokens & {
+  userBubbleBg: string;
+  userBubbleBorder: string;
+};
+
+export function buildPalette(isDark: boolean, accent: AccentPreset, highlightUserBubble: boolean): ThemePalette {
+  const base = isDark ? darkBasePalette : lightBasePalette;
+  const accentTokens = (isDark ? darkAccentMap : lightAccentMap)[accent] ?? (isDark ? darkAccentMap : lightAccentMap).cyan;
+  return {
+    ...base,
+    ...accentTokens,
+    userBubbleBg: highlightUserBubble ? accentTokens.brandWashStrong : base.bubble,
+    userBubbleBorder: highlightUserBubble ? accentTokens.brandDeep : base.transparent,
+  };
+}
+
+export const palette: ThemePalette = buildPalette(true, "cyan", false);
 
 // 圆角
 export const radius = {
@@ -86,8 +286,8 @@ export const radius = {
   md: 14,
   lg: 16,
   xl: 20,
-  xxl: 24, // 输入框外框
-  sheet: 26, // 底部弹层、侧栏
+  xxl: 24,
+  sheet: 26,
   pill: 999,
 } as const;
 
@@ -102,84 +302,91 @@ export const space = {
   xxxl: 26,
 } as const;
 
-// 字号：正文 16 起步，元信息不低于 12
-export const font = {
-  micro: 11,
-  caption: 12.5,
-  label: 13.5,
-  body: 15, // 列表行、按钮
-  bodyLg: 16,
-  reading: 16, // 对话正文
-  title: 17, // 顶栏标题、弹层标题
-  display: 22, // 空状态问候
-  large: 28, // 设置等大标题页
-} as const;
+export function buildFont(readingSize = 16) {
+  const delta = Math.max(-2, Math.min(2, readingSize - 16));
+  return {
+    micro: 11,
+    caption: 12.5 + delta * 0.25,
+    label: 13.5 + delta * 0.5,
+    body: 15 + delta * 0.75,
+    bodyLg: 16 + delta * 0.75,
+    reading: 16 + delta,
+    title: 17,
+    display: 22,
+    large: 28,
+  };
+}
 
-// 行高倍率（中文正文 >= 1.6）
+export type ThemeFont = ReturnType<typeof buildFont>;
+
+export const font = buildFont(16);
+
 export const leading = {
   tight: 1.25,
   normal: 1.45,
   relaxed: 1.68,
 } as const;
 
-// 字重：常规 400、强调 500、标题 600。700 只用于数字和极少数强调
 export const weight = {
   regular: "400",
   medium: "500",
   semibold: "600",
   bold: "700",
-  heavy: "900", // 仅限：主标题、徽章数字。正文禁止使用
+  heavy: "900",
 } as const;
 
 export const fontFamily = {
   mono: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) as string,
 } as const;
 
-// 阴影：深色主题下层次靠表面色差，阴影只给浮起元素（输入框、弹层、侧栏）。
-export const shadow = {
-  float: {
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  card: {
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.22,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  // Android 不支持彩色阴影，elevation 给 0
-  brandGlow: {
-    shadowColor: palette.brand,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 22,
-    elevation: 0,
-  },
-  none: {
-    shadowColor: "transparent",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  },
-} as const;
+export function buildShadow(isDark: boolean, brandColor: string) {
+  return {
+    float: {
+      shadowColor: "#000000",
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: isDark ? 0.45 : 0.14,
+      shadowRadius: isDark ? 24 : 20,
+      elevation: isDark ? 12 : 8,
+    },
+    card: {
+      shadowColor: "#000000",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.22 : 0.08,
+      shadowRadius: 6,
+      elevation: 2,
+    },
+    brandGlow: {
+      shadowColor: brandColor,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: isDark ? 0.3 : 0.2,
+      shadowRadius: 22,
+      elevation: 0,
+    },
+    none: {
+      shadowColor: "transparent",
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0,
+    },
+  };
+}
 
-// 旧的毛玻璃参数，保留导出以兼容未迁移的组件。
+export type ThemeShadow = ReturnType<typeof buildShadow>;
+
+export const shadow = buildShadow(true, palette.brand);
+
 export const glass = {
   intensity: 24,
   tint: palette.glassTint,
   edge: palette.glassEdge,
 } as const;
 
-/** @deprecated 已废弃，请使用 palette / radius / font / weight / shadow */
+/** @deprecated 已废弃，请使用 useAppTheme() 或 palette / radius / font / weight / shadow */
 export const darkTheme = new Proxy({} as Record<string, never>, {
   get(_t, prop) {
     throw new Error(
-      `darkTheme.${String(prop)} 已废弃。请改用 palette / radius / font / weight / shadow。`,
+      `darkTheme.${String(prop)} 已废弃。请改用 useAppTheme() 或 palette / radius / font / weight / shadow。`,
     );
   },
 });

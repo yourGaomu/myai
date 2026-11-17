@@ -19,6 +19,7 @@ import type {
   IntentConfigTestResultPayload,
   IntentTracePayload,
   ModelSummary,
+  Plan,
   PluginInfo,
   SkillSummary,
   SessionSummary,
@@ -45,6 +46,7 @@ import type { KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
 import type { SettingsSection } from "../components/settings/SettingsHome";
+import type { MotionSlot } from "../utils/motionRegistry";
 
 export type MainContentCommonProps = {
   buttonFeedback: ButtonFeedback;
@@ -175,25 +177,38 @@ export type PlanContentProps = {
 
 export type ChatContentProps = {
   activeAssistantID: string;
+  activePlan?: Plan;
+  activitySlot?: MotionSlot;
+  changesCount?: number;
   chatScrollRef: RefObject<ScrollView | null>;
   connected: boolean;
   deviceID: string;
   greetingName: string;
+  onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
+  onExecutePlan?: () => void;
+  onNearHeaderChange?: (near: boolean) => void;
+  onOpenChangePath?: (path: string) => void;
   onOpenChanges: () => void;
+  onOpenPlan?: () => void;
   onPickSuggestion: (text: string) => void;
   onScrolledChange: (scrolled: boolean) => void;
   messages: ChatItem[];
   runs: AgentRunSnapshot[];
   onRegenerate: () => void;
   pendingHistorySessionID: string;
+  pendingPlan?: boolean;
+  pendingQuestions?: UserQuestionState[];
   pendingRequestID: string;
   sessionID: string;
   subagentTasks?: SubagentTask[];
   onInspectSubagent?: (taskID: string) => void;
+  topClearance?: number;
+  workspaceChanges?: ChangeEntry[];
 };
 
 export type FilesContentProps = {
   assets: AssetSummary[];
+  changes?: ChangeEntry[];
   fileEntries: FileEntry[];
   fileParent: string;
   filePath: string;
@@ -245,6 +260,7 @@ export type KnowledgeContentProps = {
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
   onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
   onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onInsertReference?: (snippet: string) => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
   onRefresh: () => void;
   onRefreshDocuments: () => void;

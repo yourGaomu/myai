@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import { palette } from "../../constants/theme";
+import { useAppTheme } from "../../theme/ThemeProvider";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { isPermissionEvent, type ToolActivityGroupItem } from "../../utils/chatRenderItems";
 import { parseSharedAsset } from "../../utils/toolAssets";
 import { SharedAssetCard } from "./SharedAssetCard";
-import { styles } from "./styles";
+import { useChatStyles, type ChatStyles } from "./styles";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -16,6 +16,8 @@ type Props = {
 };
 
 export function ToolActivityGroup({ buttonFeedback, group }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useChatStyles();
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => toolActivitySummary(group), [group]);
 
@@ -32,7 +34,7 @@ export function ToolActivityGroup({ buttonFeedback, group }: Props) {
       {expanded ? (
         <View style={styles.toolGroupBody}>
           {group.messages.map((message, index) => (
-            <ToolActivityStep key={message.id} buttonFeedback={buttonFeedback} index={index + 1} message={message} />
+            <ToolActivityStep key={message.id} buttonFeedback={buttonFeedback} index={index + 1} message={message} styles={styles} />
           ))}
         </View>
       ) : null}
@@ -40,7 +42,17 @@ export function ToolActivityGroup({ buttonFeedback, group }: Props) {
   );
 }
 
-function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: ButtonFeedback; index: number; message: ChatItem }) {
+function ToolActivityStep({
+  buttonFeedback,
+  index,
+  message,
+  styles,
+}: {
+  buttonFeedback: ButtonFeedback;
+  index: number;
+  message: ChatItem;
+  styles: ChatStyles;
+}) {
   if (isPermissionEvent(message)) {
     return (
       <View style={styles.toolGroupStep}>
@@ -93,21 +105,11 @@ function ToolActivityStep({ buttonFeedback, index, message }: { buttonFeedback: 
 
 function toolActivitySummary(group: ToolActivityGroupItem) {
   const parts = [`${group.messages.length} 个步骤`];
-  if (group.callCount > 0) {
-    parts.push(`${group.callCount} 次调用`);
-  }
-  if (group.resultCount > 0) {
-    parts.push(`${group.resultCount} 个结果`);
-  }
-  if (group.permissionCount > 0) {
-    parts.push(`${group.permissionCount} 个权限事件`);
-  }
-  if (group.assetCount > 0) {
-    parts.push(`${group.assetCount} 个资源`);
-  }
-  if (group.failedCount > 0) {
-    parts.push(`${group.failedCount} 个失败`);
-  }
+  if (group.callCount > 0) parts.push(`${group.callCount} 次调用`);
+  if (group.resultCount > 0) parts.push(`${group.resultCount} 个结果`);
+  if (group.permissionCount > 0) parts.push(`${group.permissionCount} 个权限事件`);
+  if (group.assetCount > 0) parts.push(`${group.assetCount} 个资源`);
+  if (group.failedCount > 0) parts.push(`${group.failedCount} 个失败`);
 
   const names = group.names
     .map((name) => (name === "knowledge_search" ? "知识库检索" : name))

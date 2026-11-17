@@ -16,7 +16,8 @@ import type { KnowledgeBaseChanges } from "../../types/knowledge";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 export type KnowledgePanelProps = {
   activeSession?: SessionSummary;
@@ -31,6 +32,7 @@ export type KnowledgePanelProps = {
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
   onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
   onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onInsertReference?: (snippet: string) => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
   onRefresh: () => void;
   onRefreshDocuments: () => void;
@@ -61,6 +63,7 @@ export function KnowledgePanel({
   onDeleteCategory,
   onDeleteDocument,
   onDeleteKnowledgeBase,
+  onInsertReference,
   onMoveCategory,
   onRefresh,
   onRefreshDocuments,
@@ -75,6 +78,8 @@ export function KnowledgePanel({
   profiles,
   searchResult,
 }: KnowledgePanelProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const [selectedID, setSelectedID] = useState("");
   const [detailTab, setDetailTab] = useState<DetailTab | null>(null);
   const [filterText, setFilterText] = useState("");
@@ -315,6 +320,16 @@ export function KnowledgePanel({
                     </Text>
                   </View>
                   <View style={styles.docActions}>
+                    {onInsertReference && selectedBase ? (
+                      <Pressable
+                        hitSlop={4}
+                        onPress={() => onInsertReference(`[引用知识库文档 · ${selectedBase.name} / ${doc.file_name}]`)}
+                        style={({ pressed }) => buttonFeedback(styles.refPillBtn, pressed)}
+                      >
+                        <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                        <Text style={styles.refPillText}>引用</Text>
+                      </Pressable>
+                    ) : null}
                     <View
                       style={[
                         styles.docStatusBadge,
@@ -569,6 +584,10 @@ export function KnowledgePanel({
             <SearchPanel
               buttonFeedback={buttonFeedback}
               onChangeQuery={setSemanticQuery}
+              onInsertReference={onInsertReference ? (snippet) => {
+                setDetailTab(null);
+                onInsertReference(snippet);
+              } : undefined}
               onSearch={() =>
                 onSearch(semanticQuery, {
                   ...settings,
@@ -637,6 +656,8 @@ function KnowledgeExplorer({
   pending,
   selectedBaseID,
 }: ExplorerProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const query = filterText.trim().toLocaleLowerCase();
   const roots = categories.filter((category) => !category.parent_id);
 
@@ -834,6 +855,8 @@ function CatalogManagement({
   setCategoryName,
   setRecursiveDeleteID,
 }: CatalogManagementProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.managementPanel}>
       {managedCategory ? (
@@ -970,6 +993,7 @@ function CatalogManagement({
 }
 
 function ScopeChip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable onPress={onPress} style={[styles.scopeChip, active && styles.scopeChipActive]}>
       <Text style={styles.scopeText}>{label}</Text>
@@ -980,6 +1004,7 @@ function ScopeChip({ active, label, onPress }: { active: boolean; label: string;
 function SearchPanel({
   buttonFeedback,
   onChangeQuery,
+  onInsertReference,
   onSearch,
   pending,
   query,
@@ -987,11 +1012,14 @@ function SearchPanel({
 }: {
   buttonFeedback: ButtonFeedback;
   onChangeQuery: (value: string) => void;
+  onInsertReference?: (snippet: string) => void;
   onSearch: () => void;
   pending: boolean;
   query: string;
   result: KnowledgeSearchPreviewResultPayload | null;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.detailBody}>
       <View style={styles.toolbarRow}>
@@ -1024,7 +1052,20 @@ function SearchPanel({
           {result.error ? <Text style={styles.errorText}>{result.error}</Text> : null}
           {result.hits.map((hit) => (
             <View key={hit.chunk_id} style={styles.hitRow}>
-              <Text style={styles.hitTitle}>[{hit.rank}] {hit.source_name || hit.document_id}</Text>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.hitTitle, styles.flex]}>[{hit.rank}] {hit.source_name || hit.document_id}</Text>
+                {onInsertReference ? (
+                  <Pressable
+                    onPress={() =>
+                      onInsertReference(`[引用知识库片段 · ${hit.source_name || hit.document_id}]\n${hit.text}`)
+                    }
+                    style={({ pressed }) => buttonFeedback(styles.refPillBtn, pressed)}
+                  >
+                    <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                    <Text style={styles.refPillText}>引用</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text selectable style={styles.hitText}>{hit.text}</Text>
             </View>
           ))}
@@ -1051,6 +1092,7 @@ function ConfigPanel({
   pending: boolean;
   profiles: KnowledgeIndexProfile[];
 }) {
+  const styles = useThemedStyles(createStyles);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const activeProfiles = profiles.filter((profile) => profile.status === "active" && !profile.deleted);
   return (
@@ -1177,346 +1219,363 @@ function formatDate(value: string) {
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-const styles = StyleSheet.create({
-  content: { gap: 12, paddingTop: 10, paddingBottom: 28 },
-  headerRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  toolbarRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  sectionHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
-  explorerSection: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    overflow: "hidden",
-    ...shadow.card,
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    content: { gap: 12, paddingTop: 10, paddingBottom: 28 },
+    headerRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    toolbarRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    sectionHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
+    explorerSection: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      overflow: "hidden",
+      ...shadow.card,
     },
-  sessionSection: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    overflow: "hidden",
-    ...shadow.card,
+    sessionSection: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      overflow: "hidden",
+      ...shadow.card,
     },
-  sessionSummaryRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 58, paddingHorizontal: 12, paddingVertical: 10 },
-  sessionSettingsBody: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 10, padding: 12 },
-  detailBody: { gap: 10 },
-  tree: { borderTopColor: palette.hairline, borderTopWidth: 1, marginTop: 10 },
-  flex: { flex: 1, minWidth: 0 },
-  iconRow: { alignItems: "center", flexDirection: "row", gap: 5 },
-  eyebrow: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
-  title: { color: palette.ink1, fontSize: font.display, fontWeight: weight.semibold },
-  sectionTitle: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
-  meta: { color: palette.ink2, fontSize: font.label, fontWeight: weight.regular },
-  input: { backgroundColor: palette.well, borderColor: palette.hairlineStrong, borderRadius: radius.md - 2, borderWidth: 1, color: palette.ink1, minHeight: 44, minWidth: 0, paddingHorizontal: 12, paddingVertical: 9 },
-  smallInput: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, maxWidth: "55%", minWidth: 72, paddingHorizontal: 8, paddingVertical: 5, textAlign: "right", width: 120 },
-  primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md - 2, justifyContent: "center", minHeight: 44, paddingHorizontal: 14, paddingVertical: 8 },
-  outlineButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: 10, paddingVertical: 7 },
-  secondaryButton: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
-  secondaryText: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.semibold },
-  iconTextButton: { paddingHorizontal: 6, paddingVertical: 6 },
-  iconTextButtonLabel: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
-  newButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 34, paddingHorizontal: 10, paddingVertical: 6 },
-  newButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.semibold },
-  disabledButton: { opacity: 0.42 },
-  statusMessage: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold, paddingHorizontal: 10, paddingVertical: 8 },
-  emptyText: { color: palette.ink2, paddingHorizontal: 12, paddingVertical: 18, textAlign: "center" },
-  emptyInline: { color: palette.ink2, fontSize: font.label, paddingBottom: 10, paddingTop: 8 },
-  loadingRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 10, paddingTop: 8 },
-  categoryRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 46, paddingRight: 8 },
-  categoryMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 46, minWidth: 0 },
-  arrow: { color: palette.ink3, fontSize: font.title, textAlign: "center", width: 14 },
-  folderMark: { backgroundColor: palette.brandWash, borderBottomLeftRadius: radius.xxs, borderBottomRightRadius: radius.xxs, borderTopRightRadius: radius.xxs, height: 12, width: 17 },
-  categoryName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
-  baseRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 44, paddingRight: 8 },
-  baseRowActive: { backgroundColor: palette.brandWash },
-  baseMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 44, minWidth: 0 },
-  baseMark: { backgroundColor: palette.brandWash, borderRadius: radius.xxs, height: 16, width: 13 },
-  baseName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
-  rowMeta: { color: palette.ink2, fontSize: font.caption, minWidth: 18, textAlign: "right" },
-  rowAction: { paddingHorizontal: 7, paddingVertical: 7 },
-  rowActionText: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
-  statusPill: { borderRadius: radius.xs, fontSize: font.micro, fontWeight: weight.semibold, overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
-  statusPillOn: { backgroundColor: palette.okWash, color: palette.ok },
-  statusPillOff: { backgroundColor: palette.well, color: palette.ink2 },
-  documentRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingRight: 8, paddingVertical: 7 },
-  documentMark: { backgroundColor: palette.brandWash, borderColor: palette.cyanWash, borderRadius: radius.xxs, borderWidth: 1, height: 18, width: 14 },
-  documentName: { color: palette.ink1, fontSize: font.body, fontWeight: weight.semibold },
-  documentMeta: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.regular, marginTop: 2 },
-  managementPanel: { gap: 18 },
-  managementBlock: { gap: 10 },
-  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  scopeChip: { backgroundColor: palette.well, borderColor: palette.transparent, borderRadius: radius.md - 4, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  scopeChipActive: { backgroundColor: palette.brandWash, borderColor: palette.brandDeep, borderWidth: 1 },
-  scopeText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.medium },
-  createRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  inlineActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  rowBetween: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
-  deleteOutlineButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
-  deleteText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
-  dangerButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, paddingHorizontal: 12, paddingVertical: 9 },
-  dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.medium },
-  errorText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
-  tabRow: { backgroundColor: palette.surface1, borderRadius: radius.sm, flexDirection: "row", gap: 3, padding: 3 },
-  tabButton: { alignItems: "center", borderRadius: radius.xs, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 8, paddingVertical: 7 },
-  tabButtonActive: { backgroundColor: palette.surface4, borderColor: palette.hairlineStrong, borderWidth: 1 },
-  tabText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
-  tabTextActive: { color: palette.ink1 },
-  footerDoneButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md, justifyContent: "center", minHeight: 44, minWidth: 104, paddingHorizontal: 18 },
-  footerDoneText: { color: palette.inkInverse, fontSize: font.body, fontWeight: weight.semibold },
-  searchResults: { gap: 8 },
-  hitRow: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 4, paddingTop: 10 },
-  hitTitle: { color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold },
-  hitText: { color: palette.ink1, fontSize: font.label, lineHeight: 18 },
-  disclosure: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
-  modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
-  modeButton: { alignItems: "center", borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, flexBasis: "48%", flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 38, minWidth: 0, paddingHorizontal: 6, paddingVertical: 7 },
-  modeButtonActive: { backgroundColor: palette.brand, borderColor: palette.hairline },
-  modeText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
-  modeTextActive: { color: palette.inkInverse },
-  modeExplainBox: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, gap: 4, padding: 6, width: "100%" },
-  modeExplainItem: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 5 },
-  modeExplainItemActive: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderWidth: 1 },
-  modeExplainText: { color: palette.ink2, fontSize: font.caption, lineHeight: 16 },
-  modeExplainTextActive: { color: palette.ink1 },
-  modeExplainLabel: { color: palette.ink1, fontWeight: weight.semibold },
-  modeExplainLabelActive: { color: palette.ink1, fontWeight: weight.semibold },
-  protoSectionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-    paddingHorizontal: 2,
-  },
-  protoSectionTitle: {
-    color: palette.ink1,
-    fontSize: font.title,
-    fontWeight: weight.semibold,
-  },
-  protoNewKbBtn: {
-    alignItems: "center",
-    backgroundColor: palette.brand,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    ...shadow.float,
-  },
-  protoNewKbBtnText: {
-    color: palette.inkInverse,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  kbList: {
-    gap: 10,
-  },
-  kbCard: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 6,
-    padding: 13,
-    ...shadow.float,
-  },
-  kbCardSelected: {
-    borderColor: palette.hairline,
-    borderWidth: 1,
-  },
-  kbHeaderRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  kbTitleGroup: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 6,
-    marginRight: 8,
-  },
-  kbIcon: {
-    fontSize: font.body,
-  },
-  kbTitle: {
-    color: palette.ink1,
-    flex: 1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  connectedBadge: {
-    alignItems: "center",
-    backgroundColor: palette.okWash,
-    borderColor: palette.hairline,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  connectedText: {
-    color: palette.ok,
-    fontSize: font.micro,
-    fontWeight: weight.semibold,
-  },
-  kbDesc: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    lineHeight: 16,
-  },
-  kbFooterRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 2,
-  },
-  kbStatText: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  kbManageBtn: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 4,
-    marginLeft: "auto",
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  kbManageBtnText: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  emptyCard: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    padding: 24,
-  },
-  emptyCardTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  emptyCardSubtitle: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-    marginTop: 4,
-  },
-  docPanel: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 8,
-    padding: 13,
-    ...shadow.float,
-  },
-  docPanelHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingBottom: 4,
-  },
-  docPanelTitle: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.semibold,
-  },
-  uploadDocBtn: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  uploadDocBtnText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.semibold,
-  },
-  emptyDocBox: {
-    paddingVertical: 14,
-  },
-  emptyDocText: {
-    color: palette.ink3,
-    fontSize: font.caption,
-    fontWeight: weight.regular,
-    textAlign: "center",
-  },
-  docItemRow: {
-    alignItems: "center",
-    borderBottomColor: palette.hairline,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-  },
-  docItemRowLast: {
-    borderBottomWidth: 0,
-  },
-  docInfo: {
-    flex: 1,
-    gap: 3,
-    marginRight: 8,
-  },
-  docTitle: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-  docMeta: {
-    color: palette.ink3,
-    fontSize: font.micro,
-    fontWeight: weight.regular,
-  },
-  docActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  docStatusBadge: {
-    alignItems: "center",
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  docStatusBadgeReady: {
-    backgroundColor: palette.okWash,
-  },
-  docStatusBadgeFailed: {
-    backgroundColor: palette.errWash,
-  },
-  docStatusText: {
-    color: palette.ink2,
-    fontSize: font.micro,
-    fontWeight: weight.semibold,
-  },
-  docStatusTextReady: {
-    color: palette.ok,
-  },
-  docStatusTextFailed: {
-    color: palette.err,
-  },
-  docDeleteBtn: {
-    padding: 4,
-  },
-  docDeleteBtnText: {
-    color: palette.ink3,
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-  },
-});
+    sessionSummaryRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 58, paddingHorizontal: 12, paddingVertical: 10 },
+    sessionSettingsBody: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 10, padding: 12 },
+    detailBody: { gap: 10 },
+    tree: { borderTopColor: palette.hairline, borderTopWidth: 1, marginTop: 10 },
+    flex: { flex: 1, minWidth: 0 },
+    iconRow: { alignItems: "center", flexDirection: "row", gap: 5 },
+    eyebrow: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
+    title: { color: palette.ink1, fontSize: font.display, fontWeight: weight.semibold },
+    sectionTitle: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
+    meta: { color: palette.ink2, fontSize: font.label, fontWeight: weight.regular },
+    input: { backgroundColor: palette.well, borderColor: palette.hairlineStrong, borderRadius: radius.md - 2, borderWidth: 1, color: palette.ink1, minHeight: 44, minWidth: 0, paddingHorizontal: 12, paddingVertical: 9 },
+    smallInput: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, maxWidth: "55%", minWidth: 72, paddingHorizontal: 8, paddingVertical: 5, textAlign: "right", width: 120 },
+    primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md - 2, justifyContent: "center", minHeight: 44, paddingHorizontal: 14, paddingVertical: 8 },
+    outlineButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: 10, paddingVertical: 7 },
+    secondaryButton: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
+    secondaryText: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.semibold },
+    iconTextButton: { paddingHorizontal: 6, paddingVertical: 6 },
+    iconTextButtonLabel: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    newButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 34, paddingHorizontal: 10, paddingVertical: 6 },
+    newButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.semibold },
+    disabledButton: { opacity: 0.42 },
+    statusMessage: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold, paddingHorizontal: 10, paddingVertical: 8 },
+    emptyText: { color: palette.ink2, paddingHorizontal: 12, paddingVertical: 18, textAlign: "center" },
+    emptyInline: { color: palette.ink2, fontSize: font.label, paddingBottom: 10, paddingTop: 8 },
+    loadingRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 10, paddingTop: 8 },
+    categoryRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 46, paddingRight: 8 },
+    categoryMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 46, minWidth: 0 },
+    arrow: { color: palette.ink3, fontSize: font.title, textAlign: "center", width: 14 },
+    folderMark: { backgroundColor: palette.brandWash, borderBottomLeftRadius: radius.xxs, borderBottomRightRadius: radius.xxs, borderTopRightRadius: radius.xxs, height: 12, width: 17 },
+    categoryName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
+    baseRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 44, paddingRight: 8 },
+    baseRowActive: { backgroundColor: palette.brandWash },
+    baseMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 44, minWidth: 0 },
+    baseMark: { backgroundColor: palette.brandWash, borderRadius: radius.xxs, height: 16, width: 13 },
+    baseName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
+    rowMeta: { color: palette.ink2, fontSize: font.caption, minWidth: 18, textAlign: "right" },
+    rowAction: { paddingHorizontal: 7, paddingVertical: 7 },
+    rowActionText: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
+    statusPill: { borderRadius: radius.xs, fontSize: font.micro, fontWeight: weight.semibold, overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
+    statusPillOn: { backgroundColor: palette.okWash, color: palette.ok },
+    statusPillOff: { backgroundColor: palette.well, color: palette.ink2 },
+    documentRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingRight: 8, paddingVertical: 7 },
+    documentMark: { backgroundColor: palette.brandWash, borderColor: palette.cyanWash, borderRadius: radius.xxs, borderWidth: 1, height: 18, width: 14 },
+    documentName: { color: palette.ink1, fontSize: font.body, fontWeight: weight.semibold },
+    documentMeta: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.regular, marginTop: 2 },
+    managementPanel: { gap: 18 },
+    managementBlock: { gap: 10 },
+    chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    scopeChip: { backgroundColor: palette.well, borderColor: palette.transparent, borderRadius: radius.md - 4, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+    scopeChipActive: { backgroundColor: palette.brandWash, borderColor: palette.brandDeep, borderWidth: 1 },
+    scopeText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.medium },
+    createRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    inlineActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    rowBetween: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
+    deleteOutlineButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
+    deleteText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
+    dangerButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, paddingHorizontal: 12, paddingVertical: 9 },
+    dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.medium },
+    errorText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
+    tabRow: { backgroundColor: palette.surface1, borderRadius: radius.sm, flexDirection: "row", gap: 3, padding: 3 },
+    tabButton: { alignItems: "center", borderRadius: radius.xs, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 8, paddingVertical: 7 },
+    tabButtonActive: { backgroundColor: palette.surface4, borderColor: palette.hairlineStrong, borderWidth: 1 },
+    tabText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    tabTextActive: { color: palette.ink1 },
+    footerDoneButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md, justifyContent: "center", minHeight: 44, minWidth: 104, paddingHorizontal: 18 },
+    footerDoneText: { color: palette.inkInverse, fontSize: font.body, fontWeight: weight.semibold },
+    searchResults: { gap: 8 },
+    hitRow: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 4, paddingTop: 10 },
+    hitTitle: { color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold },
+    hitText: { color: palette.ink1, fontSize: font.label, lineHeight: 18 },
+    refPillBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    refPillText: {
+      color: palette.brandLight,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    disclosure: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
+    modeButton: { alignItems: "center", borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, flexBasis: "48%", flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 38, minWidth: 0, paddingHorizontal: 6, paddingVertical: 7 },
+    modeButtonActive: { backgroundColor: palette.brand, borderColor: palette.hairline },
+    modeText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    modeTextActive: { color: palette.inkInverse },
+    modeExplainBox: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, gap: 4, padding: 6, width: "100%" },
+    modeExplainItem: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 5 },
+    modeExplainItemActive: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderWidth: 1 },
+    modeExplainText: { color: palette.ink2, fontSize: font.caption, lineHeight: 16 },
+    modeExplainTextActive: { color: palette.ink1 },
+    modeExplainLabel: { color: palette.ink1, fontWeight: weight.semibold },
+    modeExplainLabelActive: { color: palette.ink1, fontWeight: weight.semibold },
+    protoSectionHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 4,
+      paddingHorizontal: 2,
+    },
+    protoSectionTitle: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    protoNewKbBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      ...shadow.float,
+    },
+    protoNewKbBtnText: {
+      color: palette.inkInverse,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    kbList: {
+      gap: 10,
+    },
+    kbCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 6,
+      padding: 13,
+      ...shadow.float,
+    },
+    kbCardSelected: {
+      borderColor: palette.hairline,
+      borderWidth: 1,
+    },
+    kbHeaderRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    kbTitleGroup: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 6,
+      marginRight: 8,
+    },
+    kbIcon: {
+      fontSize: font.body,
+    },
+    kbTitle: {
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    connectedBadge: {
+      alignItems: "center",
+      backgroundColor: palette.okWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    connectedText: {
+      color: palette.ok,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    kbDesc: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      lineHeight: 16,
+    },
+    kbFooterRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 12,
+      marginTop: 2,
+    },
+    kbStatText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    kbManageBtn: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 4,
+      marginLeft: "auto",
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+    },
+    kbManageBtnText: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    emptyCard: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderStyle: "dashed",
+      borderWidth: 1,
+      padding: 24,
+    },
+    emptyCardTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    emptyCardSubtitle: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+      marginTop: 4,
+    },
+    docPanel: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 8,
+      padding: 13,
+      ...shadow.float,
+    },
+    docPanelHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingBottom: 4,
+    },
+    docPanelTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    uploadDocBtn: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    uploadDocBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    emptyDocBox: {
+      paddingVertical: 14,
+    },
+    emptyDocText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.regular,
+      textAlign: "center",
+    },
+    docItemRow: {
+      alignItems: "center",
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingVertical: 8,
+    },
+    docItemRowLast: {
+      borderBottomWidth: 0,
+    },
+    docInfo: {
+      flex: 1,
+      gap: 3,
+      marginRight: 8,
+    },
+    docTitle: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    docMeta: {
+      color: palette.ink3,
+      fontSize: font.micro,
+      fontWeight: weight.regular,
+    },
+    docActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    docStatusBadge: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    docStatusBadgeReady: {
+      backgroundColor: palette.okWash,
+    },
+    docStatusBadgeFailed: {
+      backgroundColor: palette.errWash,
+    },
+    docStatusText: {
+      color: palette.ink2,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    docStatusTextReady: {
+      color: palette.ok,
+    },
+    docStatusTextFailed: {
+      color: palette.err,
+    },
+    docDeleteBtn: {
+      padding: 4,
+    },
+    docDeleteBtnText: {
+      color: palette.ink3,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+  });

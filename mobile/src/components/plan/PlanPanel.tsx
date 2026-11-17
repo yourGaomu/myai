@@ -3,9 +3,9 @@ import { Feather } from "@expo/vector-icons";
 
 import type { Plan, PlanStep, SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-import { palette } from "../../constants/theme";
+import { useAppTheme } from "../../theme/ThemeProvider";
 import { Spinner } from "../common/Spinner";
-import { styles } from "./planStyles";
+import { usePlanStyles, type PlanStyles } from "./planStyles";
 
 type Props = {
   activeSession?: SessionSummary;
@@ -17,8 +17,10 @@ type Props = {
   sessionID: string;
 };
 
-// 计划页：目标 + 进度 + 步骤时间线（和对话里的过程时间线同一套样式）。
+// 计划页：目标 + 进度 + 步骤时间线（自适应深浅主题）。
 export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenChat, pendingPlan, sessionID }: Props) {
+  const { palette } = useAppTheme();
+  const styles = usePlanStyles();
   const plan = activeSession?.current_plan;
   const progress = planProgress(plan);
   const canExecute = Boolean(
@@ -35,9 +37,9 @@ export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenCha
     <View style={styles.page}>
       <View style={styles.head}>
         <Text numberOfLines={2} style={styles.session}>{activeSession?.title || sessionID || "没有活动会话"}</Text>
-        <View style={[styles.chip, chipStyle(plan?.status)]}>
+        <View style={[styles.chip, chipStyle(plan?.status, styles)]}>
           {running ? <Spinner size={12} /> : null}
-          <Text style={[styles.chipText, chipTextStyle(plan?.status)]}>{planStatusLabel(plan?.status)}</Text>
+          <Text style={[styles.chipText, chipTextStyle(plan?.status, styles)]}>{planStatusLabel(plan?.status)}</Text>
         </View>
       </View>
 
@@ -66,7 +68,7 @@ export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenCha
           <View style={styles.steps}>
             {(plan.steps?.length || 0) > 1 ? <View pointerEvents="none" style={styles.rail} /> : null}
             {(plan.steps || []).map((step) => (
-              <StepRow key={step.id || step.order} plan={plan} step={step} />
+              <StepRow key={step.id || step.order} plan={plan} step={step} styles={styles} />
             ))}
           </View>
         </>
@@ -90,14 +92,14 @@ export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenCha
   );
 }
 
-function StepRow({ plan, step }: { plan: Plan; step: PlanStep }) {
+function StepRow({ plan, step, styles }: { plan: Plan; step: PlanStep; styles: PlanStyles }) {
   const waiting = step.status === "pending" && hasUnfinishedDependency(plan, step);
   const status = waiting ? "waiting_dependency" : step.status;
   const finished = status === "done" || status === "skipped";
   return (
     <View style={styles.step}>
       <View style={styles.stepIcon}>
-        <StepIcon status={status} />
+        <StepIcon status={status} styles={styles} />
       </View>
       <View style={styles.stepBody}>
         <Text style={[styles.stepTitle, finished && styles.stepTitleDone]}>{step.title}</Text>
@@ -114,7 +116,8 @@ function StepRow({ plan, step }: { plan: Plan; step: PlanStep }) {
   );
 }
 
-function StepIcon({ status }: { status?: string }) {
+function StepIcon({ status, styles }: { status?: string; styles: PlanStyles }) {
+  const { palette } = useAppTheme();
   if (status === "running") return <Spinner size={15} />;
   if (status === "done") return <Feather color={palette.ok} name="check-circle" size={18} />;
   if (status === "skipped") return <Feather color={palette.ink3} name="skip-forward" size={16} />;
@@ -124,14 +127,14 @@ function StepIcon({ status }: { status?: string }) {
   return <View style={styles.pendingDot} />;
 }
 
-function chipStyle(status?: string) {
+function chipStyle(status: string | undefined, styles: PlanStyles) {
   if (status === "running") return styles.chipRunning;
   if (status === "done") return styles.chipDone;
   if (status === "failed") return styles.chipFailed;
   return null;
 }
 
-function chipTextStyle(status?: string) {
+function chipTextStyle(status: string | undefined, styles: PlanStyles) {
   if (status === "running") return styles.chipTextRunning;
   if (status === "done") return styles.chipTextDone;
   if (status === "failed") return styles.chipTextFailed;
@@ -179,9 +182,7 @@ function hasUnfinishedDependency(plan: Plan | undefined, step: PlanStep) {
     return false;
   }
   return step.dependencies.some((dependency) => {
-    const candidate = plan.steps?.find(
-      (item) => item.id === dependency || String(item.order) === dependency,
-    );
+    const candidate = plan.steps?.find((item) => item.id === dependency || String(item.order) === dependency);
     return Boolean(candidate && candidate.status !== "done" && candidate.status !== "skipped");
   });
 }

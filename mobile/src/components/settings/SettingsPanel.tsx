@@ -6,9 +6,14 @@ import * as Updates from "expo-updates";
 
 import { ButtonContent } from "../common/ButtonContent";
 import { SettingsHome, type SettingsSection } from "./SettingsHome";
+import { AppearanceSettings } from "./sections/AppearanceSettings";
+import { MotionSettings } from "./sections/MotionSettings";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
+import { accentOptions } from "../../constants/theme";
+import { useMotion } from "../../hooks/useMotionConfig";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { defaultIntentConfig, normalizeIntentStrategy } from "../../hooks/useIntentSettings";
 import type {
   CompactInfo,
@@ -33,9 +38,9 @@ import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
 import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
-import { modelDisplayName } from "../../utils/session";
+import { modelDisplayName, normalizePermission, permissionLabel } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
-import { font, fontFamily, palette, radius, shadow, weight } from "../../constants/theme";
+import { fontFamily, radius, weight } from "../../constants/theme";
 
 type Props = {
   activeSection: SettingsSection | null;
@@ -152,10 +157,12 @@ type Props = {
   userID: string;
 };
 
-const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta: string }> = [
-  { label: "只读", mode: "readonly", meta: "不可写入或运行" },
-  { label: "询问", mode: "ask", meta: "危险操作需确认" },
-  { label: "完全开放", mode: "full", meta: "自动允许工具调用" },
+const permissionModes: Array<{ icon: FeatherIconName; label: string; mode: SessionPermissionMode; meta: string }> = [
+  { icon: "lock", label: "只读", mode: "readonly", meta: "禁止写文件和执行命令类工具。" },
+  { icon: "shield", label: "谨慎询问", mode: "ask", meta: "工作区内安全查询自动执行，写操作与高风险命令逐次确认。" },
+  { icon: "edit-3", label: "仅读写", mode: "read_write", meta: "允许读取和修改工作区文件，运行命令等危险操作仍需确认。" },
+  { icon: "terminal", label: "允许执行", mode: "execute", meta: "允许读写文件与在工作区内执行命令，外部高风险动作仍需确认。" },
+  { icon: "zap", label: "完全开放", mode: "full", meta: "会话内全部工具调用自动放行，不再逐次弹窗确认。" },
 ];
 const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }> = [
   { label: "对话", mode: "chat", meta: "正常对话与执行" },
@@ -320,6 +327,9 @@ export function SettingsPanel({
   userID,
 }: Props) {
   const { width } = useWindowDimensions();
+  const appTheme = useAppTheme();
+  const { palette } = appTheme;
+  const styles = useThemedStyles(createStyles);
   const activePermission = normalizePermissionMode(activeSession?.permission_mode);
   const activeAgentMode = normalizeAgentMode(activeSession?.agent_mode);
   const activePlan = activeSession?.current_plan;
@@ -688,7 +698,11 @@ export function SettingsPanel({
         style={styles.input}
         value={assetAPIKey}
       />
-      <Text style={styles.settingMeta}>Asset API Key 仅本次运行保存，重启后需重新输入。</Text>
+      <Text style={styles.settingMeta}>
+        {assetBaseURL.trim()
+          ? "已配置资源服务地址，可用于在对话中发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"
+          : "提示：配置「资源服务地址」与 Asset API Key 后，即可在对话「+」菜单里发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"}
+      </Text>
       <View style={styles.row}>
         <TextInput
           keyboardType="number-pad"
@@ -1416,7 +1430,7 @@ export function SettingsPanel({
                 <View style={styles.row}>
                   <Feather
                     color={palette.ink1}
-                    name={item.mode === "readonly" ? "lock" : item.mode === "ask" ? "shield" : "zap"}
+                    name={item.icon}
                     size={14}
                   />
                   <Text style={styles.permissionCardTitle}>
@@ -2459,7 +2473,7 @@ export function SettingsPanel({
                   >
                     <View style={styles.skillHeader}>
                       <View style={styles.rowCompact}>
-                        <View style={[styles.intentStatusBadge, traceStatusBadgeStyle(trace.status)]}>
+                        <View style={[styles.intentStatusBadge, traceStatusBadgeStyle(trace.status, styles)]}>
                           <Text style={styles.intentStatusBadgeText}>
                             {traceStatusLabel(trace.status)}
                           </Text>
@@ -2664,7 +2678,10 @@ export function SettingsPanel({
     />
   );
 
+  const motion = useMotion();
   const sectionContent: Record<SettingsSection, ReactNode> = {
+    appearance: <AppearanceSettings />,
+    motion: <MotionSettings />,
     autoplan: autoPlanSection,
     connection: relaySection,
     context: contextSection,
@@ -2679,7 +2696,22 @@ export function SettingsPanel({
   };
 
   const relayHost = normalizedRelayURL.replace(/^[a-z]+:\/\//i, "");
+  const themeLabel = appTheme.themeMode === "system" ? "跟随系统" : appTheme.isDark ? "深色" : "浅色";
+  const accentLabel = accentOptions.find((item) => item.key === appTheme.accent)?.label || "";
+  const customMotionCount = Object.keys(motion.settings.customSlots).length;
   const groups = [
+    {
+      label: "个性化与动效",
+      rows: [
+        { icon: "sun" as const, key: "appearance" as const, label: "外观与主题", value: `${themeLabel} · ${accentLabel}` },
+        {
+          icon: "film" as const,
+          key: "motion" as const,
+          label: "角色动效与 GIF",
+          value: customMotionCount > 0 ? `${customMotionCount} 个自定义` : motion.settings.motionEnabled ? "默认" : "已关闭",
+        },
+      ],
+    },
     {
       label: "模型与生成",
       rows: [
@@ -2744,6 +2776,8 @@ export function SettingsPanel({
 const settingIcons: Record<string, FeatherIconName> = { AI: "cpu", AP: "compass", MCP: "box", OTA: "refresh-cw", SK: "tool", WS: "server" };
 
 function IconBox({ label }: { label: string }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const icon = settingIcons[label];
   return (
     <View style={styles.settingIconBox}>
@@ -2771,6 +2805,8 @@ function GenerationField({
   systemDefault: number;
   value: string;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const inheritedValue = modelDefault == null
     ? `模型未设置 · 系统兜底 ${formatNumber(systemDefault)}`
     : `模型默认 ${formatNumber(modelDefault)} · 系统兜底 ${formatNumber(systemDefault)}`;
@@ -2800,6 +2836,7 @@ function GenerationField({
 }
 
 function ContextStat({ label, suffix, value }: { label: string; suffix: string; value?: number }) {
+  const styles = useThemedStyles(createStyles);
   if (value === undefined || value === null) {
     return null;
   }
@@ -2812,6 +2849,7 @@ function ContextStat({ label, suffix, value }: { label: string; suffix: string; 
 }
 
 function CheckpointDetails({ checkpoint }: { checkpoint: NonNullable<ContextInfo["checkpoint"]> }) {
+  const styles = useThemedStyles(createStyles);
   const [expanded, setExpanded] = useState(false);
   const data = checkpoint.summary_data;
   const sections: Array<[string, string[] | undefined]> = [
@@ -2846,6 +2884,7 @@ function CheckpointDetails({ checkpoint }: { checkpoint: NonNullable<ContextInfo
 }
 
 function CheckpointSection({ title, lines }: { title: string; lines?: string[] }) {
+  const styles = useThemedStyles(createStyles);
   const visible = lines?.filter((line) => line.trim()) || [];
   if (visible.length === 0) {
     return null;
@@ -2859,6 +2898,7 @@ function CheckpointSection({ title, lines }: { title: string; lines?: string[] }
 }
 
 function HashPill({ label, value }: { label: string; value?: string }) {
+  const styles = useThemedStyles(createStyles);
   if (!value) {
     return null;
   }
@@ -2871,6 +2911,7 @@ function HashPill({ label, value }: { label: string; value?: string }) {
 }
 
 function EmptyBox({ text }: { text: string }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.emptyBox}>
       <Text style={styles.emptyText}>{text}</Text>
@@ -2887,6 +2928,7 @@ function SummaryTile({
   tone?: "good" | "normal" | "quiet" | "warn";
   value: string;
 }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={[styles.summaryTile, tone === "good" && styles.summaryTileGood, tone === "warn" && styles.summaryTileWarn, tone === "quiet" && styles.summaryTileQuiet]}>
       <Text style={styles.summaryLabel}>{label}</Text>
@@ -2896,10 +2938,7 @@ function SummaryTile({
 }
 
 function normalizePermissionMode(mode?: string): SessionPermissionMode {
-  if (mode === "readonly" || mode === "full") {
-    return mode;
-  }
-  return "ask";
+  return normalizePermission(mode);
 }
 
 function normalizeAgentMode(mode?: string): SessionAgentMode {
@@ -2910,13 +2949,7 @@ function normalizeAgentMode(mode?: string): SessionAgentMode {
 }
 
 function permissionModeLabel(mode: SessionPermissionMode) {
-  if (mode === "readonly") {
-    return "只读";
-  }
-  if (mode === "full") {
-    return "完全开放";
-  }
-  return "询问";
+  return permissionLabel(mode);
 }
 
 function planStatusLabel(status?: string) {
@@ -2962,13 +2995,7 @@ function modelProtocolPlaceholder(protocol: ModelProtocol) {
 }
 
 function permissionHelp(mode: SessionPermissionMode) {
-  if (mode === "readonly") {
-    return "禁止写文件和运行命令类工具。";
-  }
-  if (mode === "full") {
-    return "允许的工具可以不再逐次确认。";
-  }
-  return "工作区内读写和安全查询可自动执行，危险命令仍需确认。";
+  return permissionModes.find((item) => item.mode === mode)?.meta || permissionModes[1].meta;
 }
 
 function shortHash(value?: string) {
@@ -3098,7 +3125,7 @@ function traceStatusLabel(status?: string): string {
   }
 }
 
-function traceStatusBadgeStyle(status?: string) {
+function traceStatusBadgeStyle(status: string | undefined, styles: SettingsStyles) {
   switch (status) {
     case "succeeded":
       return styles.intentStatusGood;
@@ -3155,7 +3182,10 @@ function formatTraceBody(body?: string): string {
   }
 }
 
-const styles = StyleSheet.create({
+type SettingsStyles = ReturnType<typeof createStyles>;
+
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
   settingsRoot: {
     gap: 12,
   },

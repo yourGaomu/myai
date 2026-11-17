@@ -4,7 +4,8 @@ import { Feather } from "@expo/vector-icons";
 import type { TokenUsage } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { tokenCount, usageHasValues, usageSummary } from "../../utils/tokenUsage";
-import { font, palette, radius, weight } from "../../constants/theme";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -15,6 +16,8 @@ type Props = {
 };
 
 export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSettingsPress }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.tokenDock}>
       <View style={styles.tokenDockHeader}>
@@ -50,88 +53,89 @@ export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSett
   );
 }
 
-const styles = StyleSheet.create({
-  tokenDock: {
-    backgroundColor: palette.surface1,
-    borderColor: palette.hairline,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  tokenDockHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-between",
-  },
-  tokenSummary: {
-    flex: 1,
-    minWidth: 0,
-  },
-  tokenDockActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexShrink: 0,
-    gap: 5,
-  },
-  tokenSettingsButton: {
-    alignItems: "center",
-    backgroundColor: palette.cyanWash,
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 28,
-    justifyContent: "center",
-    width: 30,
-  },
-  tokenSettingsText: {
-    color: palette.ink1,
-    fontSize: font.body,
-    fontWeight: weight.bold,
-  },
-  tokenDockTitle: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.bold,
-  },
-  tokenDockRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tokenDockMeta: {
-    color: palette.ink2,
-    fontSize: font.caption,
-    fontWeight: weight.bold,
-  },
-  statusPill: {
-    alignItems: "center",
-    borderColor: palette.hairlineStrong,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 4,
-    minHeight: 28,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  statusPillOnline: {
-    backgroundColor: palette.okWash,
-  },
-  statusPillOffline: {
-    backgroundColor: palette.errWash,
-  },
-  statusDot: {
-    backgroundColor: palette.surface3,
-    borderRadius: radius.xxs,
-    height: 6,
-    width: 6,
-  },
-  statusPillText: {
-    color: palette.ink1,
-    fontSize: font.caption,
-    fontWeight: weight.bold,
-  },
-});
+const createStyles = ({ font, palette }: AppTheme) =>
+  StyleSheet.create({
+    tokenDock: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 3,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    tokenDockHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "space-between",
+    },
+    tokenSummary: {
+      flex: 1,
+      minWidth: 0,
+    },
+    tokenDockActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      flexShrink: 0,
+      gap: 5,
+    },
+    tokenSettingsButton: {
+      alignItems: "center",
+      backgroundColor: palette.cyanWash,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      height: 28,
+      justifyContent: "center",
+      width: 30,
+    },
+    tokenSettingsText: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.bold,
+    },
+    tokenDockTitle: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.bold,
+    },
+    tokenDockRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    tokenDockMeta: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.bold,
+    },
+    statusPill: {
+      alignItems: "center",
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      minHeight: 28,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+    },
+    statusPillOnline: {
+      backgroundColor: palette.okWash,
+    },
+    statusPillOffline: {
+      backgroundColor: palette.errWash,
+    },
+    statusDot: {
+      backgroundColor: palette.surface3,
+      borderRadius: radius.xxs,
+      height: 6,
+      width: 6,
+    },
+    statusPillText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.bold,
+    },
+  });

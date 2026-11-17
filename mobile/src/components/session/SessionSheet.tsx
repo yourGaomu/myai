@@ -6,7 +6,8 @@ import type { ContextInfo, ModelSummary, SessionSummary } from "../../protocol";
 import type { SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import { modelDisplayName, modelProviderLabel, normalizePermission } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
-import { fontFamily, font, palette, radius, weight } from "../../constants/theme";
+import { fontFamily, font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
 import { Segmented } from "../common/Segmented";
 
@@ -29,14 +30,26 @@ type Props = {
   visible: boolean;
 };
 
+const permissionModes: Array<{ key: SessionPermissionMode; label: string }> = [
+  { key: "readonly", label: "只读" },
+  { key: "ask", label: "询问" },
+  { key: "read_write", label: "仅读写" },
+  { key: "execute", label: "可执行" },
+  { key: "full", label: "全开放" },
+];
+
 const permissionHints: Record<SessionPermissionMode, string> = {
-  readonly: "只允许读取文件和搜索，不会修改文件或执行命令",
-  ask: "运行命令等危险操作前先问你",
-  full: "所有工具调用自动执行，不再询问",
+  readonly: "仅允许读取与检索，严禁写入或执行命令",
+  ask: "读写和命令行等变更操作前先征询你",
+  read_write: "允许读写文件，执行终端命令仍需你授权",
+  execute: "允许执行命令，高危边界仍受系统校验",
+  full: "所有工具调用自动执行，不再弹窗中断",
 };
 
-// 会话设置：点顶部标题或输入框里的模型打开。模型、模式、工具权限、上下文集中在这里。
+// 会话设置：模型、模式、细粒度工具权限（完全对齐后端 5 档策略）、上下文压缩。
 export function SessionSheet(props: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
   const { activeSession, context, visible } = props;
   const hasSession = Boolean(activeSession?.id);
   const mode: SessionAgentMode = activeSession?.agent_mode === "plan" ? "plan" : "chat";
@@ -47,7 +60,6 @@ export function SessionSheet(props: Props) {
   const ratio = windowK && used ? Math.min(1, used / (windowK * 1000)) : 0;
   const settingsDisabled = !hasSession || !props.connected || props.pendingSettings;
   const { connected } = props;
-  // 回调每次渲染都可能是新引用，用 ref 避免弹层打开期间反复请求上下文
   const requestContextRef = useRef(props.onRequestContext);
   requestContextRef.current = props.onRequestContext;
 
@@ -112,14 +124,31 @@ export function SessionSheet(props: Props) {
         value={mode}
       />
 
-      <Text style={styles.label}>工具权限</Text>
-      <Segmented
-        accessibilityLabel="工具权限"
-        disabled={settingsDisabled}
-        onChange={props.onSetPermissionMode}
-        options={[{ key: "readonly", label: "只读" }, { key: "ask", label: "询问" }, { key: "full", label: "完全开放" }]}
-        value={permission}
-      />
+      <Text style={styles.label}>工具权限（切换至谨慎/只读会清除本会话临时免询规则）</Text>
+      <View style={styles.permWrap}>
+        {permissionModes.map((item) => {
+          const selected = permission === item.key;
+          return (
+            <Pressable
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected, disabled: settingsDisabled }}
+              disabled={settingsDisabled}
+              key={item.key}
+              onPress={() => {
+                if (!selected) props.onSetPermissionMode(item.key);
+              }}
+              style={({ pressed }) => [
+                styles.permChip,
+                selected && styles.permChipActive,
+                settingsDisabled && styles.dimmed,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.permChipText, selected && styles.permChipTextActive]}>{item.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <Text style={[styles.hint, permission === "full" && styles.hintWarn]}>{permissionHints[permission]}</Text>
 
       <Text style={styles.label}>上下文</Text>
@@ -129,7 +158,7 @@ export function SessionSheet(props: Props) {
             {used !== undefined ? formatTokenCount(used) : "—"} / {windowK ? `${windowK}K` : "—"}
           </Text>
           <Pressable accessibilityRole="button" disabled={settingsDisabled} hitSlop={6} onPress={props.onCompact} style={settingsDisabled && styles.dimmed}>
-            <Text style={styles.link}>压缩</Text>
+            <Text style={styles.link}>压缩上下文</Text>
           </Pressable>
         </View>
         <View style={styles.bar}>
@@ -140,30 +169,48 @@ export function SessionSheet(props: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  head: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 2 },
-  title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.semibold },
-  close: { alignItems: "center", borderRadius: radius.pill, height: 40, justifyContent: "center", width: 40 },
-  pressed: { opacity: 0.7 },
-  pressedRow: { backgroundColor: palette.pressed },
-  dimmed: { opacity: 0.4 },
-  offline: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, flexDirection: "row", gap: 8, marginTop: 10, minHeight: 44, paddingHorizontal: 12 },
-  offlineDot: { backgroundColor: palette.err, borderRadius: radius.pill, height: 7, width: 7 },
-  offlineText: { color: palette.ink1, flex: 1, fontSize: font.label },
-  label: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium, marginBottom: 8, marginLeft: 2, marginTop: 16 },
-  group: { backgroundColor: palette.well, borderRadius: radius.lg, overflow: "hidden" },
-  empty: { color: palette.ink3, fontSize: font.label, padding: 14 },
-  radio: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 6 },
-  radioDivider: { borderTopColor: palette.hairline, borderTopWidth: 1 },
-  radioText: { flex: 1, minWidth: 0 },
-  radioTitle: { color: palette.ink1, fontSize: font.body },
-  radioSub: { color: palette.ink3, fontSize: font.caption - 0.5, marginTop: 1 },
-  hint: { color: palette.ink3, fontSize: font.caption, marginLeft: 2, marginTop: 8 },
-  hintWarn: { color: palette.warn },
-  context: { gap: 12, padding: 14 },
-  contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
-  bar: { backgroundColor: palette.hairlineStrong, borderRadius: radius.xs, height: 6, overflow: "hidden" },
-  barFill: { backgroundColor: palette.brand, borderRadius: radius.xs, height: "100%" },
-  contextValue: { color: palette.ink2, flexShrink: 1, fontFamily: fontFamily.mono, fontSize: font.caption, maxWidth: "100%" },
-  link: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    head: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 2 },
+    title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.semibold },
+    close: { alignItems: "center", borderRadius: radius.pill, height: 40, justifyContent: "center", width: 40 },
+    pressed: { opacity: 0.72 },
+    pressedRow: { backgroundColor: palette.pressed },
+    dimmed: { opacity: 0.4 },
+    offline: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, flexDirection: "row", gap: 8, marginTop: 10, minHeight: 44, paddingHorizontal: 12 },
+    offlineDot: { backgroundColor: palette.err, borderRadius: radius.pill, height: 7, width: 7 },
+    offlineText: { color: palette.ink1, flex: 1, fontSize: font.label },
+    label: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium, marginBottom: 8, marginLeft: 2, marginTop: 16 },
+    group: { backgroundColor: palette.well, borderRadius: radius.lg, overflow: "hidden" },
+    empty: { color: palette.ink3, fontSize: font.label, padding: 14 },
+    radio: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 6 },
+    radioDivider: { borderTopColor: palette.hairline, borderTopWidth: 1 },
+    radioText: { flex: 1, minWidth: 0 },
+    radioTitle: { color: palette.ink1, fontSize: font.body },
+    radioSub: { color: palette.ink3, fontSize: font.caption - 0.5, marginTop: 1 },
+    permWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    permChip: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      minHeight: 34,
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    permChipActive: {
+      backgroundColor: palette.brandWashStrong,
+      borderColor: palette.brand,
+    },
+    permChipText: { color: palette.ink2, fontSize: font.label - 0.5, fontWeight: weight.medium },
+    permChipTextActive: { color: palette.brandLight, fontWeight: weight.semibold },
+    hint: { color: palette.ink3, fontSize: font.caption, marginLeft: 2, marginTop: 8 },
+    hintWarn: { color: palette.warn },
+    context: { gap: 12, padding: 14 },
+    contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
+    bar: { backgroundColor: palette.hairlineStrong, borderRadius: radius.xs, height: 6, overflow: "hidden" },
+    barFill: { backgroundColor: palette.brand, borderRadius: radius.xs, height: "100%" },
+    contextValue: { color: palette.ink2, flexShrink: 1, fontFamily: fontFamily.mono, fontSize: font.caption, maxWidth: "100%" },
+    link: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
+  });

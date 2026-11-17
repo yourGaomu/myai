@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { font, palette, radius, shadow, weight } from "../../constants/theme";
+import { font, radius, weight } from "../../constants/theme";
+import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Option<T extends string> = {
   key: T;
@@ -15,8 +16,10 @@ type Props<T extends string> = {
   value: T;
 };
 
-// 分段控件：用于两到三个互斥选项（工作区/会话资源、对话/规划、只读/询问/完全开放）。
+// 分段控件：自适应选项数量与深浅主题。
 export function Segmented<T extends string>({ accessibilityLabel, disabled, onChange, options, value }: Props<T>) {
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <View accessibilityLabel={accessibilityLabel} accessibilityRole="radiogroup" style={[styles.track, disabled && styles.disabled]}>
       {options.map((option) => {
@@ -44,39 +47,42 @@ export function Segmented<T extends string>({ accessibilityLabel, disabled, onCh
   );
 }
 
-const styles = StyleSheet.create({
-  track: {
-    backgroundColor: palette.well,
-    borderRadius: radius.md - 2,
-    flexDirection: "row",
-    gap: 3,
-    padding: 3,
-  },
-  item: {
-    alignItems: "center",
-    borderRadius: radius.sm - 1,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 38,
-    paddingHorizontal: 8,
-  },
-  itemActive: {
-    backgroundColor: palette.surface4,
-    ...shadow.card,
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  itemPressed: {
-    backgroundColor: palette.pressed,
-  },
-  label: {
-    color: palette.ink2,
-    fontSize: font.label + 0.5,
-    fontWeight: weight.regular,
-  },
-  labelActive: {
-    color: palette.ink1,
-    fontWeight: weight.semibold,
-  },
-});
+const makeStyles = ({ palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    track: {
+      backgroundColor: palette.well,
+      borderRadius: radius.md - 2,
+      flexDirection: "row",
+      gap: 3,
+      padding: 3,
+    },
+    item: {
+      alignItems: "center",
+      borderRadius: radius.sm - 1,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: 38,
+      paddingHorizontal: 6,
+    },
+    itemActive: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderWidth: 1,
+      ...shadow.card,
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+    itemPressed: {
+      backgroundColor: palette.pressed,
+    },
+    label: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.regular,
+    },
+    labelActive: {
+      color: palette.ink1,
+      fontWeight: weight.semibold,
+    },
+  });

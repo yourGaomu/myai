@@ -1,15 +1,16 @@
 import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet } from "react-native";
 
-import { palette } from "../../constants/theme";
+import { useAppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   color?: string;
   size?: number;
 };
 
-// 细线旋转圈：比系统 ActivityIndicator 更轻，尺寸可以小到 12px，用在时间线和列表行里。
-export function Spinner({ color = palette.brand, size = 14 }: Props) {
+// 细线旋转圈：自适应深浅主题色。
+export function Spinner({ color, size = 14 }: Props) {
+  const { palette } = useAppTheme();
   const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -27,7 +28,14 @@ export function Spinner({ color = palette.brand, size = 14 }: Props) {
       accessibilityLabel="加载中"
       style={[
         styles.ring,
-        { borderRadius: size / 2, borderTopColor: color, height: size, transform: [{ rotate }], width: size },
+        {
+          borderColor: palette.hairlineStrong,
+          borderRadius: size / 2,
+          borderTopColor: color ?? palette.brand,
+          height: size,
+          transform: [{ rotate }],
+          width: size,
+        },
       ]}
     />
   );
@@ -35,7 +43,6 @@ export function Spinner({ color = palette.brand, size = 14 }: Props) {
 
 const styles = StyleSheet.create({
   ring: {
-    borderColor: palette.hairlineStrong,
     borderWidth: 2,
   },
 });

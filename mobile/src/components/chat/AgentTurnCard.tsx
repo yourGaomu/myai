@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import type { SubagentTask } from "../../protocol";
+import type { ChangeEntry, SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import type { AgentTurnItem, AgentTurnTimelineStep } from "../../utils/chatRenderItems";
+import { copyToClipboard } from "../../utils/clipboard";
 import { usageBreakdown } from "../../utils/tokenUsage";
-import { font, palette, radius, weight } from "../../constants/theme";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
+import { CharacterAvatar } from "../common/CharacterAvatar";
 import { Spinner } from "../common/Spinner";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
 import { MarkdownText } from "./MarkdownText";
@@ -17,17 +20,27 @@ import { TurnTimeline } from "./turn/TurnTimeline";
 type Props = {
   buttonFeedback: ButtonFeedback;
   onInspectSubagent?: (taskID: string) => void;
+  onOpenChangePath?: (path: string) => void;
   onOpenChanges?: () => void;
   onRegenerate?: () => void;
   subagentTasks?: SubagentTask[];
   turn: AgentTurnItem;
+  workspaceChanges?: ChangeEntry[];
 };
 
-// 原生端没有剪贴板依赖（expo-clipboard 未安装），复制按钮只在 web 上显示，避免假装复制成功。
-const canCopy = Platform.OS === "web" && typeof navigator !== "undefined" && Boolean(navigator.clipboard?.writeText);
-
 // 一轮 Agent 回答：过程折叠成一行（点开是时间线），正文按文档排版，最后是变更摘要和操作。
-export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges, onRegenerate, subagentTasks, turn }: Props) {
+export function AgentTurnCard({
+  buttonFeedback,
+  onInspectSubagent,
+  onOpenChangePath,
+  onOpenChanges,
+  onRegenerate,
+  subagentTasks,
+  turn,
+  workspaceChanges,
+}: Props) {
+  const { keepThinkingExpanded, palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
   const running = turn.status === "running";
   const steps = useMemo<AgentTurnTimelineStep[]>(() => {
     if (turn.timeline?.length) return turn.timeline;
@@ -36,14 +49,16 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
     if (turn.tools?.length) fallback.push({ type: "tool_group", id: `${turn.id}-tools`, tools: turn.tools });
     return fallback;
   }, [turn.id, turn.reasoning, turn.timeline, turn.tools]);
-  // 运行中默认展开，结束后自动收起；用户手动点过之后以用户的选择为准
+
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle");
   const copyRequestRef = useRef(0);
 
   useEffect(() => {
     setCopyState("idle");
-    return () => { copyRequestRef.current += 1; };
+    return () => {
+      copyRequestRef.current += 1;
+    };
   }, [turn.id]);
 
   useEffect(() => {
@@ -54,39 +69,38 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
 
   const clock = useRunningClock(running, turn.startedAt);
   const tokens = useMemo(() => usageBreakdown(turn.usage), [turn.usage]);
-  const files = useMemo(() => extractFileChanges(turn.tools), [turn.tools]);
-  const open = manualOpen ?? running;
+  const files = useMemo(() => extractFileChanges(turn.tools, workspaceChanges), [turn.tools, workspaceChanges]);
+  const open = manualOpen ?? (running || keepThinkingExpanded);
   const opCount = turn.tools?.length || 0;
   const doneLabel = [
     turn.status === "paused" ? "已停止" : turn.status === "error" ? "执行出错" : turn.elapsed ? `已处理 ${turn.elapsed}` : "已处理",
     opCount ? `${opCount} 个操作` : "",
-  ].filter(Boolean).join(" · ");
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const canRegenerate = Boolean(turn.canRegenerate && onRegenerate);
-  // error 消息会被并进当前轮次，但不在 turn.text 里，单独显示，避免错误被吞掉
-  // 断线重连每次失败都会追加同样的错误，合并成一条并显示次数
   const errors = useMemo(() => groupErrors(turn.messages), [turn.messages]);
   const hasContent = Boolean(turn.text.trim() || turn.reasoning?.trim());
   const showModel = Boolean(turn.model && turn.model !== "MyAI Agent");
 
-  // 只有错误、没有任何回答内容的轮次（例如连接失败）：显示成一行提示，不画头像和操作栏
   if (!running && !hasContent && steps.length === 0 && errors.length > 0) {
     return (
       <View style={styles.turn}>
-        {errors.map((error, index) => <ErrorNotice count={error.count} key={turn.id + "-err-" + index} text={error.text} />)}
+        {errors.map((error, index) => (
+          <ErrorNotice count={error.count} key={turn.id + "-err-" + index} styles={styles} text={error.text} />
+        ))}
       </View>
     );
   }
 
   const handleCopy = async () => {
     const content = (turn.text || turn.reasoning || "").trim();
-    if (!content || !canCopy || copyState === "pending") return;
+    if (!content || copyState === "pending") return;
     const request = ++copyRequestRef.current;
     setCopyState("pending");
-    try {
-      await navigator.clipboard.writeText(content);
-      if (copyRequestRef.current === request) setCopyState("copied");
-    } catch {
-      if (copyRequestRef.current === request) setCopyState("failed");
+    const ok = await copyToClipboard(content);
+    if (copyRequestRef.current === request) {
+      setCopyState(ok ? "copied" : "failed");
     }
   };
 
@@ -94,7 +108,7 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
     <View style={styles.turn}>
       <View style={styles.meta}>
         <View style={styles.avatar}>
-          <Image source={require("../../../assets/avatar.png")} style={styles.avatarImage} />
+          <CharacterAvatar circular size={24} slot={running ? "working" : "idle"} variant="avatar" />
           {running ? (
             <View style={styles.avatarSpin}>
               <Spinner size={30} />
@@ -140,7 +154,9 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
         </View>
       ) : null}
 
-      {errors.map((error, index) => <ErrorNotice count={error.count} key={turn.id + "-err-" + index} text={error.text} />)}
+      {errors.map((error, index) => (
+        <ErrorNotice count={error.count} key={turn.id + "-err-" + index} styles={styles} text={error.text} />
+      ))}
 
       {!running && (turn.status === "paused" || turn.status === "error") ? (
         <View style={styles.note}>
@@ -153,23 +169,29 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
         </View>
       ) : null}
 
-      {!running ? <TurnChanges files={files} onOpenChanges={onOpenChanges} /> : null}
+      {!running ? (
+        <TurnChanges files={files} onOpenChangePath={onOpenChangePath} onOpenChanges={onOpenChanges} />
+      ) : null}
 
-      {!running && ((canCopy && hasContent) || canRegenerate || tokens) ? (
+      {!running && (hasContent || canRegenerate || tokens) ? (
         <View style={styles.actions}>
-          {canCopy && hasContent ? (
+          {hasContent ? (
             <Pressable
               accessibilityLabel={copyState === "pending" ? "正在复制" : "复制回答"}
               accessibilityRole="button"
               accessibilityState={{ busy: copyState === "pending", disabled: copyState === "pending" }}
               disabled={copyState === "pending"}
-              onPress={handleCopy}
+              onPress={() => void handleCopy()}
               style={({ pressed }) => [styles.action, pressed && styles.pressed]}
             >
               {copyState === "pending" ? (
                 <Spinner color={palette.ink3} size={17} />
               ) : (
-                <Feather color={copyState === "failed" ? palette.err : palette.ink3} name={copyState === "copied" ? "check" : "copy"} size={17} />
+                <Feather
+                  color={copyState === "failed" ? palette.err : copyState === "copied" ? palette.ok : palette.ink3}
+                  name={copyState === "copied" ? "check" : "copy"}
+                  size={17}
+                />
               )}
             </Pressable>
           ) : null}
@@ -181,9 +203,9 @@ export function AgentTurnCard({ buttonFeedback, onInspectSubagent, onOpenChanges
           {tokens ? <Text style={styles.tokens}>{tokens.total} tokens</Text> : null}
         </View>
       ) : null}
-      {canCopy && (copyState === "copied" || copyState === "failed") ? (
+      {copyState === "copied" || copyState === "failed" ? (
         <Text accessibilityLiveRegion="polite" style={[styles.copyFeedback, copyState === "failed" && styles.copyFailed]}>
-          {copyState === "copied" ? "已复制" : "复制失败，请选择文字后复制"}
+          {copyState === "copied" ? "已复制到剪贴板" : "复制失败，请长按正文选中复制"}
         </Text>
       ) : null}
     </View>
@@ -202,7 +224,8 @@ function groupErrors(messages: AgentTurnItem["messages"]) {
   return groups;
 }
 
-function ErrorNotice({ count, text }: { count: number; text: string }) {
+function ErrorNotice({ count, styles, text }: { count: number; styles: ReturnType<typeof makeStyles>; text: string }) {
+  const { palette } = useAppTheme();
   return (
     <View style={styles.error}>
       <Feather color={palette.err} name="alert-circle" size={15} style={styles.errorIcon} />
@@ -226,39 +249,39 @@ function useRunningClock(running: boolean, startedAt?: string) {
   return seconds >= 7200 ? "" : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-const styles = StyleSheet.create({
-  turn: { alignSelf: "stretch", gap: 10, width: "100%" },
-  meta: { alignItems: "center", flexDirection: "row", gap: 8 },
-  avatar: { height: 24, width: 24 },
-  avatarImage: { backgroundColor: palette.bubble, borderRadius: radius.pill, height: 24, width: 24 },
-  avatarSpin: { left: -3, position: "absolute", top: -3 },
-  name: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.semibold },
-  model: { color: palette.ink3, flexShrink: 1, fontSize: font.caption },
-  procHead: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    borderRadius: radius.xs + 2,
-    flexDirection: "row",
-    gap: 6,
-    marginLeft: -6,
-    minHeight: 32,
-    paddingHorizontal: 6,
-  },
-  pressed: { backgroundColor: palette.pressed },
-  shimmer: { alignSelf: "center", minWidth: 0 },
-  procLabel: { color: palette.ink2, fontSize: font.label + 0.5 },
-  procLabelError: { color: palette.err },
-  attachments: { gap: 8 },
-  note: { alignItems: "center", flexDirection: "row", gap: 6 },
-  noteText: { color: palette.ink2, fontSize: font.label },
-  noteLink: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
-  actions: { alignItems: "center", flexDirection: "row", gap: 2, marginLeft: -9 },
-  action: { alignItems: "center", borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
-  copyFeedback: { color: palette.ink3, fontSize: font.caption },
-  copyFailed: { color: palette.err },
-  tokens: { color: palette.ink3, fontSize: font.caption, marginLeft: 6 },
-  error: { alignItems: "flex-start", backgroundColor: palette.errWash, borderRadius: radius.md, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  errorIcon: { marginTop: 2 },
-  errorText: { color: palette.err, flex: 1, fontSize: font.label + 0.5, lineHeight: 21 },
-  errorCount: { color: palette.err, fontSize: font.caption, lineHeight: 21, opacity: 0.75 },
-});
+const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    turn: { alignSelf: "stretch", gap: 10, width: "100%" },
+    meta: { alignItems: "center", flexDirection: "row", gap: 8 },
+    avatar: { height: 24, width: 24 },
+    avatarSpin: { left: -3, position: "absolute", top: -3 },
+    name: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.semibold },
+    model: { color: palette.ink3, flexShrink: 1, fontSize: font.caption },
+    procHead: {
+      alignItems: "center",
+      alignSelf: "flex-start",
+      borderRadius: radius.xs + 2,
+      flexDirection: "row",
+      gap: 6,
+      marginLeft: -6,
+      minHeight: 32,
+      paddingHorizontal: 6,
+    },
+    pressed: { backgroundColor: palette.pressed },
+    shimmer: { alignSelf: "center", minWidth: 0 },
+    procLabel: { color: palette.ink2, fontSize: font.label + 0.5 },
+    procLabelError: { color: palette.err },
+    attachments: { gap: 8 },
+    note: { alignItems: "center", flexDirection: "row", gap: 6 },
+    noteText: { color: palette.ink2, fontSize: font.label },
+    noteLink: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
+    actions: { alignItems: "center", flexDirection: "row", gap: 2, marginLeft: -9 },
+    action: { alignItems: "center", borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
+    copyFeedback: { color: palette.ok, fontSize: font.caption },
+    copyFailed: { color: palette.err },
+    tokens: { color: palette.ink3, fontSize: font.caption, marginLeft: 6 },
+    error: { alignItems: "flex-start", backgroundColor: palette.errWash, borderRadius: radius.md, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
+    errorIcon: { marginTop: 2 },
+    errorText: { color: palette.err, flex: 1, fontSize: font.label + 0.5, lineHeight: 21 },
+    errorCount: { color: palette.err, fontSize: font.caption, lineHeight: 21, opacity: 0.75 },
+  });

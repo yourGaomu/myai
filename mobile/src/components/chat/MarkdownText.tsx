@@ -1,7 +1,10 @@
 import { type ReactNode, useMemo, useState } from "react";
-import { Linking, ScrollView, Text, View } from "react-native";
+import { Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
-import { styles } from "./styles";
+import { useAppTheme } from "../../theme/ThemeProvider";
+import { copyToClipboard } from "../../utils/clipboard";
+import { useChatStyles, type ChatStyles } from "./styles";
 
 type MarkdownBlock =
   | { type: "heading"; level: 1 | 2 | 3; text: string }
@@ -12,22 +15,26 @@ type MarkdownBlock =
   | { type: "quote"; lines: string[] };
 
 // tone="muted" 用于过程时间线里的思考文字：更小、更淡，和最终回答拉开层次。
-// 各段文字都设为 selectable，原生端可以长按选中复制。
 export function MarkdownText({ text, tone = "default" }: { text: string; tone?: "default" | "muted" }) {
+  const styles = useChatStyles();
   const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
 
   if (blocks.length === 0) {
-    return <Text selectable style={[styles.messageText, tone === "muted" && styles.markdownMutedText]}>{text}</Text>;
+    return (
+      <Text selectable style={[styles.messageText, tone === "muted" && styles.markdownMutedText]}>
+        {text}
+      </Text>
+    );
   }
 
   return (
     <View style={styles.markdownRoot}>
-      {blocks.map((block, index) => renderMarkdownBlock(block, index, tone))}
+      {blocks.map((block, index) => renderMarkdownBlock(block, index, tone, styles))}
     </View>
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default" | "muted") {
+function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default" | "muted", styles: ChatStyles) {
   const muted = tone === "muted" ? styles.markdownMutedText : null;
   if (block.type === "heading") {
     return (
@@ -41,7 +48,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
           block.level === 3 && styles.markdownHeading3,
         ]}
       >
-        {renderMarkdownInline(block.text, `heading-${index}`)}
+        {renderMarkdownInline(block.text, `heading-${index}`, styles)}
       </Text>
     );
   }
@@ -49,7 +56,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
   if (block.type === "paragraph") {
     return (
       <Text key={`paragraph-${index}`} selectable style={[styles.markdownParagraph, muted]}>
-        {renderMarkdownInline(block.text, `paragraph-${index}`)}
+        {renderMarkdownInline(block.text, `paragraph-${index}`, styles)}
       </Text>
     );
   }
@@ -60,7 +67,9 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
         {block.items.map((item, itemIndex) => (
           <View key={`list-${index}-${itemIndex}`} style={styles.markdownListItem}>
             <Text style={[styles.markdownListMarker, muted]}>{block.ordered ? `${itemIndex + 1}.` : "•"}</Text>
-            <Text selectable style={[styles.markdownListText, muted]}>{renderMarkdownInline(item, `list-${index}-${itemIndex}`)}</Text>
+            <Text selectable style={[styles.markdownListText, muted]}>
+              {renderMarkdownInline(item, `list-${index}-${itemIndex}`, styles)}
+            </Text>
           </View>
         ))}
       </View>
@@ -68,20 +77,11 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
   }
 
   if (block.type === "code") {
-    return (
-      <View key={`code-${index}`} style={styles.markdownCodeBlock}>
-        {block.language ? <Text style={styles.markdownCodeLabel}>{block.language}</Text> : null}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.markdownCodeScroll}>
-          <Text selectable style={styles.markdownCodeText}>
-            {block.text}
-          </Text>
-        </ScrollView>
-      </View>
-    );
+    return <MarkdownCodeBlock key={`code-${index}`} language={block.language} styles={styles} text={block.text} />;
   }
 
   if (block.type === "table") {
-    return <MarkdownTable key={`table-${index}`} header={block.header} rows={block.rows} />;
+    return <MarkdownTable key={`table-${index}`} header={block.header} rows={block.rows} styles={styles} />;
   }
 
   return (
@@ -90,7 +90,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
       <View style={styles.flex}>
         {block.lines.map((line, lineIndex) => (
           <Text key={`quote-${index}-${lineIndex}`} selectable style={styles.markdownQuoteText}>
-            {renderMarkdownInline(line, `quote-${index}-${lineIndex}`)}
+            {renderMarkdownInline(line, `quote-${index}-${lineIndex}`, styles)}
           </Text>
         ))}
       </View>
@@ -98,7 +98,36 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
   );
 }
 
-function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] }) {
+function MarkdownCodeBlock({ language, styles, text }: { language: string; styles: ChatStyles; text: string }) {
+  const { palette } = useAppTheme();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (await copyToClipboard(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  };
+
+  return (
+    <View style={styles.markdownCodeBlock}>
+      <View style={styles.markdownCodeHead}>
+        <Text style={styles.markdownCodeLabel}>{language || "code"}</Text>
+        <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void handleCopy()} style={styles.markdownCodeCopyBtn}>
+          <Feather color={copied ? palette.ok : palette.ink3} name={copied ? "check" : "copy"} size={12} />
+          <Text style={[styles.markdownCodeCopyText, copied && { color: palette.ok }]}>{copied ? "已复制" : "复制"}</Text>
+        </Pressable>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.markdownCodeScroll}>
+        <Text selectable style={styles.markdownCodeText}>
+          {text}
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+function MarkdownTable({ header, rows, styles }: { header: string[]; rows: string[][]; styles: ChatStyles }) {
   const columnCount = Math.max(header.length, ...rows.map((row) => row.length), 0);
   const columns = Array.from({ length: columnCount }, (_, index) => index);
 
@@ -108,7 +137,9 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
         <View style={styles.markdownTableHeaderRow}>
           {columns.map((columnIndex) => (
             <View key={`header-${columnIndex}`} style={[styles.markdownTableCell, styles.markdownTableHeaderCell]}>
-              <Text selectable style={styles.markdownTableCellText}>{renderMarkdownInline(header[columnIndex] || "", `table-header-${columnIndex}`)}</Text>
+              <Text selectable style={styles.markdownTableCellText}>
+                {renderMarkdownInline(header[columnIndex] || "", `table-header-${columnIndex}`, styles)}
+              </Text>
             </View>
           ))}
         </View>
@@ -116,7 +147,9 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
           <View key={`row-${rowIndex}`} style={[styles.markdownTableRow, rowIndex % 2 === 1 && styles.markdownTableRowAlt]}>
             {columns.map((columnIndex) => (
               <View key={`row-${rowIndex}-${columnIndex}`} style={styles.markdownTableCell}>
-                <Text selectable style={styles.markdownTableCellText}>{renderMarkdownInline(row[columnIndex] || "", `table-${rowIndex}-${columnIndex}`)}</Text>
+                <Text selectable style={styles.markdownTableCellText}>
+                  {renderMarkdownInline(row[columnIndex] || "", `table-${rowIndex}-${columnIndex}`, styles)}
+                </Text>
               </View>
             ))}
           </View>
@@ -126,7 +159,7 @@ function MarkdownTable({ header, rows }: { header: string[]; rows: string[][] })
   );
 }
 
-function MarkdownLink({ children, url }: { children: ReactNode; url: string }) {
+function MarkdownLink({ children, styles, url }: { children: ReactNode; styles: ChatStyles; url: string }) {
   const [failed, setFailed] = useState(false);
   const openLink = async () => {
     setFailed(false);
@@ -155,7 +188,6 @@ function webURL(text: string) {
   }
 }
 
-// 去掉句末标点及多出的右括号，保留网址路径里成对的括号。
 function trimURL(text: string) {
   let end = text.length;
   while (end > 0) {
@@ -173,7 +205,7 @@ function trimURL(text: string) {
   return text.slice(0, end);
 }
 
-function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true): ReactNode[] {
+function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyles, allowLinks = true): ReactNode[] {
   const parts: ReactNode[] = [];
   const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!?\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"\n]*")?\)|https?:\/\/[^\s<>`"'，。！？；：、（）【】《》「」『』]+)/gi;
   let lastIndex = 0;
@@ -190,7 +222,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true
     if (token.startsWith("**")) {
       parts.push(
         <Text key={key} style={styles.markdownStrong}>
-          {renderMarkdownInline(token.slice(2, -2), key, allowLinks)}
+          {renderMarkdownInline(token.slice(2, -2), key, styles, allowLinks)}
         </Text>,
       );
     } else if (token.startsWith("`")) {
@@ -202,7 +234,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true
     } else if (token.startsWith("*")) {
       parts.push(
         <Text key={key} style={styles.markdownEmphasis}>
-          {renderMarkdownInline(token.slice(1, -1), key, allowLinks)}
+          {renderMarkdownInline(token.slice(1, -1), key, styles, allowLinks)}
         </Text>,
       );
     } else if (!allowLinks) {
@@ -212,7 +244,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true
       const target = link?.[2].replace(/\s+"[^"\n]*"$/, "").replace(/^<(.*)>$/, "$1") || "";
       const url = webURL(target);
       if (link && url) {
-        parts.push(<MarkdownLink key={key} url={url}>{renderMarkdownInline(link[1], `${key}-label`, false)}</MarkdownLink>);
+        parts.push(<MarkdownLink key={key} styles={styles} url={url}>{renderMarkdownInline(link[1], `${key}-label`, styles, false)}</MarkdownLink>);
       } else {
         parts.push(token);
       }
@@ -222,7 +254,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, allowLinks = true
       const target = trimURL(token);
       const url = webURL(target);
       if (url) {
-        parts.push(<MarkdownLink key={key} url={url}>{target}</MarkdownLink>, token.slice(target.length));
+        parts.push(<MarkdownLink key={key} styles={styles} url={url}>{target}</MarkdownLink>, token.slice(target.length));
       } else {
         parts.push(token);
       }
@@ -268,7 +300,7 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       continue;
     }
 
-    const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
       blocks.push({
         type: "heading",
@@ -281,87 +313,83 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
 
     if (trimmed.startsWith(">")) {
       const quoteLines: string[] = [];
-      while (index < lines.length) {
-        const quoteLine = lines[index].trim();
-        if (!quoteLine.startsWith(">")) {
-          break;
-        }
-        quoteLines.push(quoteLine.replace(/^>\s?/, ""));
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
         index += 1;
       }
       blocks.push({ type: "quote", lines: quoteLines });
       continue;
     }
 
-    const listMatch = trimmed.match(/^(\d+\.|[-*+])\s+(.*)$/);
-    if (listMatch) {
-      const ordered = /^\d+\./.test(listMatch[1]);
+    if (index + 1 < lines.length && isTableRow(trimmed) && isTableDivider(lines[index + 1].trim())) {
+      const header = splitTableRow(trimmed);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && isTableRow(lines[index].trim())) {
+        rows.push(splitTableRow(lines[index].trim()));
+        index += 1;
+      }
+      blocks.push({ type: "table", header, rows });
+      continue;
+    }
+
+    const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    if (orderedMatch || unorderedMatch) {
+      const ordered = Boolean(orderedMatch);
       const items: string[] = [];
       while (index < lines.length) {
-        const itemMatch = lines[index].trim().match(/^(\d+\.|[-*+])\s+(.*)$/);
-        if (!itemMatch || /^\d+\./.test(itemMatch[1]) !== ordered) {
+        const candidate = lines[index].trim();
+        const match = ordered ? candidate.match(/^\d+\.\s+(.+)$/) : candidate.match(/^[-*]\s+(.+)$/);
+        if (!match) {
           break;
         }
-        items.push(itemMatch[2]);
+        items.push(match[1]);
         index += 1;
       }
       blocks.push({ type: "list", ordered, items });
       continue;
     }
 
-    if (line.includes("|") && index + 1 < lines.length && isTableDivider(lines[index + 1].trim())) {
-      const header = parseMarkdownTableRow(line);
-      const tableRows: string[][] = [];
-      index += 2;
-      while (index < lines.length) {
-        const rowLine = lines[index].trim();
-        if (!rowLine || !rowLine.includes("|")) {
-          break;
-        }
-        if (isTableDivider(rowLine)) {
-          index += 1;
-          continue;
-        }
-        tableRows.push(parseMarkdownTableRow(rowLine));
-        index += 1;
-      }
-      blocks.push({ type: "table", header, rows: tableRows });
-      continue;
-    }
-
-    const paragraphLines: string[] = [line];
-    index += 1;
+    const paragraphLines: string[] = [];
     while (index < lines.length) {
-      const nextLine = lines[index];
-      const nextTrimmed = nextLine.trim();
+      const candidate = lines[index].trim();
       if (
-        !nextTrimmed ||
-        nextTrimmed.startsWith(">") ||
-        nextTrimmed.startsWith("```") ||
-        /^(#{1,3})\s+/.test(nextTrimmed) ||
-        /^(\d+\.|[-*+])\s+/.test(nextTrimmed) ||
-        (nextLine.includes("|") && index + 1 < lines.length && isTableDivider(lines[index + 1].trim()))
+        !candidate ||
+        candidate.startsWith("```") ||
+        candidate.startsWith(">") ||
+        /^(#{1,3})\s+/.test(candidate) ||
+        /^[-*]\s+/.test(candidate) ||
+        /^\d+\.\s+/.test(candidate) ||
+        (index + 1 < lines.length && isTableRow(candidate) && isTableDivider(lines[index + 1].trim()))
       ) {
         break;
       }
-      paragraphLines.push(nextLine);
+      paragraphLines.push(lines[index]);
       index += 1;
     }
-    blocks.push({ type: "paragraph", text: paragraphLines.join(" ") });
+    blocks.push({ type: "paragraph", text: paragraphLines.join("\n") });
   }
 
   return blocks;
 }
 
-function parseMarkdownTableRow(line: string) {
+function isTableRow(line: string) {
+  return line.includes("|") && line.replace(/\|/g, "").trim().length > 0;
+}
+
+function isTableDivider(line: string) {
+  if (!line.includes("|")) {
+    return false;
+  }
+  const cells = splitTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitTableRow(line: string) {
   return line
-    .trim()
     .replace(/^\|/, "")
     .replace(/\|$/, "")
     .split("|")
     .map((cell) => cell.trim());
-}
-
-function isTableDivider(line: string) {
-  return /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line.trim());
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
-import { Animated, Easing, Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Animated, Easing, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -7,9 +7,10 @@ import type { SessionSummary } from "../../protocol";
 import type { ViewMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { groupSessionsByDate } from "../../utils/session";
-import { palette } from "../../constants/theme";
+import { useAppTheme } from "../../theme/ThemeProvider";
+import { CharacterAvatar } from "../common/CharacterAvatar";
 import { Spinner } from "../common/Spinner";
-import { styles } from "./sideDrawerStyles";
+import { useDrawerStyles } from "./sideDrawerStyles";
 
 type Props = {
   activeSessionID?: string;
@@ -17,6 +18,7 @@ type Props = {
   buttonFeedback: ButtonFeedback;
   changesCount: number;
   connected: boolean;
+  deletedCount?: number;
   deviceID: string;
   onClose: () => void;
   onNewSession?: () => void;
@@ -33,8 +35,10 @@ type Props = {
 type FeatherName = ComponentProps<typeof Feather>["name"];
 const maxListed = 30;
 
-// 全局侧栏：新对话、工作区页面入口、按日期分组的会话列表、设置。
+// 全局侧栏：新对话、工作区页面入口（含独立回收站）、按日期分组会话、设置。
 export function SideDrawer(props: Props) {
+  const { palette } = useAppTheme();
+  const styles = useDrawerStyles();
   const { onClose, sessions, visible } = props;
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -107,7 +111,7 @@ export function SideDrawer(props: Props) {
           ]}
         >
           <View style={styles.profile}>
-            <Image source={require("../../../assets/avatar.png")} style={styles.avatar} />
+            <CharacterAvatar circular size={42} slot={props.busySessionID ? "working" : "idle"} variant="avatar" />
             <View style={styles.profileText}>
               <Text numberOfLines={1} style={styles.name}>{displayName}</Text>
               <View style={styles.statusRow}>
@@ -119,7 +123,18 @@ export function SideDrawer(props: Props) {
 
           <View style={styles.search}>
             <Feather color={palette.ink3} name="search" size={17} />
-            <TextInput onChangeText={setQuery} placeholder="搜索对话" placeholderTextColor={palette.ink3} style={styles.searchInput} value={query} />
+            <TextInput
+              onChangeText={setQuery}
+              placeholder="搜索对话"
+              placeholderTextColor={palette.ink3}
+              style={styles.searchInput}
+              value={query}
+            />
+            {query ? (
+              <Pressable accessibilityLabel="清空搜索" onPress={() => setQuery("")} style={styles.clearBtn}>
+                <Feather color={palette.ink3} name="x" size={14} />
+              </Pressable>
+            ) : null}
           </View>
 
           <NavRow icon="edit" label="新对话" onPress={() => { props.onNewSession?.(); onClose(); }} />
@@ -158,10 +173,10 @@ export function SideDrawer(props: Props) {
 
           <View style={styles.footer}>
             <View style={styles.footerItem}>
-              <NavRow icon="settings" label="设置" onPress={() => { props.onOpenSettings(); onClose(); }} />
+              <NavRow active={props.viewMode === "settings"} icon="settings" label="设置" onPress={() => { props.onOpenSettings(); onClose(); }} />
             </View>
             <View style={styles.footerItem}>
-              <NavRow icon="trash-2" label="回收站" onPress={() => go("sessions")} />
+              <NavRow active={props.viewMode === "trash"} badge={props.deletedCount} icon="trash-2" label="回收站" onPress={() => go("trash")} />
             </View>
           </View>
         </Animated.View>
@@ -171,9 +186,11 @@ export function SideDrawer(props: Props) {
 }
 
 function NavRow({ active, badge, icon, label, onPress }: { active?: boolean; badge?: number; icon: FeatherName; label: string; onPress: () => void }) {
+  const { palette } = useAppTheme();
+  const styles = useDrawerStyles();
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.nav, active && styles.navActive, pressed && styles.pressed]}>
-      <Feather color={palette.ink2} name={icon} size={19} />
+      <Feather color={active ? palette.brandLight : palette.ink2} name={icon} size={19} />
       <Text numberOfLines={1} style={styles.navText}>{label}</Text>
       {badge ? (
         <View style={styles.badge}>

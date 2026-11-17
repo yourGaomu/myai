@@ -142,12 +142,20 @@ export function MobileMainContent({
       {common.viewMode === "chat" ? (
         <ChatPanel
           activeAssistantID={chat.activeAssistantID}
+          activePlan={chat.activePlan}
+          activitySlot={chat.activitySlot}
           buttonFeedback={common.buttonFeedback}
+          changesCount={chat.changesCount}
           chatScrollRef={chat.chatScrollRef}
           connected={chat.connected}
           deviceID={chat.deviceID}
           greetingName={chat.greetingName}
+          onAnswerUserQuestion={chat.onAnswerUserQuestion}
+          onExecutePlan={chat.onExecutePlan}
+          onNearHeaderChange={chat.onNearHeaderChange}
+          onOpenChangePath={chat.onOpenChangePath}
           onOpenChanges={chat.onOpenChanges}
+          onOpenPlan={chat.onOpenPlan}
           onPickSuggestion={chat.onPickSuggestion}
           onScrolledChange={chat.onScrolledChange}
           loadingHistory={
@@ -158,10 +166,14 @@ export function MobileMainContent({
           messages={chat.messages}
           onInspectSubagent={chat.onInspectSubagent}
           onRegenerate={chat.onRegenerate}
+          pendingPlan={chat.pendingPlan}
+          pendingQuestions={chat.pendingQuestions}
           pendingRequestID={chat.pendingRequestID}
           runs={chat.runs}
           sessionID={chat.sessionID}
           subagentTasks={chat.subagentTasks}
+          topClearance={chat.topClearance}
+          workspaceChanges={chat.workspaceChanges}
         />
       ) : null}
 
@@ -188,6 +200,7 @@ export function MobileMainContent({
             pending: common.pendingActions.memory,
           }}
           buttonFeedback={common.buttonFeedback}
+          onInsertReference={knowledge.onInsertReference}
           knowledge={{
             activeSession: knowledge.activeSession,
             categories: knowledge.categories,
@@ -233,6 +246,7 @@ export function MobileMainContent({
         <FilesPanel
           buttonFeedback={common.buttonFeedback}
           assets={files.assets}
+          changes={files.changes}
           clientToken={common.clientToken}
           fileEntries={files.fileEntries}
           fileParent={files.fileParent}
@@ -270,11 +284,12 @@ export function MobileMainContent({
         <ChangeDetailPanel changeDiff={changes.changeDiff} historyDiff={changes.historyDiff} />
       ) : null}
 
-      {common.viewMode === "sessions" ? (
+      {common.viewMode === "sessions" || common.viewMode === "trash" ? (
         <SessionsPanel
           buttonFeedback={common.buttonFeedback}
           clientToken={common.clientToken}
           deletedSessions={sessions.deletedSessions}
+          mode={common.viewMode === "trash" ? "trash" : "active"}
           onDeleteSession={sessions.onDeleteSession}
           onNewSession={settings.onNewSession}
           onRefreshDeletedSessions={sessions.onRefreshDeletedSessions}
@@ -287,15 +302,16 @@ export function MobileMainContent({
         />
       ) : null}
 
-      {/* 权限确认改为底部弹层（见 MobileAppScreen），这里只保留需要输入的提问卡片 */}
-      {permission.pendingQuestions.map((question) => (
-        <UserQuestionPrompt
-          key={question.questionID}
-          buttonFeedback={common.buttonFeedback}
-          onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
-          question={question}
-        />
-      ))}
+      {/* AskUserQuestion 已内嵌渲染在对话流内部；若用户在其他二级页，允许通过提问卡片就地响应 */}
+      {common.viewMode !== "chat" &&
+        permission.pendingQuestions.map((question) => (
+          <UserQuestionPrompt
+            key={question.questionID}
+            buttonFeedback={common.buttonFeedback}
+            onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
+            question={question}
+          />
+        ))}
     </>
   );
 }
