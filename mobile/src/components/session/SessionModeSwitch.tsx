@@ -2,6 +2,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import type { SessionAgentMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -11,12 +13,14 @@ type Props = {
   pending: boolean;
 };
 
-const modes: Array<{ icon: string; label: string; mode: SessionAgentMode }> = [
-  { icon: "💬", label: "对话模式", mode: "chat" },
-  { icon: "🎯", label: "规划模式", mode: "plan" },
+const modes: Array<{ label: string; mode: SessionAgentMode }> = [
+  { label: "对话模式", mode: "chat" },
+  { label: "规划模式", mode: "plan" },
 ];
 
 export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pending }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.wrapper}>
       <View accessibilityRole="tablist" style={styles.control}>
@@ -37,7 +41,7 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
               }
             >
               {pending && selected ? (
-                <ActivityIndicator color="#12100e" size="small" />
+                <ActivityIndicator color={palette.ink1} size="small" />
               ) : (
                 <Text
                   style={[
@@ -45,7 +49,7 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
                     selected && styles.buttonTextActive,
                   ]}
                 >
-                  {`${item.icon} ${item.label}`}
+                  {item.label}
                 </Text>
               )}
             </Pressable>
@@ -56,44 +60,41 @@ export function SessionModeSwitch({ buttonFeedback, disabled, mode, onChange, pe
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 2,
-  },
-  control: {
-    backgroundColor: "#ded7cc",
-    borderColor: "#25231f",
-    borderRadius: 999,
-    borderWidth: 2,
-    flexDirection: "row",
-    gap: 2,
-    padding: 3,
-  },
-  button: {
-    alignItems: "center",
-    borderRadius: 999,
-    height: 32,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  buttonActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderWidth: 1.5,
-    elevation: 2,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1, width: 0 },
-    shadowOpacity: 0.16,
-    shadowRadius: 2,
-  },
-  buttonText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  buttonTextActive: {
-    color: "#12100e",
-  },
-});
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    wrapper: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 2,
+    },
+    control: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 2,
+      padding: 3,
+    },
+    button: {
+      alignItems: "center",
+      borderRadius: radius.pill,
+      height: 32,
+      justifyContent: "center",
+      paddingHorizontal: 16,
+    },
+    buttonActive: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderWidth: 1,
+      ...shadow.card,
+    },
+    buttonText: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.bold,
+    },
+    buttonTextActive: {
+      color: palette.ink1,
+    },
+  });

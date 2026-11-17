@@ -55,6 +55,28 @@ func (s PersistenceService) Save(ctx context.Context, command sessioncommand.Sav
 	}))
 }
 
+func (s PersistenceService) TouchMessages(ctx context.Context, snapshot *session.Session, sessionID, model, title string, createdAt time.Time, includeUsage bool) error {
+	if s.Sessions == nil {
+		return nil
+	}
+	current := session.Clone(snapshot)
+	if current == nil {
+		current = s.memorySession(sessionID)
+	}
+	record, err := s.PrepareRecord(ctx, BuildSessionRecord(persistencecommand.BuildRecord{SessionID: sessionID, Model: model, Title: title, DefaultModel: s.DefaultModel, Current: current, Now: createdAt}))
+	if err != nil {
+		return err
+	}
+	sequence := int64(0)
+	if current != nil && len(current.Messages) > 0 {
+		sequence = current.Messages[len(current.Messages)-1].Sequence
+	}
+	if store, ok := s.Sessions.(repository.SessionMessageMetadataStore); ok {
+		return store.TouchSessionMessages(ctx, record, sequence, includeUsage)
+	}
+	return errors.New("session repository does not support message metadata updates")
+}
+
 func (s PersistenceService) SaveRecord(ctx context.Context, record repository.SessionRecord) error {
 	if s.Sessions == nil {
 		return nil
@@ -117,7 +139,7 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 	}
 	record := repository.SessionRecord{
 		ID: command.SessionID, Model: model, AgentMode: string(session.AgentModeChat),
-		Kind: string(session.KindUser), PermissionMode: string(session.PermissionModeAsk), ContextWindowK: contextmgr.DefaultWindowK, Title: title,
+		Kind: string(session.KindUser), PermissionMode: string(session.PermissionModeAsk), ContextWindowK: 0, Title: title,
 	}
 	if current := command.Current; current != nil && current.ID == command.SessionID {
 		record.Kind = string(session.NormalizeKind(current.Kind))
@@ -128,12 +150,13 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		record.SystemInstruction = current.SystemInstruction
 		record.AllowedTools = append([]string(nil), current.AllowedTools...)
 		record.EnforceToolAllowlist = current.EnforceToolAllowlist
+		record.PermissionCeiling = session.ClonePermissionCeiling(current.PermissionCeiling)
 		record.WorkspaceRoot = current.WorkspaceRoot
 		record.WorkspaceSandboxID = current.WorkspaceSandboxID
 		record.MaxToolRounds = current.MaxToolRounds
 		record.AgentMode = string(session.NormalizeAgentMode(current.AgentMode))
 		record.PermissionMode = string(session.NormalizePermissionMode(current.PermissionMode))
-		record.ContextWindowK = contextmgr.NormalizeWindowK(current.ContextWindowK)
+		record.ContextWindowK = current.ContextWindowK
 		record.Summary = current.Summary
 		record.CompactedMessages = current.CompactedMessages
 		record.CompactionSourceHash = current.CompactionSourceHash
@@ -162,6 +185,7 @@ func BuildSessionRecord(command persistencecommand.BuildRecord) repository.Sessi
 		record.SystemInstruction = existing.SystemInstruction
 		record.AllowedTools = append([]string(nil), existing.AllowedTools...)
 		record.EnforceToolAllowlist = existing.EnforceToolAllowlist
+		record.PermissionCeiling = session.ClonePermissionCeiling(existing.PermissionCeiling)
 		record.WorkspaceRoot = existing.WorkspaceRoot
 		record.WorkspaceSandboxID = existing.WorkspaceSandboxID
 		record.MaxToolRounds = existing.MaxToolRounds
@@ -207,7 +231,9 @@ func PrepareSessionRecordForSave(command persistencecommand.PrepareRecord) (repo
 	if record.PermissionMode == "" {
 		record.PermissionMode = string(session.PermissionModeAsk)
 	}
-	record.ContextWindowK = contextmgr.NormalizeWindowK(record.ContextWindowK)
+	if record.ContextWindowK != 0 {
+		record.ContextWindowK = contextmgr.NormalizeWindowK(record.ContextWindowK)
+	}
 	record.RAGSettings = session.NormalizeRAGSettings(record.RAGSettings)
 	if err := session.ValidateRAGSettings(record.RAGSettings); err != nil {
 		return repository.SessionRecord{}, err

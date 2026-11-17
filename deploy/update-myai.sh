@@ -41,11 +41,6 @@ if [ "${MYAI_UPDATE_AGENT:-true}" = "true" ]; then
   services="$services agent"
 fi
 
-if [ "${MYAI_UPDATE_SHORTENER:-true}" = "true" ]; then
-  profile_args="$profile_args --profile shortener"
-  services="$services url-shortener"
-fi
-
 printf 'Project: %s\n' "$PROJECT_DIR"
 printf 'Services: %s\n' "$services"
 

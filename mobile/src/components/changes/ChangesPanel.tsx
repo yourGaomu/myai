@@ -1,13 +1,18 @@
-import { Pressable, Text, View } from "react-native";
+import { Fragment, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
-import { ButtonContent } from "../common/ButtonContent";
 import type { ChangeEntry, HistoryCheckpoint } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-import { changeLabel, changeMeta } from "../../utils/changes";
-import { formatDateTime } from "../../utils/format";
+import { changeLabel } from "../../utils/changes";
+import { formatDateTime, formatShortTime } from "../../utils/format";
 import { shortID } from "../../utils/ids";
-import { changeBadgeStyle } from "./changeUtils";
-import { styles } from "./styles";
+import { baseName, dirName } from "../../utils/toolDisplay";
+import { fontFamily, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { ConfirmModal } from "../common/ConfirmModal";
+import { useListStyles } from "../common/listStyles";
+import { Segmented } from "../common/Segmented";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -19,8 +24,6 @@ type Props = {
   historyMessage: string;
   onOpenChange: (entry: ChangeEntry) => void;
   onPreviewHistory: (checkpointID: string) => void;
-  onRefreshChanges: () => void;
-  onRefreshHistory: () => void;
   onRevertHistory: (checkpointID: string) => void;
   pendingChanges: boolean;
   pendingDiff: boolean;
@@ -29,132 +32,140 @@ type Props = {
   selectedChange: string;
 };
 
-export function ChangesPanel({
-  buttonFeedback,
-  changes,
-  changesClean,
-  changesMessage,
-  clientToken,
-  historyCheckpoints,
-  historyMessage,
-  onOpenChange,
-  onPreviewHistory,
-  onRefreshChanges,
-  onRefreshHistory,
-  onRevertHistory,
-  pendingChanges,
-  pendingDiff,
-  pendingHistory,
-  pendingRevert,
-  selectedChange,
-}: Props) {
+// 变更页：展示未提交文件的 +X/-Y 行统计 + 历史快照回滚（带统一确认弹窗）。
+export function ChangesPanel(props: Props) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  const styles = useThemedStyles(makeStyles);
+  const { changes, clientToken, historyCheckpoints, pendingDiff } = props;
+  const [tab, setTab] = useState<"now" | "history">("now");
+  const [confirmCheckpoint, setConfirmCheckpoint] = useState<HistoryCheckpoint | null>(null);
+
+  function letterStyle(entry: ChangeEntry) {
+    if (entry.deleted) return list.letterDel;
+    if (entry.untracked || entry.status === "added") return list.letterAdd;
+    if (entry.renamed) return list.letterRen;
+    return list.letterMod;
+  }
+
   return (
-    <View style={styles.container}>
-      {/* 变更文件列表 */}
-      <View style={[styles.panel, styles.changesPanel]}>
-        <View style={styles.panelHeader}>
-          <View style={styles.flex}>
-            <Text style={styles.panelTitle}>工作区文件变更</Text>
-            <Text style={styles.pathText}>{changesClean ? "工作区干净" : `${changes.length} 个文件变动`}</Text>
-          </View>
-          <View style={styles.rowCompact}>
-            <Pressable
-              disabled={pendingChanges}
-              onPress={onRefreshChanges}
-              style={({ pressed }) => buttonFeedback([styles.smallButton, pendingChanges && styles.disabledButton], pressed)}
-            >
-              <ButtonContent loading={pendingChanges} text={pendingChanges ? "加载中" : "刷新"} />
-            </Pressable>
-          </View>
-        </View>
+    <View>
+      <Segmented onChange={setTab} options={[{ key: "now", label: "未提交" }, { key: "history", label: "历史快照" }]} value={tab} />
 
-        <View style={styles.changeList}>
-          {changesMessage ? <Text style={styles.emptyText}>{changesMessage}</Text> : null}
-          {!changesMessage && changes.length === 0 ? (
-            <Text style={styles.emptyText}>{clientToken ? "当前工作区暂无未提交变更" : "请先完成配对"}</Text>
-          ) : (
-            changes.map((entry) => {
-              const lastSlash = entry.path.lastIndexOf("/");
-              const dir = lastSlash >= 0 ? entry.path.slice(0, lastSlash + 1) : "";
-              const baseName = lastSlash >= 0 ? entry.path.slice(lastSlash + 1) : entry.path;
-
+      {tab === "now" ? (
+        <>
+          <Text style={list.hint}>
+            {props.changesMessage || (props.changesClean || changes.length === 0 ? "工作区没有未提交的改动" : `${changes.length} 个文件 · 对比工作区基线`)}
+          </Text>
+          {changes.length === 0 && props.pendingChanges ? <Loading /> : null}
+          {changes.length === 0 && !props.pendingChanges && !clientToken ? <Text style={list.empty}>请先完成配对</Text> : null}
+          <View style={list.bleed}>
+            {changes.map((entry) => {
+              const dir = dirName(entry.path);
+              const added = entry.added_lines || 0;
+              const removed = entry.removed_lines || 0;
               return (
                 <Pressable
-                  key={`${entry.path}-${entry.index_status || ""}-${entry.worktree_status || ""}`}
                   disabled={pendingDiff}
-                  onPress={() => onOpenChange(entry)}
-                  style={({ pressed }) =>
-                    buttonFeedback(
-                      [styles.changeRow, selectedChange === entry.path && styles.changeRowActive, pendingDiff && styles.disabledButton],
-                      pressed,
-                    )
-                  }
+                  key={`${entry.path}-${entry.index_status || ""}-${entry.worktree_status || ""}`}
+                  onPress={() => props.onOpenChange(entry)}
+                  style={({ pressed }) => [list.rowCompact, (pressed || props.selectedChange === entry.path) && list.pressed]}
                 >
-                  <Text style={[styles.changeBadge, changeBadgeStyle(entry)]}>{changeLabel(entry)}</Text>
-                  <View style={styles.flex}>
-                    <Text numberOfLines={1} style={styles.fileName}>
-                      {dir ? <Text style={styles.fileDir}>{dir}</Text> : null}
-                      {baseName}
-                    </Text>
-                    <Text style={styles.fileMeta}>{changeMeta(entry)}</Text>
-                  </View>
-                  <Text style={styles.viewDiffText}>查看 Diff ❯</Text>
+                  <Text style={[list.letter, letterStyle(entry)]}>{changeLabel(entry)}</Text>
+                  <Text numberOfLines={1} style={[list.body, list.title]}>
+                    {baseName(entry.path)}
+                    {dir ? <Text style={list.meta}>  {dir}</Text> : null}
+                  </Text>
+                  {added > 0 || removed > 0 ? (
+                    <View style={styles.stats}>
+                      {added > 0 ? <Text style={styles.statAdd}>+{added}</Text> : null}
+                      {removed > 0 ? <Text style={styles.statDel}>−{removed}</Text> : null}
+                    </View>
+                  ) : null}
+                  {pendingDiff && props.selectedChange === entry.path ? (
+                    <ActivityIndicator color={palette.ink3} size="small" />
+                  ) : (
+                    <Feather color={palette.ink4} name="chevron-right" size={16} />
+                  )}
                 </Pressable>
               );
-            })
-          )}
-        </View>
-      </View>
-
-      {/* 历史快照检查点 */}
-      <View style={styles.historyBox}>
-        <View style={styles.previewHeader}>
-          <View style={styles.flex}>
-            <Text style={styles.previewTitle}>历史版本快照</Text>
-            <Text style={styles.pathText}>SQLite Checkpoints 检查点</Text>
+            })}
           </View>
-          <Pressable
-            disabled={pendingHistory}
-            onPress={onRefreshHistory}
-            style={({ pressed }) => buttonFeedback([styles.smallButton, pendingHistory && styles.disabledButton], pressed)}
-          >
-            <ButtonContent loading={pendingHistory} text={pendingHistory ? "加载中" : "刷新"} />
-          </Pressable>
-        </View>
+        </>
+      ) : (
+        <>
+          <Text style={list.hint}>{props.historyMessage || "Agent 修改文件前自动保存的快照，可以对比或回滚"}</Text>
+          {historyCheckpoints.length === 0 ? (
+            props.pendingHistory ? <Loading /> : <Text style={list.empty}>{clientToken ? "还没有历史快照" : "请先完成配对"}</Text>
+          ) : null}
+          <View style={list.bleed}>
+            {historyCheckpoints.map((checkpoint, index) => (
+              <Fragment key={checkpoint.id}>
+                {index > 0 ? <View style={list.dividerFull} /> : null}
+                <View style={[list.row, { alignItems: "flex-start", paddingVertical: 12 }]}>
+                  <Text style={[list.meta, { paddingTop: 2, width: 58 }]}>{formatShortTime(checkpoint.created_at) || "—"}</Text>
+                  <View style={list.body}>
+                    <Text numberOfLines={2} style={list.title}>{checkpoint.title || `快照 ${shortID(checkpoint.id)}`}</Text>
+                    <Text style={list.sub}>{checkpoint.change_count} 个文件</Text>
+                    <View style={{ flexDirection: "row", gap: 20, marginTop: 4 }}>
+                      <Pressable
+                        disabled={pendingDiff}
+                        hitSlop={6}
+                        onPress={() => props.onPreviewHistory(checkpoint.id)}
+                        style={[list.textButton, pendingDiff && list.disabled]}
+                      >
+                        <Text style={list.textLink}>对比</Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={props.pendingRevert}
+                        hitSlop={6}
+                        onPress={() => setConfirmCheckpoint(checkpoint)}
+                        style={[list.textButton, props.pendingRevert && list.disabled]}
+                      >
+                        <Text style={list.textDanger}>回滚到此</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Fragment>
+            ))}
+          </View>
+        </>
+      )}
 
-        <View style={styles.historyList}>
-          {historyMessage ? <Text style={styles.emptyText}>{historyMessage}</Text> : null}
-          {!historyMessage && historyCheckpoints.length === 0 ? (
-            <Text style={styles.emptyText}>{clientToken ? "还没有加载历史记录" : "请先完成配对"}</Text>
-          ) : (
-            historyCheckpoints.map((checkpoint) => (
-              <View key={checkpoint.id} style={styles.historyRow}>
-                <View style={styles.historyHeader}>
-                  <Text style={styles.historyTag}>🏷️ {checkpoint.title || `Checkpoint ${shortID(checkpoint.id)}`}</Text>
-                  <Text style={styles.historyCount}>{checkpoint.change_count} 文件</Text>
-                </View>
-                <Text style={styles.historyMeta}>{formatDateTime(checkpoint.created_at)}</Text>
-                <View style={styles.historyActions}>
-                  <Pressable
-                    disabled={pendingDiff}
-                    onPress={() => onPreviewHistory(checkpoint.id)}
-                    style={({ pressed }) => buttonFeedback([styles.previewButton, pendingDiff && styles.disabledButton], pressed)}
-                  >
-                    <ButtonContent loading={pendingDiff} text={pendingDiff ? "加载中" : "对比"} />
-                  </Pressable>
-                  <Pressable
-                    disabled={pendingRevert}
-                    onPress={() => onRevertHistory(checkpoint.id)}
-                    style={({ pressed }) => buttonFeedback([styles.revertButton, pendingRevert && styles.disabledButton], pressed)}
-                  >
-                    <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "一键回滚"} />
-                  </Pressable>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
-      </View>
+      <ConfirmModal
+        confirmLabel="回滚快照"
+        danger
+        icon="rotate-ccw"
+        message={`确定恢复「${confirmCheckpoint?.title || `快照 ${shortID(confirmCheckpoint?.id || "")}`}」吗？\n将还原 ${confirmCheckpoint?.change_count || 0} 个文件至 ${formatDateTime(confirmCheckpoint?.created_at)} 的状态。`}
+        onCancel={() => setConfirmCheckpoint(null)}
+        onConfirm={() => {
+          if (confirmCheckpoint) {
+            props.onRevertHistory(confirmCheckpoint.id);
+          }
+          setConfirmCheckpoint(null);
+        }}
+        title="回滚历史快照"
+        visible={Boolean(confirmCheckpoint)}
+      />
     </View>
   );
 }
+
+function Loading() {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  return (
+    <View style={list.loading}>
+      <ActivityIndicator color={palette.ink2} size="small" />
+      <Text style={list.loadingText}>正在加载…</Text>
+    </View>
+  );
+}
+
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    stats: { alignItems: "center", flexDirection: "row", gap: 5 },
+    statAdd: { color: palette.diffAdd, fontFamily: fontFamily.mono, fontSize: 11.5, fontWeight: weight.semibold },
+    statDel: { color: palette.diffDel, fontFamily: fontFamily.mono, fontSize: 11.5, fontWeight: weight.semibold },
+  });

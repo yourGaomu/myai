@@ -47,7 +47,9 @@ import (
 	agentrunport "myai/core/port/agentrun"
 	asyncport "myai/core/port/async"
 	cacheport "myai/core/port/cache"
+	historyport "myai/core/port/history"
 	modelport "myai/core/port/model"
+	outboxport "myai/core/port/outbox"
 	persistenceport "myai/core/port/persistence"
 	repository "myai/core/port/repository"
 	"myai/core/service"
@@ -68,21 +70,23 @@ type ModelRegistry interface {
 
 type Configuration struct {
 	// Configuration 只接收进程已经创建好的基础设施，BuildDependencies 再把它们装配成应用服务。
-	Models           ModelRegistry
-	ModelFactory     modelport.Factory
-	Sessions         *memorysession.Store
-	Store            persistenceport.Store
-	Cache            cacheport.CurrentSessionCache
-	Async            asyncport.Executor
-	Tools            *tool.RegisterTools
-	Skills           *skill.Manager
-	Hooks            *hook.Manager
-	DefaultModel     string
-	UserID           string
-	KnowledgeSearch  searchapi.Service
-	AgentRuns        agentrunport.Repository
-	AgentRunObserver agentrunport.CompletionObserver
-	IntentController *service.IntentController
+	Models              ModelRegistry
+	ModelFactory        modelport.Factory
+	Sessions            *memorysession.Store
+	Store               persistenceport.Store
+	Cache               cacheport.CurrentSessionCache
+	Async               asyncport.Executor
+	Tools               *tool.RegisterTools
+	Skills              *skill.Manager
+	Hooks               *hook.Manager
+	DefaultModel        string
+	UserID              string
+	KnowledgeSearch     searchapi.Service
+	AgentRuns           agentrunport.Repository
+	AgentRunObserver    agentrunport.CompletionObserver
+	IntentController    *service.IntentController
+	HistoryStoreFactory historyport.StoreFactory
+	PersistenceQueue    *generationadapter.SessionQueue
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -161,7 +165,14 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		IDs:         uuidadapter.Generator{},
 	}
 	asyncTasks := runtimeservice.AsyncTaskService{Executor: configuration.Async}
-	sessionQueue := generationadapter.NewSessionQueue(asyncTasks)
+	sessionQueue := configuration.PersistenceQueue
+	if sessionQueue == nil {
+		sessionQueue = generationadapter.NewSessionQueue(asyncTasks)
+	}
+	var submitRecords func(context.Context, outboxport.Batch) error
+	if sessionQueue.Durable() {
+		submitRecords = sessionQueue.SubmitRecords
+	}
 	sessionQueue.OnPanic = func(err error) {
 		log.Print(err)
 	}
@@ -221,12 +232,22 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	turnHooks := hooklifecycle.Bridge{Hooks: configuration.Hooks}
 	turnInputQueue := pendinginput.NewQueue()
 	agentLoop := generationservice.AgentLoopService{
+		Sessions:     configuration.Sessions,
 		Contexts:     contexts,
 		Tools:        toolcatalog.Catalog{Tools: configuration.Tools},
 		ToolExecutor: toolExecutor,
 		Compactor:    compactor,
 		TurnHooks:    turnHooks,
 		PendingInput: turnInputQueue,
+		OnMessagesAccepted: func(ctx context.Context, current *session.Session, messages []domainmessage.Message) error {
+			if current == nil || len(messages) == 0 {
+				return nil
+			}
+			return userMessages.AcceptUserMessage(ctx, generationcommand.PersistUserMessage{
+				SessionID: current.ID, Model: current.Model, Input: messages[len(messages)-1].Text(),
+				AppendedMessages: domainmessage.CloneAll(messages), SessionSnapshot: session.Clone(current),
+			})
+		},
 		OnMessagesAppended: func(current *session.Session, messages []domainmessage.Message) {
 			// 1. 将环境、计划、mailbox 和中间回答写入同一持久化队列，保持会话顺序。
 			if current == nil || len(messages) == 0 {
@@ -238,14 +259,17 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 				AppendedMessages: domainmessage.CloneAll(messages), SessionSnapshot: session.Clone(current),
 			})
 		},
+		OnHookError: func(err error) { log.Printf("stop hook failed: %v", err) },
 		OnCompactError: func(err error) {
 			log.Printf("auto compact failed: %v", err)
 		},
 		ToolRecords: toolrecordsrepository.Recorder{
+			SubmitRecords:      submitRecords,
 			Persistence:        configuration.Store,
 			IDs:                uuidadapter.Generator{},
 			RunAsync:           asyncTasks.Submit,
 			RunAsyncForSession: sessionQueue.Submit,
+			RunRetryForSession: sessionQueue.SubmitTask,
 			OnError: func(err error) {
 				log.Printf("save tool execution records failed: %v", err)
 			},
@@ -272,11 +296,14 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		},
 	}
 	generationTasks := generationservice.TaskService{
-		RequestIDs: uuidadapter.Generator{},
-		Recorders:  taskrecorder.Factory{},
-		Generator:  assistantGeneration,
-		Runs:       runCommands,
-		TurnHooks:  turnHooks,
+		Sessions:           configuration.Sessions,
+		OnMessagesAppended: agentLoop.OnMessagesAppended,
+		OnMessagesAccepted: agentLoop.OnMessagesAccepted,
+		RequestIDs:         uuidadapter.Generator{},
+		Recorders:          taskrecorder.Factory{StoreFactory: configuration.HistoryStoreFactory},
+		Generator:          assistantGeneration,
+		Runs:               runCommands,
+		TurnHooks:          turnHooks,
 		OnSaveError: func(err error) {
 			log.Printf("save task history checkpoint failed: %v", err)
 		},
@@ -290,12 +317,18 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 
 	// 第四组：Plan 状态先更新内存 Session，再通过回调持久化整个会话。
 	planRepository := sessionplanstate.NewRepository(configuration.Sessions, func(ctx context.Context, sessionID string, model string) error {
-		return sessionPersistence.Save(ctx, sessioncommand.SaveSession{
-			SessionID: sessionID,
-			Model:     model,
-		})
+		return sessionPersistence.Save(ctx, sessioncommand.SaveSession{SessionID: sessionID, Model: model})
 	})
+	if plans, ok := configuration.Store.(repository.SessionPlanStore); ok {
+		planRepository.Plans = plans
+		planRepository.EnsureSession = func(ctx context.Context, sessionID, model string) error {
+			return sessionPersistence.TouchMessages(ctx, nil, sessionID, model, "", time.Now(), false)
+		}
+	}
 	planStates := planserviceapp.StatePersistenceService{Repository: planRepository}
+	responseCommit.PlanStates = planStates
+	assistantGeneration.ResponseCommitter = responseCommit
+	generationTasks.Generator = assistantGeneration
 
 	bootstrap := bootstrapservice.BootstrapService{
 		Cache:       currentSession,
@@ -338,7 +371,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		PlanStates:       planStates,
 		UserMessages:     userMessages,
 		Events:           events,
-		Recovery:         planservice.GenerationRecoveryPlanner{Messages: messageCommands, Generation: generationTasks},
+		Recovery:         planservice.GenerationRecoveryPlanner{Messages: messageCommands, Generation: generationTasks, UserMessages: userMessages},
 		MaxReplans:       1,
 		MaxParallelSteps: 3,
 		Runs:             runCommands,
@@ -355,6 +388,9 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	continuationControl, _ := configuration.Store.(repository.SessionContinuationStore)
 	return service.ChatDependencies{
 		ContinuationControl: continuationControl,
+		FlushPersistence:    sessionQueue.Flush,
+		BlockSession:        sessionQueue.BlockSession,
+		ResumeSession:       sessionQueue.ResumeSession,
 		Models:              configuration.Models,
 		AutoPlanEnabled:     true,
 		AutoPlanClassifier:  classifier,

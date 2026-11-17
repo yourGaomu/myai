@@ -5,6 +5,9 @@ myai:
   base_url: ""
   api_key: ""
   model: "gpt-5.5"
+  # Set these to the limits documented by your provider. Zero uses a conservative fallback.
+  context_window_tokens: 0
+  max_output_limit: 0
 
 memory:
   extraction:
@@ -76,8 +79,21 @@ thread:
   core: 5
   queueSize: 10
 
+workspace_history:
+  path: "/var/lib/myai/history"
+
+persistence:
+  outbox:
+    # Empty selects a private per-workspace database in the user config directory.
+    path: ""
+    max_pending: 10000
+    max_entries: 20000
+    max_bytes: 67108864
+    retain_done: 10000
+
 asset:
   shortener_base_url: ""
+  api_key: ""
   upload_timeout_seconds: 60
   ttl_seconds: 604800
   max_visits: 0
@@ -114,3 +130,8 @@ hooks:
 
 mcp:
   servers: []
+
+# 1. 外部短链 MCP：部署环境可直接设置 SHORT_LINKS_MCP_URL、SHORT_LINKS_API_KEY。
+# 1.1 地址留空不注册；非空时自动加入名为 short_links 的可选 MCP 服务，离线不阻止 Agent 启动。
+short_links:
+  mcp_url: ""

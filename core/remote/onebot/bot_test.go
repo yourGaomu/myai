@@ -18,6 +18,7 @@ import (
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	"myai/core/service"
+	"myai/core/session"
 )
 
 // mockChatFacade 提供用于单元测试的轻量级 ChatFacade 模拟实现。
@@ -32,6 +33,13 @@ type mockChatFacade struct {
 	compacted        []string
 	lastPrompt       string
 	lastCaller       CallerInfo
+	allowedTools     map[string][]string
+	enforcedTools    map[string]bool
+	ragSettings      map[string]session.RAGSettings
+	permissionError  error
+	allowlistError   error
+	ragError         error
+	generationCalls  int
 }
 
 func newMockChatFacade() *mockChatFacade {
@@ -41,6 +49,9 @@ func newMockChatFacade() *mockChatFacade {
 		styleInstruction: make(map[string]string),
 		models:           make(map[string]string),
 		genSettings:      make(map[string]generation.Settings),
+		allowedTools:     make(map[string][]string),
+		enforcedTools:    make(map[string]bool),
+		ragSettings:      make(map[string]session.RAGSettings),
 	}
 }
 
@@ -57,6 +68,7 @@ func (m *mockChatFacade) CreateSession(_ context.Context, title string) (string,
 func (m *mockChatFacade) SendMessageStreamForSession(ctx context.Context, sessionID string, input string, _ llm.ChatStreamHandler) (service.ChatResponse, error) {
 	m.mu.Lock()
 	m.lastPrompt = input
+	m.generationCalls++
 	if caller, ok := CallerFromContext(ctx); ok {
 		m.lastCaller = caller
 	}
@@ -84,7 +96,31 @@ func (m *mockChatFacade) DeleteSession(_ context.Context, sessionID string) erro
 func (m *mockChatFacade) SetPermissionModeForSession(_ context.Context, sessionID string, mode string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.permissionError != nil {
+		return m.permissionError
+	}
 	m.permissionModes[sessionID] = mode
+	return nil
+}
+
+func (m *mockChatFacade) SetToolAllowlistForSession(_ context.Context, sessionID string, allowed []string, enforce bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.allowlistError != nil {
+		return m.allowlistError
+	}
+	m.allowedTools[sessionID] = append([]string{}, allowed...)
+	m.enforcedTools[sessionID] = enforce
+	return nil
+}
+
+func (m *mockChatFacade) SetRAGSettingsForSession(_ context.Context, sessionID string, settings session.RAGSettings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ragError != nil {
+		return m.ragError
+	}
+	m.ragSettings[sessionID] = settings
 	return nil
 }
 
@@ -627,4 +663,3 @@ func TestAdminAndUtilTools_FullCoverage(t *testing.T) {
 		t.Fatalf("onebot_get_status unexpected output: %+v", out)
 	}
 }
-

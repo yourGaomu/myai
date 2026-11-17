@@ -1,47 +1,49 @@
 import { useEffect, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from "expo-status-bar";
+
+import { space } from "../constants/theme";
+import { useAppTheme, useThemedStyles } from "../theme/ThemeProvider";
 
 type Props = {
   bottomDock: ReactNode;
   bottomSafePadding: number;
   children: ReactNode;
+  floatingHeader?: boolean;
+  // floatingHeader=true 时顶栏以透明悬浮层覆盖在主内容上方，让对话消息滑过顶栏背部
+  header: ReactNode;
   scrollEnabled?: boolean;
-  topSafePadding: number;
 };
 
 export function MobileScreenShell({
   bottomDock,
   bottomSafePadding,
   children,
+  floatingHeader = false,
+  header,
   scrollEnabled = true,
-  topSafePadding,
 }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
+
   useEffect(() => {
     if (Platform.OS === "web" && typeof document !== "undefined") {
-      document.body.style.backgroundColor = "#f4f5f7";
+      document.body.style.backgroundColor = palette.canvas;
     }
-  }, []);
+  }, [palette.canvas]);
 
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.safe}>
-      <StatusBar style="dark" />
       <KeyboardAvoidingView
         behavior={Platform.OS === "web" ? undefined : "padding"}
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >
-        <View style={styles.screen}>
+        {floatingHeader ? null : header}
+        <View style={styles.stage}>
           {scrollEnabled ? (
             <ScrollView
-              contentContainerStyle={[
-                styles.content,
-                {
-                  paddingTop: topSafePadding,
-                  paddingBottom: bottomSafePadding + 20,
-                },
-              ]}
+              contentContainerStyle={[styles.content, { paddingBottom: bottomSafePadding + 20 }]}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               style={styles.scrollArea}
@@ -49,46 +51,55 @@ export function MobileScreenShell({
               {children}
             </ScrollView>
           ) : (
-            <View
-              style={[
-                styles.content,
-                styles.fixedContent,
-                {
-                  paddingTop: topSafePadding,
-                  paddingBottom: 2,
-                },
-              ]}
-            >
-              {children}
-            </View>
+            <View style={[styles.content, styles.fixedContent, floatingHeader && styles.fullBleedContent]}>{children}</View>
           )}
-          {bottomDock}
+          {floatingHeader ? (
+            <View pointerEvents="box-none" style={styles.floatingOverlay}>
+              {header}
+            </View>
+          ) : null}
         </View>
+        {bottomDock}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#f4f5f7",
-  },
-  keyboard: {
-    flex: 1,
-  },
-  screen: {
-    flex: 1,
-  },
-  scrollArea: {
-    flex: 1,
-  },
-  content: {
-    gap: 12,
-    paddingHorizontal: 14,
-  },
-  fixedContent: {
-    flex: 1,
-    minHeight: 0,
-  },
-});
+const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    safe: {
+      backgroundColor: palette.canvas,
+      flex: 1,
+    },
+    keyboard: {
+      flex: 1,
+    },
+    stage: {
+      flex: 1,
+      minHeight: 0,
+      position: "relative",
+    },
+    floatingOverlay: {
+      left: 0,
+      position: "absolute",
+      right: 0,
+      top: 0,
+      zIndex: 25,
+    },
+    scrollArea: {
+      flex: 1,
+    },
+    content: {
+      gap: space.lg,
+      paddingHorizontal: space.xl,
+      paddingTop: 4,
+    },
+    fixedContent: {
+      flex: 1,
+      minHeight: 0,
+    },
+    fullBleedContent: {
+      paddingHorizontal: 0,
+      paddingTop: 0,
+    },
+  });

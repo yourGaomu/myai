@@ -2,7 +2,9 @@ package plan
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -88,16 +90,30 @@ func IsExecutableStatus(status string) bool {
 }
 
 func ExtractSteps(content string) []Step {
-	if steps := extractStructuredSteps(content); len(steps) > 0 {
+	if steps, structured := extractStructuredSteps(content); structured {
 		return steps
 	}
-	// 只提取 Plan/计划标题下的列表项，最多 12 步，防止模型输出被无限扩张为执行任务。
+	// Only the first list level in an explicit Plan section is executable.
 	lines := planSectionLines(content)
 	steps := make([]Step, 0, 8)
+	listIndent := -1
 	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if listIndent >= 0 && indent > listIndent {
+			continue
+		}
 		match := stepLinePattern.FindStringSubmatch(line)
 		if len(match) < 2 {
+			if listIndent >= 0 {
+				break
+			}
 			continue
+		}
+		if listIndent < 0 {
+			listIndent = indent
 		}
 		title, description := splitStepText(match[1])
 		if title == "" {
@@ -110,8 +126,8 @@ func ExtractSteps(content string) []Step {
 			Description: description,
 			Status:      StepStatusPending,
 		})
-		if len(steps) >= 12 {
-			break
+		if len(steps) > 12 {
+			return nil
 		}
 	}
 	return steps
@@ -120,58 +136,62 @@ func ExtractSteps(content string) []Step {
 // extractStructuredSteps accepts the machine-readable plan shape emitted by
 // newer models while retaining Markdown parsing as a backwards-compatible
 // fallback for existing sessions.
-func extractStructuredSteps(content string) []Step {
+func extractStructuredSteps(content string) ([]Step, bool) {
 	trimmed := strings.TrimSpace(content)
-	if start := strings.Index(trimmed, "{"); start >= 0 {
-		if end := strings.LastIndex(trimmed, "}"); end > start {
-			trimmed = trimmed[start : end+1]
+	structured := strings.HasPrefix(trimmed, "{")
+	if !structured {
+		lines := strings.Split(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n")
+		for index, line := range lines {
+			if strings.TrimSpace(line) != "```json" {
+				continue
+			}
+			structured = true
+			for end := index + 1; end < len(lines); end++ {
+				if strings.TrimSpace(lines[end]) == "```" {
+					trimmed = strings.TrimSpace(strings.Join(lines[index+1:end], "\n"))
+					break
+				}
+			}
+			break
 		}
+	}
+	if !structured {
+		return nil, false
 	}
 	var payload struct {
 		Steps []struct {
 			ID           string   `json:"id"`
-			Order        int      `json:"order"`
+			Order        *int     `json:"order"`
 			Title        string   `json:"title"`
 			Description  string   `json:"description"`
 			DependsOn    []string `json:"depends_on"`
 			Dependencies []string `json:"dependencies"`
-			Status       string   `json:"status"`
 			MaxRetries   int      `json:"max_retries"`
 		} `json:"steps"`
 	}
-	if json.Unmarshal([]byte(trimmed), &payload) != nil || len(payload.Steps) == 0 {
-		return nil
+	if json.Unmarshal([]byte(trimmed), &payload) != nil || len(payload.Steps) == 0 || len(payload.Steps) > 12 {
+		return nil, true
 	}
 	steps := make([]Step, 0, len(payload.Steps))
 	for index, item := range payload.Steps {
 		title := summarizeLine(item.Title, "")
 		if title == "" {
-			continue
+			return nil, true
 		}
-		status := item.Status
-		if status == "" {
-			status = StepStatusPending
-		}
-		order := item.Order
-		if order <= 0 {
-			order = len(steps) + 1
+		order := index + 1
+		if item.Order != nil {
+			order = *item.Order
 		}
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			id = uuid.NewString()
 		}
-		dependencies := append([]string(nil), item.DependsOn...)
-		if len(dependencies) == 0 {
-			dependencies = append(dependencies, item.Dependencies...)
-		}
+		dependencies := append(append([]string(nil), item.DependsOn...), item.Dependencies...)
 		steps = append(steps, Step{ID: id, Order: order, Title: title,
 			Description: strings.TrimSpace(item.Description), Dependencies: normalizeDependencies(dependencies),
-			Status: status, MaxRetries: item.MaxRetries})
-		if index >= 11 {
-			break
-		}
+			Status: StepStatusPending, MaxRetries: item.MaxRetries})
 	}
-	return steps
+	return steps, true
 }
 
 func normalizeDependencies(values []string) []string {
@@ -182,9 +202,6 @@ func normalizeDependencies(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
 		if _, ok := seen[value]; ok {
 			continue
 		}
@@ -192,6 +209,100 @@ func normalizeDependencies(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+// Validate checks the whole dependency graph before callers publish state or
+// execute work. Legacy numeric order references remain valid only when unique.
+func Validate(p *Plan) error {
+	if p == nil || len(p.Steps) == 0 {
+		return fmt.Errorf("plan has no steps")
+	}
+	if len(p.Steps) > 12 {
+		return fmt.Errorf("plan exceeds the 12 step limit")
+	}
+	ids := make(map[string]bool, len(p.Steps))
+	orders := make(map[int]bool, len(p.Steps))
+	for index, step := range p.Steps {
+		if step.ID == "" || step.ID != strings.TrimSpace(step.ID) {
+			return fmt.Errorf("step %d has an empty or invalid ID", index+1)
+		}
+		if ids[step.ID] {
+			return fmt.Errorf("duplicate step ID %q", step.ID)
+		}
+		ids[step.ID] = true
+		if step.Order <= 0 || orders[step.Order] {
+			return fmt.Errorf("step %q has an invalid or duplicate order %d", step.ID, step.Order)
+		}
+		orders[step.Order] = true
+		if strings.TrimSpace(step.Title) == "" {
+			return fmt.Errorf("step %q has no title", step.ID)
+		}
+		switch step.Status {
+		case "", StepStatusPending, StepStatusRunning, StepStatusDone, StepStatusFailed, StepStatusSkipped:
+		default:
+			return fmt.Errorf("step %q has an invalid status", step.ID)
+		}
+	}
+	edges := make([][]int, len(p.Steps))
+	for index, step := range p.Steps {
+		for _, reference := range step.Dependencies {
+			dependency, err := DependencyIndex(p, reference)
+			if err != nil {
+				return fmt.Errorf("step %q: %w", step.ID, err)
+			}
+			if dependency == index {
+				return fmt.Errorf("step %q has a self dependency", step.ID)
+			}
+			edges[index] = append(edges[index], dependency)
+		}
+	}
+	visiting := make([]uint8, len(p.Steps))
+	var visit func(int) error
+	visit = func(index int) error {
+		if visiting[index] == 1 {
+			return fmt.Errorf("plan has a cyclic step dependency at %q", p.Steps[index].ID)
+		}
+		if visiting[index] == 2 {
+			return nil
+		}
+		visiting[index] = 1
+		for _, dependency := range edges[index] {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		visiting[index] = 2
+		return nil
+	}
+	for index := range p.Steps {
+		if err := visit(index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DependencyIndex resolves an ID or a legacy order reference, rejecting aliases
+// that identify more than one step rather than selecting the first match.
+func DependencyIndex(p *Plan, reference string) (int, error) {
+	reference = strings.TrimSpace(reference)
+	if p == nil || reference == "" {
+		return -1, fmt.Errorf("empty step dependency")
+	}
+	found := -1
+	for index, step := range p.Steps {
+		if step.ID != reference && strconv.Itoa(step.Order) != reference {
+			continue
+		}
+		if found >= 0 {
+			return -1, fmt.Errorf("ambiguous step dependency %q", reference)
+		}
+		found = index
+	}
+	if found < 0 {
+		return -1, fmt.Errorf("unknown step dependency %q", reference)
+	}
+	return found, nil
 }
 
 func Clone(p *Plan) *Plan {
@@ -218,48 +329,82 @@ func cloneTime(value *time.Time) *time.Time {
 	return &copy
 }
 
-func planSectionLines(content string) []string {
+func markdownLines(content string) []string {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	start := -1
+	fence := ""
 	for index, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmedLine, "#") {
+		trimmed := strings.TrimSpace(line)
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) {
+				fence = ""
+			}
+			lines[index] = ""
 			continue
 		}
-		heading := strings.TrimSpace(strings.TrimLeft(trimmedLine, "#"))
-		heading = strings.Trim(heading, " :：")
-		if isPlanHeading(heading) {
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fence = trimmed[:3]
+			lines[index] = ""
+		}
+	}
+	return lines
+}
+
+func markdownHeading(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	heading := strings.TrimLeft(trimmed, "#")
+	if len(trimmed)-len(heading) > 6 || (heading != "" && heading[0] != ' ' && heading[0] != '\t') {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(heading), " #\t:：")
+}
+
+func planSectionLines(content string) []string {
+	lines := markdownLines(content)
+	start := -1
+	for index, line := range lines {
+		if isPlanHeading(markdownHeading(line)) {
 			start = index + 1
 			break
 		}
 	}
 	if start < 0 {
-		return lines
+		return nil
 	}
-
-	selected := make([]string, 0, len(lines)-start)
-	for _, line := range lines[start:] {
-		trimmed := strings.TrimSpace(line)
-		if len(selected) > 0 && strings.HasPrefix(trimmed, "#") {
-			break
+	for end := start; end < len(lines); end++ {
+		if markdownHeading(lines[end]) != "" {
+			return lines[start:end]
 		}
-		selected = append(selected, line)
 	}
-	return selected
+	return lines[start:]
 }
 
+// HasResultSection identifies a standalone, nonempty Result answer. A reply
+// containing a Plan or structured steps must still pass through execution;
+// a heading alone is never evidence that its actions have completed.
 func HasResultSection(content string) bool {
-	// 安全的纯文本任务会在同一回复中包含 Result；这种计划可直接标记完成，无需再次点击执行。
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if _, structured := extractStructuredSteps(content); structured {
+		return false
+	}
+	lines := markdownLines(content)
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
+		if isPlanHeading(markdownHeading(line)) {
+			return false
+		}
+	}
+	for index, line := range lines {
+		if !isResultHeading(markdownHeading(line)) {
 			continue
 		}
-		heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-		heading = strings.Trim(heading, " :：")
-		if isResultHeading(heading) {
-			return true
+		for _, body := range lines[index+1:] {
+			if markdownHeading(body) != "" {
+				break
+			}
+			if strings.TrimSpace(body) != "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -277,8 +422,7 @@ func isPlanHeading(heading string) bool {
 
 func isResultHeading(heading string) bool {
 	switch strings.ToLower(strings.Join(strings.Fields(heading), " ")) {
-	case "result", "final result", "output", "final output", "answer", "final answer",
-		"结果", "最终结果", "正文", "产出", "成品", "作品":
+	case "result", "final result", "结果", "最终结果":
 		return true
 	default:
 		return false

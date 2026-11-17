@@ -30,3 +30,9 @@ type ToolExecutor interface {
 type ToolExecutionRecordSink interface {
 	RecordToolExecution(ctx context.Context, command generationcommand.ToolExecutionRecord)
 }
+
+// DurableToolExecutionRecordSink reports whether executed tool evidence was
+// accepted for persistence. A rejected write must never cause tool replay.
+type DurableToolExecutionRecordSink interface {
+	AcceptToolExecution(ctx context.Context, command generationcommand.ToolExecutionRecord) error
+}

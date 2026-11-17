@@ -8,6 +8,7 @@ import (
 	generation "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
+	tooldef "myai/core/tool/tool"
 )
 
 type InitialState struct {
@@ -20,6 +21,7 @@ type InitialState struct {
 	SystemInstruction    string
 	AllowedTools         []string
 	EnforceToolAllowlist bool
+	PermissionCeiling    []tooldef.Permission
 	WorkspaceRoot        string
 	WorkspaceSandboxID   string
 	MaxToolRounds        int
@@ -65,6 +67,7 @@ func NewFromState(state InitialState) *Session {
 	current.SystemInstruction = state.SystemInstruction
 	current.AllowedTools = append([]string(nil), state.AllowedTools...)
 	current.EnforceToolAllowlist = state.EnforceToolAllowlist
+	current.PermissionCeiling = ClonePermissionCeiling(state.PermissionCeiling)
 	current.WorkspaceRoot = state.WorkspaceRoot
 	current.WorkspaceSandboxID = state.WorkspaceSandboxID
 	current.MaxToolRounds = state.MaxToolRounds
@@ -81,7 +84,7 @@ func NewFromState(state InitialState) *Session {
 		}
 	}
 	if !hadMessages {
-		current.Messages = defaultMessages(state.SystemInstruction)
+		current.Messages = normalizeMessageMetadata(state.ID, defaultMessages(state.SystemInstruction))
 	}
 	if current.CompactionCheckpoint != nil && current.CompactionCheckpoint.Version == 0 && strings.TrimSpace(current.CompactionCheckpoint.SourceHistoryHash) == "" {
 		if hash := rebuildLegacyCompactionHash(current.Messages, current.CompactionCheckpoint.SourceEndMessage); hash != "" {

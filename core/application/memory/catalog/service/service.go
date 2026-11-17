@@ -319,8 +319,6 @@ func normalizeListFilter(filter memoryport.ListFilter) memoryport.ListFilter {
 	filter.Text = strings.TrimSpace(filter.Text)
 	filter.Tags = normalizeTags(filter.Tags)
 	filter.ScopeKey = strings.TrimSpace(filter.ScopeKey)
-	if filter.Limit <= 0 || filter.Limit > 100 {
-		filter.Limit = 50
-	}
+	filter.Limit = memoryport.NormalizeListLimit(filter.Limit)
 	return filter
 }

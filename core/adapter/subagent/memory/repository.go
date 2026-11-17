@@ -40,6 +40,7 @@ var _ subagentport.TaskEventSequenceRepository = (*Repository)(nil)
 var _ subagentport.TaskEventSequenceInitializer = (*Repository)(nil)
 var _ subagentport.AgentMessageRepository = (*Repository)(nil)
 var _ subagentport.ParentCompletionMessageRepository = (*Repository)(nil)
+var _ subagentport.ParentCompletionContentRepository = (*Repository)(nil)
 var _ subagentport.ChildAgentMessageRepository = (*Repository)(nil)
 var _ subagentport.AgentExecutionLeaseStore = (*Repository)(nil)
 var _ subagentport.LeaseGuardedTaskRunRepository = (*Repository)(nil)
@@ -305,7 +306,9 @@ func (repository *Repository) EnqueueParentCompletion(_ context.Context, taskID 
 	if !ok {
 		return domainsubagent.AgentMessage{}, subagentport.ErrNotFound
 	}
-	if !task.Terminal() || (message.Kind == domainsubagent.AgentMessageKindTaskResult && task.Status != domainsubagent.TaskStatusSucceeded) ||
+	if message.SourceTaskID != task.ID || message.RecipientAgentID != task.ParentSessionID ||
+		message.ID != domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID) ||
+		!task.Terminal() || (message.Kind == domainsubagent.AgentMessageKindTaskResult && task.Status != domainsubagent.TaskStatusSucceeded) ||
 		(message.Kind == domainsubagent.AgentMessageKindTaskError && task.Status != domainsubagent.TaskStatusFailed) {
 		return domainsubagent.AgentMessage{}, subagentport.ErrTaskStateConflict
 	}
@@ -317,6 +320,21 @@ func (repository *Repository) EnqueueParentCompletion(_ context.Context, taskID 
 	}
 	repository.agentMessages[message.ID] = domainsubagent.CloneAgentMessage(message)
 	return domainsubagent.CloneAgentMessage(message), nil
+}
+
+func (repository *Repository) BoundParentCompletion(_ context.Context, messageID string) (domainsubagent.AgentMessage, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	message, exists := repository.agentMessages[strings.TrimSpace(messageID)]
+	if !exists {
+		return domainsubagent.AgentMessage{}, subagentport.ErrNotFound
+	}
+	bounded, err := domainsubagent.BoundParentCompletionMessage(message)
+	if err != nil {
+		return domainsubagent.AgentMessage{}, err
+	}
+	repository.agentMessages[message.ID] = domainsubagent.CloneAgentMessage(bounded)
+	return domainsubagent.CloneAgentMessage(bounded), nil
 }
 
 func (repository *Repository) ClaimParentCompletion(_ context.Context, messageID, ownerID string, now time.Time, ttl time.Duration) (domainsubagent.AgentMessage, error) {
@@ -370,8 +388,17 @@ func (repository *Repository) CompleteParentCompletion(_ context.Context, messag
 	if !ok {
 		return subagentport.ErrNotFound
 	}
-	if message.Status != domainsubagent.AgentMessageDelivering || message.ClaimOwnerID != ownerID {
+	if message.Status == domainsubagent.AgentMessageDelivered {
+		return nil
+	}
+	if message.Status != domainsubagent.AgentMessageDelivering || message.ClaimOwnerID != ownerID ||
+		message.ClaimExpiresAt == nil || !message.ClaimExpiresAt.After(deliveredAt) {
 		return subagentport.ErrTaskStateConflict
+	}
+	if task, exists := repository.tasks[message.SourceTaskID]; exists && task.Unread && domainsubagent.CompletionMessageMatchesResult(message, task) {
+		task.Unread = false
+		task.UpdatedAt = deliveredAt
+		repository.tasks[task.ID] = domainsubagent.CloneTask(task)
 	}
 	message.Status = domainsubagent.AgentMessageDelivered
 	message.DeliveredAt = &deliveredAt

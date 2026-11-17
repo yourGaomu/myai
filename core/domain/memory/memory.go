@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Content struct {
@@ -142,6 +145,117 @@ func (memory Memory) CurrentRevision() (Revision, bool) {
 		}
 	}
 	return Revision{}, false
+}
+
+// ContentUpdatedAt uses revision timestamps so usage updates made by older
+// releases cannot make old content appear new. CreatedAt covers legacy records
+// without a usable revision timestamp; no stored fields need to be migrated.
+func (memory Memory) ContentUpdatedAt() time.Time {
+	latest := time.Time{}
+	for _, revision := range memory.Revisions {
+		if revision.CreatedAt.After(latest) {
+			latest = revision.CreatedAt
+		}
+	}
+	if latest.IsZero() {
+		return memory.CreatedAt
+	}
+	return latest
+}
+
+func (memory Memory) SearchText() string {
+	revision, ok := memory.CurrentRevision()
+	if !ok {
+		return ""
+	}
+	content := revision.Content
+	return strings.Join([]string{
+		memory.Title, strings.Join(memory.Tags, "\n"), content.Goal, content.ApplicableContext,
+		content.Approach, content.Result, content.PainPoints, content.RootCause, content.Lessons, content.Verification,
+	}, "\n")
+}
+
+// SearchTerms keeps words intact outside Han text. Han runs also contribute
+// adjacent pairs so Chinese queries can match phrases without a tokenizer.
+func SearchTerms(text string) []string {
+	terms := make(map[string]struct{})
+	var run []rune
+	flush := func() {
+		if len(run) >= 2 {
+			terms[string(run)] = struct{}{}
+			if unicode.Is(unicode.Han, run[0]) {
+				for index := 0; index+1 < len(run); index++ {
+					terms[string(run[index:index+2])] = struct{}{}
+				}
+			}
+		}
+		run = run[:0]
+	}
+	for _, character := range strings.ToLower(text) {
+		if !unicode.IsLetter(character) && !unicode.IsNumber(character) {
+			flush()
+			continue
+		}
+		if len(run) > 0 && unicode.Is(unicode.Han, run[0]) != unicode.Is(unicode.Han, character) {
+			flush()
+		}
+		run = append(run, character)
+	}
+	flush()
+	result := make([]string, 0, len(terms))
+	for term := range terms {
+		result = append(result, term)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// SearchTermPattern is usable by both Go and Mongo regular expressions. Han
+// pairs may occur inside sentences; other words require Unicode boundaries.
+func SearchTermPattern(term string) string {
+	literal := regexp.QuoteMeta(term)
+	for _, character := range term {
+		if unicode.Is(unicode.Han, character) {
+			return literal
+		}
+	}
+	return `(^|[^\p{L}\p{N}]|\p{Han})` + literal + `($|[^\p{L}\p{N}]|\p{Han})`
+}
+
+func (memory Memory) MatchesSearchTerms(terms []string) bool {
+	available := make(map[string]struct{})
+	for _, term := range SearchTerms(memory.SearchText()) {
+		available[term] = struct{}{}
+	}
+	for _, term := range terms {
+		if _, ok := available[term]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsSearchPhrase applies the same word boundaries to title and tag
+// bonuses. Empty labels and substrings within unrelated words earn no bonus.
+func ContainsSearchPhrase(text string, phrase string) bool {
+	phrase = strings.ToLower(strings.TrimSpace(phrase))
+	if phrase == "" || len(SearchTerms(phrase)) == 0 {
+		return false
+	}
+	text = strings.ToLower(text)
+	runes := []rune(phrase)
+	pattern := regexp.QuoteMeta(phrase)
+	if wordCharacter(runes[0]) {
+		pattern = `(^|[^\p{L}\p{N}]|\p{Han})` + pattern
+	}
+	if wordCharacter(runes[len(runes)-1]) {
+		pattern += `($|[^\p{L}\p{N}]|\p{Han})`
+	}
+	return regexp.MustCompile(pattern).MatchString(text)
+}
+
+func wordCharacter(character rune) bool {
+	return (unicode.IsLetter(character) || unicode.IsNumber(character)) && !unicode.Is(unicode.Han, character)
 }
 
 func (memory *Memory) AppendRevision(revision Revision, now time.Time) error {

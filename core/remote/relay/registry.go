@@ -105,14 +105,20 @@ func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode
 
 	var superseded *peer
 	if previous := s.agents[key]; previous != nil {
-		if previous.BindCode != "" {
-			delete(s.bindings, previous.BindCode)
-		}
 		if previous.peer != p {
 			superseded = previous.peer
 		}
 	}
 
+	// A code keeps its first owner and original expiry, including after it has
+	// been consumed or its agent reconnects. A collision never steals a code.
+	if bindCode != "" {
+		if binding := s.bindings[bindCode]; binding == nil {
+			s.bindings[bindCode] = &bindingEntry{AgentKey: key, ExpiresAt: now.Add(bindingCodeTTL)}
+		} else if binding.AgentKey != key {
+			bindCode = ""
+		}
+	}
 	s.agents[key] = &agentEntry{
 		UserID:      userID,
 		DeviceID:    deviceID,
@@ -123,9 +129,6 @@ func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode
 		peer:        p,
 	}
 
-	if bindCode != "" {
-		s.bindings[bindCode] = key
-	}
 	s.agentLock.Unlock()
 	return superseded
 }
@@ -156,9 +159,6 @@ func (s *Server) unregisterAgent(p *peer, userID string, deviceID string) {
 	defer s.agentLock.Unlock()
 
 	if agent := s.agents[key]; agent != nil && agent.peer == p {
-		if agent.BindCode != "" {
-			delete(s.bindings, agent.BindCode)
-		}
 		delete(s.agents, key)
 	}
 }
@@ -194,11 +194,16 @@ func (s *Server) getAgentByBindCode(bindCode string) *agentEntry {
 	s.agentLock.RLock()
 	defer s.agentLock.RUnlock()
 
-	key := s.bindings[bindCode]
-	if key == "" {
+	binding := s.bindings[bindCode]
+	if binding == nil || binding.Consumed || !time.Now().Before(binding.ExpiresAt) {
 		return nil
 	}
-	return s.agents[key]
+	agent := s.agents[binding.AgentKey]
+	if agent == nil || agent.BindCode != bindCode {
+		return nil
+	}
+	entry := *agent
+	return &entry
 }
 
 func (s *Server) listAgents() []AgentInfo {
@@ -458,13 +463,15 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 		return
 	}
 	s.clientLock.Lock()
-	defer s.clientLock.Unlock()
 	if s.connections == nil {
 		s.connections = make(map[*peer]*clientConnection)
 	}
+	newConnection := s.connections[p] == nil
 	s.connections[p] = &clientConnection{
 		UserID: userID, DeviceID: deviceID, ClientID: clientTokenHash(clientToken), RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
 	}
+	s.clientLock.Unlock()
+	if newConnection { s.replayInteractions(p, userID, deviceID) }
 }
 
 func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {

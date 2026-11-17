@@ -16,6 +16,8 @@ const (
 )
 
 func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload) (protocol.ChangesListResultPayload, error) {
+	s.operation.Lock()
+	defer s.operation.Unlock()
 	limit := payload.Limit
 	if limit <= 0 {
 		limit = defaultChangeLimit
@@ -37,12 +39,14 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 	entries := make([]protocol.ChangeEntry, 0)
 	for path, base := range baseline {
 		if _, ok := current[path]; !ok {
+			_, removed := entryLineCounts(&base, nil)
 			entries = append(entries, protocol.ChangeEntry{
-				Path:       path,
-				Status:     "deleted",
-				Deleted:    true,
-				Unstaged:   true,
-				Restorable: base.Available,
+				Path:         path,
+				Status:       "deleted",
+				Deleted:      true,
+				Unstaged:     true,
+				Restorable:   base.Available,
+				RemovedLines: removed,
 			})
 		}
 	}
@@ -50,19 +54,24 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 		base, ok := baseline[path]
 		switch {
 		case !ok:
+			added, _ := entryLineCounts(nil, &now)
 			entries = append(entries, protocol.ChangeEntry{
 				Path:       path,
 				Status:     "added",
 				Untracked:  true,
 				Unstaged:   true,
 				Restorable: true,
+				AddedLines: added,
 			})
 		case base.Hash != now.Hash || base.Size != now.Size || base.Binary != now.Binary || base.TooLarge != now.TooLarge:
+			added, removed := entryLineCounts(&base, &now)
 			entries = append(entries, protocol.ChangeEntry{
-				Path:       path,
-				Status:     "modified",
-				Unstaged:   true,
-				Restorable: base.Available,
+				Path:         path,
+				Status:       "modified",
+				Unstaged:     true,
+				Restorable:   base.Available,
+				AddedLines:   added,
+				RemovedLines: removed,
 			})
 		}
 	}
@@ -90,7 +99,12 @@ func (s *Service) List(ctx context.Context, payload protocol.ChangesListPayload)
 }
 
 func (s *Service) Diff(ctx context.Context, payload protocol.ChangeDiffPayload) (protocol.ChangeDiffResultPayload, error) {
-	rel, abs, err := cleanPath(s.root, payload.Path)
+	s.operation.Lock()
+	defer s.operation.Unlock()
+	if err := ctx.Err(); err != nil {
+		return protocol.ChangeDiffResultPayload{}, err
+	}
+	rel, _, err := cleanPath(s.root, payload.Path)
 	if err != nil {
 		return protocol.ChangeDiffResultPayload{}, err
 	}
@@ -102,7 +116,7 @@ func (s *Service) Diff(ctx context.Context, payload protocol.ChangeDiffPayload) 
 	base, hadBase := s.baseline[rel]
 	s.mu.RUnlock()
 
-	now, exists, err := snapshotPath(s.root, abs, rel)
+	now, exists, err := s.snapshotPath(rel)
 	if err != nil {
 		return protocol.ChangeDiffResultPayload{}, err
 	}
@@ -110,38 +124,42 @@ func (s *Service) Diff(ctx context.Context, payload protocol.ChangeDiffPayload) 
 	switch {
 	case !hadBase && !exists:
 		return protocol.ChangeDiffResultPayload{
-			Path:    rel,
-			Message: "No diff is available for this path.",
+			ExpectedHash: snapshotExpectedHash(now, exists),
+			Path:         rel,
+			Message:      "No diff is available for this path.",
 		}, nil
 	case hadBase && !exists:
 		diff, truncated, binary := deletionDiff(base)
 		return protocol.ChangeDiffResultPayload{
-			Path:       rel,
-			Diff:       diff,
-			Truncated:  truncated,
-			Binary:     binary,
-			Restorable: base.Available,
-			Message:    emptyDiffMessage(diff, binary),
+			ExpectedHash: snapshotExpectedHash(now, exists),
+			Path:         rel,
+			Diff:         diff,
+			Truncated:    truncated,
+			Binary:       binary,
+			Restorable:   base.Available,
+			Message:      emptyDiffMessage(diff, binary),
 		}, nil
 	case !hadBase && exists:
 		diff, truncated, binary := additionDiff(now)
 		return protocol.ChangeDiffResultPayload{
-			Path:       rel,
-			Diff:       diff,
-			Truncated:  truncated,
-			Binary:     binary,
-			Restorable: true,
-			Message:    emptyDiffMessage(diff, binary),
+			ExpectedHash: snapshotExpectedHash(now, exists),
+			Path:         rel,
+			Diff:         diff,
+			Truncated:    truncated,
+			Binary:       binary,
+			Restorable:   true,
+			Message:      emptyDiffMessage(diff, binary),
 		}, nil
 	default:
 		diff, truncated, binary := modifiedDiff(base, now)
 		return protocol.ChangeDiffResultPayload{
-			Path:       rel,
-			Diff:       diff,
-			Truncated:  truncated,
-			Binary:     binary,
-			Restorable: base.Available,
-			Message:    emptyDiffMessage(diff, binary),
+			ExpectedHash: snapshotExpectedHash(now, exists),
+			Path:         rel,
+			Diff:         diff,
+			Truncated:    truncated,
+			Binary:       binary,
+			Restorable:   base.Available,
+			Message:      emptyDiffMessage(diff, binary),
 		}, nil
 	}
 }

@@ -22,6 +22,9 @@ type UseMobileSettingsOptions = {
 export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions = {}) {
   const [relayURL, setRelayURL] = useState(defaultRelayURL);
   const [assetBaseURL, setAssetBaseURL] = useState(defaultAssetBaseURL);
+  // Explicit user input only. Keep the Asset API key in this runtime, outside
+  // MobileSettings and both AsyncStorage effects.
+  const [assetAPIKey, setAssetAPIKey] = useState("");
   const [userID, setUserID] = useState("local");
   const [deviceID, setDeviceID] = useState("pc-local");
   const [clientToken, setClientToken] = useState("");
@@ -78,10 +81,12 @@ export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions 
   }, [assetBaseURL, clientToken, deviceID, relayURL, settingsLoaded, userID]);
 
   return {
+    assetAPIKey,
     assetBaseURL,
     clientToken,
     deviceID,
     relayURL,
+    setAssetAPIKey,
     setAssetBaseURL,
     setClientToken,
     setDeviceID,

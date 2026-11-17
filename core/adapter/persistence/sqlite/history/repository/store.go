@@ -17,6 +17,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	domainhistory "myai/core/domain/history"
+	"myai/core/pathpolicy"
 )
 
 type Store struct {
@@ -62,21 +63,27 @@ func dataSourceName(path string) (string, error) {
 }
 
 func DefaultPath(workspace string) (string, error) {
+	return defaultPath(workspace, "")
+}
+
+func defaultPath(workspace string, base string) (string, error) {
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
 		return "", err
 	}
 	hash := sha256.Sum256([]byte(strings.ToLower(filepath.Clean(abs))))
 
-	base, err := os.UserConfigDir()
-	if err != nil || strings.TrimSpace(base) == "" {
-		base, err = os.UserHomeDir()
-		if err != nil {
-			return "", err
+	if strings.TrimSpace(base) == "" {
+		base, err = os.UserConfigDir()
+		if err != nil || strings.TrimSpace(base) == "" {
+			base, err = os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			base = filepath.Join(base, ".myai")
+		} else {
+			base = filepath.Join(base, "myai")
 		}
-		base = filepath.Join(base, ".myai")
-	} else {
-		base = filepath.Join(base, "myai")
 	}
 
 	return filepath.Join(base, "workspaces", hex.EncodeToString(hash[:16]), "history.db"), nil
@@ -93,7 +100,7 @@ func (s *Store) HasBaseline(ctx context.Context, workspace string) (bool, error)
 	var exists int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT 1
-		FROM workspaces
+		FROM workspace_baselines
 		WHERE workspace = ?
 		LIMIT 1
 	`, workspace).Scan(&exists)
@@ -127,6 +134,9 @@ func (s *Store) LoadBaseline(ctx context.Context, workspace string) (map[string]
 		var available int
 		if err := rows.Scan(&item.Path, &item.Size, &hashText, &item.Content, &binary, &tooLarge, &mode, &available); err != nil {
 			return nil, err
+		}
+		if pathpolicy.ShouldSkipSnapshot(item.Path) {
+			continue
 		}
 		hash, err := decodeHash(hashText)
 		if err != nil {
@@ -177,6 +187,9 @@ func (s *Store) ReplaceBaseline(ctx context.Context, workspace string, files map
 	defer stmt.Close()
 
 	for _, file := range files {
+		if pathpolicy.ShouldSkipSnapshot(file.Path) {
+			continue
+		}
 		if _, err = stmt.ExecContext(
 			ctx,
 			workspace,
@@ -194,6 +207,13 @@ func (s *Store) ReplaceBaseline(ctx context.Context, workspace string, files map
 		}
 	}
 
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO workspace_baselines(workspace, initialized_at)
+		VALUES(?, ?)
+		ON CONFLICT(workspace) DO UPDATE SET initialized_at = excluded.initialized_at
+	`, workspace, now); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
@@ -201,6 +221,16 @@ func (s *Store) ReplaceBaseline(ctx context.Context, workspace string, files map
 }
 
 func (s *Store) SaveCheckpoint(ctx context.Context, checkpoint domainhistory.Checkpoint, changes []domainhistory.FileChange) (string, error) {
+	filtered := make([]domainhistory.FileChange, 0, len(changes))
+	for _, change := range changes {
+		if pathpolicy.ShouldSkipSnapshot(change.Path) ||
+			(change.Before != nil && pathpolicy.ShouldSkipSnapshot(change.Before.Path)) ||
+			(change.After != nil && pathpolicy.ShouldSkipSnapshot(change.After.Path)) {
+			continue
+		}
+		filtered = append(filtered, change)
+	}
+	changes = filtered
 	if len(changes) == 0 {
 		return "", nil
 	}
@@ -438,6 +468,15 @@ func (s *Store) init(ctx context.Context) error {
 			PRIMARY KEY(workspace, path),
 			FOREIGN KEY(workspace) REFERENCES workspaces(workspace) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS workspace_baselines (
+			workspace TEXT PRIMARY KEY,
+			initialized_at TEXT NOT NULL,
+			FOREIGN KEY(workspace) REFERENCES workspaces(workspace) ON DELETE CASCADE
+		)`,
+		// Only nonempty legacy baselines can be distinguished from checkpoint-only
+		// workspaces. Empty legacy workspaces are safely scanned once by Changes.
+		`INSERT OR IGNORE INTO workspace_baselines(workspace, initialized_at)
+		 SELECT workspace, MAX(updated_at) FROM workspace_baseline_files GROUP BY workspace`,
 		`CREATE TABLE IF NOT EXISTS checkpoints (
 			id TEXT PRIMARY KEY,
 			workspace TEXT NOT NULL,

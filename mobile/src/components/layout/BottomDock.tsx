@@ -1,100 +1,34 @@
+import type { ComponentProps } from "react";
 import { StyleSheet, View } from "react-native";
 
+import { space } from "../../constants/theme";
+import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import type { ViewMode } from "../../types/app";
-import type { ChatAttachment } from "../../types/chat";
-import type { ButtonFeedback } from "../../types/ui";
 import { Composer } from "../chat/Composer";
-import { BottomTabs } from "../navigation/BottomTabs";
 
-type Props = {
-  attachedFiles: ChatAttachment[];
+type Props = ComponentProps<typeof Composer> & {
   bottomPadding: number;
-  buttonFeedback: ButtonFeedback;
-  canPause?: boolean;
-  changesActive: boolean;
-  messageInput: string;
-  onChangeMessage: (value: string) => void;
-  onChangesPress: () => void;
-  onChatPress: () => void;
-  onFilesPress: () => void;
-  onFocusInput?: () => void;
-  onPause: () => void;
-  onRemoveAttachedFile: (key: string) => void;
-  onSend: () => void;
-  onKnowledgePress: () => void;
-  onSettingsPress: () => void;
-  onUploadFile: () => void;
-  pendingPause: boolean;
-  pendingSend: boolean;
-  pendingSettings: boolean;
-  pendingUpload: boolean;
   viewMode: ViewMode;
 };
 
-export function BottomDock({
-  attachedFiles,
-  bottomPadding,
-  buttonFeedback,
-  canPause,
-  changesActive,
-  messageInput,
-  onChangeMessage,
-  onChangesPress,
-  onChatPress,
-  onFilesPress,
-  onFocusInput,
-  onPause,
-  onRemoveAttachedFile,
-  onSend,
-  onKnowledgePress,
-  onSettingsPress,
-  onUploadFile,
-  pendingPause,
-  pendingSend,
-  pendingSettings,
-  pendingUpload,
-  viewMode,
-}: Props) {
+// 只有对话页有底栏（输入区）；其他页面通过侧栏和顶栏返回。
+export function BottomDock({ bottomPadding, viewMode, ...composer }: Props) {
+  const styles = useThemedStyles(makeStyles);
+  if (viewMode !== "chat") {
+    return null;
+  }
   return (
-    <View style={[styles.bottomDock, { paddingBottom: bottomPadding }]}>
-      {viewMode === "chat" ? (
-        <Composer
-          attachedFiles={attachedFiles}
-          buttonFeedback={buttonFeedback}
-          canPause={canPause !== undefined ? canPause : pendingSend}
-          messageInput={messageInput}
-          onChangeMessage={onChangeMessage}
-          onFocus={onFocusInput}
-          onPause={onPause}
-          onRemoveAttachedFile={onRemoveAttachedFile}
-          onSend={onSend}
-          onUploadFile={onUploadFile}
-          pendingPause={pendingPause}
-          pendingSend={pendingSend || pendingSettings}
-          pendingUpload={pendingUpload}
-        />
-      ) : null}
-      {viewMode !== "chat" ? (
-        <BottomTabs
-          buttonFeedback={buttonFeedback}
-          changesActive={changesActive}
-          onChangesPress={onChangesPress}
-          onChatPress={onChatPress}
-          onFilesPress={onFilesPress}
-          onKnowledgePress={onKnowledgePress}
-          onSettingsPress={onSettingsPress}
-          viewMode={viewMode}
-        />
-      ) : null}
+    <View style={[styles.dock, { paddingBottom: bottomPadding }]}>
+      <Composer {...composer} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  bottomDock: {
-    backgroundColor: "#f4f5f7",
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingTop: 6,
-  },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    dock: {
+      backgroundColor: palette.canvas,
+      paddingHorizontal: space.lg,
+      paddingTop: space.sm,
+    },
+  });

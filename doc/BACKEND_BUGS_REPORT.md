@@ -61,7 +61,7 @@ func (sm *SessionMemory) GetSession(sessionID string) (*session.Session, error) 
 
 ### 🔴 2. Session Runtime - Nil 函数指针调用
 
-**文件**: `core/remote/agent/session_runtime.go`  
+**文件**: `core/remote/agent/session_runtime.go`   
 **行号**: 64-74  
 **问题类型**: 并发安全 - 竞态条件
 

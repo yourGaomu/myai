@@ -136,6 +136,7 @@ func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecor
 		"system_instruction":       document.SystemInstruction,
 		"allowed_tools":            document.AllowedTools,
 		"enforce_tool_allowlist":   document.EnforceToolAllowlist,
+		"permission_ceiling":       document.PermissionCeiling,
 		"workspace_root":           document.WorkspaceRoot,
 		"workspace_sandbox_id":     document.WorkspaceSandboxID,
 		"max_tool_rounds":          document.MaxToolRounds,
@@ -231,16 +232,18 @@ func (m *Store) MarkSessionRestored(ctx context.Context, sessionID string, resto
 func (m *Store) SaveConfig(ctx context.Context, model domainmodel.Config) error {
 	document := mongomapper.ModelConfigDocumentFromDomain(model)
 	setValues := bson.M{
-		"name":       document.Name,
-		"provider":   document.Provider,
-		"protocol":   document.Protocol,
-		"auth_type":  document.AuthType,
-		"base_url":   document.BaseURL,
-		"api_key":    document.APIKey,
-		"model_name": document.ModelName,
-		"enabled":    document.Enabled,
-		"is_default": document.IsDefault,
-		"updated_at": document.UpdatedAt,
+		"name":                  document.Name,
+		"provider":              document.Provider,
+		"protocol":              document.Protocol,
+		"auth_type":             document.AuthType,
+		"base_url":              document.BaseURL,
+		"api_key":               document.APIKey,
+		"model_name":            document.ModelName,
+		"enabled":               document.Enabled,
+		"is_default":            document.IsDefault,
+		"context_window_tokens": document.ContextWindowTokens,
+		"max_output_tokens":     document.MaxOutputTokens,
+		"updated_at":            document.UpdatedAt,
 	}
 	update := bson.M{
 		"$set": setValues,
@@ -284,12 +287,44 @@ func (m *Store) DeleteConfig(ctx context.Context, modelID string) error {
 }
 
 func (m *Store) SaveMessage(ctx context.Context, message repository.MessageRecord) error {
-	_, err := m.template.InsertOne(ctx, messagesCollection, mongomapper.MessageDocumentFromRecord(message))
+	document := mongomapper.MessageDocumentFromRecord(message)
+	if document.ID == "" || document.SessionID == "" {
+		return errors.New("message identity is required")
+	}
+	encoded, err := bson.Marshal(document)
+	if err != nil {
+		return err
+	}
+	filter := bson.M{}
+	if err = bson.Unmarshal(encoded, &filter); err != nil {
+		return err
+	}
+	// Match the complete immutable record. Same-ID retries are harmless; a
+	// differing payload fails the unique _id constraint instead of overwriting.
+	_, err = m.template.UpdateOne(ctx, messagesCollection, filter, bson.M{"$setOnInsert": document}, options.UpdateOne().SetUpsert(true))
+	if gomongo.IsDuplicateKeyError(err) {
+		return repository.ErrConflict
+	}
 	return err
 }
 
 func (m *Store) SaveAsset(ctx context.Context, asset repository.AssetRecord) error {
-	_, err := m.template.InsertOne(ctx, assetsCollection, mongomapper.AssetDocumentFromRecord(asset))
+	document := mongomapper.AssetDocumentFromRecord(asset)
+	if document.ID == "" {
+		return errors.New("asset identity is required")
+	}
+	encoded, err := bson.Marshal(document)
+	if err != nil {
+		return err
+	}
+	filter := bson.M{}
+	if err = bson.Unmarshal(encoded, &filter); err != nil {
+		return err
+	}
+	_, err = m.template.UpdateOne(ctx, assetsCollection, filter, bson.M{"$setOnInsert": document}, options.UpdateOne().SetUpsert(true))
+	if gomongo.IsDuplicateKeyError(err) {
+		return repository.ErrConflict
+	}
 	return err
 }
 

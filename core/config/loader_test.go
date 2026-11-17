@@ -1,12 +1,45 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 )
+
+func TestShortLinksMCPEnvironmentIntegration(t *testing.T) {
+	// 1. 部署只需地址与机器 Key，环境变量自动映射为普通 MCP Server 配置。
+	t.Setenv("SHORT_LINKS_MCP_URL", "https://links.example.test/api/mcp")
+	t.Setenv("SHORT_LINKS_API_KEY", "test-key")
+	path := filepath.Join(t.TempDir(), "application.yaml")
+	if err := os.WriteFile(path, []byte("mcp:\n  servers: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	properties, err := (ViperLoader{ConfigFile: path}).Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(properties.MCP.Servers) != 1 {
+		t.Fatalf("expected one short-links MCP server, got %d", len(properties.MCP.Servers))
+	}
+	server := properties.MCP.Servers[0]
+	if server.Name != "short_links" || server.URL != "https://links.example.test/api/mcp" || server.Command != "" || server.Permission != "execute" || server.Required {
+		t.Fatalf("unexpected short-links MCP config: %#v", server)
+	}
+	if server.Headers["X-API-Key"] != "${SHORT_LINKS_API_KEY}" {
+		t.Fatal("API key must remain an environment reference in config properties")
+	}
+	// 1.1 显式配置优先，用户停用服务器时环境变量不得把它重新启用。
+	if err := os.WriteFile(path, []byte("mcp:\n  servers:\n    - name: short_links\n      url: https://custom.example.test/api/mcp\n      disabled: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	properties, err = (ViperLoader{ConfigFile: path}).Load(t.TempDir())
+	if err != nil || len(properties.MCP.Servers) != 1 || !properties.MCP.Servers[0].Disabled || properties.MCP.Servers[0].URL != "https://custom.example.test/api/mcp" {
+		t.Fatalf("explicit short-links config was overridden: %#v %v", properties.MCP.Servers, err)
+	}
+}
 
 func TestViperLoaderMapsAndNormalizesProperties(t *testing.T) {
 	v := viper.New()

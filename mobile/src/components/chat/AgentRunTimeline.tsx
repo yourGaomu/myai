@@ -4,6 +4,8 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import type { AgentRunEvent, AgentRunSnapshot } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ThinkingReasoning } from "./ThinkingReasoning";
+import { radius, weight } from "../../constants/theme";
+import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -11,6 +13,7 @@ type Props = {
 };
 
 export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
+  const styles = useThemedStyles(createStyles);
   const [expanded, setExpanded] = useState(snapshot.run.status === "running");
   const elapsed = useRunElapsed(snapshot);
   const reasoning = useMemo(
@@ -42,7 +45,7 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
         onPress={() => setExpanded((value) => !value)}
         style={({ pressed }) => buttonFeedback(styles.header, pressed)}
       >
-        <View style={[styles.statusDot, statusDotStyle(snapshot.run.status)]} />
+        <View style={[styles.statusDot, statusDotStyle(snapshot.run.status, styles)]} />
         <View style={styles.headerText}>
           <Text numberOfLines={1} style={styles.title}>{snapshot.run.title || runKindLabel(snapshot.run.kind)}</Text>
           <Text style={styles.subtitle}>{runMeta(snapshot)} / {elapsed}</Text>
@@ -70,6 +73,7 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
                 event={event}
                 key={`${event.id}-${event.sequence}`}
                 last={index === events.length - 1}
+                styles={styles}
               />
             ))
           )}
@@ -80,7 +84,9 @@ export function AgentRunTimeline({ buttonFeedback, snapshot }: Props) {
   );
 }
 
-function TimelineEvent({ event, last }: { event: AgentRunEvent; last: boolean }) {
+type TimelineStyles = ReturnType<typeof createStyles>;
+
+function TimelineEvent({ event, last, styles }: { event: AgentRunEvent; last: boolean; styles: TimelineStyles }) {
   const expandable = event.type === "tool_call" || event.type === "tool_result" || event.type === "permission";
   const [expanded, setExpanded] = useState(event.type === "tool_result" && isFailure(event.status));
   const content = eventContent(event);
@@ -88,7 +94,7 @@ function TimelineEvent({ event, last }: { event: AgentRunEvent; last: boolean })
   return (
     <View style={styles.eventRow}>
       <View style={styles.rail}>
-        <View style={[styles.eventDot, eventDotStyle(event)]} />
+        <View style={[styles.eventDot, eventDotStyle(event, styles)]} />
         {!last ? <View style={styles.railLine} /> : null}
       </View>
       <View style={styles.eventContent}>
@@ -269,7 +275,7 @@ function isFailure(status?: string) {
   return status === "failed" || status === "error" || status === "denied" || status === "timeout" || status === "canceled";
 }
 
-function statusDotStyle(status: string) {
+function statusDotStyle(status: string, styles: TimelineStyles) {
   switch (status) {
     case "succeeded": return styles.dotSuccess;
     case "failed": return styles.dotError;
@@ -279,7 +285,7 @@ function statusDotStyle(status: string) {
   }
 }
 
-function eventDotStyle(event: AgentRunEvent) {
+function eventDotStyle(event: AgentRunEvent, styles: TimelineStyles) {
   if (event.type === "failed" || isFailure(event.status)) {
     return styles.dotError;
   }
@@ -292,53 +298,54 @@ function eventDotStyle(event: AgentRunEvent) {
   return styles.dotRunning;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignSelf: "stretch",
-    backgroundColor: "#f1eee7",
-    borderColor: "#d7cfc2",
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  header: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 9,
-    minHeight: 50,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  statusDot: { borderColor: "#12100e", borderRadius: 7, borderWidth: 2, height: 14, width: 14 },
-  dotRunning: { backgroundColor: "#ffd84f" },
-  dotSuccess: { backgroundColor: "#8fd17f" },
-  dotError: { backgroundColor: "#ff7f68" },
-  dotPaused: { backgroundColor: "#4fd7ee" },
-  dotCanceled: { backgroundColor: "#b8b2aa" },
-  dotReasoning: { backgroundColor: "#c9a7ed" },
-  headerText: { flex: 1, minWidth: 0 },
-  title: { color: "#12100e", fontSize: 13, fontWeight: "900" },
-  subtitle: { color: "#6c665f", fontSize: 10, fontWeight: "700", marginTop: 2 },
-  collapseIcon: { color: "#12100e", fontSize: 20, fontWeight: "900", textAlign: "center", width: 24 },
-  body: { borderTopColor: "#d7cfc2", borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
-  emptyText: { color: "#6c665f", fontSize: 11, paddingVertical: 5 },
-  eventRow: { flexDirection: "row", minHeight: 38 },
-  rail: { alignItems: "center", marginRight: 8, width: 14 },
-  eventDot: { borderColor: "#12100e", borderRadius: 6, borderWidth: 2, height: 12, marginTop: 4, width: 12, zIndex: 1 },
-  railLine: { backgroundColor: "#c9c0b3", flex: 1, marginBottom: -4, marginTop: -1, width: 1 },
-  eventContent: { flex: 1, minWidth: 0, paddingBottom: 11 },
-  eventHeader: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 22 },
-  eventBadge: { color: "#6c665f", fontSize: 8, fontWeight: "900", width: 42 },
-  eventTitle: { color: "#12100e", flex: 1, fontSize: 11, fontWeight: "900" },
-  eventToggle: { color: "#12100e", fontSize: 15, fontWeight: "900", textAlign: "center", width: 18 },
-  stepText: { color: "#6c665f", fontSize: 9, fontWeight: "900" },
-  eventText: { color: "#12100e", fontSize: 11, lineHeight: 17, marginTop: 3 },
-  errorText: { color: "#8a2119", fontSize: 11, lineHeight: 17, marginTop: 3 },
-  details: { borderLeftColor: "#c9c0b3", borderLeftWidth: 1, gap: 7, marginTop: 6, paddingLeft: 8 },
-  detailSection: { gap: 3 },
-  detailLabel: { color: "#6c665f", fontSize: 8, fontWeight: "900", textTransform: "uppercase" },
-  codeText: { color: "#12100e", fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), fontSize: 10, lineHeight: 15 },
-  errorCodeText: { color: "#8a2119", fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), fontSize: 10, lineHeight: 15 },
-  truncatedText: { color: "#8a4a00", fontSize: 9, fontWeight: "900" },
-  runError: { backgroundColor: "#ffb1a3", borderColor: "#12100e", borderRadius: 5, borderWidth: 2, color: "#6d1812", fontSize: 10, marginTop: 4, padding: 7 },
-});
+const createStyles = ({ font, palette }: AppTheme) =>
+  StyleSheet.create({
+    container: {
+      alignSelf: "stretch",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      overflow: "hidden",
+    },
+    header: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 9,
+      minHeight: 50,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    statusDot: { borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, height: 14, width: 14 },
+    dotRunning: { backgroundColor: palette.brand },
+    dotSuccess: { backgroundColor: palette.okWash },
+    dotError: { backgroundColor: palette.errWash },
+    dotPaused: { backgroundColor: palette.cyanWash },
+    dotCanceled: { backgroundColor: palette.surface3 },
+    dotReasoning: { backgroundColor: palette.brandWash },
+    headerText: { flex: 1, minWidth: 0 },
+    title: { color: palette.ink1, fontSize: font.body, fontWeight: weight.bold },
+    subtitle: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.bold, marginTop: 2 },
+    collapseIcon: { color: palette.ink1, fontSize: font.display, fontWeight: weight.bold, textAlign: "center", width: 24 },
+    body: { borderTopColor: palette.hairline, borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
+    emptyText: { color: palette.ink2, fontSize: font.caption, paddingVertical: 5 },
+    eventRow: { flexDirection: "row", minHeight: 38 },
+    rail: { alignItems: "center", marginRight: 8, width: 14 },
+    eventDot: { borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, height: 12, marginTop: 4, width: 12, zIndex: 1 },
+    railLine: { backgroundColor: palette.surface3, flex: 1, marginBottom: -4, marginTop: -1, width: 1 },
+    eventContent: { flex: 1, minWidth: 0, paddingBottom: 11 },
+    eventHeader: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 22 },
+    eventBadge: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.bold, width: 42 },
+    eventTitle: { color: palette.ink1, flex: 1, fontSize: font.caption, fontWeight: weight.bold },
+    eventToggle: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.bold, textAlign: "center", width: 18 },
+    stepText: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.bold },
+    eventText: { color: palette.ink1, fontSize: font.caption, lineHeight: 17, marginTop: 3 },
+    errorText: { color: palette.err, fontSize: font.caption, lineHeight: 17, marginTop: 3 },
+    details: { borderLeftColor: palette.hairline, borderLeftWidth: 1, gap: 7, marginTop: 6, paddingLeft: 8 },
+    detailSection: { gap: 3 },
+    detailLabel: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.bold, textTransform: "uppercase" },
+    codeText: { color: palette.ink1, fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), fontSize: font.micro, lineHeight: 15 },
+    errorCodeText: { color: palette.err, fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), fontSize: font.micro, lineHeight: 15 },
+    truncatedText: { color: palette.brand, fontSize: font.micro, fontWeight: weight.bold },
+    runError: { backgroundColor: palette.errWash, borderColor: palette.hairline, borderRadius: radius.xs, borderWidth: 1, color: palette.err, fontSize: font.micro, marginTop: 4, padding: 7 },
+  });

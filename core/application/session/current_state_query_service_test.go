@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	memorysession "myai/core/adapter/session/memory"
-	"myai/core/contextmgr"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/session"
@@ -19,7 +18,7 @@ func TestCurrentStateQueryServiceReturnsDefaultsWithoutMemory(t *testing.T) {
 	if state.AgentMode != session.AgentModeChat || state.PermissionMode != session.PermissionModeAsk {
 		t.Fatalf("unexpected mode defaults: %#v", state)
 	}
-	if state.ContextWindowK != contextmgr.DefaultWindowK {
+	if state.ContextWindowK != 0 {
 		t.Fatalf("unexpected context default: %#v", state)
 	}
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	memorycatalogcommand "myai/core/application/memory/catalog/command"
 	memoryretrievalapi "myai/core/application/memory/retrieval/api"
@@ -21,7 +19,7 @@ import (
 const (
 	defaultMemoryTopK        = 4
 	maxMemoryContextTokens   = 900
-	defaultCandidatePoolSize = 200
+	defaultCandidatePoolSize = memoryport.MaxListLimit
 )
 
 type ContextService struct {
@@ -42,8 +40,13 @@ func (service ContextService) Prepare(ctx context.Context, command memoryretriev
 	if service.Memories == nil {
 		return memoryretrievalresult.Context{Triggered: true, Query: query}, errors.New("memory repository is nil")
 	}
+	terms := domainmemory.SearchTerms(query)
+	if len(terms) == 0 {
+		return memoryretrievalresult.Context{Triggered: true, Query: query}, nil
+	}
 	memories, err := service.Memories.List(ctx, memoryport.ListFilter{
 		Statuses: []domainmemory.Status{domainmemory.StatusActive}, Limit: defaultCandidatePoolSize,
+		SearchTerms: terms, OrderByContent: true,
 	})
 	if err != nil {
 		return memoryretrievalresult.Context{Triggered: true, Query: query}, err
@@ -136,15 +139,7 @@ func memorySimilarity(left domainmemory.Memory, right domainmemory.Memory) float
 }
 
 func memorySearchTerms(memory domainmemory.Memory) map[string]struct{} {
-	revision, ok := memory.CurrentRevision()
-	if !ok {
-		return nil
-	}
-	content := revision.Content
-	return termSet(strings.Join([]string{
-		memory.Title, strings.Join(memory.Tags, " "), content.Goal, content.ApplicableContext,
-		content.Approach, content.Result, content.PainPoints, content.RootCause, content.Lessons, content.Verification,
-	}, "\n"))
+	return termSet(memory.SearchText())
 }
 
 func rankMemories(query string, sessionID string, scope domainmemory.Scope, memories []domainmemory.Memory) []rankedMemory {
@@ -158,22 +153,16 @@ func rankMemories(query string, sessionID string, scope domainmemory.Scope, memo
 		if !ok {
 			continue
 		}
-		content := revision.Content
-		searchable := strings.Join([]string{
-			memory.Title, strings.Join(memory.Tags, " "), content.Goal, content.ApplicableContext,
-			content.Approach, content.Result, content.PainPoints, content.RootCause, content.Lessons, content.Verification,
-		}, "\n")
-		overlap := overlapCount(queryTerms, termSet(searchable))
-		if overlap == 0 && !strings.Contains(strings.ToLower(searchable), strings.ToLower(query)) {
+		overlap := overlapCount(queryTerms, memorySearchTerms(memory))
+		if overlap == 0 {
 			continue
 		}
 		score := float64(overlap)
-		lowerQuery := strings.ToLower(query)
-		if strings.Contains(strings.ToLower(memory.Title), lowerQuery) {
+		if domainmemory.ContainsSearchPhrase(memory.Title, query) {
 			score += 6
 		}
 		for _, tag := range memory.Tags {
-			if strings.Contains(lowerQuery, strings.ToLower(tag)) {
+			if domainmemory.ContainsSearchPhrase(query, tag) {
 				score += 4
 			}
 		}
@@ -182,7 +171,7 @@ func rankMemories(query string, sessionID string, scope domainmemory.Scope, memo
 	}
 	sort.SliceStable(items, func(left, right int) bool {
 		if items[left].score == items[right].score {
-			return items[left].memory.UpdatedAt.After(items[right].memory.UpdatedAt)
+			return items[left].memory.ContentUpdatedAt().After(items[right].memory.ContentUpdatedAt())
 		}
 		return items[left].score > items[right].score
 	})
@@ -234,17 +223,9 @@ func scopeMatches(memoryScope domainmemory.Scope, configured domainmemory.Scope,
 }
 
 func termSet(text string) map[string]struct{} {
-	normalized := strings.ToLower(strings.TrimSpace(text))
 	terms := make(map[string]struct{})
-	fields := strings.FieldsFunc(normalized, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
-	for _, field := range fields {
-		if utf8.RuneCountInString(field) >= 2 {
-			terms[field] = struct{}{}
-		}
-		runes := []rune(field)
-		for index := 0; index+1 < len(runes); index++ {
-			terms[string(runes[index:index+2])] = struct{}{}
-		}
+	for _, term := range domainmemory.SearchTerms(text) {
+		terms[term] = struct{}{}
 	}
 	return terms
 }

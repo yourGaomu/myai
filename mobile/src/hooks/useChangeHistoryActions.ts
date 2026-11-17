@@ -50,25 +50,51 @@ export function useChangeHistoryActions({
     [sendEnvelope, setChangeDiff, setHistoryDiff, setSelectedChange, startPending, stopPending],
   );
 
-  const revertSelectedChange = useCallback(() => {
+  const executeRevertSelectedChange = useCallback(() => {
     const path = changeDiff?.path || selectedChange;
+    const expectedHash = changeDiff?.path === path ? changeDiff.expected_hash : undefined;
     if (!path || !canRevertSelectedChange) {
       return;
     }
-
-    const doRevert = () => {
-      startPending("revert");
-      if (!sendEnvelope("change_revert", {
+    if (!expectedHash) {
+      startPending("diff");
+      if (!sendEnvelope("change_diff", {
         request_id: newRequestID(),
         payload: { path },
       })) {
-        stopPending("revert");
+        stopPending("diff");
       }
-    };
+      return;
+    }
+    startPending("revert");
+    if (!sendEnvelope("change_revert", {
+      request_id: newRequestID(),
+      payload: { path, expected_hash: expectedHash },
+    })) {
+      stopPending("revert");
+    }
+  }, [canRevertSelectedChange, changeDiff?.expected_hash, changeDiff?.path, selectedChange, sendEnvelope, startPending, stopPending]);
+
+  const revertSelectedChange = useCallback(() => {
+    const path = changeDiff?.path || selectedChange;
+    const expectedHash = changeDiff?.path === path ? changeDiff.expected_hash : undefined;
+    if (!path || !canRevertSelectedChange) {
+      return;
+    }
+    if (!expectedHash) {
+      startPending("diff");
+      if (!sendEnvelope("change_diff", {
+        request_id: newRequestID(),
+        payload: { path },
+      })) {
+        stopPending("diff");
+      }
+      return;
+    }
 
     if (Platform.OS === "web") {
       if (typeof window === "undefined" || window.confirm(`确认将 ${path} 回退到基线版本吗？`)) {
-        doRevert();
+        executeRevertSelectedChange();
       }
       return;
     }
@@ -78,10 +104,24 @@ export function useChangeHistoryActions({
       {
         text: "Revert",
         style: "destructive",
-        onPress: doRevert,
+        onPress: executeRevertSelectedChange,
       },
     ]);
-  }, [canRevertSelectedChange, changeDiff?.path, selectedChange, sendEnvelope, startPending, stopPending]);
+  }, [canRevertSelectedChange, changeDiff?.expected_hash, changeDiff?.path, executeRevertSelectedChange, selectedChange, sendEnvelope, startPending, stopPending]);
+
+  const executeRevertHistoryCheckpoint = useCallback(
+    (checkpointID: string) => {
+      if (!checkpointID) return;
+      startPending("revert");
+      if (!sendEnvelope("history_revert", {
+        request_id: newRequestID(),
+        payload: { checkpoint_id: checkpointID },
+      })) {
+        stopPending("revert");
+      }
+    },
+    [sendEnvelope, startPending, stopPending],
+  );
 
   const revertHistoryCheckpoint = useCallback(
     (checkpointID: string) => {
@@ -95,15 +135,7 @@ export function useChangeHistoryActions({
         ? `${checkpoint.change_count} file(s) from ${formatDateTime(checkpoint.created_at)} will be restored.`
         : "This checkpoint will be restored.";
 
-      const doRevert = () => {
-        startPending("revert");
-        if (!sendEnvelope("history_revert", {
-          request_id: newRequestID(),
-          payload: { checkpoint_id: checkpointID },
-        })) {
-          stopPending("revert");
-        }
-      };
+      const doRevert = () => executeRevertHistoryCheckpoint(checkpointID);
 
       if (Platform.OS === "web") {
         if (typeof window === "undefined" || window.confirm(`确认还原到此快照版本？\n${title}\n${detail}`)) {
@@ -121,7 +153,7 @@ export function useChangeHistoryActions({
         },
       ]);
     },
-    [historyCheckpoints, sendEnvelope, startPending, stopPending],
+    [executeRevertHistoryCheckpoint, historyCheckpoints],
   );
 
   const previewHistoryCheckpoint = useCallback(
@@ -144,6 +176,8 @@ export function useChangeHistoryActions({
   );
 
   return {
+    executeRevertHistoryCheckpoint,
+    executeRevertSelectedChange,
     openChangeEntry,
     previewHistoryCheckpoint,
     revertHistoryCheckpoint,

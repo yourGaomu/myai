@@ -10,13 +10,15 @@ import (
 	"strings"
 
 	"myai/core/history"
+	historyport "myai/core/port/history"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
 type WriteFileTool struct {
-	recorder  historyRecorder
-	workspace string
+	recorder       historyRecorder
+	historyFactory historyport.StoreFactory
+	workspace      string
 }
 
 type writeFileArgs struct {
@@ -98,7 +100,7 @@ func (t *WriteFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 		return tooldef.ToolOutput{}, err
 	}
 
-	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
+	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace, t.historyFactory)
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}

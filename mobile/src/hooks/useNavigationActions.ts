@@ -49,6 +49,9 @@ export function useNavigationActions({
     setViewMode("sessions");
     requestSessions();
   }, [requestSessions, setViewMode]);
+  const openTrash = useCallback(() => {
+    setViewMode("trash");
+  }, [setViewMode]);
   const openPlan = useCallback(() => setViewMode("plan"), [setViewMode]);
   const toggleSettings = useCallback(() => {
     setViewMode((value) => (value === "settings" ? "chat" : "settings"));
@@ -68,6 +71,7 @@ export function useNavigationActions({
     openKnowledge,
     openPlan,
     openSessions,
+    openTrash,
     selectSession,
     toggleSettings,
   };

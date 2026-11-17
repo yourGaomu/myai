@@ -167,7 +167,7 @@ func RuntimeInstruction(text string) Message {
 	if text == "" {
 		return Message{}
 	}
-	return SyntheticText(SyntheticReasonRuntimeInstruction, RuntimeInstructionPrefix+"\n"+text)
+	return SyntheticUserText(SyntheticReasonRuntimeInstruction, RuntimeInstructionPrefix+"\n"+text)
 }
 
 func RAGContext(text string) Message {

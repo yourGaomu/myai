@@ -29,11 +29,13 @@ type Server struct {
 	upgrader         websocket.Upgrader
 	agentLock        sync.RWMutex
 	agents           map[string]*agentEntry
-	bindings         map[string]string
+	bindings         map[string]*bindingEntry
+	pairLimiter      pairRateLimiter
 	authStore        authorizationport.Store
 	clientLock       sync.RWMutex
 	clients          map[string]*clientEntry
 	connections      map[*peer]*clientConnection
+	interactions     map[interactionKey]*pendingInteraction
 	agentCredentials map[string]string
 	origins          map[string]struct{}
 	loopbackOrigins  map[string]struct{}
@@ -88,10 +90,11 @@ func NewServer(addr string, authStore authorizationport.Store, options ...Option
 	server := &Server{
 		addr:             addr,
 		agents:           make(map[string]*agentEntry),
-		bindings:         make(map[string]string),
+		bindings:         make(map[string]*bindingEntry),
 		authStore:        authStore,
 		clients:          make(map[string]*clientEntry),
 		connections:      make(map[*peer]*clientConnection),
+		interactions:     make(map[interactionKey]*pendingInteraction),
 		agentCredentials: make(map[string]string),
 		origins:          make(map[string]struct{}),
 		loopbackOrigins:  make(map[string]struct{}),
@@ -366,9 +369,17 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		log.Printf("agent unregistered: user=%s device=%s", message.UserID, message.DeviceID)
 	case protocol.TypeSubagentTaskEvent, protocol.TypeBackgroundTurnEvent, protocol.TypeUserQuestion, protocol.TypeUserQuestionResolved:
 		return s.forwardEventToClients(message)
+	case protocol.TypePermissionResult:
+		return s.forwardControlReply(message)
+	case protocol.TypeError:
+		var payload struct { RequestType protocol.MessageType `json:"request_type"` }
+		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
+			return s.forwardControlReply(message)
+		}
+		return s.forwardToClient(message)
 	case protocol.TypeUserQuestionListResult:
 		return s.forwardToClient(message)
-	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeMCPReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskWaitResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult, protocol.TypeError:
+	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeMCPReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskWaitResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult:
 		return s.forwardToClient(message)
 	case protocol.TypeUserMessageQueued:
 		return s.forwardToClient(message)
@@ -392,8 +403,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		// permission_result 属于原聊天请求，不能覆盖 request_id 已登记的请求类型，
 		// 否则后续 assistant_done 无法按 user_message 终态释放路由。
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
-		if !s.rebindClientRequest(message.RequestID, message.UserID, message.DeviceID, message.ClientToken, p) {
-			return fmt.Errorf("client request is not online: request=%s", message.RequestID)
+		if !s.rebindClientRequest(message.RequestID, message.UserID, message.DeviceID, message.ClientToken, p) && !s.authorizeInteraction(p, message, "permission", controlReplyID(message, "approval_id")) {
+			return fmt.Errorf("permission reply is not authorized for this request")
 		}
 		return s.forwardToAgent(message)
 	case protocol.TypeUserQuestionAnswer:
@@ -401,6 +412,9 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 			return fmt.Errorf("client token is invalid or expired")
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
+		if !s.authorizeInteraction(p, message, "question", controlReplyID(message, "question_id")) {
+			return fmt.Errorf("user question reply is not authorized for this request")
+		}
 		return s.forwardToAgent(message)
 	case protocol.TypeUserQuestionList:
 		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
@@ -488,19 +502,28 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 			return err
 		}
 	}
-	if isTerminalResponseForRequest(client.RequestType, message.Type) {
+	terminal := isTerminalResponseForRequest(client.RequestType, message.Type)
+	if message.Type == protocol.TypeError {
+		var payload struct { RequestType protocol.MessageType `json:"request_type"` }
+		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
+			terminal = false
+		}
+	}
+	if terminal {
 		s.unregisterClient(message.RequestID)
 	}
 	return nil
 }
 
 func (s *Server) forwardEventToClients(message protocol.Message) error {
+	if err := s.rememberInteraction(message); err != nil { return err }
 	peers := s.getClientConnections(message.UserID, message.DeviceID)
 	if len(peers) == 0 {
 		return nil
 	}
 	var errs []error
 	for _, peer := range peers {
+		s.grantInteraction(peer, message)
 		if err := s.writeAuthorizedClient(peer, message); err != nil {
 			errs = append(errs, err)
 		}
@@ -690,6 +713,16 @@ func writeAck(p *peer, role string, received protocol.Message) error {
 	})
 }
 
+func controlReplyID(message protocol.Message, field string) string {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(message.Payload, &payload) != nil {
+		return ""
+	}
+	var id string
+	_ = json.Unmarshal(payload[field], &id)
+	return id
+}
+
 func writeError(p *peer, received protocol.Message, text string) error {
 	message, err := protocol.NewMessage(
 		protocol.TypeError,
@@ -697,7 +730,12 @@ func writeError(p *peer, received protocol.Message, text string) error {
 		received.UserID,
 		received.DeviceID,
 		received.SessionID,
-		protocol.ErrorPayload{Message: text},
+		struct {
+			protocol.ErrorPayload
+			RequestType protocol.MessageType `json:"request_type"`
+			ApprovalID string `json:"approval_id,omitempty"`
+			QuestionID string `json:"question_id,omitempty"`
+		}{ErrorPayload: protocol.ErrorPayload{Message: text}, RequestType: received.Type, ApprovalID: controlReplyID(received, "approval_id"), QuestionID: controlReplyID(received, "question_id")},
 	)
 	if err != nil {
 		return err

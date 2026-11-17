@@ -20,10 +20,12 @@ https://relay.mikasa.wiki
 https://assets.mikasa.wiki
 ```
 
-These are also the defaults in the app. Enter the six-digit Agent bind code,
-tap `Pair`, and then tap `Connect`. Pairing fills the correct user/device
-identity and exchanges a client token; the bind code is not used as the
-WebSocket token.
+These are also the defaults in the app. On first launch the app shows the
+pairing screen: enter the six-digit bind code printed by the PC Agent and tap
+`配对并连接`. Pairing fills the correct user/device identity and exchanges a
+client token, then the app connects automatically; the bind code is not used as
+the WebSocket token. To pair again or change the relay address, open
+sidebar → 设置 → 连接与配对.
 
 If the Relay runs on the same PC and you test in an Android emulator, use:
 
@@ -43,12 +45,11 @@ Do not use `127.0.0.1` on a real phone unless the Relay also runs on that phone.
 
 1. Start Relay.
 2. Start PC Agent.
-3. Enter the Agent bind code in the mobile app.
-4. Tap `Pair`.
-5. Tap `Connect`.
-6. Chat, switch sessions, and approve or deny tool permissions.
-7. Open `Files` to browse and preview files from the PC Agent workspace.
-8. Open `Changes` to inspect changes compared with the SQLite workspace history baseline, preview diffs, jump to files, and revert restorable files.
+3. Enter the Agent bind code on the pairing screen and tap `配对并连接`.
+4. Chat, approve or deny tool permissions, and tap the title to switch model, mode, and tool permissions.
+5. Open the sidebar to switch sessions or open `文件`, `变更`, `知识库与记忆`, and `设置`.
+6. In `文件`, browse and preview files from the PC Agent workspace and add them to the chat.
+7. In `变更`, inspect changes compared with the SQLite workspace history baseline, preview diffs, open files, and revert restorable files.
 
 ## Build Android APK
 

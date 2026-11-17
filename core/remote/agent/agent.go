@@ -3,11 +3,11 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
-	mathRand "math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -40,8 +40,10 @@ type Agent struct {
 	writeMu               sync.Mutex
 	requestMu             sync.Mutex
 	catalogMu             sync.Mutex
-	catalogQueueMu        sync.Mutex
-	catalogTail           <-chan struct{}
+	operations            operationQueue
+	catalogOperations     operationQueue
+	activeOperations      atomic.Int32
+	tasks                 sync.WaitGroup
 	lastTaskEventSequence atomic.Uint64
 	permissionWaiters     *permissionWaiterRegistry
 	permissionTimeout     time.Duration
@@ -84,7 +86,7 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 	}
 }
 
-func (a *Agent) Run(ctx context.Context) error {
+func (a *Agent) Run(ctx context.Context) (runErr error) {
 	if a.config.ServerURL == "" {
 		return fmt.Errorf("server url is empty")
 	}
@@ -107,6 +109,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("change service is nil")
 	}
 	defer a.changeService.Close()
+	ctx, cancelRun := context.WithCancel(ctx)
+	defer func() {
+		cancelRun()
+		joinCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := a.waitForOperations(joinCtx); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("wait for remote operations: %w", err))
+		}
+	}()
 
 	fmt.Println("agent starting...")
 	fmt.Println("server:", a.config.ServerURL)
@@ -124,14 +135,17 @@ func (a *Agent) Run(ctx context.Context) error {
 			fmt.Println("agent stopped.")
 			return nil
 		}
-		if err != nil {
-			log.Printf("agent connection ended: %v; reconnecting in %s", err, backoff)
+		if permanentRelayError(err) {
+			return err
 		}
-
 		if connected && time.Since(connectedAt) >= 30*time.Second {
 			backoff = time.Second
 		}
-		timer := time.NewTimer(backoff)
+		delay := reconnectDelay(backoff)
+		if err != nil {
+			log.Printf("agent connection ended: %v; reconnecting in %s", err, delay)
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -139,16 +153,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			return nil
 		case <-timer.C:
 		}
-		if backoff < 30*time.Second {
-			backoffMax := float64(backoff) * 1.2
-			backoffMin := float64(backoff) * 0.8
-			delta := backoffMax - backoffMin
-			randVal := backoffMin + delta*mathRand.Float64()
-			backoff = time.Duration(randVal)
-		}
-		if backoff > 30*time.Second {
-			backoff = 30 * time.Second
-		}
+		backoff = nextReconnectBackoff(backoff)
 	}
 }
 
@@ -162,10 +167,7 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	headers.Set(protocol.HeaderAgentDeviceID, strings.TrimSpace(a.config.DeviceID))
 	conn, response, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, headers)
 	if err != nil {
-		if response != nil {
-			return false, fmt.Errorf("connect relay failed: %w, status: %s", err, response.Status)
-		}
-		return false, fmt.Errorf("connect relay failed: %w", err)
+		return false, relayDialError(err, response)
 	}
 	defer conn.Close()
 
@@ -200,7 +202,13 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 	}
 
 	readDone := make(chan error, 1)
-	go a.readLoop(ctx, conn, readDone)
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	a.tasks.Add(1)
+	go func() {
+		defer a.tasks.Done()
+		a.readLoopWithConnectionContext(ctx, connectionCtx, conn, readDone)
+	}()
+	defer cancelConnection()
 	// Keep an application-level heartbeat comfortably below common reverse proxy
 	// idle timeouts. Relay also sends protocol-level ping frames, but this
 	// heartbeat updates the agent registry's last-seen timestamp.
@@ -317,7 +325,11 @@ func (a *Agent) advanceTaskEventSequence(sequence uint64) {
 }
 
 func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, done chan<- error) {
-	waitCtx, cancel := context.WithCancel(ctx)
+	a.readLoopWithConnectionContext(ctx, ctx, conn, done)
+}
+
+func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context, conn *websocket.Conn, done chan<- error) {
+	waitCtx, cancel := context.WithCancel(connectionCtx)
 	defer cancel()
 	for {
 		var message protocol.Message
@@ -331,12 +343,12 @@ func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, done chan<- 
 		}
 
 		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
-		messageCtx := ctx
-		if message.Type == protocol.TypeSubagentTaskWait {
-			messageCtx = waitCtx
+		if waitCtx.Err() != nil {
+			done <- waitCtx.Err()
+			return
 		}
-		if err := a.handleRelayMessage(messageCtx, conn, message); err != nil {
-			if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+		if err := a.dispatchRelayMessage(ctx, waitCtx, conn, message); err != nil {
+			if writeErr := a.writeHandlerError(conn, message, err); writeErr != nil {
 				done <- fmt.Errorf("send remote error failed: %w", writeErr)
 				return
 			}
@@ -372,13 +384,16 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	switch message.Type {
 	//用户发起一次对话
 	case protocol.TypeUserMessage:
-		go a.processUserMessage(ctx, conn, message)
+		return a.startAsyncOperation(ctx, conn, message, a.processUserMessage)
 	case protocol.TypeSessionRegenerate:
-		go a.processRegenerateMessage(ctx, conn, message)
+		return a.startAsyncOperation(ctx, conn, message, a.processRegenerateMessage)
 	case protocol.TypePermissionResult:
-		return a.handlePermissionResult(message)
+		if err := a.handlePermissionResultContext(ctx, message); err != nil {
+			return err
+		}
+		return a.writeRemoteMessage(conn, protocol.TypePermissionResult, message.RequestID, message.SessionID, json.RawMessage(message.Payload))
 	case protocol.TypeUserQuestionAnswer:
-		return a.handleUserQuestionAnswer(message)
+		return a.handleUserQuestionAnswerContext(ctx, message)
 	case protocol.TypeUserQuestionList:
 		return a.handleUserQuestionList(conn, message)
 	case protocol.TypeSessionList:
@@ -404,7 +419,7 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	case protocol.TypeSessionModeSet:
 		return a.handleSessionModeSet(ctx, conn, message)
 	case protocol.TypeSessionPlanExecute:
-		go a.processPlanExecuteMessage(ctx, conn, message)
+		return a.startAsyncOperation(ctx, conn, message, a.processPlanExecuteMessage)
 	case protocol.TypeSessionContextQuery:
 		return a.handleSessionContextQuery(ctx, conn, message)
 	case protocol.TypeSessionContextSet:
@@ -516,7 +531,7 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	case protocol.TypeAIMemoryExtractionJobRetry:
 		return a.handleAIMemoryExtractionJobRetry(ctx, conn, message)
 	case protocol.TypeAIMemoryDreamRun:
-		go a.processAIMemoryDreamRun(ctx, conn, message)
+		return a.startAsyncOperation(ctx, conn, message, a.processAIMemoryDreamRun)
 	case protocol.TypeAIMemoryDreamList:
 		return a.handleAIMemoryDreamList(ctx, conn, message)
 	case protocol.TypeSubagentDefinitionList:
@@ -547,7 +562,9 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 			a.activeSubagentWaits.Add(-1)
 			return errors.New("too many pending subagent waits")
 		}
+		a.tasks.Add(1)
 		go func() {
+			defer a.tasks.Done()
 			defer a.activeSubagentWaits.Add(-1)
 			if err := a.handleSubagentTaskWait(ctx, conn, message); err != nil {
 				_ = a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()})
@@ -560,7 +577,7 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 	case protocol.TypeSubagentTaskDiscard:
 		return a.handleSubagentTaskDiscard(ctx, conn, message)
 	case protocol.TypeSubagentTaskResume:
-		go a.processSubagentTaskResume(ctx, conn, message)
+		return a.startAsyncOperation(ctx, conn, message, a.processSubagentTaskResume)
 	case protocol.TypeFileList:
 		return a.handleFileList(ctx, conn, message)
 	case protocol.TypeFileRead:

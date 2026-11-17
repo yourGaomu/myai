@@ -1,181 +1,227 @@
-import { useMemo, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import { parseDiffRows, type DiffCell, type DiffLineKind, type DiffRow } from "../../utils/diff";
+import { fontFamily, font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   diff: string;
   emptyText: string;
+  standaloneScroll?: boolean;
 };
 
-export function DiffViewer({ diff, emptyText }: Props) {
-  const [wrapLines, setWrapLines] = useState(true);
+type UnifiedLine = {
+  id: string;
+  isChunkStart?: boolean;
+  kind: DiffLineKind;
+  newNo?: number;
+  oldNo?: number;
+  text: string;
+};
+
+// 统一 diff：吸顶工具栏（+X / -Y、换行切换、↑ 上一处 / ↓ 下一处差异定位）+ 清晰浅底色行读区。
+export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
+  const [wrap, setWrap] = useState(true);
+  const [viewport, setViewport] = useState(0);
+  const [activeChunkIndex, setActiveChunkIndex] = useState(0);
+
+  const verticalScrollRef = useRef<ScrollView>(null);
+  const chunkOffsetsRef = useRef<Record<string, number>>({});
+
   const rows = useMemo(() => parseDiffRows(diff), [diff]);
+  const lines = useMemo(() => unifiedLines(rows), [rows]);
   const stats = useMemo(() => diffStats(rows), [rows]);
-  const ratioBlocks = useMemo(() => buildDiffRatioBlocks(stats.added, stats.removed), [stats.added, stats.removed]);
+  const chunkIDs = useMemo(() => lines.filter((line) => line.isChunkStart).map((line) => line.id), [lines]);
+
+  useEffect(() => {
+    setActiveChunkIndex(0);
+    chunkOffsetsRef.current = {};
+  }, [diff]);
 
   if (!diff.trim() || rows.length === 0) {
-    return <Text style={styles.emptyText}>{emptyText}</Text>;
+    return <Text style={styles.empty}>{emptyText}</Text>;
   }
 
-  const tableContent = (
-    <View style={[styles.diffTable, !wrapLines && styles.diffTableNoWrap]}>
-      {rows.map((row) => renderRow(row, wrapLines))}
+  const jumpToChunk = (nextIndex: number) => {
+    if (chunkIDs.length === 0) return;
+    const wrapped = (nextIndex + chunkIDs.length) % chunkIDs.length;
+    setActiveChunkIndex(wrapped);
+    const y = chunkOffsetsRef.current[chunkIDs[wrapped]];
+    if (typeof y === "number") {
+      verticalScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+    }
+  };
+
+  const body = (
+    <View style={[styles.body, !wrap && viewport ? { minWidth: viewport } : null]}>
+      {lines.map((line) => {
+        const recordLayout = line.isChunkStart
+          ? (y: number) => {
+              chunkOffsetsRef.current[line.id] = y;
+            }
+          : undefined;
+
+        if (line.kind === "hunk") {
+          return (
+            <View
+              key={line.id}
+              onLayout={recordLayout ? (e) => recordLayout(e.nativeEvent.layout.y) : undefined}
+            >
+              <Text numberOfLines={1} style={styles.hunk}>
+                {line.text}
+              </Text>
+            </View>
+          );
+        }
+
+        return (
+          <View
+            key={line.id}
+            onLayout={recordLayout ? (e) => recordLayout(e.nativeEvent.layout.y) : undefined}
+          >
+            <Line kind={line.kind} newNo={line.newNo} oldNo={line.oldNo} styles={styles} text={line.text} wrap={wrap} />
+          </View>
+        );
+      })}
     </View>
   );
 
+  const codeRegion = wrap ? (
+    body
+  ) : (
+    <ScrollView horizontal onLayout={(event) => setViewport(event.nativeEvent.layout.width)} showsHorizontalScrollIndicator={false}>
+      {body}
+    </ScrollView>
+  );
+
   return (
-    <View style={styles.diffViewer}>
-      <View style={styles.diffHeader}>
-        <View style={styles.diffHeaderLeft}>
-          <Text style={styles.diffHeaderTitle}>行级差异</Text>
-          <View style={styles.diffStats}>
-            <Text style={styles.diffAddedStat}>+{stats.added}</Text>
-            <Text style={styles.diffRemovedStat}>-{stats.removed}</Text>
-            <View style={styles.diffRatioRow}>
-              {ratioBlocks.map((kind, idx) => (
-                <View
-                  key={idx}
-                  style={[
-                    styles.diffRatioBlock,
-                    kind === "add"
-                      ? styles.diffRatioAdd
-                      : kind === "remove"
-                        ? styles.diffRatioRemove
-                        : styles.diffRatioNeutral,
-                  ]}
-                />
-              ))}
-            </View>
+    <View style={[styles.viewer, standaloneScroll && styles.viewerFlex]}>
+      <View style={styles.head}>
+        <Text style={styles.add}>+{stats.added}</Text>
+        <Text style={styles.del}>−{stats.removed}</Text>
+
+        {standaloneScroll && chunkIDs.length > 0 ? (
+          <View style={styles.chunkNav}>
+            <Pressable
+              accessibilityLabel="上一处差异"
+              hitSlop={4}
+              onPress={() => jumpToChunk(activeChunkIndex - 1)}
+              style={({ pressed }) => [styles.chunkBtn, pressed && styles.pressed]}
+            >
+              <Feather color={palette.ink2} name="chevron-up" size={14} />
+            </Pressable>
+            <Text style={styles.chunkText}>{activeChunkIndex + 1}/{chunkIDs.length}</Text>
+            <Pressable
+              accessibilityLabel="下一处差异"
+              hitSlop={4}
+              onPress={() => jumpToChunk(activeChunkIndex + 1)}
+              style={({ pressed }) => [styles.chunkBtn, pressed && styles.pressed]}
+            >
+              <Feather color={palette.ink2} name="chevron-down" size={14} />
+            </Pressable>
           </View>
-        </View>
-        <Pressable
-          onPress={() => setWrapLines((prev) => !prev)}
-          style={styles.wrapToggleBtn}
-        >
-          <Text style={styles.wrapToggleText}>{wrapLines ? "↩ 自动换行" : "⇄ 横向滚动"}</Text>
+        ) : null}
+
+        <View style={styles.flex} />
+
+        <Pressable hitSlop={6} onPress={() => setWrap((value) => !value)} style={({ pressed }) => [styles.toggle, pressed && styles.pressed]}>
+          <Feather color={palette.ink3} name={wrap ? "align-left" : "arrow-right"} size={13} />
+          <Text style={styles.toggleText}>{wrap ? "自动换行" : "不换行"}</Text>
         </Pressable>
       </View>
 
-      {wrapLines ? (
-        tableContent
-      ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-          {tableContent}
+      {standaloneScroll ? (
+        <ScrollView ref={verticalScrollRef} showsVerticalScrollIndicator style={styles.verticalScroll}>
+          {codeRegion}
         </ScrollView>
+      ) : (
+        codeRegion
       )}
     </View>
   );
 }
 
-function renderRow(row: DiffRow, wrapLines: boolean) {
-  if (row.type === "full") {
-    if (row.cell.kind === "meta") {
-      return null;
+// parseDiffRows 为左右分栏把删除和新增两两配对；单栏显示还原成「先删后增」的顺序，并标记每个连续改动块的起点用于上下跳转
+function unifiedLines(rows: DiffRow[]): UnifiedLine[] {
+  const out: UnifiedLine[] = [];
+  let removed: UnifiedLine[] = [];
+  let added: UnifiedLine[] = [];
+  const flush = () => {
+    out.push(...removed, ...added);
+    removed = [];
+    added = [];
+  };
+  const text = (value: string) => value.replace(/\t/g, "  ");
+  for (const row of rows) {
+    if (row.type === "full") {
+      if (row.cell.kind === "meta") continue;
+      flush();
+      out.push({ id: row.id, kind: row.cell.kind, text: row.cell.text });
+      continue;
     }
-    if (row.cell.kind === "hunk") {
-      const { rangeText, contextText } = splitHunkHeader(row.cell.text);
-      return (
-        <View key={row.id} style={styles.diffHunkRow}>
-          <View style={styles.diffHunkPill}>
-            <Text style={styles.diffHunkPillText}>{rangeText}</Text>
-          </View>
-          {contextText ? (
-            <Text numberOfLines={1} style={styles.diffHunkContext}>
-              {contextText}
-            </Text>
-          ) : null}
-        </View>
-      );
+    const { after, before } = row;
+    if (before?.kind === "context" || after?.kind === "context") {
+      flush();
+      const cell = before || after;
+      out.push({ id: row.id, kind: "context", newNo: after?.lineNumber, oldNo: before?.lineNumber, text: text(cell?.text || "") });
+      continue;
     }
-    return <DiffCodeRow key={row.id} cell={row.cell} wrapLines={wrapLines} />;
+    if (before) removed.push({ id: row.id + "-b", kind: before.kind, oldNo: before.lineNumber, text: text(before.text) });
+    if (after) added.push({ id: row.id + "-a", kind: after.kind, newNo: after.lineNumber, text: text(after.text) });
   }
+  flush();
 
-  const before = row.before;
-  const after = row.after;
-  if (before?.kind === "context" && after?.kind === "context" && before.text === after.text) {
-    return <DiffCodeRow key={row.id} before={before} after={after} wrapLines={wrapLines} />;
+  // 为每个从非变更转入 add/remove（或 hunk 头）的起点标注跳转锚点
+  let inDiffCluster = false;
+  for (const line of out) {
+    const isChange = line.kind === "add" || line.kind === "remove";
+    if (isChange && !inDiffCluster) {
+      line.isChunkStart = true;
+      inDiffCluster = true;
+    } else if (!isChange) {
+      inDiffCluster = false;
+    }
   }
-
-  return (
-    <View key={row.id}>
-      {before ? <DiffCodeRow before={before} wrapLines={wrapLines} /> : null}
-      {after ? <DiffCodeRow after={after} wrapLines={wrapLines} /> : null}
-    </View>
-  );
+  return out;
 }
 
-function DiffCodeRow({
-  before,
-  after,
-  cell,
-  wrapLines,
+function Line({
+  kind,
+  newNo,
+  oldNo,
+  styles,
+  text,
+  wrap,
 }: {
-  before?: DiffCell;
-  after?: DiffCell;
-  cell?: DiffCell;
-  wrapLines: boolean;
+  kind: DiffLineKind;
+  newNo?: number;
+  oldNo?: number;
+  styles: ReturnType<typeof makeStyles>;
+  text: string;
+  wrap: boolean;
 }) {
-  const primary = before || after || cell;
-  if (!primary) {
-    return null;
-  }
-
-  const kind = primary.kind;
-  const oldLineNumber = before?.lineNumber ?? (kind === "remove" ? primary.lineNumber : undefined);
-  const newLineNumber = after?.lineNumber ?? (kind === "add" ? primary.lineNumber : undefined);
-  const text = before?.text ?? after?.text ?? primary.text;
-
+  const sign = kind === "add" ? "+" : kind === "remove" ? "−" : "";
   return (
-    <View style={[styles.diffCodeRow, diffRowStyle(kind)]}>
-      <View style={[styles.diffGutter, diffGutterStyle(kind)]}>
-        <Text style={styles.diffLineNumber}>{oldLineNumber ?? ""}</Text>
-        <Text style={styles.diffLineNumber}>{newLineNumber ?? ""}</Text>
-      </View>
-      <Text style={[styles.diffMarker, diffMarkerStyle(kind)]}>{diffMarker(kind)}</Text>
-      <Text
-        numberOfLines={wrapLines ? undefined : 1}
-        selectable
-        style={[styles.diffCode, !wrapLines && styles.diffCodeNoWrap]}
-      >
+    <View style={[styles.line, kind === "add" && styles.lineAdd, kind === "remove" && styles.lineDel]}>
+      <Text style={styles.no}>{oldNo ?? ""}</Text>
+      <Text style={styles.no}>{newNo ?? ""}</Text>
+      <Text style={[styles.sign, kind === "add" && styles.signAdd, kind === "remove" && styles.signDel]}>{sign}</Text>
+      <Text numberOfLines={wrap ? undefined : 1} selectable style={[styles.code, wrap && styles.codeWrap]}>
         {text || " "}
       </Text>
     </View>
   );
 }
 
-function splitHunkHeader(raw: string): { rangeText: string; contextText: string } {
-  const match = raw.match(/^(@@\s*-[0-9,]+\s+\+[0-9,]+\s*@@)\s*(.*)$/);
-  if (!match) {
-    return { rangeText: raw, contextText: "" };
-  }
-  return {
-    rangeText: match[1],
-    contextText: match[2].trim(),
-  };
-}
-
-function buildDiffRatioBlocks(added: number, removed: number): Array<"add" | "remove" | "neutral"> {
-  const total = added + removed;
-  const slots = 5;
-  if (total === 0) {
-    return Array(slots).fill("neutral");
-  }
-  let addCount = Math.round((added / total) * slots);
-  if (added > 0 && addCount === 0) addCount = 1;
-  if (removed > 0 && addCount === slots) addCount = slots - 1;
-  const removeCount = slots - addCount;
-  const result: Array<"add" | "remove" | "neutral"> = [];
-  for (let i = 0; i < addCount; i += 1) result.push("add");
-  for (let i = 0; i < removeCount; i += 1) result.push("remove");
-  return result;
-}
-
 function diffStats(rows: DiffRow[]) {
   let added = 0;
   let removed = 0;
   rows.forEach((row) => {
-    const cells = row.type === "full" ? [row.cell] : [row.before, row.after];
+    const cells: (DiffCell | undefined)[] = row.type === "full" ? [row.cell] : [row.before, row.after];
     cells.forEach((cell) => {
       if (cell?.kind === "add") added += 1;
       if (cell?.kind === "remove") removed += 1;
@@ -184,243 +230,53 @@ function diffStats(rows: DiffRow[]) {
   return { added, removed };
 }
 
-function diffMarker(kind: DiffLineKind) {
-  switch (kind) {
-    case "add": return "+";
-    case "remove": return "-";
-    default: return " ";
-  }
-}
+const lineHeight = 21;
 
-function diffRowStyle(kind: DiffLineKind) {
-  switch (kind) {
-    case "add": return styles.diffAddRow;
-    case "remove": return styles.diffRemoveRow;
-    default: return styles.diffContextRow;
-  }
-}
-
-function diffGutterStyle(kind: DiffLineKind) {
-  switch (kind) {
-    case "add": return styles.diffAddGutter;
-    case "remove": return styles.diffRemoveGutter;
-    default: return null;
-  }
-}
-
-function diffMarkerStyle(kind: DiffLineKind) {
-  switch (kind) {
-    case "add": return styles.diffAddMarker;
-    case "remove": return styles.diffRemoveMarker;
-    default: return styles.diffContextMarker;
-  }
-}
-
-const monoFont = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
-
-const styles = StyleSheet.create({
-  emptyText: {
-    color: "#8c857b",
-    fontSize: 12,
-    padding: 10,
-  },
-  diffViewer: {
-    backgroundColor: "#141413",
-    borderColor: "#12100e",
-    borderRadius: 12,
-    borderWidth: 2,
-    overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  diffHeader: {
-    alignItems: "center",
-    backgroundColor: "#22211f",
-    borderBottomColor: "#383632",
-    borderBottomWidth: 1.5,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 38,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  diffHeaderLeft: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 10,
-  },
-  diffHeaderTitle: {
-    color: "#f7f5f0",
-    fontSize: 11.5,
-    fontWeight: "900",
-    letterSpacing: 0.3,
-  },
-  diffStats: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  diffAddedStat: {
-    color: "#7ee787",
-    fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "900",
-  },
-  diffRemovedStat: {
-    color: "#ffa198",
-    fontFamily: monoFont,
-    fontSize: 11.5,
-    fontWeight: "900",
-  },
-  diffRatioRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 2,
-    marginLeft: 2,
-  },
-  diffRatioBlock: {
-    borderRadius: 1.5,
-    height: 7,
-    width: 7,
-  },
-  diffRatioAdd: {
-    backgroundColor: "#3fb950",
-  },
-  diffRatioRemove: {
-    backgroundColor: "#f85149",
-  },
-  diffRatioNeutral: {
-    backgroundColor: "#484f58",
-  },
-  wrapToggleBtn: {
-    backgroundColor: "#32302c",
-    borderColor: "#524e48",
-    borderRadius: 6,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  wrapToggleText: {
-    color: "#ffd84f",
-    fontSize: 10.5,
-    fontWeight: "800",
-  },
-  diffTable: {
-    backgroundColor: "#141413",
-  },
-  diffTableNoWrap: {
-    minWidth: "100%",
-  },
-  diffHunkRow: {
-    alignItems: "center",
-    backgroundColor: "#25221b",
-    borderBottomColor: "#38342b",
-    borderBottomWidth: 1,
-    borderTopColor: "#38342b",
-    borderTopWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  diffHunkPill: {
-    backgroundColor: "rgba(255, 216, 79, 0.16)",
-    borderColor: "rgba(255, 216, 79, 0.4)",
-    borderRadius: 4,
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  diffHunkPillText: {
-    color: "#ffd84f",
-    fontFamily: monoFont,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  diffHunkContext: {
-    color: "#a8a299",
-    flex: 1,
-    fontFamily: monoFont,
-    fontSize: 10.5,
-    fontWeight: "700",
-  },
-  diffCodeRow: {
-    alignItems: "stretch",
-    borderBottomColor: "#1f1e1c",
-    borderBottomWidth: 1,
-    borderLeftColor: "transparent",
-    borderLeftWidth: 3,
-    flexDirection: "row",
-    minHeight: 23,
-    paddingRight: 10,
-  },
-  diffContextRow: {
-    backgroundColor: "#141413",
-  },
-  diffAddRow: {
-    backgroundColor: "rgba(46, 160, 67, 0.18)",
-    borderLeftColor: "#3fb950",
-  },
-  diffRemoveRow: {
-    backgroundColor: "rgba(248, 81, 73, 0.18)",
-    borderLeftColor: "#f85149",
-  },
-  diffGutter: {
-    alignItems: "flex-start",
-    backgroundColor: "rgba(255, 255, 255, 0.02)",
-    borderRightColor: "#2b2926",
-    borderRightWidth: 1,
-    flexDirection: "row",
-    paddingRight: 2,
-  },
-  diffAddGutter: {
-    backgroundColor: "rgba(46, 160, 67, 0.12)",
-  },
-  diffRemoveGutter: {
-    backgroundColor: "rgba(248, 81, 73, 0.12)",
-  },
-  diffLineNumber: {
-    color: "#6e7681",
-    fontFamily: monoFont,
-    fontSize: 9.5,
-    lineHeight: 16,
-    minWidth: 27,
-    paddingHorizontal: 3,
-    paddingTop: 3.5,
-    textAlign: "right",
-  },
-  diffMarker: {
-    fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: "900",
-    lineHeight: 16,
-    paddingTop: 3.5,
-    textAlign: "center",
-    width: 18,
-  },
-  diffAddMarker: {
-    color: "#7ee787",
-  },
-  diffRemoveMarker: {
-    color: "#ffa198",
-  },
-  diffContextMarker: {
-    color: "#6e7681",
-  },
-  diffCode: {
-    color: "#e6edf3",
-    flex: 1,
-    fontFamily: monoFont,
-    fontSize: 11,
-    lineHeight: 16,
-    minWidth: 0,
-    paddingBottom: 3.5,
-    paddingTop: 3.5,
-  },
-  diffCodeNoWrap: {
-    flex: 0,
-    paddingRight: 16,
-  },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    empty: { color: palette.ink2, fontSize: font.label, paddingVertical: 16 },
+    viewer: { marginHorizontal: -16 },
+    viewerFlex: { flex: 1, minHeight: 0 },
+    head: {
+      alignItems: "center",
+      backgroundColor: palette.canvas,
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      minHeight: 40,
+      paddingHorizontal: 16,
+    },
+    add: { color: palette.diffAdd, fontFamily: fontFamily.mono, fontSize: font.caption, fontWeight: weight.semibold },
+    del: { color: palette.diffDel, fontFamily: fontFamily.mono, fontSize: font.caption, fontWeight: weight.semibold },
+    chunkNav: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      marginLeft: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    chunkBtn: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
+    chunkText: { color: palette.ink2, fontFamily: fontFamily.mono, fontSize: 11 },
+    flex: { flex: 1 },
+    toggle: { alignItems: "center", borderRadius: radius.xs, flexDirection: "row", gap: 4, paddingHorizontal: 6, paddingVertical: 4 },
+    pressed: { backgroundColor: palette.pressed },
+    toggleText: { color: palette.ink3, fontSize: font.caption },
+    verticalScroll: { flex: 1 },
+    body: { paddingBottom: 16 },
+    hunk: { color: palette.ink3, fontFamily: fontFamily.mono, fontSize: font.caption - 0.5, paddingHorizontal: 16, paddingVertical: 6 },
+    line: { alignItems: "flex-start", flexDirection: "row", paddingRight: 16 },
+    lineAdd: { backgroundColor: palette.diffAddBg },
+    lineDel: { backgroundColor: palette.diffDelBg },
+    no: { color: palette.ink4, fontFamily: fontFamily.mono, fontSize: font.micro - 0.5, lineHeight, paddingRight: 6, textAlign: "right", width: 32 },
+    sign: { color: palette.ink4, fontFamily: fontFamily.mono, fontSize: font.caption, lineHeight, textAlign: "center", width: 16 },
+    signAdd: { color: palette.diffAdd },
+    signDel: { color: palette.diffDel },
+    code: { color: palette.ink1, fontFamily: fontFamily.mono, fontSize: font.caption, lineHeight },
+    codeWrap: { flex: 1 },
+  });

@@ -1,6 +1,8 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ButtonFeedback } from "../../types/ui";
+import { radius, weight } from "../../constants/theme";
+import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 export type ChatJumpAnchor = {
   id: string;
@@ -19,6 +21,7 @@ type Props = {
 const maxRailMarkers = 12;
 
 export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }: Props) {
+  const styles = useThemedStyles(createStyles);
   if (anchors.length < 2) {
     return null;
   }
@@ -86,128 +89,111 @@ function compactMarkers(anchors: ChatJumpAnchor[]) {
   return result;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: "flex-end",
-    bottom: 12,
-    justifyContent: "flex-start",
-    position: "absolute",
-    right: 8,
-    top: 10,
-    zIndex: 20,
-  },
-  railButton: {
-    alignItems: "center",
-    backgroundColor: "rgba(255, 250, 240, 0.88)",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    gap: 5,
-    justifyContent: "center",
-    maxHeight: 128,
-    overflow: "hidden",
-    paddingHorizontal: 5,
-    paddingVertical: 7,
-    width: 28,
-  },
-  railTrack: {
-    alignItems: "center",
-    gap: 3,
-    justifyContent: "center",
-    maxHeight: 88,
-    overflow: "hidden",
-  },
-  railMarker: {
-    backgroundColor: "#6c665f",
-    borderRadius: 3,
-    height: 3,
-    width: 12,
-  },
-  railText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  panel: {
-    backgroundColor: "rgba(255, 250, 240, 0.96)",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    elevation: 6,
-    gap: 8,
-    maxHeight: 256,
-    overflow: "hidden",
-    padding: 8,
-    position: "absolute",
-    right: 34,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 0,
-    top: 0,
-    width: 236,
-    zIndex: 30,
-  },
-  panelHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-between",
-  },
-  panelTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  closeButton: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  closeText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  anchorScroll: {
-    flexGrow: 0,
-    maxHeight: 196,
-  },
-  anchorList: {
-    gap: 6,
-    paddingBottom: 4,
-  },
-  anchorItem: {
-    alignItems: "flex-start",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 7,
-    borderWidth: 2,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
-  },
-  anchorIndex: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1,
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 5,
-    paddingVertical: 3,
-  },
-  anchorTitle: {
-    color: "#12100e",
-    flex: 1,
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-  },
-});
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    container: {
+      alignItems: "flex-end",
+      bottom: 12,
+      justifyContent: "flex-start",
+      position: "absolute",
+      right: 8,
+      top: 10,
+      zIndex: 20,
+    },
+    railButton: {
+      alignItems: "center",
+      backgroundColor: palette.surface2,
+      borderRadius: radius.pill,
+      gap: 5,
+      justifyContent: "center",
+      maxHeight: 128,
+      overflow: "hidden",
+      paddingHorizontal: 5,
+      paddingVertical: 9,
+      width: 26,
+      ...shadow.card,
+    },
+    railTrack: {
+      alignItems: "center",
+      gap: 3,
+      justifyContent: "center",
+      maxHeight: 88,
+      overflow: "hidden",
+    },
+    railMarker: {
+      backgroundColor: palette.hairlineStrong,
+      borderRadius: radius.xxs,
+      height: 2,
+      width: 10,
+    },
+    railText: {
+      color: palette.ink2,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    panel: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      gap: 6,
+      maxHeight: 280,
+      overflow: "hidden",
+      padding: 8,
+      position: "absolute",
+      right: 34,
+      ...shadow.float,
+      top: 0,
+      width: 248,
+      zIndex: 30,
+    },
+    panelHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "space-between",
+      paddingLeft: 6,
+    },
+    panelTitle: {
+      color: palette.ink1,
+      fontSize: font.label + 0.5,
+      fontWeight: weight.semibold,
+    },
+    closeButton: {
+      borderRadius: radius.sm,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    closeText: {
+      color: palette.brandLight,
+      fontSize: font.caption,
+    },
+    anchorScroll: {
+      flexGrow: 0,
+      maxHeight: 196,
+    },
+    anchorList: {
+      gap: 2,
+      paddingBottom: 2,
+    },
+    anchorItem: {
+      alignItems: "flex-start",
+      borderRadius: radius.sm,
+      flexDirection: "row",
+      gap: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
+    },
+    anchorIndex: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+      minWidth: 24,
+    },
+    anchorTitle: {
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.label,
+      lineHeight: 19,
+    },
+  });

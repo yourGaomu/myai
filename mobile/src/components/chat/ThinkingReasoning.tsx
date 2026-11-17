@@ -8,10 +8,12 @@ import {
   View,
   type LayoutChangeEvent,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
+import { useAppTheme } from "../../theme/ThemeProvider";
 import type { ButtonFeedback } from "../../types/ui";
 import { ShimmerLabel } from "./ShimmerLabel";
-import { styles } from "./styles";
+import { useChatStyles } from "./styles";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -28,11 +30,13 @@ export function ThinkingReasoning({
   running,
   startedAt,
 }: Props) {
-  const [expanded, setExpanded] = useState(running);
+  const { keepThinkingExpanded, palette } = useAppTheme();
+  const styles = useChatStyles();
+  const [expanded, setExpanded] = useState(running || keepThinkingExpanded);
   const [bodyHeight, setBodyHeight] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [observedFinishedAt, setObservedFinishedAt] = useState<string>();
-  const expansion = useRef(new Animated.Value(running ? 1 : 0)).current;
+  const expansion = useRef(new Animated.Value(running || keepThinkingExpanded ? 1 : 0)).current;
   const previousRunning = useRef(running);
 
   useEffect(() => {
@@ -48,10 +52,12 @@ export function ThinkingReasoning({
       setObservedFinishedAt(undefined);
     } else if (!running && wasRunning) {
       setObservedFinishedAt(new Date().toISOString());
-      setExpanded(false);
+      if (!keepThinkingExpanded) {
+        setExpanded(false);
+      }
     }
     previousRunning.current = running;
-  }, [running]);
+  }, [keepThinkingExpanded, running]);
 
   useEffect(() => {
     const target = expanded ? 1 : 0;
@@ -76,6 +82,7 @@ export function ThinkingReasoning({
     const height = Math.ceil(event.nativeEvent.layout.height);
     setBodyHeight((current) => (current === height ? current : height));
   }, []);
+
   const animatedHeight = expansion.interpolate({
     inputRange: [0, 1],
     outputRange: [0, bodyHeight],
@@ -94,17 +101,17 @@ export function ThinkingReasoning({
         onPress={() => setExpanded((value) => !value)}
         style={({ pressed }) => buttonFeedback(styles.reasoningHeader, pressed)}
       >
+        <Animated.View
+          accessible={false}
+          style={[styles.reasoningChevron, { transform: [{ rotate: chevronRotation }] }]}
+        >
+          <Feather color={palette.ink4} name="chevron-down" size={13} />
+        </Animated.View>
         {running ? (
           <ShimmerLabel containerStyle={styles.reasoningShimmerLabel} label="正在思考" />
         ) : (
           <Text style={styles.reasoningSummaryText}>{summary}</Text>
         )}
-        <Animated.Text
-          accessible={false}
-          style={[styles.reasoningChevron, { transform: [{ rotate: chevronRotation }] }]}
-        >
-          ⌄
-        </Animated.Text>
       </Pressable>
 
       <Animated.View

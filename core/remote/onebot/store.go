@@ -28,15 +28,16 @@ const (
 // 1.5 PrivateSessionID：该用户在私聊模式下绑定的 MyAI SessionID；
 // 1.6 LastActiveAt / CreatedAt / UpdatedAt：活跃时间与审计时间戳。
 type UserIdentity struct {
-	UserID           int64     `bson:"_id" json:"user_id"`
-	Nickname         string    `bson:"nickname" json:"nickname"`
-	Role             Role      `bson:"role" json:"role"`
-	GrantedBy        int64     `bson:"granted_by" json:"granted_by"`
-	PrivateSessionID string    `bson:"private_session_id" json:"private_session_id"`
-	Persona          string    `bson:"persona,omitempty" json:"persona,omitempty"`
-	LastActiveAt     time.Time `bson:"last_active_at" json:"last_active_at"`
-	CreatedAt        time.Time `bson:"created_at" json:"created_at"`
-	UpdatedAt        time.Time `bson:"updated_at" json:"updated_at"`
+	UserID               int64     `bson:"_id" json:"user_id"`
+	Nickname             string    `bson:"nickname" json:"nickname"`
+	Role                 Role      `bson:"role" json:"role"`
+	GrantedBy            int64     `bson:"granted_by" json:"granted_by"`
+	PrivateSessionID     string    `bson:"private_session_id" json:"private_session_id"`
+	PrivateSessionPolicy string    `bson:"private_session_policy,omitempty" json:"-"`
+	Persona              string    `bson:"persona,omitempty" json:"persona,omitempty"`
+	LastActiveAt         time.Time `bson:"last_active_at" json:"last_active_at"`
+	CreatedAt            time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt            time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 // GroupConfig 对应数据库中的 `onebot_groups` 表，记录机器人所在的 QQ 群配置、开关与人设。
@@ -47,13 +48,14 @@ type UserIdentity struct {
 // 2.5 Persona：该群专属的说话风格/人设指令（对应 Session.StyleInstruction）；
 // 2.6 UpdatedBy / UpdatedAt：最后修改该群配置的管理员 QQ 号与更新时间。
 type GroupConfig struct {
-	GroupID   int64     `bson:"_id" json:"group_id"`
-	GroupName string    `bson:"group_name" json:"group_name"`
-	Enabled   bool      `bson:"enabled" json:"enabled"`
-	SessionID string    `bson:"session_id" json:"session_id"`
-	Persona   string    `bson:"persona" json:"persona"`
-	UpdatedBy int64     `bson:"updated_by" json:"updated_by"`
-	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+	GroupID       int64     `bson:"_id" json:"group_id"`
+	GroupName     string    `bson:"group_name" json:"group_name"`
+	Enabled       bool      `bson:"enabled" json:"enabled"`
+	SessionID     string    `bson:"session_id" json:"session_id"`
+	SessionPolicy string    `bson:"session_policy,omitempty" json:"-"`
+	Persona       string    `bson:"persona" json:"persona"`
+	UpdatedBy     int64     `bson:"updated_by" json:"updated_by"`
+	UpdatedAt     time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 // Store 定义 OneBot 身份鉴权与群聊配置的持久化契约（相当于 Spring Data 的 Repository 接口）。
@@ -332,13 +334,14 @@ func (s *MongoStore) UpsertUser(ctx context.Context, user UserIdentity) error {
 
 	update := bson.M{
 		"$set": bson.M{
-			"nickname":           user.Nickname,
-			"role":               string(user.Role),
-			"granted_by":         user.GrantedBy,
-			"private_session_id": user.PrivateSessionID,
-			"persona":            user.Persona,
-			"last_active_at":     user.LastActiveAt,
-			"updated_at":         user.UpdatedAt,
+			"nickname":               user.Nickname,
+			"role":                   string(user.Role),
+			"granted_by":             user.GrantedBy,
+			"private_session_id":     user.PrivateSessionID,
+			"private_session_policy": user.PrivateSessionPolicy,
+			"persona":                user.Persona,
+			"last_active_at":         user.LastActiveAt,
+			"updated_at":             user.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"_id":        user.UserID,
@@ -421,12 +424,13 @@ func (s *MongoStore) UpsertGroup(ctx context.Context, group GroupConfig) error {
 
 	update := bson.M{
 		"$set": bson.M{
-			"group_name": group.GroupName,
-			"enabled":    group.Enabled,
-			"session_id": group.SessionID,
-			"persona":    group.Persona,
-			"updated_by": group.UpdatedBy,
-			"updated_at": group.UpdatedAt,
+			"group_name":     group.GroupName,
+			"enabled":        group.Enabled,
+			"session_id":     group.SessionID,
+			"session_policy": group.SessionPolicy,
+			"persona":        group.Persona,
+			"updated_by":     group.UpdatedBy,
+			"updated_at":     group.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"_id": group.GroupID,

@@ -29,9 +29,12 @@ type ExecutionCallbacks struct {
 }
 
 type Execution struct {
-	SessionID            string
-	AgentMode            session.AgentMode
-	PermissionMode       session.PermissionMode
+	SessionID      string
+	AgentMode      session.AgentMode
+	PermissionMode session.PermissionMode
+	// PermissionCeiling restricts inherited capabilities. Nil is unrestricted;
+	// an explicitly empty set denies every tool, including in full mode.
+	PermissionCeiling    []tooldef.Permission
 	ForceChatMode        bool
 	RequestID            string
 	WorkspaceRoot        string

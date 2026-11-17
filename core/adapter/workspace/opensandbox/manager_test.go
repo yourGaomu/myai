@@ -216,7 +216,7 @@ type fakeRemoteWorkspace struct {
 func (workspace *fakeRemoteWorkspace) ID() string { return workspace.id }
 
 func (workspace *fakeRemoteWorkspace) Run(_ context.Context, request domainsandbox.CommandRequest) (domainsandbox.CommandResult, error) {
-	if strings.HasPrefix(request.Command, "python -c") {
+	if strings.HasPrefix(request.Command, "python -I -c") {
 		manifest := make([]fileState, 0, len(workspace.files))
 		for remotePath, file := range workspace.files {
 			if !strings.HasPrefix(remotePath, "/workspace/") {

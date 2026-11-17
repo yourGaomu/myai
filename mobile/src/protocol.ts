@@ -481,6 +481,10 @@ export type BackgroundTurnKind =
   | "delta"
   | "run_event"
   | "completed"
+  | "permission_ask"
+  | "permission_resolved"
+  | "user_question"
+  | "user_question_resolved"
   | "resync_required";
 
 export type BackgroundTurnEventPayload = {
@@ -496,6 +500,9 @@ export type BackgroundTurnEventPayload = {
   error?: string;
   run?: AgentRun;
   event?: AgentRunEvent;
+  approval_id?: string;
+  permission?: PermissionAskPayload;
+  question?: UserQuestionPayload;
 };
 
 export type TokenUsage = {
@@ -509,6 +516,9 @@ export type TokenUsage = {
 
 export type ErrorPayload = {
   message?: string;
+  request_type?: RelayMessage["type"];
+  approval_id?: string;
+  question_id?: string;
 };
 
 export type ToolCallPayload = {
@@ -530,13 +540,18 @@ export type ToolResultPayload = {
 };
 
 export type PermissionAskPayload = {
+  approval_id: string;
   name?: string;
   arguments?: string;
   permission?: string;
 };
 
+export type PermissionApprovalScope = "once" | "session_tool" | "session_permission";
+
 export type PermissionResultPayload = {
+  approval_id: string;
   allowed: boolean;
+  scope?: PermissionApprovalScope;
 };
 
 export type UserQuestionItemPayload = {
@@ -866,6 +881,8 @@ export type SessionContextQueryResultPayload = {
 };
 
 export type ModelSummary = {
+  context_window_tokens?: number;
+  max_output_tokens?: number;
   id: string;
   name?: string;
   provider?: string;
@@ -896,6 +913,8 @@ export type ModelSwitchResultPayload = {
 };
 
 export type ModelConfigAddPayload = {
+  context_window_tokens?: number;
+  max_output_tokens?: number;
   id: string;
   name?: string;
   provider?: string;
@@ -1561,6 +1580,8 @@ export type ChangeEntry = {
   deleted?: boolean;
   renamed?: boolean;
   restorable?: boolean;
+  added_lines?: number;
+  removed_lines?: number;
 };
 
 export type ChangesListResultPayload = {
@@ -1579,6 +1600,7 @@ export type ChangeDiffPayload = {
 };
 
 export type ChangeDiffResultPayload = {
+  expected_hash?: string;
   path: string;
   diff?: string;
   truncated: boolean;
@@ -1589,6 +1611,7 @@ export type ChangeDiffResultPayload = {
 
 export type ChangeRevertPayload = {
   path: string;
+  expected_hash?: string;
 };
 
 export type ChangeRevertResultPayload = {
@@ -1643,6 +1666,7 @@ export type HistoryRevertPayload = {
 };
 
 export type HistoryRevertResultPayload = {
+  inverse_checkpoint_id?: string;
   checkpoint_id: string;
   reverted: boolean;
   paths?: string[];

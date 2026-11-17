@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type pairRequest struct {
@@ -23,6 +24,12 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.pairLimiter.allow(r.RemoteAddr, time.Now()) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many pair attempts; retry later", http.StatusTooManyRequests)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var request pairRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "invalid pair request", http.StatusBadRequest)
@@ -35,7 +42,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent := s.getAgentByBindCode(bindCode)
+	agent := s.consumeBindingCode(bindCode)
 	if agent == nil {
 		http.Error(w, "bind code is invalid or expired", http.StatusNotFound)
 		return

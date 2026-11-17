@@ -66,15 +66,17 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	}
 	properties := Properties{
 		Model: ModelProperties{
-			ID:              strings.TrimSpace(v.GetString("myai.model")),
-			Provider:        strings.ToLower(strings.TrimSpace(v.GetString("myai.provider"))),
-			Protocol:        strings.ToLower(strings.TrimSpace(v.GetString("myai.protocol"))),
-			AuthType:        strings.ToLower(strings.TrimSpace(v.GetString("myai.auth_type"))),
-			BaseURL:         strings.TrimSpace(v.GetString("myai.base_url")),
-			APIKey:          strings.TrimSpace(v.GetString("myai.api_key")),
-			Temperature:     optionalFloat64(v, "myai.temperature"),
-			TopP:            optionalFloat64(v, "myai.top_p"),
-			MaxOutputTokens: optionalInt(v, "myai.max_output_tokens"),
+			ID:                  strings.TrimSpace(v.GetString("myai.model")),
+			Provider:            strings.ToLower(strings.TrimSpace(v.GetString("myai.provider"))),
+			Protocol:            strings.ToLower(strings.TrimSpace(v.GetString("myai.protocol"))),
+			AuthType:            strings.ToLower(strings.TrimSpace(v.GetString("myai.auth_type"))),
+			BaseURL:             strings.TrimSpace(v.GetString("myai.base_url")),
+			APIKey:              strings.TrimSpace(v.GetString("myai.api_key")),
+			Temperature:         optionalFloat64(v, "myai.temperature"),
+			TopP:                optionalFloat64(v, "myai.top_p"),
+			MaxOutputTokens:     optionalInt(v, "myai.max_output_tokens"),
+			ContextWindowTokens: v.GetInt("myai.context_window_tokens"),
+			MaxOutputLimit:      v.GetInt("myai.max_output_limit"),
 		},
 		Memory: MemoryProperties{
 			Extraction: MemoryExtractionProperties{
@@ -152,8 +154,19 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			Core:      v.GetInt("thread.core"),
 			QueueSize: v.GetInt("thread.queueSize"),
 		},
+		WorkspaceHistory: WorkspaceHistoryProperties{
+			Path: strings.TrimSpace(v.GetString("workspace_history.path")),
+		},
+		Persistence: PersistenceProperties{Outbox: OutboxProperties{
+			Path:       strings.TrimSpace(v.GetString("persistence.outbox.path")),
+			MaxPending: v.GetInt("persistence.outbox.max_pending"),
+			MaxEntries: v.GetInt("persistence.outbox.max_entries"),
+			MaxBytes:   v.GetInt64("persistence.outbox.max_bytes"),
+			RetainDone: v.GetInt("persistence.outbox.retain_done"),
+		}},
 		Asset: AssetProperties{
 			BaseURL:              strings.TrimSpace(v.GetString("asset.shortener_base_url")),
+			APIKey:               strings.TrimSpace(v.GetString("asset.api_key")),
 			UploadTimeoutSeconds: v.GetInt("asset.upload_timeout_seconds"),
 			TTLSeconds:           v.GetInt64("asset.ttl_seconds"),
 			MaxVisits:            v.GetInt64("asset.max_visits"),
@@ -186,6 +199,9 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			Enabled: pluginEnabled(v),
 			Root:    strings.TrimSpace(v.GetString("plugin.root")),
 		},
+	}
+	if err := normalizeOutboxProperties(&properties.Persistence.Outbox); err != nil {
+		return Properties{}, err
 	}
 	if properties.Model.ID == "" {
 		properties.Model.ID = DefaultModelID
@@ -299,6 +315,9 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			model.TimeoutSeconds = 60
 		}
 	}
+	if properties.WorkspaceHistory.Path != "" {
+		properties.WorkspaceHistory.Path = resolveWorkspacePath(workspace, properties.WorkspaceHistory.Path)
+	}
 	properties.Skill.Root = resolveWorkspacePath(workspace, properties.Skill.Root)
 	properties.Subagent.SnapshotRoot = resolveWorkspacePath(workspace, properties.Subagent.SnapshotRoot)
 	properties.Plugin.Root = resolveWorkspacePath(workspace, properties.Plugin.Root)
@@ -308,6 +327,23 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	}
 	if err := v.UnmarshalKey("mcp.servers", &properties.MCP.Servers); err != nil {
 		return Properties{}, err
+	}
+	// 1. 新短链服务仅通过 MCP 接入；显式服务器配置优先，避免重复注册工具。
+	if endpoint := strings.TrimSpace(v.GetString("short_links.mcp_url")); endpoint != "" {
+		configured := false
+		for _, server := range properties.MCP.Servers {
+			if strings.TrimSpace(server.Name) == "short_links" {
+				configured = true
+				break
+			}
+		}
+		if !configured {
+			properties.MCP.Servers = append(properties.MCP.Servers, MCPServerProperties{
+				Name: "short_links", URL: endpoint,
+				Headers:    map[string]string{"X-API-Key": "${SHORT_LINKS_API_KEY}"},
+				Permission: "execute", TimeoutSeconds: 60, Required: false,
+			})
+		}
 	}
 	return properties, nil
 }

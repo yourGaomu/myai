@@ -155,6 +155,38 @@ func TestRecordUseIsAtomicAcrossConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestCatalogListUsesRepositoryLimitContract(t *testing.T) {
+	for _, test := range []struct {
+		limit int
+		want  int
+	}{
+		{limit: -1, want: 50}, {limit: 0, want: 50}, {limit: 100, want: 100},
+		{limit: 101, want: 101}, {limit: 200, want: 200}, {limit: 201, want: 200},
+	} {
+		t.Run(fmt.Sprintf("limit-%d", test.limit), func(t *testing.T) {
+			store := &listCapturingStore{Store: memoryrepository.New()}
+			service := CatalogService{Store: store, IDs: &sequenceIDs{}}
+			_, err := service.List(context.Background(), command.List{Filter: memoryport.ListFilter{Limit: test.limit}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if store.filter.Limit != test.want {
+				t.Fatalf("catalog changed requested limit %d to %d, want %d", test.limit, store.filter.Limit, test.want)
+			}
+		})
+	}
+}
+
+type listCapturingStore struct {
+	memoryport.Store
+	filter memoryport.ListFilter
+}
+
+func (store *listCapturingStore) List(_ context.Context, filter memoryport.ListFilter) ([]domainmemory.Memory, error) {
+	store.filter = filter
+	return nil, nil
+}
+
 type sequenceIDs struct{ next int }
 
 func (ids *sequenceIDs) NewID() string {

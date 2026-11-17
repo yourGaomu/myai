@@ -7,6 +7,8 @@ type ChatResult struct {
 	Message   *domainmessage.Message
 	Content   string
 	Reasoning string
-	Usage     TokenUsage
-	ToolCalls []ToolCall
+	// StopReason is the provider's completion reason; empty means unknown.
+	StopReason string
+	Usage      TokenUsage
+	ToolCalls  []ToolCall
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"myai/core/mcp"
 	"myai/core/tool"
+	"myai/core/trust"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,15 +32,15 @@ func TestPluginNamespaceAndFailedReloadPreserveOtherMCP(t *testing.T) {
 	t.Setenv("MYAI_PLUGIN_TEST_HELPER", "1")
 	ctx := context.Background()
 	registry := tool.NewRegisterTools()
-	mcpManager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{Name: "echo", Command: os.Args[0], Args: []string{"-test.run=TestPluginMCPHelperProcess"}, Required: true}}})
+	mcpManager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{Name: "echo", Command: os.Args[0], Args: []string{"-test.run=TestPluginMCPHelperProcess"}, Required: true, Env: map[string]string{"MYAI_PLUGIN_TEST_HELPER": "1"}, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}})
 	if err := mcpManager.RegisterAll(ctx, registry); err != nil {
 		t.Fatal(err)
 	}
 	defer mcpManager.Close()
 	root := t.TempDir()
-	manifest := Manifest{ID: "echo", Name: "Echo", Entrypoint: os.Args[0], Args: []string{"-test.run=TestPluginMCPHelperProcess"}}
+	manifest := Manifest{ID: "echo", Name: "Echo", Entrypoint: os.Args[0], Args: []string{"-test.run=TestPluginMCPHelperProcess"}, Env: map[string]string{"MYAI_PLUGIN_TEST_HELPER": "1"}}
 	path := writeTestManifest(t, root, manifest)
-	manager := NewManager(root)
+	manager := NewManager(root, WithTrustPolicy(&trust.Policy{Allow: true}))
 	if err := manager.Load(ctx, registry); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestPluginNamespaceAndFailedReloadPreserveOtherMCP(t *testing.T) {
 func TestFailedOptionalPluginIsNotLoadedAndEnableRollsBack(t *testing.T) {
 	root := t.TempDir()
 	path := writeTestManifest(t, root, Manifest{ID: "broken", Name: "Broken", Entrypoint: filepath.Join(root, "missing")})
-	manager := NewManager(root)
+	manager := NewManager(root, WithTrustPolicy(&trust.Policy{Allow: true}))
 	if err := manager.Load(context.Background(), tool.NewRegisterTools()); err != nil {
 		t.Fatal(err)
 	}

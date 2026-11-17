@@ -3,6 +3,8 @@ package shortener
 import "time"
 
 const (
+	DefaultMaxUploadBytes int64 = 20 << 20
+
 	LinkKindURL    = "url"
 	LinkKindObject = "object"
 )

@@ -5,12 +5,25 @@ import (
 	"log"
 
 	"github.com/gorilla/websocket"
+	domaininteraction "myai/core/domain/interaction"
 	"myai/core/remote/protocol"
 	"myai/core/service"
 )
 
 type BackgroundTurnSource interface {
 	SubscribeBackgroundTurns(buffer int) (<-chan service.BackgroundTurnEvent, func())
+}
+
+type BackgroundQuestionSource interface {
+	ListBackgroundQuestions(sessionID string) []domaininteraction.Request
+}
+
+type BackgroundPermissionControl interface {
+	ResolveBackgroundPermission(ctx context.Context, sessionID, turnID, approvalID string, allowed bool) error
+}
+
+type BackgroundQuestionControl interface {
+	ResolveBackgroundQuestion(ctx context.Context, sessionID, turnID, questionID string, answer domaininteraction.Answer) error
 }
 
 type SessionContinuationControl interface {
@@ -21,6 +34,14 @@ func backgroundTurnPayload(event service.BackgroundTurnEvent) protocol.Backgroun
 	payload := protocol.BackgroundTurnEventPayload{
 		TurnID: event.TurnID, RequestID: event.RequestID, SessionID: event.SessionID, RunID: event.RunID, Sequence: event.Sequence,
 		Kind: event.Kind, Status: event.Status, Content: event.Content, Reasoning: event.Reasoning, Error: event.Error,
+		ApprovalID: event.ApprovalID,
+	}
+	if event.Permission != nil {
+		payload.Permission = &protocol.PermissionAskPayload{ApprovalID: event.ApprovalID, Name: event.Permission.Name, Arguments: event.Permission.Arguments, Permission: string(event.Permission.Permission)}
+	}
+	if event.Question != nil {
+		question := userQuestionPayload(*event.Question)
+		payload.Question = &question
 	}
 	if event.Run != nil {
 		run := agentRunPayload(*event.Run)
@@ -46,6 +67,27 @@ func (a *Agent) forwardBackgroundTurns(ctx context.Context, conn *websocket.Conn
 					_ = conn.Close()
 				}
 				return
+			}
+			if event.Kind == "permission_ask" && event.Permission != nil {
+				if a.isSessionPermissionAllowed(event.SessionID, event.Permission.Name, string(event.Permission.Permission)) {
+					if control, ok := a.chatService.(BackgroundPermissionControl); ok {
+						if control.ResolveBackgroundPermission(ctx, event.SessionID, event.TurnID, event.ApprovalID, true) == nil {
+							continue
+						}
+					}
+				}
+				if a.permissionWaiters != nil {
+					a.permissionWaiters.rememberBackground(
+						bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID),
+						permissionRuleTarget{
+							sessionID:  event.SessionID,
+							toolName:   event.Permission.Name,
+							permission: string(event.Permission.Permission),
+						},
+					)
+				}
+			} else if event.Kind == "permission_resolved" && event.ApprovalID != "" && a.permissionWaiters != nil {
+				a.permissionWaiters.forgetBackground(bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID))
 			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeBackgroundTurnEvent, event.TurnID, event.SessionID, backgroundTurnPayload(event)); err != nil {
 				log.Printf("forward background turn failed: %v", err)

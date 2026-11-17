@@ -51,7 +51,7 @@ func historyFileToSnapshot(value domainhistory.FileSnapshot) snapshotEntry {
 }
 
 func additionDiff(entry snapshotEntry) (string, bool, bool) {
-	if entry.Binary || entry.TooLarge {
+	if entry.Binary || entry.TooLarge || !entry.Available {
 		return "", entry.TooLarge, true
 	}
 	diff, truncated := fileDiff("", string(entry.Content), entry.Path)
@@ -194,4 +194,69 @@ func emptyDiffMessage(diff string, binary bool) string {
 		return "No diff is available for this path."
 	}
 	return ""
+}
+
+func logicalLines(text string) []string {
+	if text == "" {
+		return []string{}
+	}
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized = strings.TrimSuffix(normalized, "\n")
+	return strings.Split(normalized, "\n")
+}
+
+func entryLineCounts(base *snapshotEntry, now *snapshotEntry) (int, int) {
+	switch {
+	case base == nil && now == nil:
+		return 0, 0
+	case base == nil:
+		if !now.Available || now.Binary || now.TooLarge {
+			return 0, 0
+		}
+		return len(logicalLines(string(now.Content))), 0
+	case now == nil:
+		if !base.Available || base.Binary || base.TooLarge {
+			return 0, 0
+		}
+		return 0, len(logicalLines(string(base.Content)))
+	default:
+		if !base.Available || !now.Available || base.Binary || now.Binary || base.TooLarge || now.TooLarge {
+			return 0, 0
+		}
+		return diffLineCounts(string(base.Content), string(now.Content))
+	}
+}
+
+func diffLineCounts(oldText string, newText string) (added int, removed int) {
+	oldLines := logicalLines(oldText)
+	newLines := logicalLines(newText)
+
+	start := 0
+	for start < len(oldLines) && start < len(newLines) && oldLines[start] == newLines[start] {
+		start++
+	}
+	oldEnd := len(oldLines)
+	newEnd := len(newLines)
+	for oldEnd > start && newEnd > start && oldLines[oldEnd-1] == newLines[newEnd-1] {
+		oldEnd--
+		newEnd--
+	}
+
+	oldMid := oldLines[start:oldEnd]
+	newMid := newLines[start:newEnd]
+	if len(oldMid) == 0 || len(newMid) == 0 {
+		return len(newMid), len(oldMid)
+	}
+	if len(oldMid)*len(newMid) > maxDiffLineProduct {
+		return len(newMid), len(oldMid)
+	}
+	for _, op := range diffLines(oldMid, newMid) {
+		switch op.kind {
+		case "insert":
+			added++
+		case "delete":
+			removed++
+		}
+	}
+	return added, removed
 }

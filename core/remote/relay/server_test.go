@@ -330,6 +330,7 @@ func TestRelayRoutesUserQuestionAndAnswerWithoutReplacingChatRoute(t *testing.T)
 		}
 		break
 	}
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
 	if server.getClient("question-list-1") != nil {
 		t.Fatal("question list response did not release its request route")
 	}
@@ -1706,7 +1707,10 @@ func TestRelayListsAndRevokesAuthorizations(t *testing.T) {
 	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
 
 	first := pairTestResponse(t, testServer, "123456")
-	second := pairTestResponse(t, testServer, "123456")
+	// Each pairing consumes its code. Register a fresh code for another client.
+	writeAgentOnline(t, agentConn, "local", "pc-local", "654321")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	second := pairTestResponse(t, testServer, "654321")
 
 	auths := listTestAuthorizations(t, testServer, "local", "pc-local", first.ClientToken, http.StatusOK)
 	if len(auths.Authorizations) != 2 {

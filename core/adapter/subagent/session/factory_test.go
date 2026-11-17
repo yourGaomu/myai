@@ -9,6 +9,7 @@ import (
 	repository "myai/core/port/repository"
 	subagentport "myai/core/port/subagent"
 	domainsession "myai/core/session"
+	tooldef "myai/core/tool/tool"
 )
 
 type factoryMemory struct {
@@ -34,20 +35,62 @@ func (memory *factoryMemory) RemoveSession(sessionID string) error {
 	return nil
 }
 
+func (memory *factoryMemory) SetPermissionModeForSession(id string, mode domainsession.PermissionMode) error {
+	current, err := memory.GetSession(id)
+	if err == nil {
+		current.PermissionMode = mode
+	}
+	return err
+}
+
+func (memory *factoryMemory) SetPermissionCeilingForSession(id string, ceiling []tooldef.Permission) error {
+	current, err := memory.GetSession(id)
+	if err == nil {
+		current.PermissionCeiling = intersectPermissions(current.PermissionCeiling, ceiling)
+	}
+	return err
+}
+
+func (memory *factoryMemory) SetToolAllowlistForSession(id string, allowed []string, enforce bool) error {
+	current, err := memory.GetSession(id)
+	if err == nil {
+		current.AllowedTools = append([]string{}, allowed...)
+		current.EnforceToolAllowlist = enforce
+	}
+	return err
+}
+
+func (memory *factoryMemory) SetWorkspaceForSession(id, root, sandbox string) error {
+	current, err := memory.GetSession(id)
+	if err == nil {
+		current.WorkspaceRoot, current.WorkspaceSandboxID = root, sandbox
+	}
+	return err
+}
+
+func parentSessions(children map[string]*domainsession.Session) map[string]*domainsession.Session {
+	children["parent"] = &domainsession.Session{ID: "parent", PermissionMode: domainsession.PermissionModeFull}
+	return children
+}
+
 type factoryLoader struct {
 	session *domainsession.Session
+	memory  *factoryMemory
 	err     error
 	calls   int
 }
 
 func (loader *factoryLoader) Load(context.Context, string) (*domainsession.Session, error) {
 	loader.calls++
+	if loader.memory != nil && loader.session != nil {
+		loader.memory.sessions[loader.session.ID] = loader.session
+	}
 	return loader.session, loader.err
 }
 
 func TestFactoryReusesExistingChildSession(t *testing.T) {
 	existing := &domainsession.Session{ID: "child-1", Model: "model-from-history"}
-	memory := &factoryMemory{sessions: map[string]*domainsession.Session{"child-1": existing}}
+	memory := &factoryMemory{sessions: parentSessions(map[string]*domainsession.Session{"child-1": existing})}
 	loader := &factoryLoader{err: errors.New("must not load")}
 
 	current, err := (Factory{Memory: memory, Loader: loader}).Create(context.Background(), childSessionRequest("child-1"))
@@ -61,8 +104,8 @@ func TestFactoryReusesExistingChildSession(t *testing.T) {
 
 func TestFactoryLoadsPersistedChildSessionWithoutReplacingIt(t *testing.T) {
 	existing := &domainsession.Session{ID: "child-1", Model: "model-from-history"}
-	memory := &factoryMemory{sessions: map[string]*domainsession.Session{}}
-	loader := &factoryLoader{session: existing}
+	memory := &factoryMemory{sessions: parentSessions(map[string]*domainsession.Session{})}
+	loader := &factoryLoader{session: existing, memory: memory}
 
 	current, err := (Factory{Memory: memory, Loader: loader}).Create(context.Background(), childSessionRequest("child-1"))
 	if err != nil {
@@ -75,7 +118,7 @@ func TestFactoryLoadsPersistedChildSessionWithoutReplacingIt(t *testing.T) {
 
 func TestFactorySyncsWorkspaceIdentityOnReuse(t *testing.T) {
 	existing := &domainsession.Session{ID: "child-1", Model: "model-from-history", WorkspaceRoot: "old-root", WorkspaceSandboxID: "old-sandbox"}
-	memory := &factoryMemory{sessions: map[string]*domainsession.Session{"child-1": existing}}
+	memory := &factoryMemory{sessions: parentSessions(map[string]*domainsession.Session{"child-1": existing})}
 
 	request := childSessionRequest("child-1")
 	request.WorkspaceRoot = "new-root"
@@ -90,7 +133,7 @@ func TestFactorySyncsWorkspaceIdentityOnReuse(t *testing.T) {
 }
 
 func TestFactoryCreatesChildSessionWhenPersistenceDoesNotContainIt(t *testing.T) {
-	memory := &factoryMemory{sessions: map[string]*domainsession.Session{}}
+	memory := &factoryMemory{sessions: parentSessions(map[string]*domainsession.Session{})}
 	loader := &factoryLoader{err: repository.ErrNotFound}
 
 	current, err := (Factory{Memory: memory, Loader: loader}).Create(context.Background(), childSessionRequest("child-new"))
@@ -103,7 +146,7 @@ func TestFactoryCreatesChildSessionWhenPersistenceDoesNotContainIt(t *testing.T)
 }
 
 func TestFactoryUnloadsChildSessionFromMemory(t *testing.T) {
-	memory := &factoryMemory{sessions: make(map[string]*domainsession.Session)}
+	memory := &factoryMemory{sessions: parentSessions(make(map[string]*domainsession.Session))}
 	factory := Factory{Memory: memory}
 	request := childSessionRequest("child-unload")
 	if _, err := factory.Create(context.Background(), request); err != nil {
@@ -130,7 +173,7 @@ func TestFactoryMapsCapabilityModesToSessionPermissions(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			memory := &factoryMemory{sessions: map[string]*domainsession.Session{}}
+			memory := &factoryMemory{sessions: parentSessions(map[string]*domainsession.Session{})}
 			request := childSessionRequest("child-" + testCase.name)
 			request.Definition.CapabilityMode = testCase.capability
 			current, err := (Factory{Memory: memory}).Create(context.Background(), request)
@@ -146,7 +189,8 @@ func TestFactoryMapsCapabilityModesToSessionPermissions(t *testing.T) {
 
 func childSessionRequest(sessionID string) subagentport.ChildSessionRequest {
 	return subagentport.ChildSessionRequest{
-		SessionID: sessionID,
+		SessionID:       sessionID,
+		ParentSessionID: "parent",
 		Definition: domainsubagent.DefinitionSnapshot{
 			ID: "coder", Name: "Coder", ModelID: "model-1",
 			CapabilityMode: domainsubagent.CapabilityModeReadOnly,

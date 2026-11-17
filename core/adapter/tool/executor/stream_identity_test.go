@@ -48,14 +48,21 @@ func TestConcurrentSameNameToolsKeepIndependentCallIdentity(t *testing.T) {
 func TestSharedAssetEventUsesSameIDAsPersistedBatch(t *testing.T) {
 	var streamed domaintool.SharedAsset
 	executor := Executor{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
-		"share_file": fakeTool{name: "share_file", permission: tooldef.PermissionRead, result: `{"file_name":"结果.png","content_type":"image/png","short_url":"https://example.com/a","code":"a"}`},
+		"share_file": fakeTool{name: "share_file", permission: tooldef.PermissionExecute, result: `{"file_name":"结果.png","content_type":"image/png","short_url":"https://example.com/a","code":"a"}`},
 	}}}
+	approved := false
 	result, err := executor.Execute(context.Background(), generationcommand.ToolExecution{
-		Session: &session.Session{ID: "child", PermissionMode: session.PermissionModeReadonly},
+		Session: &session.Session{ID: "child", PermissionMode: session.PermissionModeAsk},
 		Calls:   []domainmessage.ToolCall{{ID: "image-call", Name: "share_file"}},
-		Stream:  modelport.ChatStreamHandler{OnAsset: func(asset domaintool.SharedAsset) { streamed = asset }},
+		Stream: modelport.ChatStreamHandler{
+			OnAsset: func(asset domaintool.SharedAsset) { streamed = asset },
+			OnToolAsk: func(request modelport.ToolPermissionRequest) bool {
+				approved = request.Name == "share_file" && request.Permission == tooldef.PermissionExecute && request.ToolCallID == "image-call"
+				return approved
+			},
+		},
 	})
-	if err != nil || len(result.Assets) != 1 {
+	if err != nil || len(result.Assets) != 1 || !approved {
 		t.Fatalf("asset result: %#v %v", result, err)
 	}
 	if streamed.ID == "" || streamed.ID != result.Assets[0].ID || streamed.ToolCallID != "image-call" || streamed.FileName != "结果.png" {

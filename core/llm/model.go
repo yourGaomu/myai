@@ -16,6 +16,9 @@ import (
 
 type Model struct {
 	LlmModel llms.Model
+	Policy   RequestPolicy
+	// Enable when the SDK preserves finish metadata in streaming responses.
+	RequireStreamStopReason bool
 }
 
 var _ modelport.ChatModelPort = (*Model)(nil)
@@ -117,49 +120,41 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 		callOptions = append(callOptions, llms.WithTools(tools), llms.WithToolChoice("auto"))
 	}
 
-	resp, err := m.LlmModel.GenerateContent(ctx, mes, callOptions...)
+	resp, err := m.generateContent(ctx, mes, callOptions...)
 	if err != nil {
-		return ChatResult{}, err
+		return ChatResult{Content: builder.String(), Reasoning: reasoningBuilder.String()}, err
 	}
-
-	toolCalls := toolCallsFromResponse(resp)
+	result, err := resultFromResponse(resp, true)
+	if err != nil {
+		if result.Content == "" {
+			result.Content = builder.String()
+		}
+		if result.Reasoning == "" {
+			result.Reasoning = reasoningBuilder.String()
+		}
+		if err == ErrEmptyResponse && streamed && m.RequireStreamStopReason {
+			err = ErrIncompleteResponse
+		}
+		return result, err
+	}
+	if m.RequireStreamStopReason && result.StopReason == "" {
+		return result, ErrIncompleteResponse
+	}
 	if streamed {
-		// 1. SDK 可能用工具增量覆盖同一帧的正文回调；完整响应仍保存该正文。
-		// 1.1 优先使用完整响应回放历史，仅向界面补发尚未送出的尾部。
-		content := completeStreamText(builder.String(), contentFromResponse(resp), handler.OnAnswer)
-		reasoning := completeStreamText(reasoningBuilder.String(), reasoningFromResponse(resp), handler.OnReasoning)
-		return ChatResult{
-			Content:   content,
-			Reasoning: reasoning,
-			Usage:     tokenUsageFromResponse(resp),
-			ToolCalls: toolCalls,
-		}, nil
+		// SDK tool deltas can replace a text callback in the same frame. Only
+		// deliver the missing suffix from the complete response.
+		result.Content = completeStreamText(builder.String(), result.Content, handler.OnAnswer)
+		result.Reasoning = completeStreamText(reasoningBuilder.String(), result.Reasoning, handler.OnReasoning)
+		return result, nil
 	}
 
-	if resp == nil || len(resp.Choices) == 0 {
-		return ChatResult{}, nil
+	if result.Reasoning != "" && handler.OnReasoning != nil {
+		handler.OnReasoning(result.Reasoning)
 	}
-
-	text := contentFromResponse(resp)
-	reasoning := reasoningFromResponse(resp)
-	if reasoning != "" {
-		if handler.OnReasoning != nil {
-			handler.OnReasoning(reasoning)
-		}
+	if result.Content != "" && handler.OnAnswer != nil {
+		handler.OnAnswer(result.Content)
 	}
-
-	if text != "" {
-		if handler.OnAnswer != nil {
-			handler.OnAnswer(text)
-		}
-	}
-
-	return ChatResult{
-		Content:   text,
-		Reasoning: reasoning,
-		Usage:     tokenUsageFromResponse(resp),
-		ToolCalls: toolCallsFromResponse(resp),
-	}, nil
+	return result, nil
 }
 
 func completeStreamText(streamed, complete string, emit func(string)) string {
@@ -181,7 +176,7 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 		ctx = context.Background()
 	}
 	settings := generation.SystemDefaults()
-	resp, err := m.LlmModel.GenerateContent(
+	resp, err := m.generateContent(
 		ctx,
 		mes,
 		llms.WithTemperature(settings.Temperature),
@@ -191,16 +186,7 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 	if err != nil {
 		return ChatResult{}, err
 	}
-	if resp == nil || len(resp.Choices) == 0 {
-		return ChatResult{}, nil
-	}
-
-	return ChatResult{
-		Content:   contentFromResponse(resp),
-		Reasoning: reasoningFromResponse(resp),
-		Usage:     tokenUsageFromResponse(resp),
-		ToolCalls: toolCallsFromResponse(resp),
-	}, nil
+	return resultFromResponse(resp, false)
 }
 
 func reasoningFromResponse(resp *llms.ContentResponse) string {

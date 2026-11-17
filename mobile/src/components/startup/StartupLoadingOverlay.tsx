@@ -1,59 +1,42 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Image, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
-const workingFrames = [
-  require("../../../assets/loading/character-01.png"),
-  require("../../../assets/loading/character-02.png"),
-  require("../../../assets/loading/character-03.png"),
-  require("../../../assets/loading/character-04.png"),
-  require("../../../assets/loading/character-05.png"),
-  require("../../../assets/loading/character-06.png"),
-  require("../../../assets/loading/character-07.png"),
-  require("../../../assets/loading/character-08.png"),
-  require("../../../assets/loading/character-09.png"),
-  require("../../../assets/loading/character-10.png"),
-];
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
+import { CharacterAvatar } from "../common/CharacterAvatar";
 
-const thinkingFrames = [
-  require("../../../assets/loading/thinking/character-01.png"),
-  require("../../../assets/loading/thinking/character-02.png"),
-  require("../../../assets/loading/thinking/character-03.png"),
-  require("../../../assets/loading/thinking/character-04.png"),
-  require("../../../assets/loading/thinking/character-05.png"),
-  require("../../../assets/loading/thinking/character-06.png"),
-  require("../../../assets/loading/thinking/character-07.png"),
-  require("../../../assets/loading/thinking/character-08.png"),
-  require("../../../assets/loading/thinking/character-09.png"),
-  require("../../../assets/loading/thinking/character-10.png"),
-];
-
-const loadingFrames = [
-  ...workingFrames.map((source) => ({ source, status: "正在启动..." })),
-  ...thinkingFrames.map((source) => ({ source, status: "正在思考..." })),
-];
+const loadingStatuses = ["正在启动...", "加载本地外观...", "连接中继通道..."];
 
 type Props = {
+  durationMs?: number;
   onDone: () => void;
   visible: boolean;
 };
 
-export function StartupLoadingOverlay({ onDone, visible }: Props) {
-  const [frame, setFrame] = useState(0);
+export function StartupLoadingOverlay({ durationMs = 2000, onDone, visible }: Props) {
+  const theme = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
+  const { palette } = theme;
+  const [statusIndex, setStatusIndex] = useState(0);
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(10)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  const progress = useRef(new Animated.Value(0.12)).current;
 
   useEffect(() => {
     if (!visible) {
       return;
     }
 
-    setFrame(0);
+    setStatusIndex(0);
     opacity.setValue(0);
-    translateY.setValue(10);
+    translateY.setValue(12);
+    progress.setValue(0.12);
 
-    const frameTimer = setInterval(() => {
-      setFrame((current) => (current + 1) % loadingFrames.length);
-    }, 100);
+    const stepTimer = setInterval(() => {
+      setStatusIndex((current) => Math.min(loadingStatuses.length - 1, current + 1));
+    }, Math.max(400, Math.floor(durationMs / 3)));
+
     const finishTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(opacity, { duration: 220, toValue: 0, useNativeDriver: true }),
@@ -63,88 +46,111 @@ export function StartupLoadingOverlay({ onDone, visible }: Props) {
           onDone();
         }
       });
-    }, 2200);
+    }, durationMs);
 
     Animated.parallel([
       Animated.timing(opacity, { duration: 260, toValue: 1, useNativeDriver: true }),
       Animated.spring(translateY, { bounciness: 5, speed: 16, toValue: 0, useNativeDriver: true }),
+      Animated.timing(progress, {
+        duration: Math.max(500, durationMs - 150),
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: false,
+      }),
     ]).start();
 
     return () => {
-      clearInterval(frameTimer);
+      clearInterval(stepTimer);
       clearTimeout(finishTimer);
       opacity.stopAnimation();
       translateY.stopAnimation();
+      progress.stopAnimation();
     };
-  }, [onDone, opacity, translateY, visible]);
+  }, [durationMs, onDone, opacity, progress, translateY, visible]);
 
   if (!visible) {
     return null;
   }
 
+  const barWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["12%", "100%"],
+  });
+
   return (
     <View pointerEvents="auto" style={styles.overlay}>
       <Animated.View style={[styles.content, { opacity, transform: [{ translateY }] }]}>
-        <Image
-          accessibilityLabel="MYAI 正在启动"
-          source={loadingFrames[frame].source}
-          style={styles.character}
-        />
+        <View style={styles.characterWrap}>
+          <CharacterAvatar accessibilityLabel="MYAI 正在启动" height={310} size={156} slot="startup" variant="full" />
+        </View>
         <Text style={styles.title}>MYAI</Text>
-        <Text style={styles.status}>{loadingFrames[frame].status}</Text>
+        <Text style={styles.status}>{loadingStatuses[statusIndex]}</Text>
         <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((frame + 1) / loadingFrames.length) * 100}%` }]} />
+          <Animated.View style={[styles.progressBarWrap, { width: barWidth }]}>
+            <LinearGradient
+              colors={[palette.brandLight, palette.brand]}
+              end={{ x: 1, y: 0 }}
+              start={{ x: 0, y: 0 }}
+              style={styles.progressFill}
+            />
+          </Animated.View>
         </View>
       </Animated.View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: {
-    alignItems: "center",
-    backgroundColor: "#efe4d2",
-    bottom: 0,
-    justifyContent: "center",
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-    zIndex: 100,
-  },
-  content: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-  },
-  character: {
-    height: 360,
-    width: 144,
-  },
-  title: {
-    color: "#12100e",
-    fontSize: 26,
-    fontWeight: "900",
-    marginTop: -8,
-  },
-  status: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 4,
-  },
-  progressTrack: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 2,
-    height: 10,
-    marginTop: 14,
-    overflow: "hidden",
-    width: 150,
-  },
-  progressFill: {
-    backgroundColor: "#4fd7ee",
-    height: "100%",
-  },
-});
+const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    overlay: {
+      alignItems: "center",
+      backgroundColor: palette.canvas,
+      bottom: 0,
+      justifyContent: "center",
+      left: 0,
+      position: "absolute",
+      right: 0,
+      top: 0,
+      zIndex: 100,
+    },
+    content: {
+      alignItems: "center",
+      justifyContent: "center",
+      width: "100%",
+    },
+    characterWrap: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 4,
+    },
+    title: {
+      color: palette.ink1,
+      fontSize: font.display,
+      fontWeight: weight.semibold,
+      letterSpacing: 1.5,
+    },
+    status: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.medium,
+      marginTop: 4,
+    },
+    progressTrack: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      height: 6,
+      marginTop: 14,
+      overflow: "hidden",
+      width: 156,
+    },
+    progressBarWrap: {
+      height: "100%",
+      overflow: "hidden",
+    },
+    progressFill: {
+      height: "100%",
+      width: "100%",
+    },
+  });

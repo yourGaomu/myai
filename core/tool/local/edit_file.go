@@ -11,13 +11,15 @@ import (
 	"unicode/utf8"
 
 	"myai/core/history"
+	historyport "myai/core/port/history"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
 type EditFileTool struct {
-	recorder  historyRecorder
-	workspace string
+	recorder       historyRecorder
+	historyFactory historyport.StoreFactory
+	workspace      string
 }
 
 type editFileArgs struct {
@@ -94,7 +96,7 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.
 		return tooldef.ToolOutput{}, err
 	}
 
-	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace)
+	recorder, closeRecorder, err := openHistoryRecorder(ctx, t.recorder, workspace, t.historyFactory)
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -123,7 +125,12 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.
 	}
 
 	content := string(contentBytes)
-	replacements := strings.Count(content, input.OldText)
+	// Match either newline spelling, but leave all bytes outside each matched
+	// span untouched, including mixed line endings in the original file.
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	oldText := strings.ReplaceAll(input.OldText, "\r\n", "\n")
+	newText := strings.ReplaceAll(input.NewText, "\r\n", "\n")
+	replacements := strings.Count(normalized, oldText)
 	if replacements == 0 {
 		return tooldef.ToolOutput{}, errors.New("old_text was not found in file")
 	}
@@ -131,7 +138,7 @@ func (t *EditFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.
 		return tooldef.ToolOutput{}, fmt.Errorf("old_text appears %d times; set replace_all=true to replace every occurrence", replacements)
 	}
 
-	nextContent := strings.Replace(content, input.OldText, input.NewText, replacementLimit(input.ReplaceAll))
+	nextContent := replaceTextPreservingNewlines(content, normalized, oldText, newText, replacementLimit(input.ReplaceAll))
 	if err := os.WriteFile(input.Path, []byte(nextContent), info.Mode().Perm()); err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -180,6 +187,53 @@ func normalizeEditFileArgs(workspace string, args json.RawMessage) (editFileArgs
 	input.Path = path
 
 	return input, nil
+}
+
+func replaceTextPreservingNewlines(content, normalized, oldText, newText string, limit int) string {
+	// Translate monotonically increasing normalized offsets back into the raw
+	// file without allocating an offset table proportional to the file size.
+	rawOffset, normalizedOffset := 0, 0
+	rawPosition := func(offset int) int {
+		for normalizedOffset < offset {
+			if content[rawOffset] == '\r' && rawOffset+1 < len(content) && content[rawOffset+1] == '\n' {
+				rawOffset++
+			}
+			rawOffset++
+			normalizedOffset++
+		}
+		return rawOffset
+	}
+
+	var result strings.Builder
+	lastRaw, nextMatch := 0, 0
+	for limit != 0 {
+		index := strings.Index(normalized[nextMatch:], oldText)
+		if index < 0 {
+			break
+		}
+		index += nextMatch
+		start := rawPosition(index)
+		nextMatch = index + len(oldText)
+		end := rawPosition(nextMatch)
+		newline := "\n"
+		lineEnd := strings.IndexByte(content[start:], '\n')
+		if lineEnd >= 0 {
+			lineEnd += start
+		} else {
+			lineEnd = strings.LastIndexByte(content[:start], '\n')
+		}
+		if lineEnd > 0 && content[lineEnd-1] == '\r' {
+			newline = "\r\n"
+		}
+		result.WriteString(content[lastRaw:start])
+		result.WriteString(strings.ReplaceAll(newText, "\n", newline))
+		lastRaw = end
+		if limit > 0 {
+			limit--
+		}
+	}
+	result.WriteString(content[lastRaw:])
+	return result.String()
 }
 
 func replacementLimit(replaceAll bool) int {

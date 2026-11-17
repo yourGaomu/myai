@@ -7,84 +7,37 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"myai/core/pathpolicy"
 )
 
-var ignoredNames = map[string]bool{
-	".git":         true,
-	".idea":        true,
-	".expo":        true,
-	"node_modules": true,
-	"dist":         true,
-	"build":        true,
-	".next":        true,
-	".cache":       true,
-}
-
-var sensitiveNames = map[string]bool{
-	".env":            true,
-	".env.local":      true,
-	".env.production": true,
-	"id_rsa":          true,
-	"id_ed25519":      true,
-}
-
 func cleanPath(root string, path string) (string, string, error) {
-	clean := filepath.Clean(strings.TrimSpace(path))
-	if clean == "" || clean == "." {
-		return "", "", errors.New("change path is empty")
+	path = strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	if path == "" || strings.ContainsAny(path, ":\x00") {
+		return "", "", errors.New("invalid change path")
 	}
-	if filepath.IsAbs(clean) {
-		return "", "", errors.New("absolute paths are not allowed")
+	for _, component := range strings.Split(path, "/") {
+		if component != "." && component != ".." && strings.TrimRight(component, ". ") != component {
+			return "", "", errors.New("ambiguous change path")
+		}
 	}
-
-	abs := filepath.Join(root, clean)
-	abs = filepath.Clean(abs)
-	if !insideRoot(root, abs) {
-		return "", "", fmt.Errorf("path escapes workspace: %s", path)
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if clean == "." || !filepath.IsLocal(clean) {
+		return "", "", errors.New("change path must be local to the workspace")
 	}
-
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return "", "", err
-	}
-	return filepath.ToSlash(rel), abs, nil
-}
-
-func (s *Service) relative(abs string) (string, error) {
-	rel, err := filepath.Rel(s.root, abs)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." {
-		return ".", nil
-	}
-	return filepath.ToSlash(rel), nil
-}
-
-func insideRoot(root string, target string) bool {
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+	return filepath.ToSlash(clean), filepath.Join(root, clean), nil
 }
 
 func shouldHidePath(path string) bool {
-	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
-		lower := strings.ToLower(part)
-		if ignoredNames[lower] || sensitiveNames[lower] {
-			return true
-		}
-	}
-	return false
+	return pathpolicy.ShouldSkipSnapshot(path)
 }
 
 func isBinary(content []byte) bool {
-	if len(content) == 0 {
-		return false
-	}
-	if bytes.IndexByte(content, 0) >= 0 {
-		return true
-	}
-	return !utf8.Valid(content)
+	return bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content)
+}
+
+var errUnsafePath = errors.New("workspace path contains a link or non-regular entry")
+
+func unsafePath(path string) error {
+	return fmt.Errorf("%w: %s", errUnsafePath, path)
 }

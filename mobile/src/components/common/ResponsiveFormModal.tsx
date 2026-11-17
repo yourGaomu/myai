@@ -10,9 +10,12 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ButtonFeedback } from "../../types/ui";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -31,6 +34,8 @@ export function ResponsiveFormModal({
   title,
   visible,
 }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const compact = width < 700;
@@ -64,6 +69,7 @@ export function ResponsiveFormModal({
               { maxHeight: availableHeight, paddingBottom: Math.max(insets.bottom, 12) },
             ]}
           >
+            {compact ? <View style={styles.grabber} /> : null}
             <View style={styles.header}>
               <Text numberOfLines={1} style={styles.title}>{title}</Text>
               <Pressable
@@ -73,7 +79,7 @@ export function ResponsiveFormModal({
                 onPress={onClose}
                 style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}
               >
-                <Text style={styles.closeText}>×</Text>
+                <Feather color={palette.ink2} name="x" size={18} />
               </Pressable>
             </View>
             <ScrollView
@@ -92,36 +98,63 @@ export function ResponsiveFormModal({
   );
 }
 
-const styles = StyleSheet.create({
-  keyboard: { flex: 1 },
-  backdrop: { backgroundColor: "rgba(28, 25, 22, 0.46)", flex: 1, paddingHorizontal: 14 },
-  backdropCompact: { justifyContent: "flex-end", paddingHorizontal: 0 },
-  backdropWide: { alignItems: "center", justifyContent: "center", paddingVertical: 24 },
-  sheet: { backgroundColor: "#f7f5f0", overflow: "hidden", width: "100%" },
-  sheetCompact: { borderTopLeftRadius: 8, borderTopRightRadius: 8 },
-  sheetWide: { borderRadius: 8, maxWidth: 760 },
-  header: {
-    alignItems: "center",
-    borderBottomColor: "#ddd8cf",
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 56,
-    paddingHorizontal: 16,
-  },
-  title: { color: "#1d211e", flex: 1, fontSize: 18, fontWeight: "800" },
-  closeButton: { alignItems: "center", borderRadius: 6, height: 38, justifyContent: "center", width: 38 },
-  closeText: { color: "#4d504c", fontSize: 28, fontWeight: "400", lineHeight: 30 },
-  scroll: { flexShrink: 1 },
-  body: { gap: 12, padding: 16 },
-  footer: {
-    backgroundColor: "#ffffff",
-    borderTopColor: "#ddd8cf",
-    borderTopWidth: 1,
-    flexDirection: "row",
-    gap: 10,
-    justifyContent: "flex-end",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    keyboard: { flex: 1 },
+    backdrop: { backgroundColor: palette.scrim, flex: 1, paddingHorizontal: 14 },
+    backdropCompact: { justifyContent: "flex-end", paddingHorizontal: 0 },
+    backdropWide: { alignItems: "center", justifyContent: "center", paddingVertical: 24 },
+    sheet: { backgroundColor: palette.surface2, overflow: "hidden", width: "100%" },
+    sheetCompact: {
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
+    },
+    sheetWide: {
+      borderRadius: radius.xl,
+      maxWidth: 760,
+    },
+    header: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      minHeight: 52,
+      paddingLeft: 16,
+      paddingRight: 10,
+      paddingTop: 4,
+    },
+    title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.semibold },
+    closeButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.pill,
+      height: 36,
+      justifyContent: "center",
+      width: 36,
+    },
+    closeText: { color: palette.ink1, fontSize: font.display, fontWeight: weight.regular, lineHeight: 30 },
+    scroll: { flexShrink: 1 },
+    body: {
+      gap: 12,
+      paddingBottom: 16,
+      paddingHorizontal: 16,
+      paddingTop: 4,
+    },
+    footer: {
+      backgroundColor: palette.surface2,
+      borderTopColor: palette.hairline,
+      borderTopWidth: 1,
+      flexDirection: "row",
+      gap: 10,
+      justifyContent: "flex-end",
+      paddingHorizontal: 16,
+      paddingTop: 12,
+    },
+    grabber: {
+      alignSelf: "center",
+      backgroundColor: palette.hairlineStrong,
+      borderRadius: radius.xxs,
+      height: 4,
+      marginTop: 8,
+      width: 36,
+    },
+  });

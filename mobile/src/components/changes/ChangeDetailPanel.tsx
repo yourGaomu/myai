@@ -1,141 +1,89 @@
-import { Pressable, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { ButtonContent } from "../common/ButtonContent";
 import type { ChangeDiffResultPayload, HistoryDiffResultPayload } from "../../protocol";
-import type { ButtonFeedback } from "../../types/ui";
 import { shortID } from "../../utils/ids";
+import { baseName, dirName } from "../../utils/toolDisplay";
+import { fontFamily, font, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { useListStyles } from "../common/listStyles";
 import { DiffViewer } from "./DiffViewer";
-import { styles } from "./styles";
 
 type Props = {
-  buttonFeedback: ButtonFeedback;
-  canOpenSelectedChangeFile: boolean;
-  canRevertSelectedChange: boolean;
   changeDiff: ChangeDiffResultPayload | null;
   historyDiff: HistoryDiffResultPayload | null;
-  onBack: () => void;
-  onOpenSelectedChangeFile: () => void;
-  onRevertHistory: (checkpointID: string) => void;
-  onRevertSelectedChange: () => void;
-  pendingFiles: boolean;
-  pendingRevert: boolean;
 };
 
-export function ChangeDetailPanel({
-  buttonFeedback,
-  canOpenSelectedChangeFile,
-  canRevertSelectedChange,
-  changeDiff,
-  historyDiff,
-  onBack,
-  onOpenSelectedChangeFile,
-  onRevertHistory,
-  onRevertSelectedChange,
-  pendingFiles,
-  pendingRevert,
-}: Props) {
-  return (
-    <View style={[styles.panel, styles.diffDetailPanel]}>
-      <View style={styles.detailHeader}>
-        <Pressable onPress={onBack} style={({ pressed }) => buttonFeedback(styles.detailBackButton, pressed)}>
-          <Text style={styles.detailBackText}>❮ 返回变更</Text>
-        </Pressable>
-        <View style={styles.detailHeaderCenter}>
-          <Text numberOfLines={1} style={styles.detailHeaderTitle}>
-            {changeDiff
-              ? changeDiff.path.split("/").pop() || changeDiff.path
-              : historyDiff
-                ? `检查点 ${shortID(historyDiff.checkpoint_id)}`
-                : "差异详情"}
-          </Text>
-        </View>
-        <View style={styles.rowCompact}>
-          {changeDiff ? (
-            <>
-              <Pressable
-                disabled={!canOpenSelectedChangeFile || pendingFiles}
-                onPress={onOpenSelectedChangeFile}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.previewButton, (!canOpenSelectedChangeFile || pendingFiles) && styles.disabledButton], pressed)
-                }
-              >
-                <ButtonContent loading={pendingFiles} text={pendingFiles ? "打开中" : "打开"} />
-              </Pressable>
-              <Pressable
-                disabled={!canRevertSelectedChange || pendingRevert}
-                onPress={onRevertSelectedChange}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.revertButton, (!canRevertSelectedChange || pendingRevert) && styles.disabledButton], pressed)
-                }
-              >
-                <ButtonContent loading={pendingRevert} text={pendingRevert ? "还原中" : "还原文件"} />
-              </Pressable>
-            </>
-          ) : historyDiff ? (
-            <Pressable
-              disabled={pendingRevert}
-              onPress={() => onRevertHistory(historyDiff.checkpoint_id)}
-              style={({ pressed }) => buttonFeedback([styles.revertButton, pendingRevert && styles.disabledButton], pressed)}
-            >
-              <ButtonContent loading={pendingRevert} text={pendingRevert ? "恢复中" : "恢复检查点"} />
-            </Pressable>
-          ) : null}
-        </View>
+// 变更详情：单文件差异带吸顶 Hunk 上下跳转；历史快照支持连续多文件对比。
+export function ChangeDetailPanel({ changeDiff, historyDiff }: Props) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  const styles = useThemedStyles(makeStyles);
+
+  if (changeDiff) {
+    return (
+      <View style={styles.singleRoot}>
+        <Text numberOfLines={2} style={styles.path}>
+          {changeDiff.path}
+          {changeDiff.truncated ? " · 已截断" : ""}
+        </Text>
+        {changeDiff.binary ? (
+          <Text style={list.empty}>{changeDiff.message || "二进制文件暂不支持差异查看。"}</Text>
+        ) : (
+          <DiffViewer diff={changeDiff.diff || ""} emptyText={changeDiff.message || "没有可显示的差异。"} standaloneScroll />
+        )}
       </View>
+    );
+  }
 
-      {changeDiff ? (
-        <View style={styles.diffDetailContent}>
-          <View style={styles.diffStatsBar}>
-            <Text numberOfLines={1} style={styles.diffStatsPath}>
-              📁 {changeDiff.path}
-              {changeDiff.truncated ? " · 已截断" : ""}
-            </Text>
-          </View>
-          {changeDiff.binary ? (
-            <Text style={styles.emptyText}>{changeDiff.message || "二进制文件暂不支持差异查看。"}</Text>
-          ) : (
-            <DiffViewer diff={changeDiff.diff || ""} emptyText={changeDiff.message || "No diff is available."} />
-          )}
-        </View>
-      ) : null}
+  if (historyDiff) {
+    const files = historyDiff.files || [];
+    return (
+      <ScrollView showsVerticalScrollIndicator={false} style={styles.historyScroll}>
+        <Text style={list.hint}>
+          快照 {shortID(historyDiff.checkpoint_id)} · {files.length} 个文件
+          {historyDiff.message && files.length > 0 ? ` · ${historyDiff.message}` : ""}
+        </Text>
+        {files.length === 0 ? <Text style={list.empty}>{historyDiff.message || "没有可显示的差异。"}</Text> : null}
+        {files.map((file) => {
+          const dir = dirName(file.path);
+          return (
+            <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.file}>
+              <View style={styles.fileHead}>
+                <Text numberOfLines={1} style={styles.fileName}>
+                  {baseName(file.path)}
+                  {dir ? <Text style={list.meta}>  {dir}</Text> : null}
+                </Text>
+                <Text style={list.meta}>
+                  {file.change_type || "已变更"}
+                  {file.truncated ? " · 已截断" : ""}
+                </Text>
+              </View>
+              {file.binary ? (
+                <Text style={list.hint}>{file.message || "二进制文件暂不支持差异查看。"}</Text>
+              ) : (
+                <DiffViewer diff={file.diff || ""} emptyText={file.message || "没有可显示的差异。"} />
+              )}
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  }
 
-      {historyDiff ? (
-        <View style={styles.diffDetailContent}>
-          <View style={styles.diffStatsBar}>
-            <Text style={styles.diffStatsPath}>
-              🏷️ 快照 ID: {shortID(historyDiff.checkpoint_id)} ({(historyDiff.files || []).length} 个文件变动)
-            </Text>
-          </View>
-          {historyDiff.message && (historyDiff.files || []).length > 0 ? <Text style={styles.emptyText}>{historyDiff.message}</Text> : null}
-          {(historyDiff.files || []).length === 0 ? (
-            <Text style={styles.emptyText}>{historyDiff.message || "没有可显示的差异。"}</Text>
-          ) : (
-            (historyDiff.files || []).map((file) => {
-              const lastSlash = file.path.lastIndexOf("/");
-              const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : "";
-              const baseName = lastSlash >= 0 ? file.path.slice(lastSlash + 1) : file.path;
-
-              return (
-                <View key={`${historyDiff.checkpoint_id}-${file.path}`} style={styles.historyDiffFile}>
-                  <View style={styles.historyHeader}>
-                    <Text numberOfLines={1} style={[styles.fileName, styles.flex]}>
-                      {dir ? <Text style={styles.fileDir}>{dir}</Text> : null}
-                      {baseName}
-                      {file.truncated ? " · 已截断" : ""}
-                    </Text>
-                    <Text style={styles.fileMeta}>{file.change_type || "已变更"}</Text>
-                  </View>
-                  {file.binary ? (
-                    <Text style={styles.emptyText}>{file.message || "二进制文件暂不支持差异查看。"}</Text>
-                  ) : (
-                    <DiffViewer diff={file.diff || ""} emptyText={file.message || "No diff is available."} />
-                  )}
-                </View>
-              );
-            })
-          )}
-        </View>
-      ) : null}
+  return (
+    <View style={list.loading}>
+      <ActivityIndicator color={palette.ink2} size="small" />
+      <Text style={list.loadingText}>正在加载差异…</Text>
     </View>
   );
 }
+
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    singleRoot: { flex: 1, minHeight: 0, paddingHorizontal: 16 },
+    historyScroll: { flex: 1, paddingHorizontal: 16 },
+    path: { color: palette.ink3, fontFamily: fontFamily.mono, fontSize: font.caption, lineHeight: 18, paddingBottom: 6, paddingTop: 4 },
+    file: { borderTopColor: palette.hairline, borderTopWidth: 1, marginTop: 4, paddingTop: 12 },
+    fileHead: { alignItems: "center", flexDirection: "row", gap: 10 },
+    fileName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.medium },
+  });

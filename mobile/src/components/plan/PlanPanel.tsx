@@ -1,8 +1,11 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
-import { ButtonContent } from "../common/ButtonContent";
 import type { Plan, PlanStep, SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
+import { useAppTheme } from "../../theme/ThemeProvider";
+import { Spinner } from "../common/Spinner";
+import { usePlanStyles, type PlanStyles } from "./planStyles";
 
 type Props = {
   activeSession?: SessionSummary;
@@ -14,15 +17,10 @@ type Props = {
   sessionID: string;
 };
 
-export function PlanPanel({
-  activeSession,
-  buttonFeedback,
-  clientToken,
-  onExecutePlan,
-  onOpenChat,
-  pendingPlan,
-  sessionID,
-}: Props) {
+// 计划页：目标 + 进度 + 步骤时间线（自适应深浅主题）。
+export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenChat, pendingPlan, sessionID }: Props) {
+  const { palette } = useAppTheme();
+  const styles = usePlanStyles();
   const plan = activeSession?.current_plan;
   const progress = planProgress(plan);
   const canExecute = Boolean(
@@ -33,95 +31,114 @@ export function PlanPanel({
       ["draft", "approved", "failed", "canceled"].includes(plan.status) &&
       !pendingPlan,
   );
+  const running = pendingPlan || plan?.status === "running";
 
   return (
-    <View style={[styles.panel, styles.planPanel]}>
-      <View style={styles.header}>
-        <View style={styles.flex}>
-          <Text style={styles.title}>计划</Text>
-          <Text numberOfLines={2} style={styles.meta}>
-            {activeSession?.title || sessionID || "没有活动会话"}
-          </Text>
-        </View>
-        <View style={[styles.statusBadge, statusBadgeStyle(plan?.status)]}>
-          {pendingPlan || plan?.status === "running" ? <ActivityIndicator color="#12100e" size="small" /> : null}
-          <Text style={styles.statusText}>{planStatusLabel(plan?.status)}</Text>
+    <View style={styles.page}>
+      <View style={styles.head}>
+        <Text numberOfLines={2} style={styles.session}>{activeSession?.title || sessionID || "没有活动会话"}</Text>
+        <View style={[styles.chip, chipStyle(plan?.status, styles)]}>
+          {running ? <Spinner size={12} /> : null}
+          <Text style={[styles.chipText, chipTextStyle(plan?.status, styles)]}>{planStatusLabel(plan?.status)}</Text>
         </View>
       </View>
 
       {!plan ? (
-        <View style={styles.emptyBox}>
+        <View style={styles.empty}>
           <Text style={styles.emptyTitle}>还没有结构化计划</Text>
-          <Text style={styles.emptyText}>开发类请求会自动生成并执行计划；需要查看过程时，计划和子智能体状态会在这里持续更新。</Text>
+          <Text style={styles.emptyText}>开发类请求会自动生成并执行计划。执行过程和子代理状态会在这里持续更新。</Text>
         </View>
       ) : (
         <>
-          <View style={styles.goalBox}>
+          <View style={styles.goal}>
             <Text style={styles.goalLabel}>目标</Text>
             <Text style={styles.goalText}>{plan.goal || plan.steps?.[0]?.title || "未命名计划"}</Text>
           </View>
 
-          <View style={styles.progressBox}>
-            <View style={styles.progressHeader}>
-              <Text style={styles.progressText}>
-                已完成 {progress.done}/{progress.total}
-              </Text>
-              <Text style={styles.progressMeta}>{progress.running ? "执行中" : progress.failed ? "需要处理" : progress.waiting ? "等待依赖" : "就绪"}</Text>
-            </View>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progress.percent}%` }]} />
+          <View style={styles.progress}>
+            <Text style={styles.progressText}>
+              已完成 {progress.done}/{progress.total}
+              {progress.running ? " · 执行中" : progress.failed ? " · 需要处理" : progress.waiting ? " · 等待依赖" : ""}
+            </Text>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${progress.percent}%` }]} />
             </View>
           </View>
 
-          <View style={styles.stepList}>
+          <View style={styles.steps}>
+            {(plan.steps?.length || 0) > 1 ? <View pointerEvents="none" style={styles.rail} /> : null}
             {(plan.steps || []).map((step) => (
-              <PlanStepRow key={step.id || step.order} plan={plan} step={step} />
+              <StepRow key={step.id || step.order} plan={plan} step={step} styles={styles} />
             ))}
           </View>
         </>
       )}
 
       <View style={styles.actions}>
-        <Pressable
-          onPress={onOpenChat}
-          style={({ pressed }) => buttonFeedback([styles.secondaryButton], pressed)}
-        >
-          <Text style={styles.secondaryButtonText}>返回对话</Text>
+        <Pressable accessibilityRole="button" onPress={onOpenChat} style={({ pressed }) => [styles.button, styles.buttonSecondary, pressed && styles.disabled]}>
+          <Text style={styles.buttonSecondaryText}>返回对话</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
           disabled={!canExecute}
           onPress={onExecutePlan}
-          style={({ pressed }) => buttonFeedback([styles.primaryButton, !canExecute && styles.disabledButton], pressed)}
+          style={({ pressed }) => [styles.button, styles.buttonPrimary, (!canExecute || pressed) && styles.disabled]}
         >
-          <ButtonContent loading={pendingPlan} text={pendingPlan ? "执行中" : plan?.status === "running" ? "执行中" : "执行计划"} />
+          {pendingPlan ? <ActivityIndicator color={palette.inkInverse} size="small" /> : null}
+          <Text style={styles.buttonPrimaryText}>{running ? "执行中" : "执行计划"}</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-function PlanStepRow({ plan, step }: { plan: Plan; step: PlanStep }) {
-  const running = step.status === "running";
-  const waitingForDependency = step.status === "pending" && hasUnfinishedDependency(plan, step);
-  const displayStatus = waitingForDependency ? "waiting_dependency" : step.status;
+function StepRow({ plan, step, styles }: { plan: Plan; step: PlanStep; styles: PlanStyles }) {
+  const waiting = step.status === "pending" && hasUnfinishedDependency(plan, step);
+  const status = waiting ? "waiting_dependency" : step.status;
+  const finished = status === "done" || status === "skipped";
   return (
-    <View style={[styles.stepRow, stepStatusStyle(displayStatus)]}>
-      <View style={styles.stepIndex}>
-        {running ? <ActivityIndicator color="#12100e" size="small" /> : <Text style={styles.stepIndexText}>{step.order}</Text>}
+    <View style={styles.step}>
+      <View style={styles.stepIcon}>
+        <StepIcon status={status} styles={styles} />
       </View>
-      <View style={styles.flex}>
-        <Text style={styles.stepTitle}>{step.title}</Text>
-        {step.description ? <Text style={styles.stepDescription}>{step.description}</Text> : null}
-        {step.dependencies?.length ? <Text style={styles.stepDependency}>依赖：{step.dependencies.join(", ")}</Text> : null}
+      <View style={styles.stepBody}>
+        <Text style={[styles.stepTitle, finished && styles.stepTitleDone]}>{step.title}</Text>
+        {step.description ? <Text style={styles.stepSub}>{step.description}</Text> : null}
+        {step.dependencies?.length ? <Text style={styles.stepSub}>依赖：{step.dependencies.join("、")}</Text> : null}
         {step.last_error ? <Text style={styles.stepError}>{step.last_error}</Text> : null}
-        {step.agent_task_id ? <Text style={styles.stepAgent}>子智能体：{step.agent_task_id}</Text> : null}
+        {step.agent_task_id ? <Text style={styles.stepSub}>子代理 {step.agent_task_id}</Text> : null}
       </View>
-      <View style={styles.stepMeta}>
-        {step.retry_count ? <Text style={styles.stepRetry}>重试 {step.retry_count}{step.max_retries ? `/${step.max_retries}` : ""}</Text> : null}
-        <Text style={styles.stepStatus}>{stepStatusLabel(displayStatus)}</Text>
-      </View>
+      <Text style={[styles.stepStatus, status === "running" && styles.stepStatusRunning, status === "failed" && styles.stepStatusFailed]}>
+        {step.retry_count ? `重试 ${step.retry_count}${step.max_retries ? `/${step.max_retries}` : ""} · ` : ""}
+        {stepStatusLabel(status)}
+      </Text>
     </View>
   );
+}
+
+function StepIcon({ status, styles }: { status?: string; styles: PlanStyles }) {
+  const { palette } = useAppTheme();
+  if (status === "running") return <Spinner size={15} />;
+  if (status === "done") return <Feather color={palette.ok} name="check-circle" size={18} />;
+  if (status === "skipped") return <Feather color={palette.ink3} name="skip-forward" size={16} />;
+  if (status === "failed") return <Feather color={palette.err} name="x-circle" size={18} />;
+  if (status === "canceled") return <Feather color={palette.ink3} name="slash" size={16} />;
+  if (status === "waiting_dependency") return <Feather color={palette.warn} name="clock" size={16} />;
+  return <View style={styles.pendingDot} />;
+}
+
+function chipStyle(status: string | undefined, styles: PlanStyles) {
+  if (status === "running") return styles.chipRunning;
+  if (status === "done") return styles.chipDone;
+  if (status === "failed") return styles.chipFailed;
+  return null;
+}
+
+function chipTextStyle(status: string | undefined, styles: PlanStyles) {
+  if (status === "running") return styles.chipTextRunning;
+  if (status === "done") return styles.chipTextDone;
+  if (status === "failed") return styles.chipTextFailed;
+  return null;
 }
 
 function planProgress(plan?: Plan) {
@@ -133,19 +150,6 @@ function planProgress(plan?: Plan) {
   const waiting = steps.some((step) => step.status === "pending" && hasUnfinishedDependency(plan, step));
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   return { done, failed, percent, running, total, waiting };
-}
-
-function statusBadgeStyle(status?: string) {
-  if (status === "done") {
-    return styles.statusDone;
-  }
-  if (status === "running") {
-    return styles.statusRunning;
-  }
-  if (status === "failed") {
-    return styles.statusFailed;
-  }
-  return styles.statusDraft;
 }
 
 function planStatusLabel(status?: string) {
@@ -173,287 +177,12 @@ function stepStatusLabel(status?: string) {
   }
 }
 
-function stepStatusStyle(status?: string) {
-  if (status === "done") {
-    return styles.stepDone;
-  }
-  if (status === "running") {
-    return styles.stepRunning;
-  }
-  if (status === "failed") {
-    return styles.stepFailed;
-  }
-  if (status === "skipped") {
-    return styles.stepDone;
-  }
-  if (status === "waiting_dependency") {
-    return styles.stepWaiting;
-  }
-  return styles.stepPending;
-}
-
 function hasUnfinishedDependency(plan: Plan | undefined, step: PlanStep) {
   if (!plan || !step.dependencies?.length) {
     return false;
   }
   return step.dependencies.some((dependency) => {
-    const candidate = plan.steps?.find(
-      (item) => item.id === dependency || String(item.order) === dependency,
-    );
+    const candidate = plan.steps?.find((item) => item.id === dependency || String(item.order) === dependency);
     return Boolean(candidate && candidate.status !== "done" && candidate.status !== "skipped");
   });
 }
-
-const styles = StyleSheet.create({
-  panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
-    gap: 12,
-    padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
-  },
-  planPanel: {
-    minHeight: 420,
-  },
-  header: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    justifyContent: "space-between",
-  },
-  flex: {
-    flex: 1,
-    minWidth: 0,
-  },
-  title: {
-    color: "#12100e",
-    fontSize: 28,
-    fontWeight: "900",
-  },
-  meta: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  statusBadge: {
-    alignItems: "center",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 3,
-    flexDirection: "row",
-    flexShrink: 0,
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  statusDraft: {
-    backgroundColor: "#f5eefc",
-  },
-  statusRunning: {
-    backgroundColor: "#ffd84f",
-  },
-  statusDone: {
-    backgroundColor: "#b9e9b0",
-  },
-  statusFailed: {
-    backgroundColor: "#ff7f68",
-  },
-  statusText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  emptyBox: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 6,
-    padding: 12,
-  },
-  emptyTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  emptyText: {
-    color: "#6c665f",
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19,
-  },
-  goalBox: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 4,
-    padding: 10,
-  },
-  goalLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "900",
-    textTransform: "uppercase",
-  },
-  goalText: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
-    lineHeight: 21,
-  },
-  progressBox: {
-    gap: 8,
-  },
-  progressHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  progressText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  progressMeta: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  progressTrack: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 3,
-    height: 16,
-    overflow: "hidden",
-  },
-  progressFill: {
-    backgroundColor: "#4fd7ee",
-    height: "100%",
-  },
-  stepList: {
-    gap: 8,
-  },
-  stepRow: {
-    alignItems: "center",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    flexDirection: "row",
-    gap: 10,
-    padding: 10,
-  },
-  stepPending: {
-    backgroundColor: "#fffaf0",
-  },
-  stepRunning: {
-    backgroundColor: "#fff4cc",
-  },
-  stepDone: {
-    backgroundColor: "#edf9e8",
-  },
-  stepWaiting: {
-    backgroundColor: "#f1efff",
-  },
-  stepFailed: {
-    backgroundColor: "#ffe1db",
-  },
-  stepIndex: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 2,
-    height: 34,
-    justifyContent: "center",
-    width: 34,
-  },
-  stepIndexText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  stepTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
-    lineHeight: 19,
-  },
-  stepDescription: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 3,
-  },
-  stepDependency: {
-    color: "#766e65",
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  stepError: {
-    color: "#9b3b2f",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  stepAgent: {
-    color: "#286177",
-    fontSize: 11,
-    marginTop: 4,
-  },
-  stepMeta: {
-    alignItems: "flex-end",
-    gap: 4,
-  },
-  stepRetry: {
-    color: "#8b6f2b",
-    fontSize: 11,
-  },
-  stepStatus: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  actions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    justifyContent: "flex-end",
-  },
-  primaryButton: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    minHeight: 42,
-    minWidth: 132,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  secondaryButton: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    minHeight: 42,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  secondaryButtonText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-});

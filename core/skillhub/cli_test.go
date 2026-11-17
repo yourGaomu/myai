@@ -2,9 +2,13 @@ package skillhub
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -286,6 +290,58 @@ func TestCommandNotFoundErrorsIncludeInstallHint(t *testing.T) {
 	}
 }
 
+func TestSkillHubForwardsLiteralArgvOnWindowsOfficialLayout(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows official CLI layout")
+	}
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	path := filepath.Join(home, ".skillhub", "skills_store_cli.py")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# inert fixture, never executed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	client := NewClient(Options{Workspace: t.TempDir(), Registry: "https://registry.example.test/path?label=a&value=b", Runner: runner})
+	query := `中文 words 'quoted' "double" $literal & label`
+	if _, err := client.Search(context.Background(), SearchRequest{Query: query}); err != nil {
+		t.Fatal(err)
+	}
+	call := runner.calls[0]
+	if call.name != "python" && call.name != "py" {
+		t.Fatalf("unexpected launcher %q", call.name)
+	}
+	if !reflect.DeepEqual(call.args, []string{path, "search", query, "--registry", client.registry}) {
+		t.Fatalf("argv changed: %q", call.args)
+	}
+}
+
+func TestExecRunnerSeparatesStderrAndPreservesArgv(t *testing.T) {
+	result, err := (ExecRunner{}).Run(context.Background(), t.TempDir(), os.Args[0], "-test.run=TestSkillHubRunnerHelperProcess", "--", "first value", `中文 'quotes' $literal & label`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(result.Output), &args); err != nil {
+		t.Fatalf("stdout contaminated: %v", err)
+	}
+	if !reflect.DeepEqual(args, []string{"first value", `中文 'quotes' $literal & label`}) || result.Stderr != "ordinary diagnostic" {
+		t.Fatalf("result=%+v args=%q", result, args)
+	}
+}
+
+func TestSkillHubRunnerHelperProcess(t *testing.T) {
+	for index, arg := range os.Args {
+		if arg == "--" {
+			_, _ = fmt.Fprint(os.Stderr, "ordinary diagnostic")
+			_ = json.NewEncoder(os.Stdout).Encode(os.Args[index+1:])
+			os.Exit(0)
+		}
+	}
+}
+
 func absPath(t *testing.T, path string) string {
 	t.Helper()
 
@@ -315,16 +371,10 @@ func assertSkillHubArgs(t *testing.T, call fakeCall, want []string) {
 		return
 	}
 
-	if len(call.args) != 2 || call.args[0] != "-lc" {
-		t.Fatalf("expected bash -lc args for %v, got command=%q args=%v", want, call.name, call.args)
+	if call.name != "python" && call.name != "py" {
+		t.Fatalf("expected direct CLI or Python argv, got command=%q args=%v", call.name, call.args)
 	}
-	if !strings.Contains(call.args[1], `export PYTHONIOENCODING=utf-8;`) || !strings.Contains(call.args[1], `export PATH="$HOME/.local/bin:$PATH";`) {
-		t.Fatalf("expected official skillhub bootstrap, got %q", call.args[1])
-	}
-	for _, arg := range want {
-		quoted := shellQuote(arg)
-		if !strings.Contains(call.args[1], quoted) {
-			t.Fatalf("expected shell script %q to contain %q for args %v", call.args[1], quoted, want)
-		}
+	if len(call.args) != len(want)+1 || filepath.Base(call.args[0]) != "skills_store_cli.py" || !reflect.DeepEqual(call.args[1:], want) {
+		t.Fatalf("expected Python script plus exact argv %v, got %v", want, call.args)
 	}
 }

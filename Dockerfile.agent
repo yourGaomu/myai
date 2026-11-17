@@ -63,8 +63,9 @@ COPY document_processor/ /app/document_processor/
 COPY skills/ /app/skills/
 
 RUN useradd --create-home --uid 10001 --shell /bin/bash myai \
-    && mkdir -p /app/resource /workspace \
-    && chown -R myai:myai /app /workspace /home/myai
+    && mkdir -p /app/resource /workspace /var/lib/myai/history /home/myai/.config/myai \
+    && chown -R myai:myai /app /workspace /home/myai /var/lib/myai \
+    && chmod 700 /home/myai/.config/myai
 
 USER myai
 

@@ -1,14 +1,21 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Fragment, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
-import { ButtonContent } from "../common/ButtonContent";
 import type { SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-import { formatDateTime } from "../../utils/format";
+import { formatShortTime } from "../../utils/format";
+import { groupSessionsByDate } from "../../utils/session";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { ConfirmModal } from "../common/ConfirmModal";
+import { useListStyles } from "../common/listStyles";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
   clientToken: string;
   deletedSessions: SessionSummary[];
+  mode?: "active" | "trash";
   onDeleteSession: (sessionID: string) => void;
   onNewSession: () => void;
   onRefreshDeletedSessions: () => void;
@@ -20,329 +27,214 @@ type Props = {
   unreadSessionIDs?: Record<string, boolean>;
 };
 
-export function SessionsPanel({
-  buttonFeedback,
-  clientToken,
-  deletedSessions,
-  onDeleteSession,
-  onNewSession,
-  onRefreshDeletedSessions,
-  onRestoreSession,
-  onSelectSession,
-  pendingSessions,
-  sessionID,
-  sessions,
-  unreadSessionIDs,
-}: Props) {
-  return (
-    <View style={[styles.panel, styles.sessionsPanel]}>
-      <View style={styles.sessionsHeader}>
-        <View>
-          <Text style={styles.sessionsTitle}>全部会话</Text>
-          <Text style={styles.pathText}>{sessions.length} 个会话</Text>
-        </View>
-        <Pressable
-          disabled={pendingSessions}
-          onPress={onNewSession}
-          style={({ pressed }) => buttonFeedback([styles.floatingNewButton, pendingSessions && styles.disabledButton], pressed)}
-        >
-          <ButtonContent loading={pendingSessions} text={pendingSessions ? "处理中" : "+"} />
-        </Pressable>
-      </View>
+// 全部对话（支持日期分组、搜索、二次确认删除）与独立回收站视图（一键还原）。
+export function SessionsPanel(props: Props) {
+  const { palette } = useAppTheme();
+  const list = useListStyles();
+  const styles = useThemedStyles(makeStyles);
+  const { clientToken, deletedSessions, mode = "active", pendingSessions, sessions } = props;
 
-      <View style={styles.sessionList}>
-        {pendingSessions ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color="#12100e" size="small" />
-            <Text style={styles.inlineLoadingText}>正在同步会话...</Text>
-          </View>
-        ) : null}
-        {sessions.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "还没有加载会话" : "请先完成配对"}</Text>
-        ) : (
-          sessions.map((session) => (
-            <View
-              key={session.id}
-              style={[styles.sessionListItem, session.id === sessionID && styles.sessionListItemActive]}
-            >
-              <Pressable
-                disabled={pendingSessions}
-                onPress={() => onSelectSession(session.id)}
-                style={({ pressed }) => buttonFeedback([styles.sessionMain, pendingSessions && styles.disabledButton], pressed)}
-              >
-                <View style={styles.sessionAvatar}>
-                  <Text style={styles.sessionAvatarText}>…</Text>
-                  {unreadSessionIDs?.[session.id] ? <View style={styles.unreadDot} /> : null}
-                </View>
-                <View style={styles.flex}>
-                  <Text numberOfLines={1} style={styles.sessionListTitle}>{session.title || "新对话"}</Text>
-                  <Text numberOfLines={1} style={styles.sessionListMeta}>
-                    {session.model || "model"} / {session.permission_mode || "permission"}
-                  </Text>
-                </View>
-                <Text numberOfLines={2} style={styles.sessionListTime}>{formatDateTime(session.updated_at || session.created_at)}</Text>
-              </Pressable>
-              <Pressable
-                disabled={pendingSessions}
-                onPress={() => onDeleteSession(session.id)}
-                style={({ pressed }) => buttonFeedback([styles.deleteButton, pendingSessions && styles.disabledButton], pressed)}
-              >
-                <Text style={styles.deleteButtonText}>删除</Text>
-              </Pressable>
-            </View>
-          ))
-        )}
-      </View>
+  const [query, setQuery] = useState("");
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState<SessionSummary | null>(null);
 
-      <View style={styles.recycleBox}>
-        <View style={styles.recycleHeader}>
-          <View>
-            <Text style={styles.recycleTitle}>回收站</Text>
-            <Text style={styles.pathText}>{deletedSessions.length} 个已删除会话</Text>
-          </View>
+  const liveSessions = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return sessions.filter((s) => !s.deleted && (!keyword || (s.title || "").toLowerCase().includes(keyword)));
+  }, [query, sessions]);
+
+  const groupedLive = useMemo(() => groupSessionsByDate(liveSessions), [liveSessions]);
+
+  if (mode === "trash") {
+    return (
+      <View>
+        <View style={styles.labelRow}>
+          <Text style={list.sectionLabel}>已移入回收站 · {deletedSessions.length}</Text>
           <Pressable
             disabled={pendingSessions || !clientToken}
-            onPress={onRefreshDeletedSessions}
-            style={({ pressed }) => buttonFeedback([styles.recycleButton, (pendingSessions || !clientToken) && styles.disabledButton], pressed)}
+            hitSlop={6}
+            onPress={props.onRefreshDeletedSessions}
+            style={[styles.refresh, (pendingSessions || !clientToken) && list.disabled]}
           >
-            <ButtonContent loading={pendingSessions} text="刷新" />
+            <Text style={list.textLink}>刷新</Text>
           </Pressable>
         </View>
         {deletedSessions.length === 0 ? (
-          <Text style={styles.emptyText}>{clientToken ? "没有已删除会话" : "请先完成配对"}</Text>
+          <View style={styles.emptyBox}>
+            <Feather color={palette.ink4} name="trash-2" size={28} />
+            <Text style={list.empty}>{clientToken ? "回收站是空的，删除的对话会暂存在这里" : "请先完成配对"}</Text>
+          </View>
         ) : (
-          deletedSessions.map((session) => (
-            <View key={session.id} style={styles.deletedItem}>
-              <View style={styles.flex}>
-                <Text numberOfLines={1} style={styles.deletedTitle}>{session.title || "新对话"}</Text>
-                <Text numberOfLines={1} style={styles.sessionListMeta}>
-                  删除于 {formatDateTime(session.deleted_at || session.updated_at || session.created_at)}
-                </Text>
-              </View>
-              <Pressable
-                disabled={pendingSessions}
-                onPress={() => onRestoreSession(session.id)}
-                style={({ pressed }) => buttonFeedback([styles.restoreButton, pendingSessions && styles.disabledButton], pressed)}
-              >
-                <Text style={styles.restoreButtonText}>恢复</Text>
-              </Pressable>
-            </View>
-          ))
+          <View style={list.bleed}>
+            {deletedSessions.map((session, index) => (
+              <Fragment key={session.id}>
+                {index > 0 ? <View style={styles.divider} /> : null}
+                <View style={list.row}>
+                  <View style={list.body}>
+                    <Text numberOfLines={1} style={[list.title, styles.deleted]}>
+                      {session.title?.trim() || "未命名对话"}
+                    </Text>
+                    <Text numberOfLines={1} style={list.sub}>
+                      删除于 {formatShortTime(session.deleted_at || session.updated_at || session.created_at) || "—"}
+                    </Text>
+                  </View>
+                  <Pressable
+                    disabled={pendingSessions}
+                    hitSlop={6}
+                    onPress={() => props.onRestoreSession(session.id)}
+                    style={({ pressed }) => [styles.restoreBtn, pressed && list.pressed, pendingSessions && list.disabled]}
+                  >
+                    <Feather color={palette.brandLight} name="rotate-ccw" size={14} />
+                    <Text style={list.textLink}>恢复</Text>
+                  </Pressable>
+                </View>
+              </Fragment>
+            ))}
+          </View>
         )}
       </View>
+    );
+  }
+
+  return (
+    <View>
+      <Pressable
+        disabled={pendingSessions}
+        onPress={props.onNewSession}
+        style={({ pressed }) => [list.secondaryButton, pressed && list.pressed, pendingSessions && list.disabled]}
+      >
+        <Feather color={palette.ink1} name="plus" size={18} />
+        <Text style={list.secondaryButtonText}>新对话</Text>
+      </Pressable>
+
+      <View style={styles.search}>
+        <Feather color={palette.ink3} name="search" size={16} />
+        <TextInput
+          onChangeText={setQuery}
+          placeholder="搜索全部对话标题…"
+          placeholderTextColor={palette.ink4}
+          style={styles.searchInput}
+          value={query}
+        />
+        {query ? (
+          <Pressable hitSlop={6} onPress={() => setQuery("")}>
+            <Feather color={palette.ink3} name="x" size={14} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.labelRow}>
+        <Text style={list.sectionLabel}>全部对话 · {liveSessions.length}</Text>
+        {pendingSessions ? <ActivityIndicator color={palette.ink3} size="small" /> : null}
+      </View>
+
+      {liveSessions.length === 0 ? (
+        <Text style={list.empty}>{clientToken ? (query ? "没有匹配的对话" : "还没有对话") : "请先完成配对"}</Text>
+      ) : null}
+
+      {groupedLive.map((group) => (
+        <Fragment key={group.label}>
+          <Text style={styles.groupHeader}>{group.label}</Text>
+          <View style={list.bleed}>
+            {group.sessions.map((session, index) => {
+              const current = session.id === props.sessionID;
+              return (
+                <Fragment key={session.id}>
+                  {index > 0 ? <View style={styles.divider} /> : null}
+                  <View style={[styles.row, current && styles.rowCurrent]}>
+                    <Pressable
+                      disabled={pendingSessions}
+                      onPress={() => props.onSelectSession(session.id)}
+                      style={({ pressed }) => [styles.main, pressed && list.pressed]}
+                    >
+                      {current ? <View style={styles.bar} /> : null}
+                      <View style={list.body}>
+                        <Text numberOfLines={1} style={[list.title, current && list.titleStrong]}>
+                          {session.title?.trim() || "未命名对话"}
+                        </Text>
+                        <Text numberOfLines={1} style={list.sub}>
+                          {formatShortTime(session.updated_at || session.created_at) || "—"}
+                        </Text>
+                      </View>
+                      {props.unreadSessionIDs?.[session.id] ? <View style={styles.unread} /> : null}
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="删除对话"
+                      disabled={pendingSessions}
+                      hitSlop={4}
+                      onPress={() => setConfirmDeleteSession(session)}
+                      style={({ pressed }) => [styles.trash, pressed && list.pressed]}
+                    >
+                      <Feather color={palette.ink3} name="trash-2" size={17} />
+                    </Pressable>
+                  </View>
+                </Fragment>
+              );
+            })}
+          </View>
+        </Fragment>
+      ))}
+
+      <ConfirmModal
+        confirmLabel="移入回收站"
+        danger
+        icon="trash-2"
+        message={`确定删除「${confirmDeleteSession?.title?.trim() || "未命名对话"}」吗？之后仍可在侧栏「回收站」中恢复。`}
+        onCancel={() => setConfirmDeleteSession(null)}
+        onConfirm={() => {
+          if (confirmDeleteSession) {
+            props.onDeleteSession(confirmDeleteSession.id);
+          }
+          setConfirmDeleteSession(null);
+        }}
+        title="移入回收站"
+        visible={Boolean(confirmDeleteSession)}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 4,
-    elevation: 2,
-    gap: 10,
-    padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
-  },
-  sessionsPanel: {
-    minHeight: 420,
-  },
-  sessionsHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-  },
-  sessionsTitle: {
-    color: "#12100e",
-    fontSize: 28,
-    fontWeight: "900",
-  },
-  pathText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 3,
-  },
-  floatingNewButton: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    height: 48,
-    justifyContent: "center",
-    minWidth: 58,
-    paddingHorizontal: 12,
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  sessionList: {
-    gap: 4,
-  },
-  inlineLoading: {
-    alignItems: "center",
-    backgroundColor: "#fff4cc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-  },
-  inlineLoadingText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  sessionListItem: {
-    alignItems: "center",
-    borderBottomColor: "#d8ccb9",
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    paddingVertical: 8,
-  },
-  sessionListItemActive: {
-    backgroundColor: "#fff4cc",
-  },
-  sessionMain: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 12,
-    minWidth: 0,
-    paddingVertical: 6,
-  },
-  sessionAvatar: {
-    alignItems: "center",
-    backgroundColor: "#f5f1e9",
-    borderColor: "#4fd7ee",
-    borderRadius: 34,
-    borderWidth: 3,
-    height: 54,
-    justifyContent: "center",
-    width: 54,
-  },
-  sessionAvatarText: {
-    color: "#12100e",
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  sessionListTitle: {
-    color: "#12100e",
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  sessionListMeta: {
-    color: "#6c665f",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  sessionListTime: {
-    color: "#6c665f",
-    fontSize: 12,
-    maxWidth: 92,
-    textAlign: "right",
-  },
-  deleteButton: {
-    alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: 10,
-  },
-  deleteButtonText: {
-    color: "#a3342f",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  recycleBox: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 8,
-    marginTop: 8,
-    padding: 10,
-  },
-  recycleHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-between",
-  },
-  recycleTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  recycleButton: {
-    alignItems: "center",
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: 10,
-  },
-  deletedItem: {
-    alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  deletedTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  restoreButton: {
-    alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: 10,
-  },
-  restoreButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  flex: {
-    flex: 1,
-    minWidth: 0,
-  },
-  emptyText: {
-    color: "#6c665f",
-  },
-  unreadDot: {
-    backgroundColor: "#ff4d4f",
-    borderColor: "#ffffff",
-    borderRadius: 5,
-    borderWidth: 1.5,
-    height: 10,
-    position: "absolute",
-    right: -2,
-    top: -2,
-    width: 10,
-  },
-});
+const makeStyles = ({ palette }: AppTheme) =>
+  StyleSheet.create({
+    search: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 8,
+      height: 40,
+      marginTop: 12,
+      paddingHorizontal: 12,
+    },
+    searchInput: { color: palette.ink1, flex: 1, fontSize: font.label, padding: 0 },
+    labelRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
+    groupHeader: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+      marginBottom: 4,
+      marginTop: 10,
+    },
+    row: { alignItems: "center", flexDirection: "row" },
+    rowCurrent: { backgroundColor: palette.surface1 },
+    main: { alignItems: "center", flex: 1, flexDirection: "row", gap: 10, minHeight: 58, paddingLeft: 16, paddingRight: 4 },
+    bar: { backgroundColor: palette.brand, borderRadius: radius.xxs, height: 18, marginLeft: -8, width: 3 },
+    unread: { backgroundColor: palette.brand, borderRadius: radius.pill, height: 7, width: 7 },
+    trash: { alignItems: "center", borderRadius: radius.pill, height: 44, justifyContent: "center", marginRight: 6, width: 44 },
+    divider: { backgroundColor: palette.hairline, height: 1, marginLeft: 16 },
+    refresh: { justifyContent: "center", minHeight: 32, paddingTop: 12 },
+    deleted: { color: palette.ink2 },
+    emptyBox: { alignItems: "center", gap: 8, paddingTop: 40 },
+    restoreBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 5,
+      minHeight: 32,
+      paddingHorizontal: 11,
+    },
+  });

@@ -44,6 +44,7 @@ var _ subagentport.TaskEventSequenceRepository = (*Repository)(nil)
 var _ subagentport.TaskEventSequenceInitializer = (*Repository)(nil)
 var _ subagentport.AgentMessageRepository = (*Repository)(nil)
 var _ subagentport.ParentCompletionMessageRepository = (*Repository)(nil)
+var _ subagentport.ParentCompletionContentRepository = (*Repository)(nil)
 var _ subagentport.ChildAgentMessageRepository = (*Repository)(nil)
 var _ subagentport.AgentExecutionLeaseStore = (*Repository)(nil)
 var _ subagentport.LeaseGuardedTaskRunRepository = (*Repository)(nil)
@@ -664,7 +665,9 @@ func (repository *Repository) EnqueueParentCompletion(ctx context.Context, taskI
 		if err != nil {
 			return nil, err
 		}
-		if !task.Terminal() || (message.Kind == domainsubagent.AgentMessageKindTaskResult && task.Status != domainsubagent.TaskStatusSucceeded) ||
+		if message.SourceTaskID != task.ID || message.RecipientAgentID != task.ParentSessionID ||
+			message.ID != domainsubagent.AgentResultMessageID(task.ID, task.CurrentRunID) ||
+			!task.Terminal() || (message.Kind == domainsubagent.AgentMessageKindTaskResult && task.Status != domainsubagent.TaskStatusSucceeded) ||
 			(message.Kind == domainsubagent.AgentMessageKindTaskError && task.Status != domainsubagent.TaskStatusFailed) {
 			return nil, subagentport.ErrTaskStateConflict
 		}
@@ -686,6 +689,39 @@ func (repository *Repository) EnqueueParentCompletion(ctx context.Context, taskI
 		return nil, nil
 	})
 	return saved, err
+}
+
+func (repository *Repository) BoundParentCompletion(ctx context.Context, messageID string) (domainsubagent.AgentMessage, error) {
+	message, err := repository.GetAgentMessage(ctx, messageID)
+	if err != nil {
+		return domainsubagent.AgentMessage{}, err
+	}
+	bounded, err := domainsubagent.BoundParentCompletionMessage(message)
+	if err != nil {
+		return domainsubagent.AgentMessage{}, err
+	}
+	if bounded.Content == message.Content {
+		return message, nil
+	}
+	result, err := repository.template.UpdateOne(ctx, messagesCollection, bson.M{
+		"_id": message.ID, "content": message.Content,
+	}, bson.M{"$set": bson.M{"content": bounded.Content}})
+	if err != nil {
+		return domainsubagent.AgentMessage{}, err
+	}
+	if result.MatchedCount == 0 {
+		// A concurrent deterministic upgrade is successful, but a different
+		// payload under the same source identity must never be substituted.
+		current, err := repository.GetAgentMessage(ctx, messageID)
+		if err != nil {
+			return domainsubagent.AgentMessage{}, err
+		}
+		if current.Content != bounded.Content {
+			return domainsubagent.AgentMessage{}, subagentport.ErrTaskStateConflict
+		}
+		return current, nil
+	}
+	return repository.GetAgentMessage(ctx, messageID)
 }
 
 func (repository *Repository) ClaimParentCompletion(ctx context.Context, messageID, ownerID string, now time.Time, ttl time.Duration) (domainsubagent.AgentMessage, error) {
@@ -727,12 +763,64 @@ func (repository *Repository) ReleaseParentCompletion(ctx context.Context, messa
 }
 
 func (repository *Repository) CompleteParentCompletion(ctx context.Context, messageID, ownerID string, deliveredAt time.Time) error {
+	if repository == nil || repository.database == nil {
+		return errors.New("mongo subagent database is nil")
+	}
+	session, err := repository.database.Client().StartSession()
+	if err != nil {
+		return err
+	}
+	defer session.EndSession(context.Background())
+	_, err = session.WithTransaction(ctx, func(transactionContext context.Context) (any, error) {
+		return nil, repository.completeParentCompletion(transactionContext, messageID, ownerID, deliveredAt)
+	})
+	return err
+}
+
+// Called only inside the transaction: a task write failure rolls the message
+// delivery back as well, so retrying never loses the unread projection.
+func (repository *Repository) completeParentCompletion(ctx context.Context, messageID, ownerID string, deliveredAt time.Time) error {
+	message, err := repository.GetAgentMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	if message.Status == domainsubagent.AgentMessageDelivered {
+		return nil
+	}
+	if message.Status != domainsubagent.AgentMessageDelivering || message.ClaimOwnerID != ownerID ||
+		message.ClaimExpiresAt == nil || !message.ClaimExpiresAt.After(deliveredAt) {
+		return subagentport.ErrTaskStateConflict
+	}
 	result, err := repository.template.UpdateOne(ctx, messagesCollection, bson.M{
-		"_id": strings.TrimSpace(messageID), "status": string(domainsubagent.AgentMessageDelivering), "claim_owner_id": ownerID,
+		"_id": message.ID, "status": string(domainsubagent.AgentMessageDelivering), "claim_owner_id": ownerID,
+		"claim_expires_at": bson.M{"$gt": deliveredAt},
 	}, bson.M{
 		"$set":   bson.M{"status": string(domainsubagent.AgentMessageDelivered), "delivered_at": deliveredAt},
 		"$unset": bson.M{"claim_owner_id": "", "claim_expires_at": ""},
 	})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return subagentport.ErrTaskStateConflict
+	}
+	if message.SourceTaskID == "" {
+		return nil
+	}
+	task, err := repository.GetTask(ctx, message.SourceTaskID)
+	if errors.Is(err, subagentport.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !task.Unread || !domainsubagent.CompletionMessageMatchesResult(message, task) {
+		return nil
+	}
+	result, err = repository.template.UpdateOne(ctx, tasksCollection, bson.M{
+		"_id": task.ID, "current_run_id": task.CurrentRunID, "updated_at": task.UpdatedAt,
+		"status": string(task.Status), "unread": true,
+	}, bson.M{"$set": bson.M{"unread": false, "updated_at": deliveredAt}})
 	if err != nil {
 		return err
 	}

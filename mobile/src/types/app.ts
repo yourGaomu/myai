@@ -1,4 +1,5 @@
 export type PermissionState = {
+  approvalID: string;
   requestID: string;
   sessionID: string;
   name: string;
@@ -16,10 +17,19 @@ export type UserQuestionState = {
   submitted?: boolean;
 };
 
-export type SessionPermissionMode = "readonly" | "ask" | "full";
+export type SessionPermissionMode = "readonly" | "ask" | "read_write" | "execute" | "full";
 export type SessionAgentMode = "chat" | "plan";
 
-export type ViewMode = "chat" | "knowledge" | "files" | "changes" | "changeDetail" | "sessions" | "settings" | "plan";
+export type ViewMode =
+  | "chat"
+  | "knowledge"
+  | "files"
+  | "changes"
+  | "changeDetail"
+  | "sessions"
+  | "trash"
+  | "settings"
+  | "plan";
 
 export type PendingAction =
   | "connect"

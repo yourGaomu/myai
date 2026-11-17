@@ -3,8 +3,6 @@ package history
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"strings"
 
 	domainhistory "myai/core/domain/history"
 	historyport "myai/core/port/history"
@@ -44,15 +42,7 @@ func NewRecorderWithStore(workspace string, store historyport.Store) (*Recorder,
 	if store == nil {
 		return nil, errors.New("history store is nil")
 	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		workspace = "."
-	}
-	abs, err := filepath.Abs(workspace)
-	if err != nil {
-		return nil, err
-	}
-	abs, err = filepath.EvalSymlinks(abs)
+	abs, err := cleanWorkspace(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -74,11 +64,14 @@ func (r *Recorder) RecordFileChange(ctx context.Context, path string, before *do
 		return "", err
 	}
 
-	rel, abs, err := r.cleanPath(path)
+	rel, _, err := r.cleanPath(path)
 	if err != nil {
 		return "", err
 	}
-	after, exists, err := SnapshotFile(abs, rel)
+	if shouldSkipSnapshotPath(rel) || (before != nil && shouldSkipSnapshotPath(before.Path)) {
+		return "", nil
+	}
+	after, exists, err := snapshotWorkspacePath(r.workspace, rel)
 	if err != nil {
 		return "", err
 	}
@@ -112,11 +105,11 @@ func (r *Recorder) SnapshotPath(path string) (*domainhistory.FileSnapshot, error
 		return nil, nil
 	}
 
-	rel, abs, err := r.cleanPath(path)
+	rel, _, err := r.cleanPath(path)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, exists, err := SnapshotFile(abs, rel)
+	snapshot, exists, err := snapshotWorkspacePath(r.workspace, rel)
 	if err != nil || !exists {
 		return nil, err
 	}

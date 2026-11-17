@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -47,6 +48,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		return generationresult.GenerationResponse{}, fmt.Errorf("response committer is nil")
 	}
 
+	command.Session = session.Clone(command.Session)
 	model := s.Models.GetModel(command.Session.Model)
 	if model == nil {
 		return generationresult.GenerationResponse{}, fmt.Errorf("model not found: %s", command.Session.Model)
@@ -67,32 +69,45 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 			compactInfo = info
 		}
 	}
+	modelWindowTokens := 0
+	if s.ModelMetadata != nil {
+		if info, ok := s.ModelMetadata.GetModelInfo(command.Session.Model); ok {
+			modelWindowTokens = info.ContextWindowTokens
+		}
+	}
 	result, err := s.AgentRunner.Run(ctx, generationcommand.Run{
 		Model: model, Session: command.Session, Stream: command.Stream,
-		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode,
+		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode, Internal: command.Internal, ModelWindowTokens: modelWindowTokens,
 		Settings:           settings,
 		EnvironmentContext: environmentContextPrompt(s.now(), command.Session.WorkspaceRoot),
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
 	}
-	// 模型成功返回后先提交内存状态，再异步保存 assistant 消息和当前会话指针。
+	// Preserve the completed answer in memory before accepting its durable write.
 	commitResult, err := s.ResponseCommitter.Commit(generationcommand.Commit{
 		Session: command.Session, LatestInput: command.LatestInput, Result: result, CapturePlan: command.CapturePlan,
 		Internal: command.Internal,
 	})
-	if err != nil {
-		return generationresult.GenerationResponse{}, err
+	if err != nil && commitResult.Session == nil {
+		return generationresult.GenerationResponse{SessionID: command.Session.ID, Result: result}, err
 	}
-	if s.Persistence != nil {
-		if !command.Internal {
+	if commitResult.Session != nil {
+		command.Session = commitResult.Session
+	}
+	if s.Persistence != nil && !command.Internal {
+		if durable, ok := s.Persistence.(generationport.DurablePersistence); ok {
+			if persistErr := durable.AcceptAssistant(ctx, command.Session, result); persistErr != nil {
+				err = errors.Join(err, fmt.Errorf("accept assistant persistence: %w", persistErr))
+			}
+		} else {
 			s.Persistence.PersistAssistant(command.Session, result)
 		}
 	}
 	return generationresult.GenerationResponse{
 		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),
 		Compact: compactInfo, Plan: commitResult.Plan,
-	}, nil
+	}, err
 }
 
 func (s AssistantGenerationService) resolveGenerationSettings(current *session.Session) (generation.ResolvedSettings, error) {

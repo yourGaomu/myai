@@ -81,28 +81,26 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 			slots[index] = s.skippedCall(command, call, index, createdAt)
 		}
 	} else {
-		var wg sync.WaitGroup
-		var exclusive sync.RWMutex
+		var reads sync.WaitGroup
 		for index, call := range command.Calls {
 			if strings.TrimSpace(call.Name) == "" {
 				slots[index].skip = true
 				continue
 			}
-			wg.Add(1)
+			if s.lookupPermission(call.Name) != tooldef.PermissionRead {
+				// A state-changing call is a boundary between consecutive read groups.
+				// Run it here so execution and approval follow the model's order.
+				reads.Wait()
+				slots[index] = s.executeOne(ctx, command, call, index, createdAt)
+				continue
+			}
+			reads.Add(1)
 			go func(index int, call domainmessage.ToolCall) {
-				defer wg.Done()
-				permission := s.lookupPermission(call.Name)
-				if permission == tooldef.PermissionRead {
-					exclusive.RLock()
-					defer exclusive.RUnlock()
-				} else {
-					exclusive.Lock()
-					defer exclusive.Unlock()
-				}
+				defer reads.Done()
 				slots[index] = s.executeOne(ctx, command, call, index, createdAt)
 			}(index, call)
 		}
-		wg.Wait()
+		reads.Wait()
 	}
 
 	result := toolresult.Execution{
@@ -158,7 +156,8 @@ func (s ExecutionService) lookupPermission(name string) tooldef.Permission {
 	if err != nil {
 		return tooldef.PermissionExecute
 	}
-	return tooldef.NormalizePermission(registered.Permission())
+	// Only tools that explicitly declare read permission may join a read group.
+	return registered.Permission()
 }
 
 func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Execution, call domainmessage.ToolCall, index int, createdAt time.Time) callExecution {
@@ -206,6 +205,22 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		return s.finishedCall(ctx, command, call, permission, output, nil, entries, resultCreatedAt)
 	}
 
+	if !tooldef.PermissionAllowsCeiling(permission, command.PermissionCeiling) {
+		message := fmt.Sprintf("permission denied: inherited capabilities do not allow tool %s requiring %s", call.Name, permission)
+		output := domaintool.FailedOutput(domaintool.ResultStatusDenied, "permission_ceiling_denied", message)
+		return s.finishedCall(ctx, command, call, permission, output, nil, entries, resultCreatedAt)
+	}
+
+	// Validate the final Hook rewrite against this tool's schema before asking
+	// for permission or passing it to the tool. Older calls without a rewrite
+	// retain their tool-specific argument handling.
+	if strings.TrimSpace(hookResult.Arguments) != "" {
+		if err := validateToolArguments(registeredTool.Schema(), call.Arguments); err != nil {
+			output := domaintool.FailedOutput(domaintool.ResultStatusFailed, "tool_arguments_invalid", "tool arguments: "+err.Error())
+			return s.finishedCall(ctx, command, call, permission, output, err, entries, resultCreatedAt)
+		}
+	}
+
 	// 1.1 权限服务保持通用；在调用边界补充身份，避免同名工具的询问混淆。
 	ask := command.Callbacks.OnToolAsk
 	if ask != nil {
@@ -224,7 +239,7 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 	output := domaintool.ToolOutput{}
 	var toolErr error
 	if permissionDecision.Allowed {
-		output, toolErr = registeredTool.Call(ctx, []byte(call.Arguments))
+		output, toolErr = callTool(ctx, registeredTool, call)
 	} else {
 		output = domaintool.FailedOutput(domaintool.ResultStatusDenied, "permission_denied", permissionDecision.Message)
 	}
@@ -232,6 +247,30 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		output = outputForError(ctx, toolErr)
 	}
 	return s.finishedCall(ctx, command, call, permission, output.Normalized(), toolErr, entries, resultCreatedAt)
+}
+
+type toolCallPanicError struct {
+	name  string
+	value any
+}
+
+func (err *toolCallPanicError) Error() string {
+	return fmt.Sprintf("tool %s panicked: %v", err.name, err.value)
+}
+
+// callTool isolates extension code only. Hooks, callbacks, assets and durable
+// state failures must remain visible to their callers.
+func callTool(ctx context.Context, registered tooldef.Tool, call domainmessage.ToolCall) (output domaintool.ToolOutput, err error) {
+	returned := false
+	defer func() {
+		if !returned {
+			err = &toolCallPanicError{name: call.Name, value: recover()}
+			output = domaintool.ToolOutput{}
+		}
+	}()
+	output, err = registered.Call(ctx, []byte(call.Arguments))
+	returned = true
+	return
 }
 
 func toolAllowedForExecution(ctx context.Context, command toolcommand.Execution, name string, registered tooldef.Tool) bool {
@@ -315,7 +354,10 @@ func allowsExecutionInMode(permission tooldef.Permission, agentMode session.Agen
 func outputForError(ctx context.Context, err error) domaintool.ToolOutput {
 	status := domaintool.ResultStatusFailed
 	code := "tool_failed"
-	if errors.Is(err, context.DeadlineExceeded) {
+	var panicErr *toolCallPanicError
+	if errors.As(err, &panicErr) {
+		code = "tool_panic"
+	} else if errors.Is(err, context.DeadlineExceeded) {
 		status = domaintool.ResultStatusTimeout
 		code = "tool_timeout"
 	} else if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {

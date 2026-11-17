@@ -293,6 +293,8 @@ func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
 			ModelName: model.ModelName,
 			Enabled:   model.Enabled,
 			IsDefault: model.IsDefault,
+			ContextWindowTokens: model.ContextWindowTokens,
+			MaxOutputTokens: model.MaxOutputTokens,
 			Defaults:  generationSettingsPayload(model.DefaultGenerationSettings),
 		})
 	}

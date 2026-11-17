@@ -1,374 +1,233 @@
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
-import type { SessionAgentMode, ViewMode } from "../../types/app";
-import type { ButtonFeedback } from "../../types/ui";
+import { font, radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import type { AgentActivity } from "../../utils/agentActivity";
+import { activityStatusLabel, activityToMotionSlot } from "../../utils/motionRegistry";
+import { CharacterAvatar } from "../common/CharacterAvatar";
+import { HeaderIconButton } from "./ScreenHeader";
+
+type Tone = "ok" | "busy" | "wait" | "off";
 
 type Props = {
   activity: AgentActivity;
-  buttonFeedback: ButtonFeedback;
+  busy: boolean;
   connected: boolean;
   deviceID: string;
-  isBusy: boolean;
-  mode?: SessionAgentMode;
-  modePending?: boolean;
-  onOpenHistory?: () => void;
-  onOpenMenu?: () => void;
-  onQuickNew?: () => void;
-  onToggleMode?: (nextMode: SessionAgentMode) => void;
-  onToggleSettings: () => void;
+  emptyHome: boolean;
+  nearHeader: boolean;
+  onNewSession: () => void;
+  onOpenMenu: () => void;
+  onOpenSession: () => void;
+  planMode: boolean;
   status: string;
-  userID: string;
-  viewMode: ViewMode;
+  title: string;
+  topInset: number;
+  waiting: boolean;
 };
 
+// 把 Relay 连接状态翻译成一句人话。
+export function describeConnection(status: string, connected: boolean, deviceID: string): { label: string; tone: Tone } {
+  const device = deviceID.trim() || "电脑";
+  if (connected) return { label: `${device} · 在线`, tone: "ok" };
+  if (/pairing/i.test(status)) return { label: "正在配对…", tone: "wait" };
+  if (/reconnect/i.test(status)) return { label: `重连中 · ${device}`, tone: "wait" };
+  if (/connecting|restoring/i.test(status)) return { label: `正在连接 ${device}…`, tone: "wait" };
+  return { label: `${device} · 离线`, tone: "off" };
+}
+
+// 对话页悬浮顶栏：透明穿透手势；空首页显示简洁在线胶囊，有对话时中间显示悬浮角色状态岛，
+// 聊天内容滚动接近顶部时自动平滑半透明化 (opacity: 0.26) 以免遮挡消息阅读。
 export function AppHeader({
   activity,
-  buttonFeedback,
+  busy,
   connected,
   deviceID,
-  isBusy,
-  mode = "chat",
-  modePending = false,
-  onOpenHistory,
+  emptyHome,
+  nearHeader,
+  onNewSession,
   onOpenMenu,
-  onQuickNew,
-  onToggleMode,
-  onToggleSettings,
+  onOpenSession,
+  planMode,
   status,
-  userID,
-  viewMode,
+  title,
+  topInset,
+  waiting,
 }: Props) {
-  const frames = activity === "tool" ? workingFrames : thinkingFrames;
-  const animated = activity === "thinking" || activity === "tool" || activity === "permission" || activity === "uploading";
-  const [frame, setFrame] = useState(0);
+  const theme = useAppTheme();
+  const styles = useThemedStyles(makeStyles);
+  const { palette } = theme;
+
+  const base = describeConnection(status, connected, deviceID);
+  const { label, tone } = !connected
+    ? base
+    : waiting
+      ? { label: "待确认", tone: "wait" as Tone }
+      : busy
+        ? { label: activityStatusLabel(activity), tone: "busy" as Tone }
+        : planMode
+          ? { label: "规划模式", tone: "ok" as Tone }
+          : { label: "已就绪", tone: "ok" as Tone };
+
+  const islandOpacity = useRef(new Animated.Value(nearHeader && !emptyHome ? 0.26 : 1)).current;
 
   useEffect(() => {
-    setFrame(0);
-    if (!animated) {
-      return;
-    }
-    const timer = setInterval(() => setFrame((current) => (current + 1) % frames.length), 100);
-    return () => clearInterval(timer);
-  }, [animated, frames.length]);
+    const targetOpacity = nearHeader && !emptyHome ? 0.26 : 1;
+    Animated.timing(islandOpacity, {
+      duration: 210,
+      easing: Easing.out(Easing.cubic),
+      toValue: targetOpacity,
+      useNativeDriver: true,
+    }).start();
+  }, [emptyHome, islandOpacity, nearHeader]);
 
-  const activityText = activityLabel(activity);
-  const statusText = activityText || (isBusy ? "处理中" : connected ? "在线" : "离线");
+  const dotColor =
+    tone === "off"
+      ? palette.err
+      : tone === "wait"
+        ? palette.warn
+        : tone === "busy"
+          ? activity === "subagent"
+            ? palette.info
+            : palette.brandLight
+          : palette.ok;
 
-  const handleToggleMode = () => {
-    if (onToggleMode && !modePending) {
-      onToggleMode(mode === "chat" ? "plan" : "chat");
-    }
-  };
+  const motionSlot = activityToMotionSlot(activity);
 
   return (
-    <View style={styles.header}>
-      {/* 左侧：菜单按钮，呼出侧边抽屉（收纳设置与工作区，借鉴图四） */}
-      <Pressable
-        accessibilityLabel="打开导航菜单"
-        onPress={onOpenMenu}
-        style={({ pressed }) =>
-          buttonFeedback(styles.actionButton, pressed)
-        }
-      >
-        <Text style={styles.actionButtonText}>☰</Text>
-      </Pressable>
+    <View pointerEvents="box-none" style={[styles.root, { paddingTop: topInset + 4 }]}>
+      <View pointerEvents="box-none" style={styles.row}>
+        <HeaderIconButton accessibilityLabel="打开侧栏" glassy icon="menu" onPress={onOpenMenu} />
 
-      {/* 中上方：动作角色与状态浮岛（半透明玻璃拟态，借鉴图三 Muse） */}
-      <View style={styles.characterIsland}>
-        {/* 头像突出在上 */}
-        <View style={styles.avatarWrap}>
-          <Image
-            accessibilityLabel={activityText ? `MYAI ${activityText}` : "MYAI 头像"}
-            source={animated ? frames[frame] : require("../../../assets/icon.png")}
-            style={[styles.avatarImage, animated && styles.motionImage]}
-          />
-        </View>
-
-        {/* 角色名与设备徽章 */}
-        <View style={styles.identityRow}>
-          <Text style={styles.identityName}>MYAI</Text>
-          {connected ? (
-            <View style={styles.deviceBadge}>
-              <Text numberOfLines={1} style={styles.deviceBadgeText}>
-                {deviceID.trim() || "pc-local"}
+        <Animated.View pointerEvents="box-none" style={[styles.centerWrap, { opacity: islandOpacity }]}>
+          {emptyHome ? (
+            <Pressable
+              accessibilityLabel="会话与设备设置"
+              accessibilityRole="button"
+              onPress={onOpenSession}
+              style={({ pressed }) => [styles.homePill, pressed && styles.pressed]}
+            >
+              <View style={[styles.dot, { backgroundColor: dotColor }]} />
+              <Text numberOfLines={1} style={styles.homePillText}>
+                {connected ? `${deviceID.trim() || "本机"} · 在线` : base.label}
               </Text>
-            </View>
-          ) : null}
-        </View>
-
-        {/* 状态与紧凑模式切换胶囊 (将原占地巨大的模式条缩进此处) */}
-        <View style={styles.statusModeCapsule}>
-          {animated || isBusy ? (
-            <ActivityIndicator color="#12100e" size="small" style={styles.inlineSpinner} />
+              <Feather color={palette.ink3} name="chevron-down" size={13} />
+            </Pressable>
           ) : (
-            <View
-              style={[
-                styles.statusDot,
-                connected ? styles.statusDotOnline : styles.statusDotOffline,
-              ]}
-            />
+            <Pressable
+              accessibilityLabel={`${title}，点击管理会话`}
+              accessibilityRole="button"
+              onPress={onOpenSession}
+              style={({ pressed }) => [styles.heroIsland, pressed && styles.pressed]}
+            >
+              <View style={styles.avatarContainer}>
+                <CharacterAvatar
+                  accessibilityLabel={label}
+                  height={52}
+                  size={52}
+                  slot={motionSlot}
+                  variant="full"
+                />
+              </View>
+              <View style={styles.statusPill}>
+                <View style={[styles.dot, { backgroundColor: dotColor }]} />
+                <Text numberOfLines={1} style={styles.statusText}>
+                  {label}
+                </Text>
+                <Feather color={palette.ink3} name="chevron-down" size={11} />
+              </View>
+            </Pressable>
           )}
-          <Text style={styles.statusLabel}>{statusText}</Text>
+        </Animated.View>
 
-          {/* 模式切换药丸 */}
-          {connected ? (
-            <>
-              <Text style={styles.dotDivider}>·</Text>
-              <Pressable
-                accessibilityLabel="切换会话模式"
-                disabled={modePending}
-                onPress={handleToggleMode}
-                style={({ pressed }) =>
-                  buttonFeedback(
-                    [
-                      styles.modePill,
-                      mode === "plan" && styles.modePillPlan,
-                    ],
-                    pressed,
-                  )
-                }
-              >
-                {modePending ? (
-                  <ActivityIndicator color="#12100e" size="small" />
-                ) : (
-                  <>
-                    <Text style={styles.modePillText}>
-                      {mode === "plan" ? "🎯 规划模式" : "💬 对话模式"}
-                    </Text>
-                    <Text style={styles.modeDropdownArrow}>▾</Text>
-                  </>
-                )}
-              </Pressable>
-            </>
-          ) : null}
+        <View pointerEvents="box-none" style={styles.rightCluster}>
+          <HeaderIconButton accessibilityLabel="新对话" glassy icon="edit" onPress={onNewSession} />
         </View>
-      </View>
-
-      {/* 右侧：对话历史快捷跳转与设置按钮 */}
-      <View style={styles.rightActions}>
-        {onOpenHistory ? (
-          <Pressable
-            accessibilityLabel="对话历史快捷跳转"
-            onPress={onOpenHistory}
-            style={({ pressed }) => buttonFeedback(styles.actionButton, pressed)}
-          >
-            <Text style={styles.actionButtonText}>🕒</Text>
-          </Pressable>
-        ) : null}
-        <Pressable
-          accessibilityLabel="打开设置"
-          onPress={onToggleSettings}
-          style={({ pressed }) =>
-            buttonFeedback(
-              [styles.actionButton, viewMode === "settings" && styles.actionButtonActive],
-              pressed,
-            )
-          }
-        >
-          <Text style={styles.actionButtonText}>⚙</Text>
-        </Pressable>
       </View>
     </View>
   );
 }
 
-const workingFrames = [
-  require("../../../assets/loading/character-01.png"),
-  require("../../../assets/loading/character-02.png"),
-  require("../../../assets/loading/character-03.png"),
-  require("../../../assets/loading/character-04.png"),
-  require("../../../assets/loading/character-05.png"),
-  require("../../../assets/loading/character-06.png"),
-  require("../../../assets/loading/character-07.png"),
-  require("../../../assets/loading/character-08.png"),
-  require("../../../assets/loading/character-09.png"),
-  require("../../../assets/loading/character-10.png"),
-];
-
-const thinkingFrames = [
-  require("../../../assets/loading/thinking/character-01.png"),
-  require("../../../assets/loading/thinking/character-02.png"),
-  require("../../../assets/loading/thinking/character-03.png"),
-  require("../../../assets/loading/thinking/character-04.png"),
-  require("../../../assets/loading/thinking/character-05.png"),
-  require("../../../assets/loading/thinking/character-06.png"),
-  require("../../../assets/loading/thinking/character-07.png"),
-  require("../../../assets/loading/thinking/character-08.png"),
-  require("../../../assets/loading/thinking/character-09.png"),
-  require("../../../assets/loading/thinking/character-10.png"),
-];
-
-function activityLabel(activity: AgentActivity) {
-  switch (activity) {
-    case "thinking": return "正在思考...";
-    case "tool": return "调用工具...";
-    case "permission": return "等待确认...";
-    case "uploading": return "上传中...";
-    default: return "";
-  }
-}
-
-const styles = StyleSheet.create({
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    zIndex: 30,
-  },
-  actionButton: {
-    alignItems: "center",
-    backgroundColor: "rgba(255, 253, 247, 0.9)",
-    borderColor: "#12100e",
-    borderRadius: 20,
-    borderWidth: 2,
-    elevation: 3,
-    height: 40,
-    justifyContent: "center",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    width: 40,
-  },
-  actionButtonActive: {
-    backgroundColor: "#ffd84f",
-  },
-  actionButtonText: {
-    color: "#12100e",
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  rightActions: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  characterIsland: {
-    alignItems: "center",
-    backgroundColor: "rgba(255, 253, 247, 0.92)",
-    borderColor: "#12100e",
-    borderRadius: 24,
-    borderWidth: 2,
-    elevation: 3,
-    flexShrink: 1,
-    paddingBottom: 6,
-    paddingHorizontal: 14,
-    paddingTop: 4,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  avatarWrap: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 18,
-    borderWidth: 2,
-    elevation: 2,
-    height: 36,
-    marginTop: -14,
-    overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 1, height: 1 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    width: 36,
-  },
-  avatarImage: {
-    height: "100%",
-    width: "100%",
-  },
-  motionImage: {
-    transform: [{ scale: 1.05 }],
-  },
-  identityRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 5,
-    marginTop: 2,
-  },
-  identityName: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-    letterSpacing: -0.2,
-  },
-  deviceBadge: {
-    backgroundColor: "#f0ebe1",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1,
-    maxWidth: 95,
-    paddingHorizontal: 4,
-    paddingVertical: 0.5,
-  },
-  deviceBadgeText: {
-    color: "#12100e",
-    fontSize: 9,
-    fontWeight: "900",
-  },
-  statusModeCapsule: {
-    alignItems: "center",
-    backgroundColor: "#f5eee2",
-    borderColor: "#d8cfbf",
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 4,
-    marginTop: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  inlineSpinner: {
-    marginRight: 2,
-  },
-  statusDot: {
-    borderRadius: 4,
-    height: 6,
-    width: 6,
-  },
-  statusDotOnline: {
-    backgroundColor: "#2e8b38",
-  },
-  statusDotOffline: {
-    backgroundColor: "#ff7f68",
-  },
-  statusLabel: {
-    color: "#12100e",
-    fontSize: 10.5,
-    fontWeight: "800",
-  },
-  dotDivider: {
-    color: "#999083",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  modePill: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-  },
-  modePillPlan: {
-    backgroundColor: "#4fd7ee",
-  },
-  modePillText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  modeDropdownArrow: {
-    color: "#12100e",
-    fontSize: 8,
-    fontWeight: "900",
-    marginTop: -1,
-  },
-});
+const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    root: {
+      backgroundColor: "transparent",
+      paddingBottom: 4,
+      paddingHorizontal: 12,
+    },
+    row: {
+      alignItems: "flex-start",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      minHeight: 54,
+    },
+    centerWrap: {
+      alignItems: "center",
+      flex: 1,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+    },
+    rightCluster: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    homePill: {
+      alignItems: "center",
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 6,
+      marginTop: 4,
+      maxWidth: 210,
+      minHeight: 34,
+      paddingHorizontal: 12,
+      ...shadow.card,
+    },
+    homePillText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    heroIsland: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    avatarContainer: {
+      alignItems: "center",
+      height: 50,
+      justifyContent: "center",
+      width: 52,
+    },
+    statusPill: {
+      alignItems: "center",
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 5,
+      marginTop: -8,
+      maxWidth: 148,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      ...shadow.card,
+    },
+    statusText: {
+      color: palette.ink1,
+      fontSize: 11,
+      fontWeight: weight.semibold,
+    },
+    dot: {
+      borderRadius: radius.pill,
+      height: 7,
+      width: 7,
+    },
+    pressed: {
+      opacity: 0.78,
+    },
+  });

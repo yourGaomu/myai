@@ -20,31 +20,17 @@ import (
 // Lifecycle operations may wait on external processes. Never run them on the
 // websocket reader: permission replies and pause requests must remain readable.
 func (a *Agent) enqueueCatalogMutation(ctx context.Context, conn *websocket.Conn, message protocol.Message, handle func(context.Context, *websocket.Conn, protocol.Message) error) {
-	// Reserve order on the reader before starting work. Rapid disable/enable
-	// requests must preserve their receive order despite asynchronous execution.
-	a.catalogQueueMu.Lock()
-	previous := a.catalogTail
-	done := make(chan struct{})
-	a.catalogTail = done
-	a.catalogQueueMu.Unlock()
-	go func() {
-		defer close(done)
-		if previous != nil {
-			select {
-			case <-previous:
-			case <-ctx.Done():
-				return
-			}
-		}
-		if ctx.Err() != nil {
-			return
-		}
+	if err := a.catalogOperations.enqueue(ctx, func() {
 		if err := handle(ctx, conn, message); err != nil {
-			if writeErr := a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.ErrorPayload{Message: err.Error()}); writeErr != nil {
+			if writeErr := a.writeHandlerError(conn, message, err); writeErr != nil {
 				log.Printf("send catalog mutation error: %v", writeErr)
 			}
 		}
-	}()
+	}); err != nil {
+		if writeErr := a.writeHandlerError(conn, message, err); writeErr != nil {
+			log.Printf("send catalog queue error: %v", writeErr)
+		}
+	}
 }
 
 func (a *Agent) handleModelList(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -188,6 +174,11 @@ func mapPluginInfos(items []pluginruntime.Info) []protocol.PluginInfo {
 	return result
 }
 
+func optionalInt(value *int) int {
+	if value == nil { return 0 }
+	return *value
+}
+
 func (a *Agent) modelListPayload() protocol.ModelListResultPayload {
 	return protocol.ModelListResultPayload{
 		CurrentModelID: a.chatService.CurrentModelID(),
@@ -212,6 +203,8 @@ func (a *Agent) handleModelConfigAdd(ctx context.Context, conn *websocket.Conn, 
 		BaseURL:   payload.BaseURL,
 		APIKey:    payload.APIKey,
 		ModelName: payload.ModelName,
+		ContextWindowTokens: optionalInt(payload.ContextWindowTokens),
+		MaxOutputTokens: optionalInt(payload.MaxOutputTokens),
 		IsDefault: payload.IsDefault,
 		DefaultGenerationSettings: generation.Settings{
 			Temperature:     payload.Defaults.Temperature,
@@ -254,6 +247,8 @@ func (a *Agent) handleModelConfigTest(ctx context.Context, conn *websocket.Conn,
 		BaseURL:   payload.BaseURL,
 		APIKey:    payload.APIKey,
 		ModelName: payload.ModelName,
+		ContextWindowTokens: optionalInt(payload.ContextWindowTokens),
+		MaxOutputTokens: optionalInt(payload.MaxOutputTokens),
 		DefaultGenerationSettings: generation.Settings{
 			Temperature:     payload.Defaults.Temperature,
 			TopP:            payload.Defaults.TopP,
@@ -282,6 +277,7 @@ func (a *Agent) handleModelConfigUpdate(ctx context.Context, conn *websocket.Con
 		ID: payload.ID, Name: payload.Name, Provider: payload.Provider,
 		Protocol: domainmodel.Protocol(payload.Protocol), AuthType: domainmodel.AuthType(payload.AuthType),
 		BaseURL: payload.BaseURL, APIKey: payload.APIKey, ModelName: payload.ModelName,
+		ContextWindowTokens: payload.ContextWindowTokens, MaxOutputTokens: payload.MaxOutputTokens,
 		DefaultGenerationSettings: generation.Settings{Temperature: payload.Defaults.Temperature, TopP: payload.Defaults.TopP, MaxOutputTokens: payload.Defaults.MaxOutputTokens},
 	}); err != nil {
 		return err

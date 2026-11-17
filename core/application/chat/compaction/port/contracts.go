@@ -3,11 +3,16 @@ package port
 import (
 	"context"
 
+	compactionresult "myai/core/application/chat/compaction/result"
 	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
+
+type RequestCompactor interface {
+	CompactIfNeededForRequest(ctx context.Context, current *session.Session, model modelport.ChatModelPort, options contextmgr.RequestOptions) (compactionresult.CompactInfo, error)
+}
 
 type SummaryGenerator interface {
 	Summarize(ctx context.Context, model modelport.ChatModelPort, existingSummary string, messages []domainmessage.Message) (string, error)

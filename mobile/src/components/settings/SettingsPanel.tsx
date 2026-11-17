@@ -1,12 +1,19 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import * as Updates from "expo-updates";
 
 import { ButtonContent } from "../common/ButtonContent";
+import { SettingsHome, type SettingsSection } from "./SettingsHome";
+import { AppearanceSettings } from "./sections/AppearanceSettings";
+import { MotionSettings } from "./sections/MotionSettings";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
+import { accentOptions } from "../../constants/theme";
+import { useMotion } from "../../hooks/useMotionConfig";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { defaultIntentConfig, normalizeIntentStrategy } from "../../hooks/useIntentSettings";
 import type {
   CompactInfo,
@@ -31,12 +38,16 @@ import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
 import { shortID } from "../../utils/ids";
 import { websocketURL } from "../../utils/relay";
-import { modelDisplayName } from "../../utils/session";
+import { modelDisplayName, normalizePermission, permissionLabel } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
+import { fontFamily, radius, weight } from "../../constants/theme";
 
 type Props = {
+  activeSection: SettingsSection | null;
+  onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
+  assetAPIKey: string;
   assetBaseURL: string;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
@@ -105,6 +116,7 @@ type Props = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
+  onAssetAPIKeyChange: (value: string) => void;
   onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -145,43 +157,46 @@ type Props = {
   userID: string;
 };
 
-const permissionModes: Array<{ label: string; mode: SessionPermissionMode; meta: string }> = [
-  { label: "只读", mode: "readonly", meta: "不可写入或运行" },
-  { label: "询问", mode: "ask", meta: "危险操作需确认" },
-  { label: "完全开放", mode: "full", meta: "自动允许工具调用" },
+const permissionModes: Array<{ icon: FeatherIconName; label: string; mode: SessionPermissionMode; meta: string }> = [
+  { icon: "lock", label: "只读", mode: "readonly", meta: "禁止写文件和执行命令类工具。" },
+  { icon: "shield", label: "谨慎询问", mode: "ask", meta: "工作区内安全查询自动执行，写操作与高风险命令逐次确认。" },
+  { icon: "edit-3", label: "仅读写", mode: "read_write", meta: "允许读取和修改工作区文件，运行命令等危险操作仍需确认。" },
+  { icon: "terminal", label: "允许执行", mode: "execute", meta: "允许读写文件与在工作区内执行命令，外部高风险动作仍需确认。" },
+  { icon: "zap", label: "完全开放", mode: "full", meta: "会话内全部工具调用自动放行，不再逐次弹窗确认。" },
 ];
 const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }> = [
   { label: "对话", mode: "chat", meta: "正常对话与执行" },
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
 const contextPresets = [8, 16, 32, 64, 128];
-type SettingsSection = "general" | "connection" | "model" | "autoplan" | "skill" | "plugin" | "subagent" | "session" | "permission" | "context" | "generation";
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
+
+type FeatherIconName = ComponentProps<typeof Feather>["name"];
 
 const intentStrategies: Array<{
   strategy: IntentStrategy;
-  icon: string;
+  icon: FeatherIconName;
   label: string;
   badge: string;
   meta: string;
 }> = [
   {
     strategy: "system",
-    icon: "⚙️",
+    icon: "sliders",
     label: "内置判断 (system)",
     badge: "内置规则+聊天模型",
     meta: "先使用内置关键词规则匹配，必要时调用当前聊天模型做分类（并非纯离线）。",
   },
   {
     strategy: "jev",
-    icon: "🎯",
+    icon: "crosshair",
     label: "Jev 远程判断 (jev)",
     badge: "远程意图分类",
     meta: "发送当前用户消息与最近几条用户历史到 Jev 服务，按置信度阈值决定仅规划或规划后直执。",
   },
   {
     strategy: "off",
-    icon: "⏸️",
+    icon: "pause-circle",
     label: "关闭自动判断 (off)",
     badge: "仅手动开关",
     meta: "关闭自动触发规划，仅在你手动把会话切换为 Plan 模式时才进行规划。",
@@ -196,23 +211,13 @@ const modelProtocols: Array<{ label: string; meta: string; protocol: ModelProtoc
   { label: "Ollama", meta: "本地原生对话", protocol: "ollama-chat" },
 ];
 
-const settingSections: Array<{ icon: string; key: SettingsSection; label: string; meta: string }> = [
-  { icon: "💬", key: "session", label: "会话", meta: "新建与切换" },
-  { icon: "🧠", key: "model", label: "模型", meta: "选择当前模型" },
-  { icon: "🧭", key: "autoplan", label: "自动规划", meta: "意图判断与记录" },
-  { icon: "⚡", key: "connection", label: "连接", meta: "中继服务与配对" },
-  { icon: "⚙️", key: "general", label: "常规", meta: "状态总览" },
-  { icon: "🛡️", key: "permission", label: "权限", meta: "工具调用策略" },
-  { icon: "🤖", key: "subagent", label: "智能体", meta: "配置与后台任务" },
-  { icon: "🛠️", key: "skill", label: "技能", meta: "本地技能中心" },
-  { icon: "🔌", key: "plugin", label: "插件", meta: "本地工具插件" },
-  { icon: "🎨", key: "generation", label: "生成", meta: "采样与回复风格" },
-  { icon: "📦", key: "context", label: "上下文", meta: "窗口与压缩" },
-];
 
 export function SettingsPanel({
+  activeSection: selectedSection,
+  onSelectSection,
   activeModel,
   activeSession,
+  assetAPIKey,
   assetBaseURL,
   bindCode,
   buttonFeedback,
@@ -278,6 +283,7 @@ export function SettingsPanel({
   onRefreshPlugins,
   onReloadPlugins,
   onSetPluginEnabled,
+  onAssetAPIKeyChange,
   onAssetBaseURLChange,
   onRelayURLChange,
   onSetAgentMode,
@@ -321,6 +327,9 @@ export function SettingsPanel({
   userID,
 }: Props) {
   const { width } = useWindowDimensions();
+  const appTheme = useAppTheme();
+  const { palette } = appTheme;
+  const styles = useThemedStyles(createStyles);
   const activePermission = normalizePermissionMode(activeSession?.permission_mode);
   const activeAgentMode = normalizeAgentMode(activeSession?.agent_mode);
   const activePlan = activeSession?.current_plan;
@@ -361,7 +370,8 @@ export function SettingsPanel({
   const [traceCustomSessionID, setTraceCustomSessionID] = useState("");
   const [selectedTraceID, setSelectedTraceID] = useState("");
 
-  const [activeSection, setActiveSection] = useState<SettingsSection>("session");
+  // 列表页时没有选中分区；各分区的数据加载副作用只在对应详情页打开时触发
+  const activeSection: SettingsSection | null = selectedSection;
   const requestContextInfoRef = useRef(onRequestContextInfo);
   const requestGenerationPreferencesRef = useRef(onRequestGenerationPreferences);
   const requestIntentConfigRef = useRef(onRequestIntentConfig);
@@ -460,7 +470,6 @@ export function SettingsPanel({
   const planBusy = pendingActions.plan;
   const canUseSessionSettings = Boolean(clientToken && sessionID);
   const wideLayout = width >= 760;
-  const activeSectionMeta = settingSections.find((section) => section.key === activeSection);
   const versionLabel = `v${mobileAppVersion} · Android ${mobileAndroidVersionCode}`;
   const updateLabel = Updates.isEnabled
     ? `${Updates.channel || "本地"} · ${Updates.updateId ? shortID(Updates.updateId) : "嵌入包"}`
@@ -651,7 +660,11 @@ export function SettingsPanel({
             )
           }
         >
-          <ButtonContent loading={pendingActions.connect} text={pendingActions.connect ? "连接中" : connected ? "在线" : "连接"} />
+          <ButtonContent
+            color={connected ? palette.ink1 : palette.inkInverse}
+            loading={pendingActions.connect}
+            text={pendingActions.connect ? "连接中" : connected ? "在线" : "连接"}
+          />
         </Pressable>
       </View>
 
@@ -660,7 +673,7 @@ export function SettingsPanel({
         autoCorrect={false}
         onChangeText={onRelayURLChange}
         placeholder="https://relay.mikasa.wiki"
-        placeholderTextColor="#776f66"
+        placeholderTextColor={palette.ink4}
         style={styles.input}
         value={relayURL}
       />
@@ -669,17 +682,34 @@ export function SettingsPanel({
         autoCorrect={false}
         onChangeText={onAssetBaseURLChange}
         placeholder="资源服务地址，例如 https://assets.mikasa.wiki"
-        placeholderTextColor="#776f66"
+        placeholderTextColor={palette.ink4}
         style={styles.input}
         value={assetBaseURL}
       />
+      <TextInput
+        accessibilityLabel="Asset API Key"
+        autoCapitalize="none"
+        autoComplete="off"
+        autoCorrect={false}
+        onChangeText={onAssetAPIKeyChange}
+        placeholder="独立的 Asset API Key"
+        placeholderTextColor={palette.ink4}
+        secureTextEntry
+        style={styles.input}
+        value={assetAPIKey}
+      />
+      <Text style={styles.settingMeta}>
+        {assetBaseURL.trim()
+          ? "已配置资源服务地址，可用于在对话中发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"
+          : "提示：配置「资源服务地址」与 Asset API Key 后，即可在对话「+」菜单里发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"}
+      </Text>
       <View style={styles.row}>
         <TextInput
           keyboardType="number-pad"
           maxLength={6}
           onChangeText={onBindCodeChange}
           placeholder="配对码"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.flex]}
           value={bindCode}
         />
@@ -688,21 +718,21 @@ export function SettingsPanel({
           onPress={onPair}
           style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.pair && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.pair} text={pendingActions.pair ? "配对中" : "配对"} />
+          <ButtonContent color={palette.ink1} loading={pendingActions.pair} text={pendingActions.pair ? "配对中" : "配对"} />
         </Pressable>
       </View>
       <View style={styles.row}>
         <TextInput
           onChangeText={onUserIDChange}
           placeholder="用户标识"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.flex]}
           value={userID}
         />
         <TextInput
           onChangeText={onDeviceIDChange}
           placeholder="设备标识"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.flex]}
           value={deviceID}
         />
@@ -725,7 +755,7 @@ export function SettingsPanel({
           onPress={onRefreshModels}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.models} text={pendingActions.models ? "加载中" : "刷新"} />
+          <ButtonContent color={palette.ink1} loading={pendingActions.models} text={pendingActions.models ? "加载中" : "刷新"} />
         </Pressable>
         <Pressable
           disabled={pendingActions.models}
@@ -743,7 +773,7 @@ export function SettingsPanel({
           }}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
         >
-          <ButtonContent text={modelFormOpen ? "取消添加" : "添加第三方模型"} />
+          <ButtonContent color={palette.ink1} text={modelFormOpen ? "取消添加" : "添加第三方模型"} />
         </Pressable>
       </View>
 
@@ -787,7 +817,7 @@ export function SettingsPanel({
               editable={key !== "baseURL" || modelForm.protocol !== "google-generative-ai"}
               onChangeText={(value) => setModelForm((current) => ({ ...current, [key]: value }))}
               placeholder={`${label}: ${placeholder}`}
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               secureTextEntry={key === "apiKey"}
               style={[styles.input, key === "baseURL" && modelForm.protocol === "google-generative-ai" && styles.disabledInput]}
               value={modelForm[key]}
@@ -826,7 +856,7 @@ export function SettingsPanel({
               keyboardType="decimal-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTemperature: value }))}
               placeholder="温度 0-2"
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTemperature}
             />
@@ -834,7 +864,7 @@ export function SettingsPanel({
               keyboardType="decimal-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultTopP: value }))}
               placeholder="核采样 0-1"
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultTopP}
             />
@@ -842,7 +872,7 @@ export function SettingsPanel({
               keyboardType="number-pad"
               onChangeText={(value) => setModelForm((current) => ({ ...current, defaultMaxTokens: value }))}
               placeholder="最大输出长度"
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               style={[styles.input, styles.flex, styles.generationDefaultsInput]}
               value={modelForm.defaultMaxTokens}
             />
@@ -865,7 +895,7 @@ export function SettingsPanel({
               }}
               style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.models && styles.disabledButton], pressed)}
             >
-              <ButtonContent loading={pendingActions.models} text={editingModelID ? "保存修改" : "保存模型"} />
+              <ButtonContent color={palette.ink1} loading={pendingActions.models} text={editingModelID ? "保存修改" : "保存模型"} />
             </Pressable>
             <Pressable
               disabled={pendingActions.models}
@@ -879,7 +909,7 @@ export function SettingsPanel({
               }}
               style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
             >
-              <ButtonContent loading={pendingActions.models} text="测试连接" />
+              <ButtonContent color={palette.ink1} loading={pendingActions.models} text="测试连接" />
             </Pressable>
           </View>
           {modelFormError ? <Text style={styles.generationMessage}>{modelFormError}</Text> : null}
@@ -973,7 +1003,7 @@ export function SettingsPanel({
             <Text style={styles.controlTitle}>会话生成参数</Text>
             <Text style={styles.settingMeta}>空值表示继承模型默认值；最终生效值会包含系统兜底值。</Text>
           </View>
-          {generationBusy ? <ButtonContent loading text="保存中" /> : null}
+          {generationBusy ? <ButtonContent color={palette.ink2} loading text="保存中" /> : null}
         </View>
         {generation ? (
           <>
@@ -1011,20 +1041,20 @@ export function SettingsPanel({
                 onPress={submitGeneration}
                 style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
               >
-                <ButtonContent loading={generationBusy} text="应用参数" />
+                <ButtonContent color={palette.ink1} loading={generationBusy} text="应用参数" />
               </Pressable>
               <Pressable
                 disabled={!canUseSessionSettings || generationBusy}
                 onPress={resetGeneration}
                 style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
               >
-                <ButtonContent loading={generationBusy} text="全部继承" />
+                <ButtonContent color={palette.ink1} loading={generationBusy} text="全部继承" />
               </Pressable>
             </View>
           </>
         ) : (
           <View style={styles.generationLoading}>
-            <ButtonContent loading={generationBusy} text={generationBusy ? "正在读取生成参数" : "连接后读取生成参数"} />
+            <ButtonContent color={palette.ink2} loading={generationBusy} text={generationBusy ? "正在读取生成参数" : "连接后读取生成参数"} />
           </View>
         )}
       </View>
@@ -1041,7 +1071,7 @@ export function SettingsPanel({
           multiline
           onChangeText={setStyleInput}
           placeholder="例如：使用简洁的中文，先给结论，再给必要细节。"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.multilineInput]}
           textAlignVertical="top"
           value={styleInput}
@@ -1052,14 +1082,14 @@ export function SettingsPanel({
             onPress={submitStyle}
             style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={generationBusy} text="保存风格" />
+            <ButtonContent color={palette.ink1} loading={generationBusy} text="保存风格" />
           </Pressable>
           <Pressable
             disabled={!canUseSessionSettings || generationBusy}
             onPress={() => { setStyleInput(""); onSetStyleInstruction(""); }}
             style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || generationBusy) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={generationBusy} text="清除风格" />
+            <ButtonContent color={palette.ink1} loading={generationBusy} text="清除风格" />
           </Pressable>
         </View>
       </View>
@@ -1088,21 +1118,21 @@ export function SettingsPanel({
             onPress={onRefreshSkills}
             style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.skills && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingActions.skills} text={pendingActions.skills ? "加载中" : "刷新"} />
+            <ButtonContent color={palette.ink1} loading={pendingActions.skills} text={pendingActions.skills ? "加载中" : "刷新"} />
           </Pressable>
           <Pressable
             disabled={pendingActions.skills}
             onPress={onReloadSkills}
             style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.skills && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
+            <ButtonContent color={palette.ink1} loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
           </Pressable>
           <Pressable
             disabled={!clientToken || mcpReloading}
             onPress={reloadMCP}
             style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+            <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
           </Pressable>
         </View>
       </View>
@@ -1118,7 +1148,7 @@ export function SettingsPanel({
                   <Text numberOfLines={1} style={styles.skillName}>{item.name}</Text>
                   {item.description ? <Text numberOfLines={2} style={styles.skillDescription}>{item.description}</Text> : null}
                 </View>
-                <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text>
+                {item.updated_at ? <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text> : null}
               </View>
               {item.triggers && item.triggers.length > 0 ? (
                 <View style={styles.triggerRow}>
@@ -1158,7 +1188,7 @@ export function SettingsPanel({
             )
           }
         >
-          <ButtonContent loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+          <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
         </Pressable>
       </View>
 
@@ -1198,7 +1228,7 @@ export function SettingsPanel({
             onPress={onRefreshSessions}
             style={({ pressed }) => buttonFeedback([styles.secondaryActionButton, pendingActions.sessions && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={pendingActions.sessions} text={pendingActions.sessions ? "刷新中" : "刷新"} />
+            <ButtonContent color={palette.ink1} loading={pendingActions.sessions} text={pendingActions.sessions ? "刷新中" : "刷新"} />
           </Pressable>
         </View>
       </View>
@@ -1248,8 +1278,12 @@ export function SettingsPanel({
                     ], pressed)
                   }
                 >
+                  <Feather
+                    color={selected ? palette.inkInverse : palette.ink2}
+                    name={item.mode === "chat" ? "message-circle" : "clipboard"}
+                    size={13}
+                  />
                   <Text style={[styles.heroModeBtnText, selected && styles.heroModeBtnTextActive]}>
-                    {item.mode === "chat" ? "💬 " : "📋 "}
                     {item.label}模式{selected ? " (激活)" : ""}
                   </Text>
                 </Pressable>
@@ -1259,7 +1293,7 @@ export function SettingsPanel({
 
           {settingsBusy ? (
             <View style={styles.sessionBusyRow}>
-              <ButtonContent loading text="正在切换会话模式" />
+              <ButtonContent color={palette.ink2} loading text="正在切换会话模式" />
             </View>
           ) : null}
 
@@ -1324,7 +1358,11 @@ export function SettingsPanel({
               >
                 <View style={styles.sessionStreamLeft}>
                   <View style={[styles.sessionAvatarBox, selected && styles.sessionAvatarBoxActive]}>
-                    <Text style={styles.sessionAvatarIcon}>💬</Text>
+                    <Feather
+                      color={selected ? palette.inkInverse : palette.cyan}
+                      name="message-circle"
+                      size={16}
+                    />
                     {unreadSessionIDs?.[session.id] ? <View style={styles.unreadDot} /> : null}
                   </View>
                   <View style={styles.sessionInfoBox}>
@@ -1369,7 +1407,7 @@ export function SettingsPanel({
           <Text style={styles.sectionHeading}>会话工具调用权限策略</Text>
           <Text style={styles.sectionSubheading}>不同模式决定 Agent 调用系统工具时的确认级别</Text>
         </View>
-        {settingsBusy ? <ButtonContent loading text="保存中" /> : null}
+        {settingsBusy ? <ButtonContent color={palette.ink2} loading text="保存中" /> : null}
       </View>
 
       <View style={styles.permissionStack}>
@@ -1390,8 +1428,12 @@ export function SettingsPanel({
             >
               <View style={styles.flex}>
                 <View style={styles.row}>
+                  <Feather
+                    color={palette.ink1}
+                    name={item.icon}
+                    size={14}
+                  />
                   <Text style={styles.permissionCardTitle}>
-                    {item.mode === "readonly" ? "🔒 " : item.mode === "ask" ? "🛡️ " : "⚡ "}
                     {item.label}模式
                   </Text>
                   {item.mode === "ask" ? (
@@ -1434,12 +1476,12 @@ export function SettingsPanel({
             onPress={onCompactSession}
             style={({ pressed }) => buttonFeedback([styles.settingAction, (!canUseSessionSettings || settingsBusy || contextBusy) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={settingsBusy} text={settingsBusy ? "处理中" : "压缩"} />
+            <ButtonContent color={palette.ink1} loading={settingsBusy} text={settingsBusy ? "处理中" : "压缩"} />
           </Pressable>
         </View>
         {contextBusy ? (
           <View style={styles.contextLoadingRow}>
-            <ButtonContent loading text="正在读取上下文" />
+            <ButtonContent color={palette.ink2} loading text="正在读取上下文" />
           </View>
         ) : null}
         <View style={styles.row}>
@@ -1447,7 +1489,7 @@ export function SettingsPanel({
             keyboardType="number-pad"
             onChangeText={setWindowInput}
             placeholder="16"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={[styles.input, styles.flex]}
             value={windowInput}
           />
@@ -1456,7 +1498,7 @@ export function SettingsPanel({
             onPress={submitWindow}
             style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!canUseSessionSettings || settingsBusy || contextBusy) && styles.disabledButton], pressed)}
           >
-            <ButtonContent loading={settingsBusy} text="应用" />
+            <ButtonContent color={palette.ink1} loading={settingsBusy} text="应用" />
           </Pressable>
         </View>
         <View style={styles.segmentRow}>
@@ -1548,14 +1590,14 @@ export function SettingsPanel({
               buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)
             }
           >
-            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "🔄 检查更新"} />
+            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "检查更新"} />
           </Pressable>
           {updateReadyToReload ? (
             <Pressable
               onPress={() => void Updates.reloadAsync()}
               style={({ pressed }) => buttonFeedback(styles.secondaryButton, pressed)}
             >
-              <ButtonContent text="立即重启" />
+              <ButtonContent color={palette.ink1} text="立即重启" />
             </Pressable>
           ) : null}
         </View>
@@ -1591,35 +1633,35 @@ export function SettingsPanel({
           onPress={onConnect}
           style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.connect && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.connect} text={connected ? "重新连接" : "连接"} />
+          <ButtonContent color={palette.ink1} loading={pendingActions.connect} text={connected ? "重新连接" : "连接"} />
         </Pressable>
         <Pressable
           disabled={pendingActions.models}
           onPress={onRefreshModels}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.models} text="刷新模型" />
+          <ButtonContent color={palette.ink1} loading={pendingActions.models} text="刷新模型" />
         </Pressable>
         <Pressable
           disabled={pendingActions.skills}
           onPress={onRefreshSkills}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.skills && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.skills} text="刷新技能" />
+          <ButtonContent color={palette.ink1} loading={pendingActions.skills} text="刷新技能" />
         </Pressable>
         <Pressable
           disabled={!clientToken || mcpReloading}
           onPress={reloadMCP}
           style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={mcpReloading} text="重载 MCP" />
+          <ButtonContent color={palette.ink1} loading={mcpReloading} text="重载 MCP" />
         </Pressable>
         <Pressable
           disabled={pendingActions.sessions}
           onPress={onRefreshSessions}
           style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.sessions && styles.disabledButton], pressed)}
         >
-          <ButtonContent loading={pendingActions.sessions} text="刷新会话" />
+          <ButtonContent color={palette.ink1} loading={pendingActions.sessions} text="刷新会话" />
         </Pressable>
       </View>
     </View>
@@ -1802,7 +1844,7 @@ export function SettingsPanel({
             )
           }
         >
-          <ButtonContent loading={intentConfigLoading} text={intentConfigLoading ? "读取中" : "刷新配置"} />
+          <ButtonContent color={palette.ink1} loading={intentConfigLoading} text={intentConfigLoading ? "读取中" : "刷新配置"} />
         </Pressable>
       </View>
 
@@ -1822,7 +1864,7 @@ export function SettingsPanel({
               选择在用户发送消息时如何自动判断是否需要先生成结构化计划
             </Text>
           </View>
-          {intentConfigSaving ? <ButtonContent loading text="保存中" /> : null}
+          {intentConfigSaving ? <ButtonContent color={palette.ink2} loading text="保存中" /> : null}
         </View>
 
         <View style={styles.permissionStack}>
@@ -1860,8 +1902,9 @@ export function SettingsPanel({
               >
                 <View style={styles.flex}>
                   <View style={styles.row}>
+                    <Feather color={palette.ink1} name={item.icon} size={14} />
                     <Text style={styles.permissionCardTitle}>
-                      {item.icon} {item.label}
+                      {item.label}
                     </Text>
                     <View style={styles.recommendBadge}>
                       <Text style={styles.recommendBadgeText}>{item.badge}</Text>
@@ -1902,6 +1945,7 @@ export function SettingsPanel({
               }
             >
               <ButtonContent
+                color={palette.ink1}
                 loading={intentConfigSaving}
                 text={intentConfigSaving ? "保存中..." : "保存当前策略"}
               />
@@ -1968,7 +2012,7 @@ export function SettingsPanel({
               setIntentFormError("");
             }}
             placeholder="https://api.typesafe.ai"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={styles.input}
             value={intentBaseURL}
           />
@@ -2010,7 +2054,7 @@ export function SettingsPanel({
                     ? "留空表示保留旧密钥；输入新值则更新"
                     : "输入 Jev Bearer API Key（不会回显）"
               }
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               secureTextEntry
               style={[styles.input, styles.generationInput]}
               value={intentAPIKey}
@@ -2061,7 +2105,7 @@ export function SettingsPanel({
               setIntentFormError("");
             }}
             placeholder="jev-latest"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={styles.input}
             value={intentModel}
           />
@@ -2082,7 +2126,7 @@ export function SettingsPanel({
                 setIntentFormError("");
               }}
               placeholder="0.55"
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               style={styles.input}
               value={intentPlanConfidence}
             />
@@ -2104,7 +2148,7 @@ export function SettingsPanel({
                 setIntentFormError("");
               }}
               placeholder="0.85"
-              placeholderTextColor="#776f66"
+              placeholderTextColor={palette.ink4}
               style={styles.input}
               value={intentExecuteConfidence}
             />
@@ -2127,6 +2171,7 @@ export function SettingsPanel({
             }
           >
             <ButtonContent
+              color={palette.ink1}
               loading={intentConfigSaving}
               text={intentConfigSaving ? "保存中..." : "保存配置"}
             />
@@ -2143,8 +2188,9 @@ export function SettingsPanel({
             }
           >
             <ButtonContent
+              color={palette.ink1}
               loading={intentConfigTesting}
-              text={intentConfigTesting ? "测试中..." : "⚡ 测试连接"}
+              text={intentConfigTesting ? "测试中..." : "测试连接"}
             />
           </Pressable>
 
@@ -2162,7 +2208,7 @@ export function SettingsPanel({
               buttonFeedback([styles.settingAction, intentBusy && styles.disabledButton], pressed)
             }
           >
-            <ButtonContent text="恢复默认参数" />
+            <ButtonContent color={palette.ink1} text="恢复默认参数" />
           </Pressable>
         </View>
 
@@ -2173,9 +2219,16 @@ export function SettingsPanel({
               intentTestResult.success ? styles.intentTestBannerSuccess : styles.intentTestBannerError,
             ]}
           >
-            <Text style={styles.intentTestBannerTitle}>
-              {intentTestResult.success ? "✅ Jev 连接测试通过" : "❌ Jev 连接测试失败"}
-            </Text>
+            <View style={styles.rowCompact}>
+              <Feather
+                color={intentTestResult.success ? palette.ok : palette.err}
+                name={intentTestResult.success ? "check-circle" : "x-circle"}
+                size={15}
+              />
+              <Text style={styles.intentTestBannerTitle}>
+                {intentTestResult.success ? "Jev 连接测试通过" : "Jev 连接测试失败"}
+              </Text>
+            </View>
             <Text style={styles.intentTestBannerMeta}>
               success={String(intentTestResult.success)} · latency_ms={intentTestResult.latency_ms} ms
             </Text>
@@ -2219,6 +2272,7 @@ export function SettingsPanel({
               }
             >
               <ButtonContent
+                color={palette.ink1}
                 loading={intentTraceListLoading}
                 text={intentTraceListLoading ? "加载中" : "刷新记录"}
               />
@@ -2234,6 +2288,7 @@ export function SettingsPanel({
               }
             >
               <ButtonContent
+                color={palette.ink1}
                 loading={intentTraceClearing}
                 text={
                   intentTraceClearing
@@ -2318,7 +2373,7 @@ export function SettingsPanel({
                 autoCorrect={false}
                 onChangeText={setTraceCustomSessionID}
                 placeholder="输入要筛选的 session_id"
-                placeholderTextColor="#776f66"
+                placeholderTextColor={palette.ink4}
                 style={[styles.input, styles.flex]}
                 value={traceCustomSessionID}
               />
@@ -2335,7 +2390,7 @@ export function SettingsPanel({
                   )
                 }
               >
-                <ButtonContent loading={intentTraceListLoading} text="按会话查询" />
+                <ButtonContent color={palette.ink1} loading={intentTraceListLoading} text="按会话查询" />
               </Pressable>
             </View>
             {sessions.length > 0 ? (
@@ -2375,7 +2430,7 @@ export function SettingsPanel({
 
         {intentTraceListLoading ? (
           <View style={styles.generationLoading}>
-            <ButtonContent loading text="正在加载判断记录列表 (intent_trace_list)..." />
+            <ButtonContent color={palette.ink2} loading text="正在加载判断记录列表 (intent_trace_list)..." />
           </View>
         ) : null}
 
@@ -2418,7 +2473,7 @@ export function SettingsPanel({
                   >
                     <View style={styles.skillHeader}>
                       <View style={styles.rowCompact}>
-                        <View style={[styles.intentStatusBadge, traceStatusBadgeStyle(trace.status)]}>
+                        <View style={[styles.intentStatusBadge, traceStatusBadgeStyle(trace.status, styles)]}>
                           <Text style={styles.intentStatusBadgeText}>
                             {traceStatusLabel(trace.status)}
                           </Text>
@@ -2466,9 +2521,12 @@ export function SettingsPanel({
                       <Text numberOfLines={1} style={styles.skillPath}>
                         trace_id: #{shortID(trace.trace_id)} · model: {trace.response_model || trace.requested_model || "-"}
                       </Text>
-                      <Text style={styles.checkpointToggle}>
-                        {isExpanded ? "收起详情 ▲" : "查看详情 ▼"}
-                      </Text>
+                      <View style={styles.rowCompact}>
+                        <Text style={styles.checkpointToggle}>
+                          {isExpanded ? "收起详情" : "查看详情"}
+                        </Text>
+                        <Feather color={palette.cyan} name={isExpanded ? "chevron-up" : "chevron-down"} size={13} />
+                      </View>
                     </View>
                   </Pressable>
 
@@ -2496,7 +2554,7 @@ export function SettingsPanel({
 
                       {detailLoading ? (
                         <View style={styles.contextLoadingRow}>
-                          <ButtonContent loading text="正在请求判断详情 (intent_trace_get)..." />
+                          <ButtonContent color={palette.ink2} loading text="正在请求判断详情 (intent_trace_get)..." />
                         </View>
                       ) : null}
 
@@ -2620,7 +2678,10 @@ export function SettingsPanel({
     />
   );
 
+  const motion = useMotion();
   const sectionContent: Record<SettingsSection, ReactNode> = {
+    appearance: <AppearanceSettings />,
+    motion: <MotionSettings />,
     autoplan: autoPlanSection,
     connection: relaySection,
     context: contextSection,
@@ -2634,106 +2695,93 @@ export function SettingsPanel({
     subagent: subagentSection,
   };
 
+  const relayHost = normalizedRelayURL.replace(/^[a-z]+:\/\//i, "");
+  const themeLabel = appTheme.themeMode === "system" ? "跟随系统" : appTheme.isDark ? "深色" : "浅色";
+  const accentLabel = accentOptions.find((item) => item.key === appTheme.accent)?.label || "";
+  const customMotionCount = Object.keys(motion.settings.customSlots).length;
+  const groups = [
+    {
+      label: "个性化与动效",
+      rows: [
+        { icon: "sun" as const, key: "appearance" as const, label: "外观与主题", value: `${themeLabel} · ${accentLabel}` },
+        {
+          icon: "film" as const,
+          key: "motion" as const,
+          label: "角色动效与 GIF",
+          value: customMotionCount > 0 ? `${customMotionCount} 个自定义` : motion.settings.motionEnabled ? "默认" : "已关闭",
+        },
+      ],
+    },
+    {
+      label: "模型与生成",
+      rows: [
+        { icon: "cpu" as const, key: "model" as const, label: "模型", value: activeModel ? modelDisplayName(activeModel) : activeSession?.model || "" },
+        { icon: "sliders" as const, key: "generation" as const, label: "生成参数与回复风格" },
+      ],
+    },
+    {
+      label: "智能体",
+      rows: [
+        { icon: "compass" as const, key: "autoplan" as const, label: "自动规划", value: intentStrategies.find((item) => item.strategy === effectiveIntentConfig.strategy)?.label.replace(/\s*\(.*\)$/, "") },
+        { icon: "shield" as const, key: "permission" as const, label: "工具权限", value: permissionModeLabel(activePermission) },
+        { icon: "users" as const, key: "subagent" as const, label: "子代理" },
+        { icon: "tool" as const, key: "skill" as const, label: "技能", value: skills.length ? `${skills.length} 个` : "" },
+        { icon: "box" as const, key: "plugin" as const, label: "插件与 MCP", value: plugins.length ? `${plugins.length} 个` : "" },
+      ],
+    },
+    {
+      label: "会话",
+      rows: [
+        { icon: "message-square" as const, key: "session" as const, label: "会话管理" },
+        { icon: "layers" as const, key: "context" as const, label: "上下文", value: `${currentWindowK}K` },
+      ],
+    },
+    {
+      label: "连接与版本",
+      rows: [
+        { icon: "server" as const, key: "connection" as const, label: "连接与配对", value: relayHost },
+        { icon: "refresh-cw" as const, key: "general" as const, label: "版本与热更新", value: `v${mobileAppVersion}` },
+      ],
+    },
+  ];
+
   return (
-    <View style={[styles.panel, wideLayout && styles.panelWide]}>
-      <View style={styles.panelHeader}>
-        <View style={styles.flex}>
-          <Text style={styles.settingsTitle}>设置中心</Text>
-          <Text style={styles.pathText}>连接、模型、会话和工具权限集中管理 · {versionLabel}</Text>
-        </View>
-        <View style={styles.rowCompact}>
-          <Pressable
-            accessibilityLabel="检查更新"
-            disabled={checkingUpdate}
-            onPress={() => void handleCheckUpdate()}
-            style={({ pressed }) =>
-              buttonFeedback([styles.primaryActionButton, checkingUpdate && styles.disabledButton], pressed)
-            }
-          >
-            <ButtonContent loading={checkingUpdate} text={checkingUpdate ? "检查中" : "🔄 检查更新"} />
-          </Pressable>
-          <Pressable onPress={onClose} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
-            <Text style={styles.closeButtonText}>✕ 关闭</Text>
-          </Pressable>
-        </View>
-      </View>
+    <View style={styles.settingsRoot}>
       {updateStatusMessage && activeSection !== "general" ? (
         <View style={styles.row}>
-          <Text style={[ styles.flex, updateStatusError ? styles.generationMessage : styles.generationSuccess ]}>
-            {updateStatusMessage}
-          </Text>
+          <Text style={[styles.flex, updateStatusError ? styles.generationMessage : styles.generationSuccess]}>{updateStatusMessage}</Text>
           {updateReadyToReload ? (
-            <Pressable
-              onPress={() => void Updates.reloadAsync()}
-              style={({ pressed }) => buttonFeedback(styles.primaryActionButton, pressed)}
-            >
+            <Pressable onPress={() => void Updates.reloadAsync()} style={({ pressed }) => buttonFeedback(styles.primaryActionButton, pressed)}>
               <ButtonContent text="立即重启" />
             </Pressable>
           ) : null}
         </View>
       ) : null}
-
-      <View style={[styles.settingsBox, wideLayout && styles.settingsBoxWide]}>
-        <View style={[styles.sideRail, wideLayout ? styles.sideRailWide : styles.sideRailCompact]}>
-          <ScrollView
-            horizontal={!wideLayout}
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={[styles.navList, wideLayout ? styles.navListWide : styles.navListCompact]}>
-              {settingSections.map((section) => {
-                const selected = activeSection === section.key;
-                return (
-                  <Pressable
-                    key={section.key}
-                    onPress={() => setActiveSection(section.key)}
-                    style={({ pressed }) =>
-                      buttonFeedback([styles.navItem, wideLayout && styles.navItemWide, selected && styles.navItemActive], pressed)
-                    }
-                  >
-                    <Text style={styles.navIcon}>{section.icon}</Text>
-                    <View style={styles.navTextBlock}>
-                      <Text style={[styles.navLabel, selected && styles.navTextActive]}>{section.label}</Text>
-                      {wideLayout ? <Text style={styles.navMeta}>{section.meta}</Text> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </View>
-
-        <View style={[styles.contentPane, !wideLayout && styles.contentPaneCompact]}>
-          {wideLayout ? (
-            <>
-              <View style={styles.contentHeader}>
-                <View style={styles.flex}>
-                  <Text style={styles.contentTitle}>{activeSectionMeta?.label || "设置"}</Text>
-                  <Text style={styles.settingMeta}>{activeSectionMeta?.meta || "配置中心"}</Text>
-                </View>
-              </View>
-              <ScrollView
-                contentContainerStyle={styles.contentScroll}
-                keyboardShouldPersistTaps="handled"
-                nestedScrollEnabled
-                showsVerticalScrollIndicator={false}
-              >
-                {sectionContent[activeSection]}
-              </ScrollView>
-            </>
-          ) : (
-            <View style={styles.contentScroll}>{sectionContent[activeSection]}</View>
-          )}
-        </View>
-      </View>
+      {activeSection ? (
+        <View style={styles.sectionStack}>{sectionContent[activeSection]}</View>
+      ) : (
+        <SettingsHome
+          connected={connected}
+          deviceID={deviceID}
+          groups={groups}
+          onOpenSection={onSelectSection}
+          relayHost={relayHost}
+          versionLabel={versionLabel}
+        />
+      )}
     </View>
   );
 }
 
+const settingIcons: Record<string, FeatherIconName> = { AI: "cpu", AP: "compass", MCP: "box", OTA: "refresh-cw", SK: "tool", WS: "server" };
+
 function IconBox({ label }: { label: string }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
+  const icon = settingIcons[label];
   return (
     <View style={styles.settingIconBox}>
-      <Text style={styles.settingIconText}>{label}</Text>
+      {icon ? <Feather color={palette.ink2} name={icon} size={20} /> : <Text style={styles.settingIconText}>{label}</Text>}
     </View>
   );
 }
@@ -2757,6 +2805,8 @@ function GenerationField({
   systemDefault: number;
   value: string;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const inheritedValue = modelDefault == null
     ? `模型未设置 · 系统兜底 ${formatNumber(systemDefault)}`
     : `模型默认 ${formatNumber(modelDefault)} · 系统兜底 ${formatNumber(systemDefault)}`;
@@ -2772,7 +2822,7 @@ function GenerationField({
           keyboardType={integer ? "number-pad" : "decimal-pad"}
           onChangeText={onChangeText}
           placeholder="继承"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.generationInput]}
           value={value}
         />
@@ -2786,6 +2836,10 @@ function GenerationField({
 }
 
 function ContextStat({ label, suffix, value }: { label: string; suffix: string; value?: number }) {
+  const styles = useThemedStyles(createStyles);
+  if (value === undefined || value === null) {
+    return null;
+  }
   return (
     <View style={styles.contextStat}>
       <Text style={styles.contextValue}>{value ?? "-"}</Text>
@@ -2795,6 +2849,7 @@ function ContextStat({ label, suffix, value }: { label: string; suffix: string; 
 }
 
 function CheckpointDetails({ checkpoint }: { checkpoint: NonNullable<ContextInfo["checkpoint"]> }) {
+  const styles = useThemedStyles(createStyles);
   const [expanded, setExpanded] = useState(false);
   const data = checkpoint.summary_data;
   const sections: Array<[string, string[] | undefined]> = [
@@ -2829,6 +2884,7 @@ function CheckpointDetails({ checkpoint }: { checkpoint: NonNullable<ContextInfo
 }
 
 function CheckpointSection({ title, lines }: { title: string; lines?: string[] }) {
+  const styles = useThemedStyles(createStyles);
   const visible = lines?.filter((line) => line.trim()) || [];
   if (visible.length === 0) {
     return null;
@@ -2842,6 +2898,10 @@ function CheckpointSection({ title, lines }: { title: string; lines?: string[] }
 }
 
 function HashPill({ label, value }: { label: string; value?: string }) {
+  const styles = useThemedStyles(createStyles);
+  if (!value) {
+    return null;
+  }
   return (
     <View style={styles.hashPill}>
       <Text style={styles.hashLabel}>{label}</Text>
@@ -2851,6 +2911,7 @@ function HashPill({ label, value }: { label: string; value?: string }) {
 }
 
 function EmptyBox({ text }: { text: string }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.emptyBox}>
       <Text style={styles.emptyText}>{text}</Text>
@@ -2867,6 +2928,7 @@ function SummaryTile({
   tone?: "good" | "normal" | "quiet" | "warn";
   value: string;
 }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={[styles.summaryTile, tone === "good" && styles.summaryTileGood, tone === "warn" && styles.summaryTileWarn, tone === "quiet" && styles.summaryTileQuiet]}>
       <Text style={styles.summaryLabel}>{label}</Text>
@@ -2876,10 +2938,7 @@ function SummaryTile({
 }
 
 function normalizePermissionMode(mode?: string): SessionPermissionMode {
-  if (mode === "readonly" || mode === "full") {
-    return mode;
-  }
-  return "ask";
+  return normalizePermission(mode);
 }
 
 function normalizeAgentMode(mode?: string): SessionAgentMode {
@@ -2890,13 +2949,7 @@ function normalizeAgentMode(mode?: string): SessionAgentMode {
 }
 
 function permissionModeLabel(mode: SessionPermissionMode) {
-  if (mode === "readonly") {
-    return "只读";
-  }
-  if (mode === "full") {
-    return "完全开放";
-  }
-  return "询问";
+  return permissionLabel(mode);
 }
 
 function planStatusLabel(status?: string) {
@@ -2942,13 +2995,7 @@ function modelProtocolPlaceholder(protocol: ModelProtocol) {
 }
 
 function permissionHelp(mode: SessionPermissionMode) {
-  if (mode === "readonly") {
-    return "禁止写文件和运行命令类工具。";
-  }
-  if (mode === "full") {
-    return "允许的工具可以不再逐次确认。";
-  }
-  return "工作区内读写和安全查询可自动执行，危险命令仍需确认。";
+  return permissionModes.find((item) => item.mode === mode)?.meta || permissionModes[1].meta;
 }
 
 function shortHash(value?: string) {
@@ -3078,7 +3125,7 @@ function traceStatusLabel(status?: string): string {
   }
 }
 
-function traceStatusBadgeStyle(status?: string) {
+function traceStatusBadgeStyle(status: string | undefined, styles: SettingsStyles) {
   switch (status) {
     case "succeeded":
       return styles.intentStatusGood;
@@ -3135,19 +3182,21 @@ function formatTraceBody(body?: string): string {
   }
 }
 
-const styles = StyleSheet.create({
+type SettingsStyles = ReturnType<typeof createStyles>;
+
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+  settingsRoot: {
+    gap: 12,
+  },
   panel: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#d8cdbb",
-    borderRadius: 16,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    elevation: 1,
     gap: 10,
     padding: 12,
-    shadowColor: "#8f8272",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
+    ...shadow.card,
   },
   panelWide: {
     alignSelf: "center",
@@ -3162,30 +3211,28 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   settingsTitle: {
-    color: "#12100e",
-    fontSize: 22,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.semibold,
     lineHeight: 26,
   },
   closeButton: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
     justifyContent: "center",
     paddingHorizontal: 10,
     paddingVertical: 6,
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   closeButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   settingsBox: {
     gap: 10,
@@ -3198,10 +3245,10 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   sideRailWide: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 12,
-    borderWidth: 2,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     flexShrink: 0,
     minHeight: 520,
     padding: 8,
@@ -3223,10 +3270,10 @@ const styles = StyleSheet.create({
   },
   navItem: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 20,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.xl,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 6,
     minHeight: 36,
@@ -3234,45 +3281,41 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   navItemWide: {
-    borderRadius: 10,
+    borderRadius: radius.md,
     minHeight: 48,
     width: "100%",
   },
   navItemActive: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    elevation: 2,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    ...shadow.float,
   },
   navIcon: {
-    fontSize: 14,
+    fontSize: font.body,
     textAlign: "center",
   },
   navTextBlock: {
     minWidth: 0,
   },
   navLabel: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   navMeta: {
-    color: "#7f766c",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
     marginTop: 2,
   },
   navTextActive: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.inkInverse,
+    fontWeight: weight.semibold,
   },
   contentPane: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#ded4c6",
-    borderRadius: 14,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
     borderWidth: 1,
     flex: 1,
     gap: 12,
@@ -3296,31 +3339,30 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   contentTitle: {
-    color: "#12100e",
-    fontSize: 22,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.display,
+    fontWeight: weight.semibold,
     lineHeight: 26,
   },
   sectionStack: {
     gap: 10,
   },
   pathText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.label - 0.5,
     marginTop: 3,
   },
   settingCard: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 0,
-    borderWidth: 3,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
-    minHeight: 74,
-    padding: 12,
+    minHeight: 70,
+    padding: 14,
   },
   settingCardCompact: {
     alignItems: "flex-start",
@@ -3330,56 +3372,52 @@ const styles = StyleSheet.create({
   },
   settingIconBox: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 0,
-    borderWidth: 3,
-    height: 48,
+    backgroundColor: palette.well,
+    borderRadius: radius.sm + 2,
+    height: 44,
     justifyContent: "center",
-    width: 56,
+    width: 44,
   },
   settingIconText: {
-    color: "#12100e",
-    fontSize: 18,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontFamily: fontFamily.mono,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   settingTitle: {
-    color: "#12100e",
-    fontSize: 18,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   settingMeta: {
-    color: "#6c665f",
+    color: palette.ink2,
     flexShrink: 1,
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-    marginTop: 4,
+    fontSize: font.label - 0.5,
+    lineHeight: 19,
+    marginTop: 3,
   },
   settingAction: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 0,
-    borderWidth: 3,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexShrink: 0,
     justifyContent: "center",
-    minHeight: 44,
+    minHeight: 40,
     minWidth: 58,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
   },
   settingActionOnline: {
-    backgroundColor: "#ff7f68",
+    backgroundColor: palette.okWash,
   },
   settingActionWarn: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brand,
   },
   input: {
-    backgroundColor: "#fdf7ea",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    color: "#12100e",
+    backgroundColor: palette.well,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.md - 2,
+    borderWidth: 1,
+    color: palette.ink1,
     includeFontPadding: false,
     lineHeight: 22,
     minHeight: 48,
@@ -3413,32 +3451,28 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     justifyContent: "center",
-    minHeight: 44,
+    minHeight: 42,
     paddingHorizontal: 16,
   },
   smallButton: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   smallButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   disabledButton: {
     opacity: 0.45,
   },
   disabledInput: {
-    backgroundColor: "#ece7dd",
+    backgroundColor: palette.surface1,
     opacity: 0.65,
   },
   modelGrid: {
@@ -3448,10 +3482,10 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   modelChip: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 2,
+    borderWidth: 1,
     flexGrow: 1,
     minWidth: 132,
     padding: 10,
@@ -3461,8 +3495,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   modelActions: {
-    borderColor: "#12100e",
-    borderTopWidth: 2,
+    borderColor: palette.hairline,
+    borderTopWidth: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 5,
@@ -3470,51 +3504,53 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   modelAction: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 4,
-    borderWidth: 2,
-    paddingHorizontal: 7,
-    paddingVertical: 5,
+    backgroundColor: palette.well,
+    borderRadius: radius.xs + 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   modelActionActive: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modelActionDanger: {
-    backgroundColor: "#ffb4a7",
-    borderColor: "#12100e",
-    borderRadius: 4,
-    borderWidth: 2,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 5,
   },
   modelActionText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.medium,
   },
   modelChipActive: {
-    backgroundColor: "#b9e9b0",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modelTitle: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.ink1,
+    fontWeight: weight.semibold,
   },
   modelMeta: {
-    color: "#6c665f",
-    fontSize: 12,
+    color: palette.ink2,
+    fontSize: font.label,
     marginTop: 3,
   },
   skillList: {
     gap: 8,
   },
   skillCard: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
-    gap: 8,
-    padding: 10,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12,
   },
   skillHeader: {
     alignItems: "flex-start",
@@ -3523,28 +3559,25 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   skillName: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
   },
   skillDescription: {
-    color: "#4f4942",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.regular,
     lineHeight: 17,
     marginTop: 3,
   },
   skillBadge: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    backgroundColor: palette.well,
+    borderRadius: radius.xs,
+    color: palette.ink3,
+    fontSize: font.caption,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   triggerRow: {
     flexDirection: "row",
@@ -3552,29 +3585,26 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   triggerChip: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    backgroundColor: palette.well,
+    borderRadius: radius.xs,
+    color: palette.ink2,
+    fontSize: font.caption,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   skillPath: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
   },
   controlBlock: {
-    backgroundColor: "#fdf7ea",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     gap: 10,
-    padding: 10,
+    padding: 14,
   },
   controlHeader: {
     alignItems: "center",
@@ -3583,15 +3613,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   controlTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
   },
   generationField: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 6,
     padding: 9,
   },
@@ -3601,14 +3631,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   generationLabel: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   generationEffective: {
-    color: "#1e6847",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.info,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   generationInputRow: {
     alignItems: "center",
@@ -3620,29 +3650,27 @@ const styles = StyleSheet.create({
   },
   inheritButton: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderRadius: radius.sm,
     justifyContent: "center",
     minHeight: 44,
     minWidth: 58,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
   },
   inheritButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.medium,
   },
   generationMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
   },
   generationCount: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   generationLoading: {
     alignItems: "flex-start",
@@ -3650,23 +3678,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   generationMessage: {
-    backgroundColor: "#ffe1d8",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    color: "#8c2d1c",
-    fontSize: 13,
-    fontWeight: "800",
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: palette.err,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
     padding: 10,
   },
   generationSuccess: {
-    backgroundColor: "#dff3dc",
-    borderColor: "#1e6847",
-    borderRadius: 8,
-    borderWidth: 2,
-    color: "#1e6847",
-    fontSize: 13,
-    fontWeight: "800",
+    backgroundColor: palette.okWash,
+    borderColor: palette.okBorder,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: palette.info,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
     padding: 10,
   },
   segmentRow: {
@@ -3675,35 +3703,37 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   segment: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flexGrow: 1,
     minWidth: 92,
     padding: 9,
   },
   presetChip: {
     alignItems: "center",
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 4,
+    borderWidth: 1,
     minWidth: 58,
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
   segmentActive: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   segmentTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   segmentMeta: {
-    color: "#6c665f",
-    fontSize: 11,
+    color: palette.ink2,
+    fontSize: font.caption,
     marginTop: 3,
   },
   contextGrid: {
@@ -3712,14 +3742,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   contextStat: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexGrow: 1,
     minWidth: 104,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   hashGrid: {
     flexDirection: "row",
@@ -3728,46 +3756,44 @@ const styles = StyleSheet.create({
   },
   hashPill: {
     alignItems: "center",
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexDirection: "row",
     flexGrow: 1,
     gap: 8,
     minHeight: 36,
     minWidth: 146,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   hashLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     textTransform: "uppercase",
   },
   hashValue: {
-    color: "#12100e",
+    color: palette.ink1,
     flex: 1,
-    fontSize: 12,
-    fontWeight: "900",
+    fontSize: font.label,
+    fontWeight: weight.semibold,
     minWidth: 0,
   },
   contextNote: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   contextSummaryBox: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    gap: 8,
-    padding: 10,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12,
   },
   contextLoadingRow: {
     minHeight: 24,
@@ -3782,23 +3808,22 @@ const styles = StyleSheet.create({
     maxHeight: 220,
   },
   contextSummaryText: {
-    color: "#12100e",
-    fontSize: 12,
+    color: palette.ink1,
+    fontSize: font.label,
     lineHeight: 19,
   },
   contextSummaryEmpty: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 18,
+    color: palette.ink2,
+    fontSize: font.label,
+    lineHeight: 20,
   },
   checkpointBox: {
-    backgroundColor: "#eef7ff",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    gap: 8,
-    padding: 10,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12,
   },
   checkpointHeader: {
     alignItems: "center",
@@ -3807,9 +3832,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   checkpointToggle: {
-    color: "#1e5c9a",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.cyan,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   checkpointContent: {
     gap: 8,
@@ -3818,26 +3843,26 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   checkpointSectionTitle: {
-    color: "#1e5c9a",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.cyan,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   checkpointLine: {
-    color: "#12100e",
-    fontSize: 12,
+    color: palette.ink1,
+    fontSize: font.label,
     lineHeight: 18,
   },
   contextNoteText: {
-    color: "#4f4942",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.regular,
     lineHeight: 17,
   },
   compactBox: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 3,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 8,
     padding: 10,
   },
@@ -3848,21 +3873,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   compactTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   compactBadge: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    backgroundColor: palette.brandWash,
+    borderRadius: radius.xs,
+    color: palette.brandLight,
+    fontSize: font.caption,
+    fontWeight: weight.medium,
     overflow: "hidden",
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   summaryGrid: {
     flexDirection: "row",
@@ -3870,35 +3893,32 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   summaryTile: {
-    backgroundColor: "#fdf7ea",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
     flexBasis: 150,
     flexGrow: 1,
-    minHeight: 72,
-    padding: 10,
+    minHeight: 64,
+    padding: 12,
   },
   summaryTileGood: {
-    backgroundColor: "#b9e9b0",
+    backgroundColor: palette.well,
   },
   summaryTileWarn: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.warnWash,
   },
   summaryTileQuiet: {
-    backgroundColor: "#f5eefc",
+    backgroundColor: palette.well,
   },
   summaryLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink3,
+    fontSize: font.caption,
   },
   summaryValue: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
-    lineHeight: 19,
-    marginTop: 5,
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.medium,
+    lineHeight: 20,
+    marginTop: 4,
   },
   quickActions: {
     flexDirection: "row",
@@ -3906,14 +3926,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   contextValue: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontVariant: ["tabular-nums"],
+    fontWeight: weight.medium,
   },
   contextLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink3,
+    fontSize: font.caption,
     marginTop: 2,
   },
   sectionHeaderRow: {
@@ -3923,55 +3943,47 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sectionHeading: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
   },
   sectionSubheading: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     marginTop: 2,
   },
   primaryActionButton: {
     alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   secondaryActionButton: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     justifyContent: "center",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   activeHeroCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderLeftColor: "#ffd84f",
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderLeftColor: palette.brandDeep,
     borderLeftWidth: 6,
-    borderRadius: 12,
-    borderWidth: 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
     gap: 8,
     padding: 12,
-    elevation: 2,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   activeHeroTopRow: {
     alignItems: "center",
@@ -3984,46 +3996,44 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   activePill: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 4,
-    borderWidth: 1.5,
+    backgroundColor: palette.brandWash,
+    borderRadius: radius.xs,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   activePillText: {
-    color: "#12100e",
-    fontSize: 10,
-    fontWeight: "900",
+    color: palette.brandLight,
+    fontSize: font.micro,
+    fontWeight: weight.medium,
   },
   activeSessionId: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   heroDeleteBtn: {
-    backgroundColor: "#ff7f68",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   heroDeleteBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   activeHeroTitle: {
-    color: "#12100e",
-    fontSize: 15,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.bodyLg,
+    fontWeight: weight.semibold,
     lineHeight: 20,
   },
   activeHeroMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
   },
   heroModeRow: {
     flexDirection: "row",
@@ -4032,31 +4042,29 @@ const styles = StyleSheet.create({
   },
   heroModeBtn: {
     alignItems: "center",
-    backgroundColor: "#f5f1e9",
-    borderColor: "#d8d1c5",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     flex: 1,
+    flexDirection: "row",
+    gap: 6,
     justifyContent: "center",
     paddingVertical: 7,
   },
   heroModeBtnActive: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    ...shadow.float,
   },
   heroModeBtnText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   heroModeBtnTextActive: {
-    color: "#12100e",
-    fontWeight: "900",
+    color: palette.inkInverse,
+    fontWeight: weight.semibold,
   },
   modeRow: {
     flexDirection: "row",
@@ -4065,34 +4073,36 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   modeChip: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderColor: palette.transparent,
+    borderRadius: radius.md - 2,
+    borderWidth: 1,
     flexGrow: 1,
     minWidth: 120,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   modeChipActive: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   modeChipTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   modeChipMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     marginTop: 2,
   },
   planSummaryBox: {
-    backgroundColor: "#fffaf0",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     marginTop: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -4104,14 +4114,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   planSummaryTitle: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   planSummaryMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
     marginTop: 3,
   },
   planActionRow: {
@@ -4120,21 +4130,25 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   planSmallButton: {
-    backgroundColor: "#f5eefc",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 4,
     minWidth: 56,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   planSmallButtonText: {
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
     textAlign: "center",
   },
   planExecuteButton: {
+    alignItems: "center",
+    backgroundColor: palette.brand,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    justifyContent: "center",
     minWidth: 72,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -4148,22 +4162,18 @@ const styles = StyleSheet.create({
   },
   sessionStreamCard: {
     alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 12,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     padding: 10,
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   sessionStreamCardActive: {
-    borderColor: "#12100e",
-    borderLeftColor: "#ffd84f",
+    borderColor: palette.hairline,
+    borderLeftColor: palette.brandDeep,
     borderLeftWidth: 5,
   },
   sessionStreamLeft: {
@@ -4175,22 +4185,20 @@ const styles = StyleSheet.create({
   },
   sessionAvatarBox: {
     alignItems: "center",
-    backgroundColor: "#4fd7ee",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: palette.well,
+    borderRadius: radius.sm,
     height: 34,
     justifyContent: "center",
     width: 34,
   },
   sessionAvatarBoxActive: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.brand,
   },
   unreadDot: {
-    backgroundColor: "#ff4d4f",
-    borderColor: "#ffffff",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairlineStrong,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     height: 10,
     position: "absolute",
     right: -2,
@@ -4198,21 +4206,21 @@ const styles = StyleSheet.create({
     width: 10,
   },
   sessionAvatarIcon: {
-    fontSize: 15,
+    fontSize: font.bodyLg,
   },
   sessionInfoBox: {
     flex: 1,
     minWidth: 0,
   },
   sessionStreamTitle: {
-    color: "#12100e",
-    fontSize: 13.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   sessionStreamMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
     marginTop: 2,
   },
   sessionStreamRight: {
@@ -4222,22 +4230,22 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   sessionTimeText: {
-    color: "#7f766c",
-    fontSize: 10.5,
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
   },
   streamDeleteBtn: {
-    backgroundColor: "#ff7f68",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.errWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   streamDeleteBtnText: {
-    color: "#12100e",
-    fontSize: 10.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   permissionStack: {
     gap: 8,
@@ -4245,154 +4253,144 @@ const styles = StyleSheet.create({
   },
   permissionCard: {
     alignItems: "center",
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 10,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: 12,
+    padding: 14,
   },
   permissionCardActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderLeftColor: "#ffd84f",
-    borderLeftWidth: 6,
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    backgroundColor: palette.brandWash,
+    borderColor: palette.brandDeep,
+    borderWidth: 1,
   },
   permissionCardTitle: {
-    color: "#12100e",
-    fontSize: 13.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   permissionCardMeta: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "700",
+    color: palette.ink2,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
     marginTop: 3,
   },
   recommendBadge: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 4,
-    borderWidth: 1,
-    marginLeft: 6,
-    paddingHorizontal: 4,
+    backgroundColor: palette.brandWash,
+    borderRadius: radius.xs,
+    paddingHorizontal: 5,
     paddingVertical: 1,
+    marginLeft: 6,
   },
   recommendBadgeText: {
-    color: "#12100e",
-    fontSize: 9.5,
-    fontWeight: "900",
+    color: palette.brandLight,
+    fontSize: font.micro,
+    fontWeight: weight.medium,
   },
   permissionActiveBadge: {
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 4,
-    borderWidth: 1.5,
+    backgroundColor: palette.brandWash,
+    borderRadius: radius.xs,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   permissionActiveBadgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.brandLight,
+    fontSize: font.caption,
+    fontWeight: weight.medium,
   },
   permissionSelectBtn: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   permissionSelectBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   deleteButtonText: {
-    color: "#a3342f",
-    fontSize: 12,
-    fontWeight: "900",
+    color: palette.err,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   emptyText: {
-    color: "#6c665f",
-    fontWeight: "800",
+    color: palette.ink2,
+    fontSize: font.label,
+    lineHeight: 20,
   },
   emptyBox: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    backgroundColor: palette.well,
+    borderRadius: radius.md - 2,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   intentSavedBadge: {
-    backgroundColor: "#58d46f",
-    borderColor: "#12100e",
-    borderRadius: 4,
+    backgroundColor: palette.okWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
     borderWidth: 1,
     marginLeft: 6,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
   intentSavedBadgeText: {
-    color: "#12100e",
-    fontSize: 9.5,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.micro,
+    fontWeight: weight.semibold,
   },
   intentKeyStatusPill: {
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   intentKeyStatusGood: {
-    backgroundColor: "#d9f6df",
+    backgroundColor: palette.okWash,
   },
   intentKeyStatusWarn: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.warnWash,
+    borderColor: palette.warn,
   },
   intentKeyStatusQuiet: {
-    backgroundColor: "#f5f1e9",
+    backgroundColor: palette.surface2,
   },
   intentKeyStatusText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   intentTestButton: {
-    backgroundColor: "#4fd7ee",
+    backgroundColor: palette.cyanWash,
   },
   intentTestBanner: {
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
+    borderColor: palette.hairline,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     gap: 2,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   intentTestBannerSuccess: {
-    backgroundColor: "#d9f6df",
+    backgroundColor: palette.okWash,
   },
   intentTestBannerError: {
-    backgroundColor: "#ffd9d4",
+    backgroundColor: palette.errWash,
   },
   intentTestBannerTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.body,
+    fontWeight: weight.semibold,
   },
   intentTestBannerMeta: {
-    color: "#3f3a34",
-    fontSize: 11.5,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.regular,
   },
   intentClearBtn: {
     minHeight: 36,
@@ -4400,75 +4398,72 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   intentTraceCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 10,
-    borderWidth: 2,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.md,
+    borderWidth: 1,
     gap: 8,
     padding: 10,
   },
   intentTraceCardActive: {
-    borderLeftColor: "#ffd84f",
+    borderLeftColor: palette.brandDeep,
     borderLeftWidth: 6,
-    elevation: 1,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    ...shadow.float,
   },
   intentTraceHeaderBtn: {
     gap: 8,
   },
   intentStatusBadge: {
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   intentStatusBadgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   intentStatusGood: {
-    backgroundColor: "#58d46f",
+    backgroundColor: palette.okWash,
   },
   intentStatusWarn: {
-    backgroundColor: "#ffd84f",
+    backgroundColor: palette.warnWash,
+    borderColor: palette.warn,
   },
   intentStatusError: {
-    backgroundColor: "#ff7f68",
+    backgroundColor: palette.errWash,
   },
   intentRouteBadge: {
-    backgroundColor: "#4fd7ee",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.cyanWash,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   intentRouteBadgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   intentHttpBadge: {
-    backgroundColor: "#f5f1e9",
-    borderColor: "#12100e",
-    borderRadius: 5,
-    borderWidth: 1.5,
+    backgroundColor: palette.surface2,
+    borderColor: palette.hairline,
+    borderRadius: radius.xs,
+    borderWidth: 1,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   intentHttpBadgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "800",
+    color: palette.ink1,
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
   },
   intentErrorChip: {
-    backgroundColor: "#ffd9d4",
-    color: "#8f1f18",
+    backgroundColor: palette.errWash,
+    color: palette.err,
   },
   intentTraceFooterRow: {
     alignItems: "center",
@@ -4477,19 +4472,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   intentTraceDetailBox: {
-    backgroundColor: "#f8f4ec",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    gap: 8,
+    backgroundColor: palette.surface1,
+    borderColor: palette.hairline,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12,
     marginTop: 4,
-    padding: 10,
   },
   intentCodeText: {
-    color: "#12100e",
+    color: palette.ink1,
     fontFamily: "monospace",
-    fontSize: 11.5,
-    fontWeight: "700",
+    fontSize: font.caption,
+    fontWeight: weight.semibold,
     lineHeight: 17,
   },
 });

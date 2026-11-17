@@ -7,21 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"myai/core/pathpolicy"
 )
-
-var ignoredNames = map[string]bool{
-	".git": true, ".idea": true, ".expo": true, ".next": true, ".cache": true, ".myai": true,
-	"node_modules": true, "dist": true, "build": true,
-}
-
-var sensitiveNames = map[string]bool{
-	".env": true, ".env.local": true, ".env.production": true,
-	"id_rsa": true, "id_ed25519": true,
-}
 
 func normalizeDirectory(path string) (string, error) {
 	path = strings.TrimSpace(path)
@@ -47,52 +40,57 @@ func normalizeDirectory(path string) (string, error) {
 }
 
 func shouldSkip(path string) bool {
-	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
-		name := strings.ToLower(part)
-		if ignoredNames[name] || sensitiveNames[name] {
-			return true
+	return !validRelativePath(path) || pathpolicy.ShouldSkipSnapshot(path)
+}
+
+func validRelativePath(path string) bool {
+	if !fs.ValidPath(path) || path == "." || strings.ContainsAny(path, "\\:") {
+		return false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if strings.TrimRight(part, ". ") != part {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func copyWorkspace(ctx context.Context, source string, target string, excludedRoots ...string) ([]fileState, error) {
+	sourceRoot, err := os.OpenRoot(source)
+	if err != nil {
+		return nil, err
+	}
+	defer sourceRoot.Close()
+	targetRoot, err := os.OpenRoot(target)
+	if err != nil {
+		return nil, err
+	}
+	defer targetRoot.Close()
 	files := make([]fileState, 0)
-	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+	err = fs.WalkDir(sourceRoot.FS(), ".", func(relative string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if path == source {
+		if relative == "." {
 			return nil
 		}
-		if isWithinAnyRoot(path, excludedRoots) {
+		if shouldSkip(relative) || isWithinAnyRoot(filepath.Join(source, filepath.FromSlash(relative)), excludedRoots) || entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			if entry.IsDir() {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil {
+		if err := rejectLinkedPath(sourceRoot, relative, false); err != nil {
 			return err
 		}
-		if shouldSkip(relative) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		destination := filepath.Join(target, relative)
 		if entry.IsDir() {
-			return os.MkdirAll(destination, 0o755)
+			if err := rejectLinkedPath(targetRoot, relative, true); err != nil {
+				return err
+			}
+			return targetRoot.MkdirAll(filepath.FromSlash(relative), 0o755)
 		}
 		info, err := entry.Info()
 		if err != nil {
@@ -101,11 +99,11 @@ func copyWorkspace(ctx context.Context, source string, target string, excludedRo
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		state, err := copyFileWithHash(ctx, path, destination, info.Mode().Perm())
+		state, err := copyRootedFileWithHash(ctx, sourceRoot, relative, targetRoot, relative, info.Mode().Perm())
 		if err != nil {
 			return err
 		}
-		state.Path = filepath.ToSlash(relative)
+		state.Path = relative
 		files = append(files, state)
 		return nil
 	})
@@ -129,28 +127,32 @@ func isWithinAnyRoot(path string, roots []string) bool {
 }
 
 func scanWorkspace(ctx context.Context, root string) (map[string]fileState, error) {
+	directory, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer directory.Close()
 	result := make(map[string]fileState)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err = fs.WalkDir(directory.FS(), ".", func(relative string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if path == root {
+		if relative == "." {
 			return nil
 		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if shouldSkip(relative) {
+		if shouldSkip(relative) || entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			if entry.IsDir() {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+		if err := rejectLinkedPath(directory, relative, false); err != nil {
+			return err
+		}
+		if entry.IsDir() {
 			return nil
 		}
 		info, err := entry.Info()
@@ -160,45 +162,92 @@ func scanWorkspace(ctx context.Context, root string) (map[string]fileState, erro
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		state, err := inspectFile(path)
+		state, err := inspectRootedFile(ctx, directory, relative)
 		if err != nil {
 			return err
 		}
-		state.Path = filepath.ToSlash(relative)
-		result[state.Path] = state
+		state.Path = relative
+		result[relative] = state
 		return nil
 	})
 	return result, err
 }
 
 func inspectWorkspaceFile(root string, relative string) (fileState, bool, error) {
-	abs, err := safeJoin(root, relative)
+	if shouldSkip(relative) {
+		return fileState{}, false, fmt.Errorf("invalid or protected workspace path: %s", relative)
+	}
+	directory, err := os.OpenRoot(root)
 	if err != nil {
 		return fileState{}, false, err
 	}
-	info, err := os.Lstat(abs)
+	defer directory.Close()
+	state, err := inspectRootedFile(context.Background(), directory, relative)
 	if errors.Is(err, os.ErrNotExist) {
 		return fileState{}, false, nil
 	}
-	if err != nil {
-		return fileState{}, false, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return fileState{}, false, fmt.Errorf("workspace path is not a regular file: %s", relative)
-	}
-	state, err := inspectFile(abs)
-	state.Path = filepath.ToSlash(relative)
-	return state, true, err
+	state.Path = relative
+	return state, err == nil, err
 }
 
-func inspectFile(path string) (fileState, error) {
-	file, err := os.Open(path)
+// Check every component, including junctions/reparse points reported as
+// irregular files on Windows. Root also confines the actual I/O if a path is
+// replaced between this check and the subsequent open.
+func rejectLinkedPath(root *os.Root, relative string, allowMissing bool) error {
+	if !validRelativePath(relative) {
+		return fmt.Errorf("invalid workspace-relative path %q", relative)
+	}
+	parts := strings.Split(relative, "/")
+	for index := range parts {
+		name := filepath.FromSlash(strings.Join(parts[:index+1], "/"))
+		info, err := root.Lstat(name)
+		if allowMissing && errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("workspace path is a link or non-regular file: %s", relative)
+		}
+	}
+	return nil
+}
+
+func openRegularFile(root *os.Root, relative string) (*os.File, error) {
+	if err := rejectLinkedPath(root, relative, false); err != nil {
+		return nil, err
+	}
+	before, err := root.Lstat(filepath.FromSlash(relative))
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, fmt.Errorf("workspace path is not a regular file: %s", relative)
+	}
+	file, err := root.Open(filepath.FromSlash(relative))
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(before, info) {
+		_ = file.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("workspace file changed during open: %s", relative)
+	}
+	return file, nil
+}
+
+func inspectRootedFile(ctx context.Context, root *os.Root, relative string) (fileState, error) {
+	file, err := openRegularFile(root, relative)
 	if err != nil {
 		return fileState{}, err
 	}
 	defer file.Close()
 	hasher := sha256.New()
-	size, err := io.Copy(hasher, file)
+	size, err := copyWithContext(ctx, hasher, file)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -210,15 +259,37 @@ func inspectFile(path string) (fileState, error) {
 }
 
 func copyFileWithHash(ctx context.Context, source string, destination string, mode os.FileMode) (fileState, error) {
+	sourceRoot, err := os.OpenRoot(filepath.Dir(source))
+	if err != nil {
+		return fileState{}, err
+	}
+	defer sourceRoot.Close()
+	// The workspace copy uses its already-open destination Root directly. This
+	// wrapper also serves the existing apply/rollback code's sibling temp files.
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return fileState{}, err
 	}
-	input, err := os.Open(source)
+	targetRoot, err := os.OpenRoot(filepath.Dir(destination))
+	if err != nil {
+		return fileState{}, err
+	}
+	defer targetRoot.Close()
+	return copyRootedFileWithHash(ctx, sourceRoot, filepath.Base(source), targetRoot, filepath.Base(destination), mode)
+}
+
+func copyRootedFileWithHash(ctx context.Context, sourceRoot *os.Root, source string, targetRoot *os.Root, destination string, mode os.FileMode) (fileState, error) {
+	input, err := openRegularFile(sourceRoot, source)
 	if err != nil {
 		return fileState{}, err
 	}
 	defer input.Close()
-	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err := rejectLinkedPath(targetRoot, destination, true); err != nil {
+		return fileState{}, err
+	}
+	if err := targetRoot.MkdirAll(filepath.Dir(filepath.FromSlash(destination)), 0o755); err != nil {
+		return fileState{}, err
+	}
+	output, err := targetRoot.OpenFile(filepath.FromSlash(destination), os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return fileState{}, err
 	}
@@ -262,44 +333,16 @@ func copyWithContext(ctx context.Context, destination io.Writer, source io.Reade
 }
 
 func safeJoin(root string, relative string) (string, error) {
-	if relative == "" || filepath.IsAbs(relative) {
-		return "", fmt.Errorf("invalid workspace-relative path %q", relative)
+	if shouldSkip(relative) {
+		return "", fmt.Errorf("invalid or protected workspace-relative path %q", relative)
 	}
-	root, err := filepath.EvalSymlinks(root)
+	directory, err := os.OpenRoot(root)
 	if err != nil {
 		return "", err
 	}
-	abs := filepath.Clean(filepath.Join(root, filepath.FromSlash(relative)))
-	abs, err = resolveExistingPath(abs)
-	if err != nil {
+	defer directory.Close()
+	if err := rejectLinkedPath(directory, relative, true); err != nil {
 		return "", err
 	}
-	inside, err := filepath.Rel(root, abs)
-	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) || filepath.IsAbs(inside) {
-		return "", fmt.Errorf("path escapes workspace: %s", relative)
-	}
-	return abs, nil
-}
-
-func resolveExistingPath(path string) (string, error) {
-	current := filepath.Clean(path)
-	missing := make([]string, 0, 4)
-	for {
-		resolved, err := filepath.EvalSymlinks(current)
-		if err == nil {
-			for index := len(missing) - 1; index >= 0; index-- {
-				resolved = filepath.Join(resolved, missing[index])
-			}
-			return filepath.Abs(filepath.Clean(resolved))
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", err
-		}
-		missing = append(missing, filepath.Base(current))
-		current = parent
-	}
+	return pathpolicy.Resolve(root, relative)
 }

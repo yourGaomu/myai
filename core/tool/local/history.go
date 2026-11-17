@@ -8,6 +8,7 @@ import (
 	sqlitehistory "myai/core/adapter/persistence/sqlite/history/repository"
 	domainhistory "myai/core/domain/history"
 	"myai/core/history"
+	historyport "myai/core/port/history"
 )
 
 type historyRecorder interface {
@@ -15,7 +16,15 @@ type historyRecorder interface {
 	RecordFileChange(ctx context.Context, path string, before *domainhistory.FileSnapshot, options history.RecordCommand) (string, error)
 }
 
-func openHistoryRecorder(ctx context.Context, configured historyRecorder, workspace string) (historyRecorder, func(), error) {
+func NewWriteFileToolWithWorkspaceAndHistory(workspace string, factory historyport.StoreFactory) *WriteFileTool {
+	return &WriteFileTool{workspace: workspace, historyFactory: factory}
+}
+
+func NewEditFileToolWithWorkspaceAndHistory(workspace string, factory historyport.StoreFactory) *EditFileTool {
+	return &EditFileTool{workspace: workspace, historyFactory: factory}
+}
+
+func openHistoryRecorder(ctx context.Context, configured historyRecorder, workspace string, factories ...historyport.StoreFactory) (historyRecorder, func(), error) {
 	if configured != nil {
 		return configured, func() {}, nil
 	}
@@ -37,7 +46,11 @@ func openHistoryRecorder(ctx context.Context, configured historyRecorder, worksp
 		return recorder, func() {}, nil
 	}
 
-	recorder, err := history.NewRecorder(workspace, sqlitehistory.Factory{})
+	var factory historyport.StoreFactory = sqlitehistory.Factory{}
+	if len(factories) > 0 && factories[0] != nil {
+		factory = factories[0]
+	}
+	recorder, err := history.NewRecorder(workspace, factory)
 	if err != nil {
 		return nil, nil, err
 	}

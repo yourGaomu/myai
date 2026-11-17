@@ -75,6 +75,7 @@ func (s LoadService) EnsureInMemory(ctx context.Context, command loadcommand.Ens
 		SystemInstruction:    record.SystemInstruction,
 		AllowedTools:         append([]string(nil), record.AllowedTools...),
 		EnforceToolAllowlist: record.EnforceToolAllowlist,
+		PermissionCeiling:    session.ClonePermissionCeiling(record.PermissionCeiling),
 		WorkspaceRoot:        record.WorkspaceRoot,
 		WorkspaceSandboxID:   record.WorkspaceSandboxID,
 		MaxToolRounds:        record.MaxToolRounds,

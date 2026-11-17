@@ -1,10 +1,14 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { font, weight } from "../../constants/theme";
+import { useAppTheme } from "../../theme/ThemeProvider";
 
-export function ButtonContent({ color = "#12100e", loading, text }: { color?: string; loading?: boolean; text: string }) {
+export function ButtonContent({ color, loading, text }: { color?: string; loading?: boolean; text: string }) {
+  const { palette } = useAppTheme();
+  const resolved = color ?? palette.inkInverse;
   return (
     <View style={styles.buttonContent}>
-      {loading ? <ActivityIndicator color={color} size="small" /> : null}
-      <Text style={[styles.buttonContentText, { color }]}>{text}</Text>
+      {loading ? <ActivityIndicator color={resolved} size="small" /> : null}
+      <Text style={[styles.buttonContentText, { color: resolved }]}>{text}</Text>
     </View>
   );
 }
@@ -17,7 +21,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   buttonContentText: {
-    fontSize: 12,
-    fontWeight: "900",
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
 });

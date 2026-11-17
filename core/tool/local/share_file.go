@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"myai/core/asset"
+	"myai/core/pathpolicy"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
@@ -86,7 +87,7 @@ func (t *ShareFileTool) Schema() any {
 }
 
 func (t *ShareFileTool) Permission() tooldef.Permission {
-	return tooldef.PermissionWrite
+	return tooldef.PermissionExecute
 }
 
 func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
@@ -110,14 +111,14 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
-	if info.IsDir() {
-		return tooldef.ToolOutput{}, fmt.Errorf("path is a directory: %s", input.Path)
+	if !info.Mode().IsRegular() {
+		return tooldef.ToolOutput{}, errors.New("only regular workspace files can be shared")
 	}
 	if info.Size() > maxShareFileBytes {
 		return tooldef.ToolOutput{}, fmt.Errorf("file is too large to share: %s (%d bytes, max %d bytes)", filepath.ToSlash(relativePath(workspace, input.Path)), info.Size(), maxShareFileBytes)
 	}
-	if isSensitiveFileName(filepath.Base(input.Path)) {
-		return tooldef.ToolOutput{}, fmt.Errorf("refusing to share sensitive file: %s", filepath.ToSlash(relativePath(workspace, input.Path)))
+	if (pathpolicy.Policy{WorkspaceRoot: workspace}).RequiresApproval(input.Path) {
+		return tooldef.ToolOutput{}, errors.New("refusing to share sensitive or protected file")
 	}
 
 	file, err := os.Open(input.Path)
@@ -125,6 +126,13 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 		return tooldef.ToolOutput{}, err
 	}
 	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return tooldef.ToolOutput{}, err
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() > maxShareFileBytes {
+		return tooldef.ToolOutput{}, errors.New("workspace file changed before sharing")
+	}
 
 	response, err := t.uploader.UploadFile(ctx, asset.UploadFileRequest{
 		Reader:      file,
@@ -170,7 +178,11 @@ func normalizeShareFileArgs(workspace string, args json.RawMessage) (shareFileAr
 	if input.Path == "" {
 		return shareFileArgs{}, errors.New("path is empty")
 	}
-	path, err := cleanWorkspacePath(workspace, input.Path)
+	policy := pathpolicy.Policy{WorkspaceRoot: workspace}
+	if policy.RequiresApproval(input.Path) {
+		return shareFileArgs{}, errors.New("refusing to share sensitive or protected file")
+	}
+	path, err := pathpolicy.Resolve(workspace, input.Path)
 	if err != nil {
 		return shareFileArgs{}, err
 	}
@@ -196,10 +208,5 @@ func contentTypeFromPath(path string) string {
 }
 
 func isSensitiveFileName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case ".env", ".env.local", ".env.production", "id_rsa", "id_ed25519":
-		return true
-	default:
-		return false
-	}
+	return pathpolicy.IsSensitive(name)
 }

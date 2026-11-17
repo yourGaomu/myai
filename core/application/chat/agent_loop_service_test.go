@@ -246,8 +246,8 @@ func TestAgentLoopServiceReusesPersistedEnvironmentContext(t *testing.T) {
 		if environmentMessages != 1 {
 			t.Fatalf("request %d expected one environment context, got %d", index, environmentMessages)
 		}
-		if lastUser >= 0 && environmentAt != lastUser+1 {
-			t.Fatalf("request %d expected environment appended after user message", index)
+		if lastUser >= 0 && environmentAt != lastUser-1 {
+			t.Fatalf("request %d expected request-only environment before the current user input", index)
 		}
 	}
 	count := 0
@@ -256,8 +256,8 @@ func TestAgentLoopServiceReusesPersistedEnvironmentContext(t *testing.T) {
 			count++
 		}
 	}
-	if count != 1 {
-		t.Fatalf("expected one durable environment message, got %d", count)
+	if count != 0 {
+		t.Fatalf("request-only environment mutated durable history: %d", count)
 	}
 }
 

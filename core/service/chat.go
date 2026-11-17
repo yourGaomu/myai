@@ -22,6 +22,7 @@ import (
 	bootstrapcommand "myai/core/application/session/bootstrap/command"
 	bootstrapresult "myai/core/application/session/bootstrap/result"
 	lifecyclecommand "myai/core/application/session/lifecycle/command"
+	lifecycleresult "myai/core/application/session/lifecycle/result"
 	loadcommand "myai/core/application/session/load/command"
 	messagecommand "myai/core/application/session/message/command"
 	querycommand "myai/core/application/session/query/command"
@@ -46,17 +47,43 @@ type ChatService struct {
 	operationInit         sync.Once
 	operations            *sessionOperationCoordinator
 	pendingWakeMu         sync.Mutex
+	backgroundClosed      bool
+	backgroundWorkers     sync.WaitGroup
 	pendingWakes          map[string]*pendingWakeState
 	continuationMu        sync.Mutex
 	continuations         map[string]*continuationState
 	backgroundEventsMu    sync.Mutex
 	backgroundSubscribers map[chan BackgroundTurnEvent]struct{}
+	backgroundPending     map[string]*backgroundInteraction
+	generationMu          sync.Mutex
+	lifecycleInit         sync.Once
+	lifecycleOperations   *sessionOperationCoordinator
+	generations           map[string]*sessionGeneration
+	lifecycleBlocks       map[string]string
+	userAcceptanceMu      sync.Mutex
+	pendingUserAcceptance map[string]generationcommand.PersistUserMessage
+	userAcceptanceSlots   map[string]bool
 }
+
+type sessionGeneration struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+const (
+	sessionBlockClear      = "clear"
+	sessionBlockDelete     = "delete"
+	sessionBlockRestore    = "restore"
+	maxUserAcceptanceSlots = 128
+)
+
+var ErrSessionPersistenceBlocked = errors.New("session persistence is blocked")
 
 type pendingWakeState struct {
 	// requested records an enqueue that happened while the worker was already
 	// running, so the worker gets another chance before it exits.
 	requested bool
+	cancel    context.CancelFunc
 }
 
 var ErrNoPendingParentInput = errors.New("no pending parent input")
@@ -87,6 +114,38 @@ type SessionPreferencesView struct {
 	Effective        generation.ResolvedSettings
 	StyleInstruction string
 	RAGSettings      session.RAGSettings
+}
+
+func (s *ChatService) FlushPersistence(ctx context.Context) error {
+	if s == nil || s.dependencies.FlushPersistence == nil {
+		return nil
+	}
+	return s.dependencies.FlushPersistence(ctx)
+}
+
+func (s *ChatService) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.pendingWakeMu.Lock()
+	s.backgroundClosed = true
+	for _, state := range s.pendingWakes {
+		if state.cancel != nil {
+			state.cancel()
+		}
+	}
+	s.pendingWakeMu.Unlock()
+	done := make(chan struct{})
+	go func() { s.backgroundWorkers.Wait(); close(done) }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return s.FlushPersistence(ctx)
+	}
 }
 
 func NewChatService(dependencies ChatDependencies) *ChatService {
@@ -203,6 +262,10 @@ func (s *ChatService) schedulePendingTurn(sessionID string) {
 		return
 	}
 	s.pendingWakeMu.Lock()
+	if s.backgroundClosed {
+		s.pendingWakeMu.Unlock()
+		return
+	}
 	if s.pendingWakes == nil {
 		s.pendingWakes = make(map[string]*pendingWakeState)
 	}
@@ -211,15 +274,24 @@ func (s *ChatService) schedulePendingTurn(sessionID string) {
 		s.pendingWakeMu.Unlock()
 		return
 	}
-	s.pendingWakes[sessionID] = &pendingWakeState{}
+	workerCtx, cancel := context.WithCancel(context.Background())
+	s.pendingWakes[sessionID] = &pendingWakeState{cancel: cancel}
+	s.backgroundWorkers.Add(1)
 	s.pendingWakeMu.Unlock()
-
-	go s.runPendingTurnWorker(sessionID)
+	go func() {
+		defer s.backgroundWorkers.Done()
+		defer cancel()
+		s.runPendingTurnWorkerContext(workerCtx, sessionID)
+	}()
 }
 
 func (s *ChatService) runPendingTurnWorker(sessionID string) {
+	s.runPendingTurnWorkerContext(context.Background(), sessionID)
+}
+
+func (s *ChatService) runPendingTurnWorkerContext(ctx context.Context, sessionID string) {
 	for {
-		_, err := s.continuePendingStreamForSession(context.Background(), sessionID, llm.ChatStreamHandler{}, true)
+		_, err := s.continuePendingStreamForSession(ctx, sessionID, llm.ChatStreamHandler{}, true)
 		if err != nil && !errors.Is(err, ErrNoPendingParentInput) && !errors.Is(err, ErrContinuationPaused) && !errors.Is(err, context.Canceled) {
 			if s.dependencies.OnPendingTurnError != nil {
 				s.dependencies.OnPendingTurnError(fmt.Errorf("wake parent session %s: %w", sessionID, err))
@@ -228,7 +300,7 @@ func (s *ChatService) runPendingTurnWorker(sessionID string) {
 
 		s.pendingWakeMu.Lock()
 		state := s.pendingWakes[sessionID]
-		if state == nil || !state.requested {
+		if s.backgroundClosed || ctx.Err() != nil || state == nil || !state.requested {
 			delete(s.pendingWakes, sessionID)
 			s.pendingWakeMu.Unlock()
 			return
@@ -273,6 +345,14 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	ctx, finishGeneration, err := s.beginSessionGeneration(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
+	defer finishGeneration()
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
 	if err := s.resumeContinuations(ctx, sessionID); err != nil {
 		return ChatResponse{}, err
 	}
@@ -282,6 +362,9 @@ func (s *ChatService) SendMessageStreamForSession(ctx context.Context, sessionID
 func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, input string, stream llm.ChatStreamHandler, sourceID string, sourceKind string) (ChatResponse, error) {
 	if s.dependencies.Models == nil {
 		return ChatResponse{}, errors.New("llm client is nil")
+	}
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
 	}
 	var currentBefore *session.Session
 	autoPlanAction := AutoPlanActionChat
@@ -305,6 +388,11 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 		// local so a classifier can never execute a nonexistent or completed plan.
 		autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
 		autoPlanAction = autoPlanDecision.Action
+		if autoPlanAction == AutoPlanActionPlanExecute {
+			// Planning decisions describe the work; execution requires a later
+			// explicit confirmation of the captured draft.
+			autoPlanAction = AutoPlanActionPlanOnly
+		}
 		if autoPlanAction == AutoPlanActionResumePlan && !hasExecutablePlan(currentBefore) {
 			// A classifier is advisory. Never execute a missing, completed, or
 			// otherwise non-executable plan based only on its response.
@@ -344,9 +432,9 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 	if userMessageCount(current.Messages) == 1 {
 		title = titleFromInput(input)
 	}
-	// 持久化与主生成流程解耦；落库失败由适配器上报，不阻断已经开始的模型请求。
+	// Durable acceptance must finish before main generation or tool execution.
 	if s.dependencies.UserMessages != nil && prepared.Appended {
-		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+		if err := s.acceptUserMessage(ctx, generationcommand.PersistUserMessage{
 			SessionID:          current.ID,
 			Model:              current.Model,
 			Title:              title,
@@ -355,7 +443,9 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 			RAGContext:         prepared.RAGContext,
 			AppendedMessages:   domainmessage.CloneAll(prepared.AppendedMessages),
 			SessionSnapshot:    session.Clone(current),
-		})
+		}); err != nil {
+			return ChatResponse{SessionID: current.ID}, err
+		}
 	}
 
 	switch autoPlanAction {
@@ -422,12 +512,7 @@ func (s *ChatService) generateAndExecutePlan(ctx context.Context, current *sessi
 func (s *ChatService) generatePlanOnly(ctx context.Context, current *session.Session, input string, title string, retrievalInfo chatretrievalresult.Context, stream llm.ChatStreamHandler) (ChatResponse, error) {
 	planningSession := session.Clone(current)
 	planningSession.AgentMode = session.AgentModePlan
-	// The plan is delivered through OnPlanUpdate. Keeping the planning answer
-	// out of OnAnswer prevents it from being concatenated with the real step
-	// results in the single assistant response shown to the user.
-	planningStream := stream
-	planningStream.OnAnswer = nil
-	planning, err := s.generateAssistantForSession(ctx, planningSession, input, title, "autonomous planning", retrievalInfo, planningStream, true, false)
+	planning, err := s.generateAssistantForSession(ctx, planningSession, input, title, "autonomous planning", retrievalInfo, stream, true, false)
 	if err != nil {
 		return planning, err
 	}
@@ -591,6 +676,14 @@ func (s *ChatService) continueSessionStreamForSessionWithSource(ctx context.Cont
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	ctx, finishGeneration, err := s.beginSessionGeneration(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
+	defer finishGeneration()
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
 
 	prepared, err := s.dependencies.MessageCommands.AppendUserMessage(ctx, messagecommand.AppendUserMessage{
 		SessionID: sessionID, Input: input, ForceChatMode: true, SyntheticReason: syntheticReason,
@@ -601,11 +694,13 @@ func (s *ChatService) continueSessionStreamForSessionWithSource(ctx context.Cont
 	}
 	current := prepared.Session
 	if prepared.Appended && s.dependencies.UserMessages != nil {
-		s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+		if err := s.acceptUserMessage(ctx, generationcommand.PersistUserMessage{
 			SessionID: current.ID, Model: current.Model, Input: input,
 			RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
 			SyntheticReason: syntheticReason, AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(current),
-		})
+		}); err != nil {
+			return ChatResponse{SessionID: current.ID}, err
+		}
 	}
 
 	return s.generateAssistantForSession(
@@ -639,6 +734,14 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	ctx, finishGeneration, err := s.beginSessionGeneration(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
+	defer finishGeneration()
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
 	if background {
 		var finish func()
 		ctx, finish, err = s.beginContinuation(ctx, sessionID)
@@ -691,7 +794,7 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 			turnStream := stream
 			var finish func(ChatResponse, error)
 			if background {
-				turnStream, finish = s.backgroundStreamForRequest(sessionID, item.ID)
+				turnStream, finish = s.backgroundStreamForContext(ctx, sessionID, "", item.ID)
 			}
 			queuedResponse, queuedErr := s.sendMessageLocked(ctx, sessionID, item.Content, turnStream, item.ID, domaingeneration.PendingTurnSourceUserMessage)
 			if finish != nil {
@@ -745,12 +848,15 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 		latestInput = prepared.Input
 		if prepared.Appended && s.dependencies.UserMessages != nil {
 			// 5. 先记录父会话新增消息，模型成功后才确认 mailbox 事件完成。
-			s.dependencies.UserMessages.PersistUserMessage(generationcommand.PersistUserMessage{
+			if acceptErr := s.acceptUserMessage(ctx, generationcommand.PersistUserMessage{
 				SessionID: current.ID, Model: current.Model, Input: prepared.Input,
 				RuntimeInstruction: prepared.RuntimeInstruction, RAGContext: prepared.RAGContext,
 				SyntheticReason:  domainmessage.SyntheticReasonSubagentResult,
 				AppendedMessages: domainmessage.CloneAll(prepared.AppendedMessages), SessionSnapshot: session.Clone(current),
-			})
+			}); acceptErr != nil {
+				return ChatResponse{SessionID: current.ID}, errors.Join(acceptErr, requeue(pendingItems))
+			}
+
 		}
 	}
 	if current == nil || latestInput == "" {
@@ -758,7 +864,7 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 	}
 	if background {
 		var completed func(ChatResponse, error)
-		stream, completed = s.backgroundStream(sessionID)
+		stream, completed = s.backgroundStreamForContext(ctx, sessionID, "", "")
 		defer func() { completed(response, resultErr) }()
 	}
 	response, err = s.generateAssistantForSession(
@@ -816,6 +922,14 @@ func (s *ChatService) RegenerateLastMessageStreamForSession(ctx context.Context,
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	ctx, finishGeneration, err := s.beginSessionGeneration(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
+	defer finishGeneration()
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
 	if err := s.resumeContinuations(ctx, sessionID); err != nil {
 		return ChatResponse{}, err
 	}
@@ -841,6 +955,14 @@ func (s *ChatService) ExecutePlanStreamForSession(ctx context.Context, sessionID
 	}
 	defer unlock()
 	ctx = withSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID))
+	ctx, finishGeneration, err := s.beginSessionGeneration(ctx, sessionID)
+	if err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
+	defer finishGeneration()
+	if err := s.retryUserAcceptance(ctx, sessionID); err != nil {
+		return ChatResponse{SessionID: sessionID}, err
+	}
 	if err := s.resumeContinuations(ctx, sessionID); err != nil {
 		return ChatResponse{}, err
 	}
@@ -882,11 +1004,8 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Stream:        stream,
 		CapturePlan:   capturePlan,
 		ForceChatMode: forceChatMode,
-		Internal:      reason == "autonomous planning" || reason == "recover plan",
+		Internal:      reason == "recover plan",
 	})
-	if err != nil {
-		return ChatResponse{}, err
-	}
 
 	return ChatResponse{
 		SessionID: response.SessionID,
@@ -896,7 +1015,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 		Compact:   response.Compact,
 		Plan:      response.Plan,
 		Retrieval: retrievalInfo,
-	}, nil
+	}, err
 }
 
 func (s *ChatService) contextInfo(ctx context.Context, current *session.Session) ContextInfo {
@@ -939,39 +1058,66 @@ func (s *ChatService) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		sessionID = s.CurrentSessionID()
 	}
-	if err := s.PauseSessionContinuations(ctx, sessionID); err != nil {
-		return err
-	}
-	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	unlock, err := s.lockSessionLifecycle(ctx, sessionID, sessionBlockDelete)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	s.discardUserAcceptance(sessionID)
 	_, err = s.dependencies.SessionLifecycle.Delete(ctx, lifecyclecommand.DeleteSession{SessionID: sessionID})
 	return err
 }
 
 func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) error {
-	unlock, err := s.lockSessionOperation(ctx, sessionID)
+	sessionID = strings.TrimSpace(sessionID)
+	unlock, err := s.lockSessionLifecycle(ctx, sessionID, sessionBlockRestore)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	_, err = s.dependencies.SessionLifecycle.Restore(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID})
-	return err
+	if s.dependencies.BlockSession != nil || s.dependencies.ResumeSession != nil {
+		restorer, ok := s.dependencies.SessionLifecycle.(interface {
+			RestoreDeleted(context.Context, lifecyclecommand.RestoreSession) (lifecycleresult.Lifecycle, error)
+		})
+		if !ok {
+			return fmt.Errorf("%w: restore requires deleted-session metadata verification; retry ClearSession for an active session", ErrSessionPersistenceBlocked)
+		}
+		if _, err := restorer.RestoreDeleted(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID}); err != nil {
+			return err
+		}
+	} else if _, err := s.dependencies.SessionLifecycle.Restore(ctx, lifecyclecommand.RestoreSession{SessionID: sessionID}); err != nil {
+		return err
+	}
+	if err := s.resumeSessionPersistence(ctx, sessionID); err != nil {
+		return fmt.Errorf("session restored in store but persistence remains blocked; retry ClearSession for %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 func (s *ChatService) ClearCurrent(ctx context.Context) error {
-	unlock, err := s.lockSessionOperation(ctx, s.CurrentSessionID())
+	return s.ClearSession(ctx, s.CurrentSessionID())
+}
+
+// ClearSession also retries a failed clear after the current session changes.
+func (s *ChatService) ClearSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session id is empty")
+	}
+	unlock, err := s.lockSessionLifecycle(ctx, sessionID, sessionBlockClear)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	_, err = s.dependencies.SessionLifecycle.Clear(ctx, lifecyclecommand.ClearSession{Title: "New chat"})
-	return err
+	s.discardUserAcceptance(sessionID)
+	if _, err := s.dependencies.SessionLifecycle.Clear(ctx, lifecyclecommand.ClearSession{SessionID: sessionID, Title: "New chat"}); err != nil {
+		return fmt.Errorf("clear session %s failed; persistence remains blocked, retry ClearSession: %w", sessionID, err)
+	}
+	return s.resumeSessionPersistence(ctx, sessionID)
 }
 
 func (s *ChatService) ListSessions(ctx context.Context) ([]sessionresult.SessionListItem, error) {
@@ -1163,6 +1309,18 @@ func (s *ChatService) SetRAGSettingsForSession(ctx context.Context, sessionID st
 	})
 }
 
+func (s *ChatService) SetToolAllowlistForSession(ctx context.Context, sessionID string, allowed []string, enforce bool) error {
+	return s.withSessionOperation(ctx, sessionID, func() error {
+		settings, ok := s.dependencies.SessionSettings.(interface {
+			SetToolAllowlist(context.Context, string, []string, bool) error
+		})
+		if !ok {
+			return errors.New("session settings do not support tool allowlists")
+		}
+		return settings.SetToolAllowlist(ctx, sessionID, allowed, enforce)
+	})
+}
+
 func (s *ChatService) CurrentSessionPreferences(ctx context.Context) (SessionPreferencesView, error) {
 	return s.SessionPreferencesForSession(ctx, s.CurrentSessionID())
 }
@@ -1346,6 +1504,187 @@ func (s *ChatService) lockSessionOperation(ctx context.Context, sessionID string
 	//只会运行一次，创建会话管理机制
 	s.operationInit.Do(func() { s.operations = newSessionOperationCoordinator() })
 	return s.operations.lock(ctx, sessionID)
+}
+
+func (s *ChatService) acceptUserMessage(ctx context.Context, command generationcommand.PersistUserMessage) error {
+	if s.dependencies.UserMessages == nil {
+		return nil
+	}
+	if durable, ok := s.dependencies.UserMessages.(planport.UserMessageAcceptor); ok {
+		if err := s.reserveUserAcceptance(command.SessionID); err != nil {
+			return err
+		}
+		command.AppendedMessages = domainmessage.CloneAll(command.AppendedMessages)
+		command.SessionSnapshot = session.Clone(command.SessionSnapshot)
+		s.userAcceptanceMu.Lock()
+		if s.pendingUserAcceptance == nil {
+			s.pendingUserAcceptance = make(map[string]generationcommand.PersistUserMessage)
+		}
+		s.pendingUserAcceptance[command.SessionID] = command
+		s.userAcceptanceMu.Unlock()
+		accepted := command
+		accepted.AppendedMessages = domainmessage.CloneAll(command.AppendedMessages)
+		accepted.SessionSnapshot = session.Clone(command.SessionSnapshot)
+		if err := durable.AcceptUserMessage(ctx, accepted); err != nil {
+			return fmt.Errorf("accept user message persistence: %w", err)
+		}
+		s.userAcceptanceMu.Lock()
+		delete(s.pendingUserAcceptance, command.SessionID)
+		s.userAcceptanceMu.Unlock()
+		s.releaseUserAcceptance(command.SessionID)
+		return nil
+	}
+	s.dependencies.UserMessages.PersistUserMessage(command)
+	return nil
+}
+
+func (s *ChatService) retryUserAcceptance(ctx context.Context, sessionID string) error {
+	s.userAcceptanceMu.Lock()
+	command, pending := s.pendingUserAcceptance[sessionID]
+	s.userAcceptanceMu.Unlock()
+	if !pending {
+		return nil
+	}
+	return s.acceptUserMessage(ctx, command)
+}
+
+func (s *ChatService) discardUserAcceptance(sessionID string) {
+	s.userAcceptanceMu.Lock()
+	delete(s.pendingUserAcceptance, sessionID)
+	s.userAcceptanceMu.Unlock()
+	s.releaseUserAcceptance(sessionID)
+}
+
+// lockSessionLifecycle fences new turns, cancels and waits for the current turn,
+// then persists the tombstone while holding the session operation lock.
+func (s *ChatService) lockSessionLifecycle(ctx context.Context, sessionID, reason string) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if sessionID == "" {
+		return nil, errors.New("session id is empty")
+	}
+	if isSessionOperationLocked(ctx, normalizeSessionOperationKey(sessionID)) {
+		return nil, errors.New("session lifecycle operation cannot run from its active generation")
+	}
+	s.lifecycleInit.Do(func() { s.lifecycleOperations = newSessionOperationCoordinator() })
+	releaseLifecycle, err := s.lifecycleOperations.lock(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (func(), error) {
+		releaseLifecycle()
+		return nil, err
+	}
+	s.generationMu.Lock()
+	if s.lifecycleBlocks == nil {
+		s.lifecycleBlocks = make(map[string]string)
+	}
+	if reason != sessionBlockRestore || s.lifecycleBlocks[sessionID] != sessionBlockClear {
+		s.lifecycleBlocks[sessionID] = reason
+	}
+	active := s.generations[sessionID]
+	if active != nil {
+		active.cancel()
+	}
+	s.generationMu.Unlock()
+	if active != nil {
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-active.done:
+		}
+	}
+	releaseOperation, err := s.lockSessionOperation(ctx, sessionID)
+	if err != nil {
+		return fail(err)
+	}
+	if s.dependencies.BlockSession != nil {
+		if err := s.dependencies.BlockSession(ctx, sessionID); err != nil {
+			releaseOperation()
+			return fail(fmt.Errorf("block session %s before %s: %w", sessionID, reason, err))
+		}
+	}
+	if err := s.PauseSessionContinuations(ctx, sessionID); err != nil {
+		releaseOperation()
+		return fail(err)
+	}
+	return func() {
+		releaseOperation()
+		releaseLifecycle()
+	}, nil
+}
+
+func (s *ChatService) resumeSessionPersistence(ctx context.Context, sessionID string) error {
+	if s.dependencies.ResumeSession != nil {
+		if err := s.dependencies.ResumeSession(ctx, sessionID); err != nil {
+			return fmt.Errorf("%w: session %s resume failed; retry ClearSession: %w", ErrSessionPersistenceBlocked, sessionID, err)
+		}
+	}
+	s.generationMu.Lock()
+	delete(s.lifecycleBlocks, sessionID)
+	s.generationMu.Unlock()
+	return nil
+}
+
+func (s *ChatService) sessionPersistenceBlockedLocked(sessionID string) error {
+	reason := s.lifecycleBlocks[sessionID]
+	if reason == "" {
+		return nil
+	}
+	recovery := "retry RestoreSession for this session"
+	if reason == sessionBlockClear {
+		recovery = "retry ClearSession for this session"
+	} else if reason == sessionBlockDelete {
+		recovery = "retry DeleteSession or explicitly RestoreSession for this session"
+	}
+	return fmt.Errorf("%w: session %s is blocked by %s; %s", ErrSessionPersistenceBlocked, sessionID, reason, recovery)
+}
+
+// Registration shares a mutex with destructive lifecycle admission, so a
+// concurrent clear/delete either cancels this generation or prevents its start.
+func (s *ChatService) beginSessionGeneration(ctx context.Context, sessionID string) (context.Context, func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	if err := s.sessionPersistenceBlockedLocked(sessionID); err != nil {
+		return ctx, nil, err
+	}
+	if s.generations == nil {
+		s.generations = make(map[string]*sessionGeneration)
+	}
+	if s.generations[sessionID] != nil {
+		return ctx, nil, errors.New("session generation is already running")
+	}
+	if _, durable := s.dependencies.UserMessages.(planport.UserMessageAcceptor); durable {
+		if err := s.reserveUserAcceptance(sessionID); err != nil {
+			return ctx, nil, err
+		}
+		s.userAcceptanceMu.Lock()
+		s.userAcceptanceSlots[sessionID] = true
+		s.userAcceptanceMu.Unlock()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	state := &sessionGeneration{cancel: cancel, done: make(chan struct{})}
+	s.generations[sessionID] = state
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			cancel()
+			s.generationMu.Lock()
+			if s.generations[sessionID] == state {
+				delete(s.generations, sessionID)
+			}
+			s.finishUserAcceptance(sessionID)
+			close(state.done)
+			s.generationMu.Unlock()
+		})
+	}, nil
 }
 
 func titleFromInput(input string) string {

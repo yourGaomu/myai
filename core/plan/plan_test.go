@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,17 +57,93 @@ func TestExtractStepsFromChinesePlanSection(t *testing.T) {
 }
 
 func TestHasResultSection(t *testing.T) {
-	if !HasResultSection("## Plan\n1. Draft\n\n## Result\nDone") {
-		t.Fatal("expected English result section")
+	for _, content := range []string{
+		"## Result\nA complete text answer.",
+		"## 最终结果\n《秋夜》",
+	} {
+		if !HasResultSection(content) {
+			t.Fatalf("expected a standalone nonempty Result: %q", content)
+		}
 	}
-	if !HasResultSection("## 执行规划\n1. 写诗\n\n## 正文\n《秋夜》") {
-		t.Fatal("expected Chinese body section")
+	for _, content := range []string{
+		"## Plan\n1. Draft\n\n## Result\nDone",
+		"## 执行规划\n1. 写诗\n\n## 正文\n《秋夜》",
+		"## Result\nDone\n\n## Plan\n1. Inspect",
+		"## Plan\n1. Inspect only",
+		"## Result format\nUse JSON",
+		"## Output\nExpected output",
+		"## Answer\nAn answer",
+		"## Result\n\n## Notes\nUnrelated text",
+		"```markdown\n## Result\nExample only\n```",
+	} {
+		if HasResultSection(content) {
+			t.Fatalf("a plan, example, empty or unrelated heading must not signal completion: %q", content)
+		}
 	}
-	if HasResultSection("## Plan\n1. Inspect only") {
-		t.Fatal("did not expect result section")
+}
+
+func TestExtractStepsRequiresAnExplicitPlanSection(t *testing.T) {
+	for _, content := range []string{
+		"Notes:\n- assumption\n- risk",
+		"1. Explanation\n2. More explanation",
+		"## Output\n- expected output",
+		"```markdown\n## Plan\n1. example\n```",
+		"An example object: {\"steps\":[{\"title\":\"example\"}]}",
+	} {
+		if steps := ExtractSteps(content); len(steps) != 0 {
+			t.Fatalf("ordinary prose must not become executable steps: %#v", steps)
+		}
 	}
-	if HasResultSection("## Result format\nUse JSON") {
-		t.Fatal("did not expect a descriptive heading to count as a result")
+}
+
+func TestExtractStepsKeepsOnlyTheFirstListLevel(t *testing.T) {
+	content := "## Plan\n1. Inspect\n   - detail\n   - another detail\n2. Verify\n\nRisks:\n- assumption\n- risk"
+	steps := ExtractSteps(content)
+	if len(steps) != 2 || steps[0].Title != "Inspect" || steps[1].Title != "Verify" {
+		t.Fatalf("nested details and following prose became steps: %#v", steps)
+	}
+}
+
+func TestExtractStructuredStepsIgnoreExecutionState(t *testing.T) {
+	for _, status := range []string{"done", "skipped", "running", "failed", "canceled", "unknown"} {
+		t.Run(status, func(t *testing.T) {
+			content := `{"status":"done","steps":[{"id":"work","title":"Work","status":"` + status + `","retry_count":5,"last_error":"old","agent_task_id":"old","started_at":"old","completed_at":"old"}]}`
+			steps := ExtractSteps(content)
+			if len(steps) != 1 || steps[0].Status != StepStatusPending || steps[0].RetryCount != 0 || steps[0].LastError != "" || steps[0].AgentTaskID != "" || steps[0].StartedAt != nil || steps[0].CompletedAt != nil {
+				t.Fatalf("model supplied execution state was accepted: %#v", steps)
+			}
+		})
+	}
+}
+
+func TestExtractStructuredStepsPreservesInvalidGraphForValidation(t *testing.T) {
+	for _, content := range []string{
+		`{"steps":[{"id":"work","title":"Work","order":0}]}`,
+		`{"steps":[{"id":"work","title":"Work","depends_on":[" "]}]}`,
+		`{"steps":[{"id":"work","title":"Work","depends_on":["missing"]}]}`,
+		`{"steps":[{"id":"work","title":"Work","depends_on":["work"]}]}`,
+	} {
+		steps := ExtractSteps(content)
+		if len(steps) != 1 || Validate(&Plan{Steps: steps}) == nil {
+			t.Fatalf("parsing silently repaired invalid graph input: %#v", steps)
+		}
+	}
+}
+
+func TestExtractStructuredStepsAcceptsJSONFenceAndRejectsPartialPlans(t *testing.T) {
+	steps := ExtractSteps("Intro {example}\n```json\n{\"steps\":[{\"title\":\"Work\"}]}\n```\nNotes {other}")
+	if len(steps) != 1 || steps[0].Title != "Work" {
+		t.Fatalf("expected fenced JSON compatibility: %#v", steps)
+	}
+	for _, content := range []string{
+		`{"steps":[{"title":"Work"},{"title":""}]}`,
+		"```json\n{\"steps\":[{\"title\":\"Work\"},]}\n```\n## Plan\n1. Do only a fragment",
+		"## Plan\n" + strings.Repeat("1. Work\n", 13),
+		`{"steps":[` + strings.Repeat(`{"title":"Work"},`, 12) + `{"title":"Last"}]}`,
+	} {
+		if steps := ExtractSteps(content); len(steps) != 0 {
+			t.Fatalf("invalid or oversized plan was partially accepted: %#v", steps)
+		}
 	}
 }
 

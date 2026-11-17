@@ -31,7 +31,10 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 		if s.ModePolicy != nil && !s.ModePolicy.AllowsToolPermission(permission, agentMode, forceChatMode) {
 			return false
 		}
-		return allowsPermissionMode(permission, permissionMode)
+		if !allowsPermissionMode(permission, permissionMode) {
+			return false
+		}
+		return current == nil || tooldef.PermissionAllowsCeiling(permission, current.PermissionCeiling)
 	})
 	// Knowledge retrieval is exposed only in auto mode; always mode searches
 	// before generation. AI memory search is independent of those RAG settings.
@@ -82,6 +85,9 @@ func withoutKnowledgeSearch(tools []modelport.Tool) []modelport.Tool {
 
 func allowsPermissionMode(permission tooldef.Permission, mode session.PermissionMode) bool {
 	permission = tooldef.NormalizePermission(permission)
+	if permission == tooldef.PermissionUnknown {
+		return false
+	}
 	mode = session.NormalizePermissionMode(mode)
 	switch mode {
 	case session.PermissionModeReadonly:

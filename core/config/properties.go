@@ -1,19 +1,37 @@
 package config
 
 type Properties struct {
-	Model    ModelProperties
-	Memory   MemoryProperties
-	Mongo    MongoProperties
-	Redis    RedisProperties
-	RAG      RAGProperties
-	Thread   ThreadProperties
-	Asset    AssetProperties
-	Skill    SkillProperties
-	Sandbox  SandboxProperties
-	Subagent SubagentProperties
-	Plugin   PluginProperties
-	Hooks    HookProperties
-	MCP      MCPProperties
+	Model            ModelProperties
+	Memory           MemoryProperties
+	Mongo            MongoProperties
+	Redis            RedisProperties
+	RAG              RAGProperties
+	Thread           ThreadProperties
+	Asset            AssetProperties
+	Skill            SkillProperties
+	Sandbox          SandboxProperties
+	Subagent         SubagentProperties
+	Plugin           PluginProperties
+	Hooks            HookProperties
+	MCP              MCPProperties
+	WorkspaceHistory WorkspaceHistoryProperties
+	Persistence      PersistenceProperties
+}
+
+type PersistenceProperties struct {
+	Outbox OutboxProperties
+}
+
+type OutboxProperties struct {
+	Path       string
+	MaxPending int
+	MaxEntries int
+	MaxBytes   int64
+	RetainDone int
+}
+
+type WorkspaceHistoryProperties struct {
+	Path string
 }
 
 type MemoryProperties struct {
@@ -30,15 +48,17 @@ type MemoryDreamProperties struct {
 }
 
 type ModelProperties struct {
-	ID              string
-	Provider        string
-	Protocol        string
-	AuthType        string
-	BaseURL         string
-	APIKey          string
-	Temperature     *float64
-	TopP            *float64
-	MaxOutputTokens *int
+	ID                  string
+	Provider            string
+	Protocol            string
+	AuthType            string
+	BaseURL             string
+	APIKey              string
+	Temperature         *float64
+	TopP                *float64
+	MaxOutputTokens     *int
+	ContextWindowTokens int
+	MaxOutputLimit      int
 }
 
 type MongoProperties struct {
@@ -147,6 +167,7 @@ type ThreadProperties struct {
 
 type AssetProperties struct {
 	BaseURL              string
+	APIKey               string
 	UploadTimeoutSeconds int
 	TTLSeconds           int64
 	MaxVisits            int64
@@ -204,6 +225,8 @@ type CommandHookProperties struct {
 
 type MCPServerProperties struct {
 	Name            string            `mapstructure:"name"`
+	URL             string            `mapstructure:"url"`
+	Headers         map[string]string `mapstructure:"headers"`
 	Command         string            `mapstructure:"command"`
 	Args            []string          `mapstructure:"args"`
 	Env             map[string]string `mapstructure:"env"`

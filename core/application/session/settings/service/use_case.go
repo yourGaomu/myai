@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	sessioncommand "myai/core/application/session/command"
 	settingsapi "myai/core/application/session/settings/api"
@@ -73,6 +74,20 @@ func (u UseCase) SetRAGSettings(ctx context.Context, command settingscommand.Set
 		return err
 	}
 	return u.saveAndPublish(ctx, current, "rag")
+}
+
+func (u UseCase) SetToolAllowlist(ctx context.Context, sessionID string, allowed []string, enforce bool) error {
+	settings, ok := u.Settings.(interface {
+		SetToolAllowlist(context.Context, string, []string, bool) (*session.Session, error)
+	})
+	if !ok {
+		return errors.New("session settings do not support tool allowlists")
+	}
+	current, err := settings.SetToolAllowlist(ctx, sessionID, allowed, enforce)
+	if err != nil {
+		return err
+	}
+	return u.saveAndPublish(ctx, current, "tool_allowlist")
 }
 
 func (u UseCase) saveAndPublish(ctx context.Context, current *session.Session, reason string) error {

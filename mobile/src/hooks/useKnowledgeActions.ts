@@ -27,6 +27,7 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 
 type Args = {
   activeKnowledgeBase?: KnowledgeBase;
+  assetAPIKey: string;
   assetBaseURL: string;
   clientToken: string;
   sessionID: string;
@@ -38,6 +39,7 @@ type Args = {
 
 export function useKnowledgeActions({
   activeKnowledgeBase,
+  assetAPIKey,
   assetBaseURL,
   clientToken,
   sessionID,
@@ -158,6 +160,14 @@ export function useKnowledgeActions({
 
   const uploadDocument = useCallback(async () => {
     if (!activeKnowledgeBase?.id) return;
+    if (!assetBaseURL.trim()) {
+      onError("请先在设置中填写资源服务地址，再上传知识库文档。");
+      return;
+    }
+    if (!assetAPIKey.trim()) {
+      onError("请先在设置中填写独立的 Asset API Key，再上传知识库文档（仅本次运行保存）。");
+      return;
+    }
     startPending("knowledge");
     try {
       const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, base64: false });
@@ -165,7 +175,7 @@ export function useKnowledgeActions({
         stopPending("knowledge");
         return;
       }
-      const uploaded = await uploadMobileAsset({ asset: picked.assets[0], baseURL: assetBaseURL, sessionID });
+      const uploaded = await uploadMobileAsset({ asset: picked.assets[0], apiKey: assetAPIKey, baseURL: assetBaseURL, sessionID });
       const payload: KnowledgeDocumentIngestPayload = {
         knowledge_base_id: activeKnowledgeBase.id,
         url: uploaded.short_url,
@@ -181,7 +191,7 @@ export function useKnowledgeActions({
       onError(error instanceof Error ? error.message : "Document upload failed");
       stopPending("knowledge");
     }
-  }, [activeKnowledgeBase?.id, assetBaseURL, onError, sendEnvelope, sessionID, startPending, stopPending]);
+  }, [activeKnowledgeBase?.id, assetAPIKey, assetBaseURL, onError, sendEnvelope, sessionID, startPending, stopPending]);
 
   const retryDocument = useCallback((knowledgeBaseID: string, jobID: string) => {
     startPending("knowledge");

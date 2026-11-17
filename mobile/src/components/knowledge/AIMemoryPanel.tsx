@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type {
   AIMemory,
@@ -15,6 +16,8 @@ import type {
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 export type AIMemoryPanelProps = {
   buttonFeedback: ButtonFeedback;
@@ -26,6 +29,7 @@ export type AIMemoryPanelProps = {
   onApproveCandidate: (candidate: AIMemoryCandidate, memoryID?: string) => boolean;
   onCreateMemory: (memory: AIMemoryInput) => boolean;
   onDeleteMemory: (memoryID: string) => boolean;
+  onInsertReference?: (snippet: string) => void;
   onRefreshCandidates: () => boolean;
   onRefreshDreamRuns: () => boolean;
   onRefreshExtractionJobs: () => boolean;
@@ -58,6 +62,7 @@ export function AIMemoryPanel({
   onApproveCandidate,
   onCreateMemory,
   onDeleteMemory,
+  onInsertReference,
   onRefreshExtractionJobs,
   onRejectCandidate,
   onRestoreMemory,
@@ -66,6 +71,8 @@ export function AIMemoryPanel({
   onUpdateMemory,
   pending,
 }: AIMemoryPanelProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const [expandedID, setExpandedID] = useState("");
   const [showCandidates, setShowCandidates] = useState(false);
   const [editingID, setEditingID] = useState("");
@@ -163,7 +170,10 @@ export function AIMemoryPanel({
         {/* 提取异常提示 (如有) */}
         {extractionJobs.length > 0 ? (
           <View style={styles.extractionBanner}>
-            <Text style={styles.extractionBannerText}>⚠️ 有 {extractionJobs.length} 项提取任务待处理</Text>
+            <View style={styles.iconRow}>
+              <Feather color={palette.warn} name="alert-triangle" size={15} />
+              <Text style={styles.extractionBannerText}>有 {extractionJobs.length} 项提取任务待处理</Text>
+            </View>
             <Pressable
               disabled={pending}
               onPress={() => onRefreshExtractionJobs()}
@@ -181,10 +191,16 @@ export function AIMemoryPanel({
               onPress={() => setShowCandidates((prev) => !prev)}
               style={({ pressed }) => buttonFeedback(styles.candidateBannerHeader, pressed)}
             >
-              <Text style={styles.candidateBannerTitle}>
-                🔔 发现 {candidates.length} 条待审核记忆候选
-              </Text>
-              <Text style={styles.candidateBannerToggle}>{showCandidates ? "收起 ▲" : "审核 ▼"}</Text>
+              <View style={styles.iconRow}>
+                <Feather color={palette.brand} name="bell" size={16} />
+                <Text style={styles.candidateBannerTitle}>
+                  发现 {candidates.length} 条待审核记忆候选
+                </Text>
+              </View>
+              <View style={styles.iconRow}>
+                <Text style={styles.candidateBannerToggle}>{showCandidates ? "收起" : "审核"}</Text>
+                <Feather color={palette.ink2} name={showCandidates ? "chevron-up" : "chevron-down"} size={15} />
+              </View>
             </Pressable>
             {showCandidates ? (
               <View style={styles.candidateList}>
@@ -272,18 +288,33 @@ export function AIMemoryPanel({
                 </View>
               ) : null}
 
-              {/* 卡片底部: 来源 + [删除] 按钮 */}
+              {/* 卡片底部: 来源 + 引用 + [删除] 按钮 */}
               <View style={styles.cardFooter}>
-                <Text style={styles.cardSource}>来源: {sourceText}</Text>
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    onDeleteMemory(memory.id);
-                  }}
-                  style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
-                >
-                  <Text style={styles.deleteBtnText}>删除</Text>
-                </Pressable>
+                <Text numberOfLines={1} style={styles.cardSource}>来源: {sourceText}</Text>
+                <View style={styles.cardFooterActions}>
+                  {onInsertReference ? (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        const title = memory.title?.trim() || getCategoryTag(memory);
+                        onInsertReference(`[引用记忆 · ${title}]\n${bodyText}`);
+                      }}
+                      style={({ pressed }) => buttonFeedback(styles.refBtn, pressed)}
+                    >
+                      <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                      <Text style={styles.refBtnText}>引用</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      onDeleteMemory(memory.id);
+                    }}
+                    style={({ pressed }) => buttonFeedback(styles.deleteBtn, pressed)}
+                  >
+                    <Text style={styles.deleteBtnText}>删除</Text>
+                  </Pressable>
+                </View>
               </View>
             </Pressable>
           );
@@ -297,7 +328,10 @@ export function AIMemoryPanel({
 
         {/* 底部: 记忆自动化固化 (Dream) 模块 */}
         <View style={styles.dreamCard}>
-          <Text style={styles.dreamTitle}>✨ 记忆自动化固化 (Dream)</Text>
+          <View style={styles.iconRow}>
+            <Feather color={palette.brand} name="star" size={16} />
+            <Text style={styles.dreamTitle}>记忆自动化固化 (Dream)</Text>
+          </View>
           <Text style={styles.dreamSubtitle}>
             Agent 每天凌晨会自动提取高频对话事实并合并至主记忆库
           </Text>
@@ -363,6 +397,8 @@ function MergeMemoryModal({
   query: string;
   selectedID: string;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <ResponsiveFormModal
       buttonFeedback={buttonFeedback}
@@ -388,7 +424,7 @@ function MergeMemoryModal({
       <TextInput
         onChangeText={onChangeQuery}
         placeholder="搜索标题、目标或标签"
-        placeholderTextColor="#777169"
+        placeholderTextColor={palette.ink4}
         style={styles.input}
         value={query}
       />
@@ -406,7 +442,7 @@ function MergeMemoryModal({
               <Text numberOfLines={2} style={styles.mergeTargetGoal}>{revision?.content.goal || "无目标描述"}</Text>
               <Text style={styles.cardMeta}>v{memory.current_version} · {(memory.tags || []).map((tag) => `#${tag}`).join(" ") || "无标签"}</Text>
             </View>
-            <Text style={[styles.mergeCheck, selected && styles.mergeCheckSelected]}>{selected ? "✓" : "○"}</Text>
+            <Feather color={selected ? palette.ok : palette.ink3} name={selected ? "check" : "circle"} size={14} />
           </Pressable>
         );
       })}
@@ -434,6 +470,8 @@ function MemoryEditor({
   pending: boolean;
   visible: boolean;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const setContent = (key: keyof AIMemoryInput["content"], value: string) =>
     onChange({ ...draft, content: { ...draft.content, [key]: value } });
 
@@ -462,7 +500,7 @@ function MemoryEditor({
         autoFocus
         onChangeText={(title) => onChange({ ...draft, title })}
         placeholder="记忆标题或简要描述"
-        placeholderTextColor="#777169"
+        placeholderTextColor={palette.ink4}
         style={styles.input}
         value={draft.title}
       />
@@ -488,7 +526,7 @@ function MemoryEditor({
       <TextInput
         onChangeText={(tagsText) => onChange({ ...draft, tagsText })}
         placeholder="分类标签，用逗号分隔（如：用户习惯, 工程约定）"
-        placeholderTextColor="#777169"
+        placeholderTextColor={palette.ink4}
         style={styles.input}
         value={draft.tagsText}
       />
@@ -497,6 +535,8 @@ function MemoryEditor({
 }
 
 function EditorField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.editorFieldWrapper}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -504,7 +544,7 @@ function EditorField({ label, onChange, value }: { label: string; onChange: (val
         multiline
         onChangeText={onChange}
         placeholder={label}
-        placeholderTextColor="#777169"
+        placeholderTextColor={palette.ink4}
         style={[styles.input, styles.textarea]}
         value={value}
       />
@@ -513,6 +553,7 @@ function EditorField({ label, onChange, value }: { label: string; onChange: (val
 }
 
 function MemoryContentView({ content }: { content: AIMemoryInput["content"] }) {
+  const styles = useThemedStyles(createStyles);
   const rows = [
     ["适用条件", content.applicable_context],
     ["方案", content.approach],
@@ -606,443 +647,466 @@ function scopeLabel(scope: AIMemoryScope): string {
   return scope.type === "global" ? "全局" : `${scope.type}:${scope.key || "未指定"}`;
 }
 
-const styles = StyleSheet.create({
-  content: {
-    backgroundColor: "#f4f5f7",
-    gap: 10,
-    paddingTop: 10,
-    paddingBottom: 40,
-  },
-  flex: {
-    flex: 1,
-  },
-  headerRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  headerTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  addBtn: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  addBtnText: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  status: {
-    backgroundColor: "#edf5f0",
-    borderColor: "#2e8b38",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    color: "#12100e",
-    fontSize: 12,
-    fontWeight: "700",
-    padding: 8,
-  },
-  extractionBanner: {
-    alignItems: "center",
-    backgroundColor: "#fff8f6",
-    borderColor: "#eedbd6",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 10,
-  },
-  extractionBannerText: {
-    color: "#9b4037",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  miniActionBtn: {
-    borderColor: "#25231f",
-    borderRadius: 6,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  miniActionText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  candidateBanner: {
-    backgroundColor: "#fbf5e6",
-    borderColor: "#25231f",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    overflow: "hidden",
-  },
-  candidateBannerHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  candidateBannerTitle: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  candidateBannerToggle: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  candidateList: {
-    borderTopColor: "#e6dfd3",
-    borderTopWidth: 1,
-    gap: 8,
-    padding: 10,
-  },
-  candidateCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    padding: 10,
-  },
-  candidateActions: {
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "flex-end",
-    marginTop: 8,
-  },
-  approveBtn: {
-    alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  approveBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  mergeBtn: {
-    alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  mergeBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    content: {
+      backgroundColor: palette.canvas,
+      gap: 10,
+      paddingTop: 10,
+      paddingBottom: 40,
+    },
+    flex: {
+      flex: 1,
+    },
+    iconRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    headerRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 4,
+    },
+    headerTitle: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    addBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      minHeight: 34,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+    },
+    addBtnText: {
+      color: palette.inkInverse,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    status: {
+      backgroundColor: palette.okWash,
+      borderColor: palette.okBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+      padding: 8,
+    },
+    extractionBanner: {
+      alignItems: "center",
+      backgroundColor: palette.errWash,
+      borderColor: palette.errBorder,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      padding: 10,
+    },
+    extractionBannerText: {
+      color: palette.err,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    miniActionBtn: {
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    miniActionText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    candidateBanner: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      overflow: "hidden",
+    },
+    candidateBannerHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    candidateBannerTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    candidateBannerToggle: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    candidateList: {
+      borderTopColor: palette.hairline,
+      borderTopWidth: 1,
+      gap: 8,
+      padding: 10,
+    },
+    candidateCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      padding: 10,
+    },
+    candidateActions: {
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "flex-end",
+      marginTop: 8,
+    },
+    approveBtn: {
+      alignItems: "center",
+      backgroundColor: palette.okWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    approveBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    mergeBtn: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    mergeBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
 
-  /* Neo-Brutalism 记忆卡片样式 */
-  memoryCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderLeftColor: "#ffd84f",
-    borderLeftWidth: 6,
-    borderRadius: 8,
-    borderWidth: 2,
-    elevation: 2,
-    gap: 6,
-    padding: 12,
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.1,
-    shadowRadius: 0,
-  },
-  cardPressed: {
-    opacity: 0.92,
-    transform: [{ translateY: 1 }],
-  },
-  cardHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  badge: {
-    backgroundColor: "#f8f1e5",
-    borderColor: "#25231f",
-    borderRadius: 4,
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  badgeText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  cardDate: {
-    color: "#8c857b",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  cardBody: {
-    color: "#12100e",
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19,
-    marginVertical: 2,
-  },
-  cardFooter: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 2,
-  },
-  cardSource: {
-    color: "#8c857b",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  deleteBtn: {
-    alignItems: "center",
-    backgroundColor: "#ff7f68",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  deleteBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  expandedDetails: {
-    borderTopColor: "#eee8dd",
-    borderTopWidth: 1,
-    gap: 8,
-    marginTop: 6,
-    paddingTop: 8,
-  },
-  expandedMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  cardMeta: {
-    color: "#8c857b",
-    fontSize: 11,
-  },
-  editBtn: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  editBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
+    /* Neo-Brutalism 记忆卡片样式 */
+    memoryCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderLeftColor: palette.brandDeep,
+      borderLeftWidth: 1,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      gap: 6,
+      padding: 12,
+      ...shadow.card,
+    },
+    cardPressed: {
+      opacity: 0.92,
+      transform: [{ translateY: 1 }],
+    },
+    cardHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    badge: {
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.xs,
+      borderWidth: 1,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    badgeText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    cardDate: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    cardBody: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.regular,
+      lineHeight: 19,
+      marginVertical: 2,
+    },
+    cardFooter: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "space-between",
+      marginTop: 2,
+    },
+    cardFooterActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    cardSource: {
+      color: palette.ink3,
+      flex: 1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    refBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      justifyContent: "center",
+      paddingHorizontal: 9,
+      paddingVertical: 3,
+    },
+    refBtnText: {
+      color: palette.brandLight,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    deleteBtn: {
+      alignItems: "center",
+      backgroundColor: palette.errWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    deleteBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    expandedDetails: {
+      borderTopColor: palette.hairline,
+      borderTopWidth: 1,
+      gap: 8,
+      marginTop: 6,
+      paddingTop: 8,
+    },
+    expandedMetaRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginTop: 4,
+    },
+    cardMeta: {
+      color: palette.ink3,
+      fontSize: font.caption,
+    },
+    editBtn: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    editBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
 
-  /* 底部 Dream 卡片 (虚线边框) */
-  dreamCard: {
-    alignItems: "center",
-    backgroundColor: "#fbf5e6",
-    borderColor: "#25231f",
-    borderRadius: 12,
-    borderStyle: "dashed",
-    borderWidth: 2,
-    gap: 6,
-    marginTop: 6,
-    padding: 16,
-  },
-  dreamTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  dreamSubtitle: {
-    color: "#6c665f",
-    fontSize: 11.5,
-    lineHeight: 16,
-    textAlign: "center",
-  },
-  dreamBtn: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    marginTop: 4,
-    minHeight: 38,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-  },
+    /* 底部 Dream 卡片 (虚线边框) */
+    dreamCard: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.md,
+      borderStyle: "dashed",
+      borderWidth: 1,
+      gap: 6,
+      marginTop: 6,
+      padding: 16,
+    },
+    dreamTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+      textAlign: "center",
+    },
+    dreamSubtitle: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      lineHeight: 16,
+      textAlign: "center",
+    },
+    dreamBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      marginTop: 4,
+      minHeight: 38,
+      paddingHorizontal: 18,
+      paddingVertical: 8,
+    },
 
-  /* 通用表单与弹窗样式 */
-  emptyContainer: {
-    alignItems: "center",
-    paddingVertical: 32,
-  },
-  emptyText: {
-    color: "#8c857b",
-    fontSize: 12,
-    textAlign: "center",
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  input: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    color: "#12100e",
-    fontSize: 13,
-    minHeight: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  textarea: {
-    minHeight: 70,
-    textAlignVertical: "top",
-  },
-  editorFieldWrapper: {
-    gap: 4,
-  },
-  fieldLabel: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  detailGrid: {
-    gap: 6,
-  },
-  detailItem: {
-    gap: 2,
-  },
-  detailText: {
-    color: "#25231f",
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  segmented: {
-    backgroundColor: "#e6dfd3",
-    borderColor: "#25231f",
-    borderRadius: 999,
-    borderWidth: 1.5,
-    flexDirection: "row",
-    gap: 2,
-    padding: 2,
-  },
-  segment: {
-    alignItems: "center",
-    borderRadius: 999,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 30,
-    paddingHorizontal: 6,
-  },
-  segmentActive: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderWidth: 1,
-  },
-  segmentText: {
-    color: "#6c665f",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  segmentTextActive: {
-    color: "#12100e",
-    fontWeight: "900",
-  },
-  footerCancelButton: {
-    alignItems: "center",
-    borderColor: "#25231f",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    minHeight: 38,
-    minWidth: 80,
-    paddingHorizontal: 12,
-  },
-  footerCancelText: {
-    color: "#4d504c",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  footerSubmitButton: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: "center",
-    minHeight: 38,
-    minWidth: 100,
-    paddingHorizontal: 14,
-  },
-  mergeHint: {
-    backgroundColor: "#edf5f0",
-    borderRadius: 6,
-    color: "#345348",
-    fontSize: 12,
-    lineHeight: 18,
-    padding: 8,
-  },
-  mergeTarget: {
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderColor: "#25231f",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    flexDirection: "row",
-    gap: 10,
-    padding: 10,
-  },
-  mergeTargetSelected: {
-    backgroundColor: "#edf5f0",
-    borderColor: "#2e8b38",
-    borderWidth: 2,
-  },
-  mergeTargetTitle: {
-    color: "#20231f",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  mergeTargetGoal: {
-    color: "#454a45",
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  mergeCheck: {
-    color: "#777169",
-    fontSize: 18,
-    width: 22,
-  },
-  mergeCheckSelected: {
-    color: "#2e8b38",
-    fontWeight: "900",
-  },
-});
+    /* 通用表单与弹窗样式 */
+    emptyContainer: {
+      alignItems: "center",
+      paddingVertical: 32,
+    },
+    emptyText: {
+      color: palette.ink3,
+      fontSize: font.label,
+      textAlign: "center",
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+    input: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      color: palette.ink1,
+      fontSize: font.body,
+      minHeight: 40,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    textarea: {
+      minHeight: 70,
+      textAlignVertical: "top",
+    },
+    editorFieldWrapper: {
+      gap: 4,
+    },
+    fieldLabel: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    detailGrid: {
+      gap: 6,
+    },
+    detailItem: {
+      gap: 2,
+    },
+    detailText: {
+      color: palette.ink1,
+      fontSize: font.label,
+      lineHeight: 17,
+    },
+    segmented: {
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 2,
+      padding: 2,
+    },
+    segment: {
+      alignItems: "center",
+      borderRadius: radius.pill,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: 30,
+      paddingHorizontal: 6,
+    },
+    segmentActive: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderWidth: 1,
+    },
+    segmentText: {
+      color: palette.ink2,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    segmentTextActive: {
+      color: palette.ink1,
+      fontWeight: weight.semibold,
+    },
+    footerCancelButton: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 44,
+      minWidth: 88,
+      paddingHorizontal: 14,
+    },
+    footerCancelText: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.medium,
+    },
+    footerSubmitButton: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 44,
+      minWidth: 104,
+      paddingHorizontal: 16,
+    },
+    mergeHint: {
+      backgroundColor: palette.well,
+      borderRadius: radius.sm,
+      color: palette.ok,
+      fontSize: font.label,
+      lineHeight: 18,
+      padding: 8,
+    },
+    mergeTarget: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 10,
+      padding: 10,
+    },
+    mergeTargetSelected: {
+      backgroundColor: palette.brandWash,
+      borderColor: palette.okBorder,
+      borderWidth: 1,
+    },
+    mergeTargetTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    mergeTargetGoal: {
+      color: palette.ink1,
+      fontSize: font.label,
+      lineHeight: 16,
+      marginTop: 2,
+    },
+    mergeCheck: {
+      color: palette.ink3,
+      fontSize: font.title,
+      width: 22,
+    },
+    mergeCheckSelected: {
+      color: palette.ok,
+      fontWeight: weight.semibold,
+    },
+  });

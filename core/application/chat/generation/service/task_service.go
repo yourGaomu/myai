@@ -17,19 +17,23 @@ import (
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
+	sessionport "myai/core/port/session"
 	"myai/core/session"
 )
 
 type TaskService struct {
 	// TaskService creates the request-scoped checkpoint and Agent run before delegating generation.
-	RequestIDs   generationport.RequestIDGenerator
-	Recorders    generationport.TaskRecorderFactory
-	Generator    generationapi.Generator
-	Runs         agentrunapi.CommandService
-	TurnHooks    generationport.TurnLifecycleHooks
-	OnSaveError  func(error)
-	OnCloseError func(error)
-	OnRunError   func(error)
+	Sessions           sessionport.TranscriptStore
+	OnMessagesAppended func(*session.Session, []domainmessage.Message)
+	OnMessagesAccepted func(context.Context, *session.Session, []domainmessage.Message) error
+	RequestIDs         generationport.RequestIDGenerator
+	Recorders          generationport.TaskRecorderFactory
+	Generator          generationapi.Generator
+	Runs               agentrunapi.CommandService
+	TurnHooks          generationport.TurnLifecycleHooks
+	OnSaveError        func(error)
+	OnCloseError       func(error)
+	OnRunError         func(error)
 }
 
 var _ generationapi.TaskService = TaskService{}
@@ -128,7 +132,7 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 		Stream: stream, CapturePlan: command.CapturePlan, ForceChatMode: command.ForceChatMode, Internal: command.Internal,
 	})
 	response.RunID = runID
-	if resultErr == nil {
+	if resultErr == nil || response.Result.Content != "" {
 		// Persist the final answer in the run log so disconnected consumers can
 		// recover it even before asynchronous chat-message persistence catches up.
 		if runID != "" && s.Runs != nil && response.Result.Content != "" {
@@ -263,7 +267,32 @@ func (s TaskService) applyTurnHook(ctx context.Context, command generationcomman
 		}
 		return fmt.Errorf("turn denied by %s hook: %s", name, message)
 	}
-	appendHookContext(command.Session, outcome.Continuation)
+	message := domainmessage.HookContext(outcome.Continuation)
+	if !message.IsSynthetic() {
+		return nil
+	}
+	var appended []domainmessage.Message
+	if s.Sessions != nil {
+		snapshot, messages, err := s.Sessions.AppendMessagesTo(command.Session.ID, message)
+		if err != nil {
+			return err
+		}
+		replaceRunSnapshot(command.Session, snapshot)
+		appended = messages
+	} else {
+		start := len(command.Session.Messages)
+		command.Session.AppendMessage(message)
+		appended = domainmessage.CloneAll(command.Session.Messages[start:])
+	}
+	if len(appended) > 0 {
+		if s.OnMessagesAccepted != nil {
+			if err := s.OnMessagesAccepted(ctx, command.Session, domainmessage.CloneAll(appended)); err != nil {
+				return fmt.Errorf("accept turn hook context: %w", err)
+			}
+		} else if s.OnMessagesAppended != nil {
+			s.OnMessagesAppended(command.Session, appended)
+		}
+	}
 	return nil
 }
 

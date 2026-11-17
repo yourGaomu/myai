@@ -5,8 +5,12 @@ deploy/kafka/data/
 __pycache__/
 *.py[cod]
 .venv/
-/resource/application.yaml
-/.env
+# Ignore runtime configuration in the root and subprojects.
+**/resource/application.yaml
+**/.env
+**/.env.*
+!**/.env.example
+!**/resource/application.example.yaml
 /config/application.yaml
 /config/relay.yaml
 /workspace/

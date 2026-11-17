@@ -1,23 +1,37 @@
 import type { AgentRunSnapshot } from "../protocol";
 import type { ChatItem } from "../types/chat";
 
-export type AgentActivity = "offline" | "idle" | "thinking" | "tool" | "permission" | "uploading";
+export type AgentActivity =
+  | "offline"
+  | "idle"
+  | "thinking"
+  | "tool"
+  | "permission"
+  | "uploading"
+  | "subagent"
+  | "done";
 
 type AgentActivityInput = {
   connected: boolean;
   messages: ChatItem[];
   pendingPermission: boolean;
+  pendingQuestion?: boolean;
   pendingRequestID: string;
+  planRunning?: boolean;
+  runningSubagentCount?: number;
   runs: AgentRunSnapshot[];
   uploading: boolean;
 };
 
-// 根据当前请求最近的运行事件计算头像状态。UI 只消费这个稳定的状态，不直接理解 Relay 事件细节。
+// 根据当前请求与后台运行态计算统一角色活动状态。UI 只消费该稳定语义枚举。
 export function agentActivity({
   connected,
   messages,
   pendingPermission,
+  pendingQuestion = false,
   pendingRequestID,
+  planRunning = false,
+  runningSubagentCount = 0,
   runs,
   uploading,
 }: AgentActivityInput): AgentActivity {
@@ -27,11 +41,16 @@ export function agentActivity({
   if (!connected) {
     return "offline";
   }
-  if (pendingPermission) {
+  if (pendingPermission || pendingQuestion) {
     return "permission";
   }
+
+  if (runningSubagentCount > 0) {
+    return "subagent";
+  }
+
   if (!pendingRequestID) {
-    return "idle";
+    return planRunning ? "tool" : "idle";
   }
 
   const run = [...runs]
@@ -43,6 +62,9 @@ export function agentActivity({
       return "permission";
     }
     if (latestEvent?.type === "tool_call") {
+      if (/subagent|agent_spawn|spawn_subagent/i.test(latestEvent.tool_name || "")) {
+        return "subagent";
+      }
       return "tool";
     }
   }
@@ -51,8 +73,13 @@ export function agentActivity({
   const lastToolCall = lastIndex(requestMessages, (message) => message.role === "tool_call");
   const lastToolResult = lastIndex(requestMessages, (message) => message.role === "tool");
   if (lastToolCall > lastToolResult) {
+    const callToolName = requestMessages[lastToolCall]?.toolName || "";
+    if (/subagent|agent_spawn|spawn_subagent/i.test(callToolName)) {
+      return "subagent";
+    }
     return "tool";
   }
+
   return "thinking";
 }
 

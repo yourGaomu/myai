@@ -1,9 +1,11 @@
 import { ActivityIndicator, Image, Linking, Modal, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { useState } from "react";
+import { Feather } from "@expo/vector-icons";
 
 import { isPreviewableImageAsset, type SharedAsset } from "../../utils/toolAssets";
 import { formatBytes, formatDateTime } from "../../utils/format";
-import { styles } from "./styles";
+import { useChatStyles } from "./styles";
+import { useAppTheme } from "../../theme/ThemeProvider";
 
 type Props = {
   asset: SharedAsset;
@@ -12,6 +14,8 @@ type Props = {
 };
 
 export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
+  const { palette } = useAppTheme();
+  const styles = useChatStyles();
   const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
   const [fullScreenVisible, setFullScreenVisible] = useState(false);
@@ -46,11 +50,12 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
             style={styles.assetPreviewImage}
           />
           <View style={styles.assetPreviewTapHint}>
-            <Text style={styles.assetPreviewTapHintText}>🔍 查看大图</Text>
+            <Feather color={palette.ink1} name="zoom-in" size={16} />
+            <Text style={styles.assetPreviewTapHintText}>查看大图</Text>
           </View>
           {imageLoading ? (
             <View style={styles.assetPreviewOverlay}>
-              <ActivityIndicator color="#12100e" size="small" />
+              <ActivityIndicator color={palette.ink1} size="small" />
               <Text style={styles.assetPreviewStatus}>正在加载预览</Text>
             </View>
           ) : null}
@@ -73,7 +78,8 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
               onPress={() => setFullScreenVisible(false)}
               style={({ pressed }) => buttonFeedback(styles.imageModalCloseBtn, pressed)}
             >
-              <Text style={styles.imageModalCloseBtnText}>✕ 关闭</Text>
+              <Feather color={palette.inkInverse} name="x" size={16} />
+              <Text style={styles.imageModalCloseBtnText}>关闭</Text>
             </Pressable>
           </View>
 
@@ -93,7 +99,8 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
               onPress={() => void Linking.openURL(asset.shortURL)}
               style={({ pressed }) => buttonFeedback(styles.imageModalActionBtn, pressed)}
             >
-              <Text style={styles.imageModalActionBtnText}>🔗 浏览器中打开</Text>
+              <Feather color={palette.ink1} name="link" size={14} />
+              <Text style={styles.imageModalActionBtnText}>浏览器中打开</Text>
             </Pressable>
           </View>
         </View>

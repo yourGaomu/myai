@@ -88,7 +88,7 @@ func (m *capturingLLM) GenerateContent(_ context.Context, _ []llms.MessageConten
 	if m.response != nil {
 		return m.response, nil
 	}
-	return &llms.ContentResponse{}, nil
+	return &llms.ContentResponse{Choices: []*llms.ContentChoice{{StopReason: "stop"}}}, nil
 }
 
 func (m *capturingLLM) Call(context.Context, string, ...llms.CallOption) (string, error) {

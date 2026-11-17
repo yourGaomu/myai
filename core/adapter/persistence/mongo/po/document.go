@@ -1,6 +1,9 @@
 package po
 
-import "time"
+import (
+	tooldef "myai/core/tool/tool"
+	"time"
+)
 
 type SessionDocument struct {
 	ID                   string                        `bson:"_id"`
@@ -12,6 +15,7 @@ type SessionDocument struct {
 	SystemInstruction    string                        `bson:"system_instruction,omitempty"`
 	AllowedTools         []string                      `bson:"allowed_tools,omitempty"`
 	EnforceToolAllowlist bool                          `bson:"enforce_tool_allowlist,omitempty"`
+	PermissionCeiling    []tooldef.Permission          `bson:"permission_ceiling"`
 	WorkspaceRoot        string                        `bson:"workspace_root,omitempty"`
 	WorkspaceSandboxID   string                        `bson:"workspace_sandbox_id,omitempty"`
 	MaxToolRounds        int                           `bson:"max_tool_rounds,omitempty"`
@@ -124,6 +128,8 @@ type ModelConfigDocument struct {
 	ModelName                 string                      `bson:"model_name"`
 	Enabled                   bool                        `bson:"enabled"`
 	IsDefault                 bool                        `bson:"is_default"`
+	ContextWindowTokens       int                         `bson:"context_window_tokens,omitempty"`
+	MaxOutputTokens           int                         `bson:"max_output_tokens,omitempty"`
 	DefaultGenerationSettings *GenerationSettingsDocument `bson:"default_generation_settings,omitempty"`
 	CreatedAt                 time.Time                   `bson:"created_at"`
 	UpdatedAt                 time.Time                   `bson:"updated_at"`

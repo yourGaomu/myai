@@ -17,5 +17,6 @@ type RestoreSession struct {
 }
 
 type ClearSession struct {
-	Title string
+	SessionID string
+	Title     string
 }

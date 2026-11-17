@@ -724,7 +724,7 @@ thread:
   queueSize: 10
 
 asset:
-  shortener_base_url: "http://localhost:18081"
+  shortener_base_url: ""
   upload_timeout_seconds: 60
   ttl_seconds: 604800
   max_visits: 0
@@ -735,6 +735,10 @@ skill:
 
 mcp:
   servers: []
+
+short_links:
+  # 通过环境变量 SHORT_LINKS_MCP_URL 和 SHORT_LINKS_API_KEY 接入独立短链服务。
+  mcp_url: ""
 
 hooks:
   commands: []

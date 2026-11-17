@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 
 import type {
   KnowledgeBase,
@@ -15,6 +16,8 @@ import type { KnowledgeBaseChanges } from "../../types/knowledge";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
+import { radius, weight } from "../../constants/theme";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
 export type KnowledgePanelProps = {
   activeSession?: SessionSummary;
@@ -29,6 +32,7 @@ export type KnowledgePanelProps = {
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
   onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
   onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onInsertReference?: (snippet: string) => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
   onRefresh: () => void;
   onRefreshDocuments: () => void;
@@ -59,6 +63,7 @@ export function KnowledgePanel({
   onDeleteCategory,
   onDeleteDocument,
   onDeleteKnowledgeBase,
+  onInsertReference,
   onMoveCategory,
   onRefresh,
   onRefreshDocuments,
@@ -73,6 +78,8 @@ export function KnowledgePanel({
   profiles,
   searchResult,
 }: KnowledgePanelProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const [selectedID, setSelectedID] = useState("");
   const [detailTab, setDetailTab] = useState<DetailTab | null>(null);
   const [filterText, setFilterText] = useState("");
@@ -210,7 +217,7 @@ export function KnowledgePanel({
                 >
                   <View style={styles.kbHeaderRow}>
                     <View style={styles.kbTitleGroup}>
-                      <Text style={styles.kbIcon}>📑</Text>
+                      <Feather color={palette.brand} name="clipboard" size={16} />
                       <Text numberOfLines={1} style={styles.kbTitle}>
                         {kb.name}
                       </Text>
@@ -241,7 +248,8 @@ export function KnowledgePanel({
                       }}
                       style={styles.kbManageBtn}
                     >
-                      <Text style={styles.kbManageBtnText}>⚙ 管理</Text>
+                      <Feather color={palette.ink2} name="sliders" size={14} />
+                      <Text style={styles.kbManageBtnText}>管理</Text>
                     </Pressable>
                   </View>
                 </Pressable>
@@ -300,15 +308,28 @@ export function KnowledgePanel({
                   ]}
                 >
                   <View style={styles.docInfo}>
-                    <Text numberOfLines={1} style={styles.docTitle}>
-                      📄 {doc.file_name}
-                    </Text>
+                    <View style={styles.iconRow}>
+                      <Feather color={palette.brand} name="file-text" size={15} />
+                      <Text numberOfLines={1} style={[styles.docTitle, styles.flex]}>
+                        {doc.file_name}
+                      </Text>
+                    </View>
                     <Text style={styles.docMeta}>
                       {sizeLabel}
                       {doc.updated_at ? ` · ${formatDate(doc.updated_at)}` : ""}
                     </Text>
                   </View>
                   <View style={styles.docActions}>
+                    {onInsertReference && selectedBase ? (
+                      <Pressable
+                        hitSlop={4}
+                        onPress={() => onInsertReference(`[引用知识库文档 · ${selectedBase.name} / ${doc.file_name}]`)}
+                        style={({ pressed }) => buttonFeedback(styles.refPillBtn, pressed)}
+                      >
+                        <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                        <Text style={styles.refPillText}>引用</Text>
+                      </Pressable>
+                    ) : null}
                     <View
                       style={[
                         styles.docStatusBadge,
@@ -333,7 +354,7 @@ export function KnowledgePanel({
                       }}
                       style={styles.docDeleteBtn}
                     >
-                      <Text style={styles.docDeleteBtnText}>✕</Text>
+                      <Feather color={palette.ink3} name="x" size={14} />
                     </Pressable>
                   </View>
                 </View>
@@ -353,7 +374,7 @@ export function KnowledgePanel({
               {modeLabel(settings.mode)} · Top K {settings.top_k}
             </Text>
           </View>
-          {pendingSettings ? <ButtonContent loading text="保存中" /> : null}
+          {pendingSettings ? <ButtonContent color={palette.ink1} loading text="保存中" /> : null}
           <Text style={styles.disclosure}>{showSessionRAG ? "收起" : "设置"}</Text>
         </Pressable>
 
@@ -378,7 +399,7 @@ export function KnowledgePanel({
                   }
                 >
                   {pendingSettings && pendingRAGMode === mode ? (
-                    <ActivityIndicator color="#12100e" size="small" />
+                    <ActivityIndicator color={palette.ink1} size="small" />
                   ) : null}
                   <Text style={[styles.modeText, settings.mode === mode && styles.modeTextActive]}>
                     {modeLabel(mode)}
@@ -404,13 +425,15 @@ export function KnowledgePanel({
                       )
                     }
                   >
-                    <Text style={[styles.modeExplainText, isSelected && styles.modeExplainTextActive]}>
-                      <Text style={[styles.modeExplainLabel, isSelected && styles.modeExplainLabelActive]}>
-                        {isSelected ? "● " : "○ "}
-                        {modeLabel(mode)}：
+                    <View style={styles.iconRow}>
+                      <Feather color={isSelected ? palette.brand : palette.ink4} name="circle" size={8} />
+                      <Text style={[styles.modeExplainText, styles.flex, isSelected && styles.modeExplainTextActive]}>
+                        <Text style={[styles.modeExplainLabel, isSelected && styles.modeExplainLabelActive]}>
+                          {modeLabel(mode)}：
+                        </Text>
+                        {modeDescription(mode)}
                       </Text>
-                      {modeDescription(mode)}
-                    </Text>
+                    </View>
                   </Pressable>
                 );
               })}
@@ -446,10 +469,14 @@ export function KnowledgePanel({
                     )
                   }
                 >
-                  <Text style={styles.scopeText}>
-                    {settings.category_ids.includes(category.id) ? "✓ " : ""}
-                    {categoryPathLabel(category, categories)}
-                  </Text>
+                  <View style={styles.iconRow}>
+                    {settings.category_ids.includes(category.id) ? (
+                      <Feather color={palette.ok} name="check" size={14} />
+                    ) : null}
+                    <Text style={styles.scopeText}>
+                      {categoryPathLabel(category, categories)}
+                    </Text>
+                  </View>
                 </Pressable>
               ))}
               {sortedBases.map((base) => (
@@ -470,10 +497,14 @@ export function KnowledgePanel({
                     )
                   }
                 >
-                  <Text style={styles.scopeText}>
-                    {settings.knowledge_base_ids.includes(base.id) ? "✓ " : ""}
-                    {base.name}
-                  </Text>
+                  <View style={styles.iconRow}>
+                    {settings.knowledge_base_ids.includes(base.id) ? (
+                      <Feather color={palette.ok} name="check" size={14} />
+                    ) : null}
+                    <Text style={styles.scopeText}>
+                      {base.name}
+                    </Text>
+                  </View>
                 </Pressable>
               ))}
             </View>
@@ -553,6 +584,10 @@ export function KnowledgePanel({
             <SearchPanel
               buttonFeedback={buttonFeedback}
               onChangeQuery={setSemanticQuery}
+              onInsertReference={onInsertReference ? (snippet) => {
+                setDetailTab(null);
+                onInsertReference(snippet);
+              } : undefined}
               onSearch={() =>
                 onSearch(semanticQuery, {
                   ...settings,
@@ -621,6 +656,8 @@ function KnowledgeExplorer({
   pending,
   selectedBaseID,
 }: ExplorerProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   const query = filterText.trim().toLocaleLowerCase();
   const roots = categories.filter((category) => !category.parent_id);
 
@@ -645,7 +682,7 @@ function KnowledgeExplorer({
     if (pending && documents.length === 0) {
       return (
         <View style={[styles.loadingRow, { paddingLeft: 48 + depth * 18 }]}>
-          <ActivityIndicator color="#12100e" size="small" />
+          <ActivityIndicator color={palette.ink1} size="small" />
           <Text style={styles.meta}>加载文档中</Text>
         </View>
       );
@@ -738,7 +775,7 @@ function KnowledgeExplorer({
             onPress={() => onToggleCategory(category.id)}
             style={({ pressed }) => buttonFeedback(styles.categoryMain, pressed)}
           >
-            <Text style={styles.arrow}>{open ? "▾" : "›"}</Text>
+            <Feather color={palette.ink3} name={open ? "chevron-down" : "chevron-right"} size={14} />
             <View style={styles.folderMark} />
             <Text numberOfLines={1} style={styles.categoryName}>{category.name}</Text>
             <Text style={styles.rowMeta}>{categoryBases.length}</Text>
@@ -818,6 +855,8 @@ function CatalogManagement({
   setCategoryName,
   setRecursiveDeleteID,
 }: CatalogManagementProps) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.managementPanel}>
       {managedCategory ? (
@@ -895,7 +934,7 @@ function CatalogManagement({
           <TextInput
             onChangeText={setCategoryName}
             placeholder="新目录"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={[styles.input, styles.flex]}
             value={categoryName}
           />
@@ -931,7 +970,7 @@ function CatalogManagement({
           <TextInput
             onChangeText={setBaseName}
             placeholder="新知识库"
-            placeholderTextColor="#776f66"
+            placeholderTextColor={palette.ink4}
             style={[styles.input, styles.flex]}
             value={baseName}
           />
@@ -954,6 +993,7 @@ function CatalogManagement({
 }
 
 function ScopeChip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable onPress={onPress} style={[styles.scopeChip, active && styles.scopeChipActive]}>
       <Text style={styles.scopeText}>{label}</Text>
@@ -964,6 +1004,7 @@ function ScopeChip({ active, label, onPress }: { active: boolean; label: string;
 function SearchPanel({
   buttonFeedback,
   onChangeQuery,
+  onInsertReference,
   onSearch,
   pending,
   query,
@@ -971,11 +1012,14 @@ function SearchPanel({
 }: {
   buttonFeedback: ButtonFeedback;
   onChangeQuery: (value: string) => void;
+  onInsertReference?: (snippet: string) => void;
   onSearch: () => void;
   pending: boolean;
   query: string;
   result: KnowledgeSearchPreviewResultPayload | null;
 }) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.detailBody}>
       <View style={styles.toolbarRow}>
@@ -983,7 +1027,7 @@ function SearchPanel({
           onChangeText={onChangeQuery}
           onSubmitEditing={onSearch}
           placeholder="输入检索问题"
-          placeholderTextColor="#776f66"
+          placeholderTextColor={palette.ink4}
           style={[styles.input, styles.flex]}
           value={query}
         />
@@ -1008,7 +1052,20 @@ function SearchPanel({
           {result.error ? <Text style={styles.errorText}>{result.error}</Text> : null}
           {result.hits.map((hit) => (
             <View key={hit.chunk_id} style={styles.hitRow}>
-              <Text style={styles.hitTitle}>[{hit.rank}] {hit.source_name || hit.document_id}</Text>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.hitTitle, styles.flex]}>[{hit.rank}] {hit.source_name || hit.document_id}</Text>
+                {onInsertReference ? (
+                  <Pressable
+                    onPress={() =>
+                      onInsertReference(`[引用知识库片段 · ${hit.source_name || hit.document_id}]\n${hit.text}`)
+                    }
+                    style={({ pressed }) => buttonFeedback(styles.refPillBtn, pressed)}
+                  >
+                    <Feather color={palette.brandLight} name="corner-up-left" size={12} />
+                    <Text style={styles.refPillText}>引用</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text selectable style={styles.hitText}>{hit.text}</Text>
             </View>
           ))}
@@ -1035,6 +1092,7 @@ function ConfigPanel({
   pending: boolean;
   profiles: KnowledgeIndexProfile[];
 }) {
+  const styles = useThemedStyles(createStyles);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const activeProfiles = profiles.filter((profile) => profile.status === "active" && !profile.deleted);
   return (
@@ -1161,362 +1219,363 @@ function formatDate(value: string) {
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-const styles = StyleSheet.create({
-  content: { gap: 12, paddingTop: 10, paddingBottom: 28 },
-  headerRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  toolbarRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  sectionHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
-  explorerSection: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 16,
-    borderWidth: 2,
-    elevation: 3,
-    overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
-  },
-  sessionSection: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#25231f",
-    borderRadius: 16,
-    borderWidth: 2,
-    elevation: 3,
-    overflow: "hidden",
-    shadowColor: "#12100e",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 0,
-  },
-  sessionSummaryRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 58, paddingHorizontal: 12, paddingVertical: 10 },
-  sessionSettingsBody: { borderTopColor: "#ded2c3", borderTopWidth: 1, gap: 10, padding: 12 },
-  detailBody: { gap: 10 },
-  tree: { borderTopColor: "#ded2c3", borderTopWidth: 1, marginTop: 10 },
-  flex: { flex: 1, minWidth: 0 },
-  eyebrow: { color: "#6c665f", fontSize: 11, fontWeight: "900" },
-  title: { color: "#12100e", fontSize: 24, fontWeight: "900" },
-  sectionTitle: { color: "#12100e", fontSize: 16, fontWeight: "900" },
-  meta: { color: "#6c665f", fontSize: 12, fontWeight: "700" },
-  input: { backgroundColor: "#fffdf7", borderColor: "#25231f", borderRadius: 8, borderWidth: 1.5, color: "#12100e", minHeight: 42, minWidth: 0, paddingHorizontal: 10, paddingVertical: 8 },
-  smallInput: { backgroundColor: "#fffdf7", borderColor: "#25231f", borderRadius: 6, borderWidth: 1.5, color: "#12100e", maxWidth: "55%", minWidth: 72, paddingHorizontal: 8, paddingVertical: 5, textAlign: "right", width: 120 },
-  primaryButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, justifyContent: "center", minHeight: 42, paddingHorizontal: 11, paddingVertical: 8 },
-  outlineButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, justifyContent: "center", minHeight: 40, paddingHorizontal: 10, paddingVertical: 7 },
-  secondaryButton: { alignItems: "center", backgroundColor: "#4fd7ee", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, paddingHorizontal: 9, paddingVertical: 7 },
-  secondaryText: { color: "#12100e", fontSize: 11, fontWeight: "900" },
-  iconTextButton: { paddingHorizontal: 6, paddingVertical: 6 },
-  iconTextButtonLabel: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
-  newButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 8, borderWidth: 2, justifyContent: "center", minHeight: 34, paddingHorizontal: 10, paddingVertical: 6 },
-  newButtonText: { color: "#12100e", fontSize: 12, fontWeight: "900" },
-  disabledButton: { opacity: 0.42 },
-  statusMessage: { backgroundColor: "#fffdf7", borderColor: "#25231f", borderRadius: 8, borderWidth: 1.5, color: "#3d3833", fontSize: 12, fontWeight: "800", paddingHorizontal: 10, paddingVertical: 8 },
-  emptyText: { color: "#6c665f", paddingHorizontal: 12, paddingVertical: 18, textAlign: "center" },
-  emptyInline: { color: "#8a8177", fontSize: 12, paddingBottom: 10, paddingTop: 8 },
-  loadingRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 10, paddingTop: 8 },
-  categoryRow: { alignItems: "center", borderBottomColor: "#ebe2d6", borderBottomWidth: 1, flexDirection: "row", minHeight: 46, paddingRight: 8 },
-  categoryMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 46, minWidth: 0 },
-  arrow: { color: "#776f66", fontSize: 16, textAlign: "center", width: 14 },
-  folderMark: { backgroundColor: "#ffd15c", borderBottomLeftRadius: 2, borderBottomRightRadius: 2, borderTopRightRadius: 2, height: 12, width: 17 },
-  categoryName: { color: "#12100e", flex: 1, fontSize: 14, fontWeight: "900" },
-  baseRow: { alignItems: "center", borderBottomColor: "#ebe2d6", borderBottomWidth: 1, flexDirection: "row", minHeight: 44, paddingRight: 8 },
-  baseRowActive: { backgroundColor: "#f5eedf" },
-  baseMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 44, minWidth: 0 },
-  baseMark: { backgroundColor: "#4da8ed", borderRadius: 2, height: 16, width: 13 },
-  baseName: { color: "#24211f", flex: 1, fontSize: 13, fontWeight: "800" },
-  rowMeta: { color: "#8a8177", fontSize: 11, minWidth: 18, textAlign: "right" },
-  rowAction: { paddingHorizontal: 7, paddingVertical: 7 },
-  rowActionText: { color: "#6c665f", fontSize: 11, fontWeight: "900" },
-  statusPill: { borderRadius: 4, fontSize: 9, fontWeight: "900", overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
-  statusPillOn: { backgroundColor: "#b9e9b0", color: "#245b2e" },
-  statusPillOff: { backgroundColor: "#e5ddd2", color: "#6c665f" },
-  documentRow: { alignItems: "center", borderBottomColor: "#ebe2d6", borderBottomWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingRight: 8, paddingVertical: 7 },
-  documentMark: { backgroundColor: "#e9f4ff", borderColor: "#2387d8", borderRadius: 2, borderWidth: 1, height: 18, width: 14 },
-  documentName: { color: "#12100e", fontSize: 13, fontWeight: "900" },
-  documentMeta: { color: "#8a8177", fontSize: 10, fontWeight: "700", marginTop: 2 },
-  managementPanel: { gap: 18 },
-  managementBlock: { gap: 10 },
-  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  scopeChip: { borderColor: "#b8aea1", borderRadius: 6, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 7 },
-  scopeChipActive: { backgroundColor: "#b9e9b0", borderColor: "#12100e" },
-  scopeText: { color: "#12100e", fontSize: 12, fontWeight: "800" },
-  createRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  inlineActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  rowBetween: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
-  deleteOutlineButton: { alignItems: "center", borderColor: "#b5412b", borderRadius: 6, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 7 },
-  deleteText: { color: "#b5412b", fontSize: 11, fontWeight: "900" },
-  dangerButton: { alignItems: "center", backgroundColor: "#ef7868", borderColor: "#12100e", borderRadius: 6, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 9 },
-  dangerText: { color: "#12100e", fontSize: 12, fontWeight: "900" },
-  errorText: { color: "#b5412b", fontSize: 11, fontWeight: "700" },
-  tabRow: { backgroundColor: "#e8e5df", borderRadius: 7, flexDirection: "row", gap: 3, padding: 3 },
-  tabButton: { alignItems: "center", borderRadius: 5, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 8, paddingVertical: 7 },
-  tabButtonActive: { backgroundColor: "#ffffff", borderColor: "#b8aea1", borderWidth: 1 },
-  tabText: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
-  tabTextActive: { color: "#12100e" },
-  footerDoneButton: { alignItems: "center", backgroundColor: "#ffd84f", borderColor: "#12100e", borderRadius: 6, borderWidth: 2, justifyContent: "center", minHeight: 42, minWidth: 104, paddingHorizontal: 16 },
-  footerDoneText: { color: "#12100e", fontSize: 13, fontWeight: "900" },
-  searchResults: { gap: 8 },
-  hitRow: { borderTopColor: "#ded2c3", borderTopWidth: 1, gap: 4, paddingTop: 10 },
-  hitTitle: { color: "#12100e", fontSize: 12, fontWeight: "900" },
-  hitText: { color: "#3d3833", fontSize: 12, lineHeight: 18 },
-  disclosure: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
-  modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
-  modeButton: { alignItems: "center", borderColor: "#b8aea1", borderRadius: 6, borderWidth: 2, flexBasis: "48%", flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 38, minWidth: 0, paddingHorizontal: 6, paddingVertical: 7 },
-  modeButtonActive: { backgroundColor: "#ffd84f", borderColor: "#12100e" },
-  modeText: { color: "#6c665f", fontSize: 12, fontWeight: "900" },
-  modeTextActive: { color: "#12100e" },
-  modeExplainBox: { backgroundColor: "#fcfaf6", borderColor: "#ded7cc", borderRadius: 8, borderWidth: 1.5, gap: 4, padding: 6, width: "100%" },
-  modeExplainItem: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
-  modeExplainItemActive: { backgroundColor: "#fffdf7", borderColor: "#12100e", borderWidth: 1.5 },
-  modeExplainText: { color: "#6c665f", fontSize: 11, lineHeight: 16 },
-  modeExplainTextActive: { color: "#12100e" },
-  modeExplainLabel: { color: "#544e47", fontWeight: "700" },
-  modeExplainLabelActive: { color: "#12100e", fontWeight: "900" },
-  protoSectionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
-    paddingHorizontal: 2,
-  },
-  protoSectionTitle: {
-    color: "#12100e",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  protoNewKbBtn: {
-    alignItems: "center",
-    backgroundColor: "#ffd84f",
-    borderColor: "#12100e",
-    borderRadius: 8,
-    borderWidth: 2,
-    elevation: 2,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 1.5, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  protoNewKbBtnText: {
-    color: "#12100e",
-    fontSize: 11.5,
-    fontWeight: "900",
-  },
-  kbList: {
-    gap: 10,
-  },
-  kbCard: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 14,
-    borderWidth: 2,
-    elevation: 2,
-    gap: 6,
-    padding: 13,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 2, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  kbCardSelected: {
-    borderColor: "#12100e",
-    borderWidth: 2.5,
-  },
-  kbHeaderRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  kbTitleGroup: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 6,
-    marginRight: 8,
-  },
-  kbIcon: {
-    fontSize: 14,
-  },
-  kbTitle: {
-    color: "#12100e",
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  connectedBadge: {
-    alignItems: "center",
-    backgroundColor: "#b9e9b0",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  connectedText: {
-    color: "#0e4e16",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  kbDesc: {
-    color: "#6c665f",
-    fontSize: 11.5,
-    lineHeight: 16,
-  },
-  kbFooterRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 2,
-  },
-  kbStatText: {
-    color: "#8c857b",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  kbManageBtn: {
-    marginLeft: "auto",
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  kbManageBtnText: {
-    color: "#6c665f",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  emptyCard: {
-    alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#ded7cc",
-    borderRadius: 14,
-    borderStyle: "dashed",
-    borderWidth: 2,
-    padding: 24,
-  },
-  emptyCardTitle: {
-    color: "#12100e",
-    fontSize: 13.5,
-    fontWeight: "900",
-  },
-  emptyCardSubtitle: {
-    color: "#8c857b",
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  docPanel: {
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 14,
-    borderWidth: 2,
-    elevation: 2,
-    gap: 8,
-    padding: 13,
-    shadowColor: "#12100e",
-    shadowOffset: { height: 2, width: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  docPanelHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingBottom: 4,
-  },
-  docPanelTitle: {
-    color: "#12100e",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  uploadDocBtn: {
-    alignItems: "center",
-    backgroundColor: "#fffdf7",
-    borderColor: "#12100e",
-    borderRadius: 6,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  uploadDocBtnText: {
-    color: "#12100e",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  emptyDocBox: {
-    paddingVertical: 14,
-  },
-  emptyDocText: {
-    color: "#8c857b",
-    fontSize: 11.5,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  docItemRow: {
-    alignItems: "center",
-    borderBottomColor: "#ede7da",
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-  },
-  docItemRowLast: {
-    borderBottomWidth: 0,
-  },
-  docInfo: {
-    flex: 1,
-    gap: 3,
-    marginRight: 8,
-  },
-  docTitle: {
-    color: "#12100e",
-    fontSize: 12.5,
-    fontWeight: "800",
-  },
-  docMeta: {
-    color: "#8c857b",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  docActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  docStatusBadge: {
-    alignItems: "center",
-    backgroundColor: "#f0eae1",
-    borderColor: "#12100e",
-    borderRadius: 999,
-    borderWidth: 1.5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  docStatusBadgeReady: {
-    backgroundColor: "#b9e9b0",
-  },
-  docStatusBadgeFailed: {
-    backgroundColor: "#ff7f68",
-  },
-  docStatusText: {
-    color: "#6c665f",
-    fontSize: 9.5,
-    fontWeight: "800",
-  },
-  docStatusTextReady: {
-    color: "#0e4e16",
-  },
-  docStatusTextFailed: {
-    color: "#7a1f1a",
-  },
-  docDeleteBtn: {
-    padding: 4,
-  },
-  docDeleteBtnText: {
-    color: "#8c857b",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-});
+const createStyles = ({ font, palette, shadow }: AppTheme) =>
+  StyleSheet.create({
+    content: { gap: 12, paddingTop: 10, paddingBottom: 28 },
+    headerRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    toolbarRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    sectionHeader: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
+    explorerSection: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      overflow: "hidden",
+      ...shadow.card,
+    },
+    sessionSection: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairlineStrong,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      overflow: "hidden",
+      ...shadow.card,
+    },
+    sessionSummaryRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 58, paddingHorizontal: 12, paddingVertical: 10 },
+    sessionSettingsBody: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 10, padding: 12 },
+    detailBody: { gap: 10 },
+    tree: { borderTopColor: palette.hairline, borderTopWidth: 1, marginTop: 10 },
+    flex: { flex: 1, minWidth: 0 },
+    iconRow: { alignItems: "center", flexDirection: "row", gap: 5 },
+    eyebrow: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
+    title: { color: palette.ink1, fontSize: font.display, fontWeight: weight.semibold },
+    sectionTitle: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
+    meta: { color: palette.ink2, fontSize: font.label, fontWeight: weight.regular },
+    input: { backgroundColor: palette.well, borderColor: palette.hairlineStrong, borderRadius: radius.md - 2, borderWidth: 1, color: palette.ink1, minHeight: 44, minWidth: 0, paddingHorizontal: 12, paddingVertical: 9 },
+    smallInput: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, maxWidth: "55%", minWidth: 72, paddingHorizontal: 8, paddingVertical: 5, textAlign: "right", width: 120 },
+    primaryButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md - 2, justifyContent: "center", minHeight: 44, paddingHorizontal: 14, paddingVertical: 8 },
+    outlineButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: 10, paddingVertical: 7 },
+    secondaryButton: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
+    secondaryText: { color: palette.ink1, fontSize: font.caption, fontWeight: weight.semibold },
+    iconTextButton: { paddingHorizontal: 6, paddingVertical: 6 },
+    iconTextButtonLabel: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    newButton: { alignItems: "center", backgroundColor: palette.brand, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, justifyContent: "center", minHeight: 34, paddingHorizontal: 10, paddingVertical: 6 },
+    newButtonText: { color: palette.inkInverse, fontSize: font.label, fontWeight: weight.semibold },
+    disabledButton: { opacity: 0.42 },
+    statusMessage: { backgroundColor: palette.surface1, borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold, paddingHorizontal: 10, paddingVertical: 8 },
+    emptyText: { color: palette.ink2, paddingHorizontal: 12, paddingVertical: 18, textAlign: "center" },
+    emptyInline: { color: palette.ink2, fontSize: font.label, paddingBottom: 10, paddingTop: 8 },
+    loadingRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 10, paddingTop: 8 },
+    categoryRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 46, paddingRight: 8 },
+    categoryMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 46, minWidth: 0 },
+    arrow: { color: palette.ink3, fontSize: font.title, textAlign: "center", width: 14 },
+    folderMark: { backgroundColor: palette.brandWash, borderBottomLeftRadius: radius.xxs, borderBottomRightRadius: radius.xxs, borderTopRightRadius: radius.xxs, height: 12, width: 17 },
+    categoryName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
+    baseRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", minHeight: 44, paddingRight: 8 },
+    baseRowActive: { backgroundColor: palette.brandWash },
+    baseMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8, minHeight: 44, minWidth: 0 },
+    baseMark: { backgroundColor: palette.brandWash, borderRadius: radius.xxs, height: 16, width: 13 },
+    baseName: { color: palette.ink1, flex: 1, fontSize: font.body, fontWeight: weight.semibold },
+    rowMeta: { color: palette.ink2, fontSize: font.caption, minWidth: 18, textAlign: "right" },
+    rowAction: { paddingHorizontal: 7, paddingVertical: 7 },
+    rowActionText: { color: palette.ink2, fontSize: font.caption, fontWeight: weight.semibold },
+    statusPill: { borderRadius: radius.xs, fontSize: font.micro, fontWeight: weight.semibold, overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
+    statusPillOn: { backgroundColor: palette.okWash, color: palette.ok },
+    statusPillOff: { backgroundColor: palette.well, color: palette.ink2 },
+    documentRow: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingRight: 8, paddingVertical: 7 },
+    documentMark: { backgroundColor: palette.brandWash, borderColor: palette.cyanWash, borderRadius: radius.xxs, borderWidth: 1, height: 18, width: 14 },
+    documentName: { color: palette.ink1, fontSize: font.body, fontWeight: weight.semibold },
+    documentMeta: { color: palette.ink2, fontSize: font.micro, fontWeight: weight.regular, marginTop: 2 },
+    managementPanel: { gap: 18 },
+    managementBlock: { gap: 10 },
+    chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    scopeChip: { backgroundColor: palette.well, borderColor: palette.transparent, borderRadius: radius.md - 4, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+    scopeChipActive: { backgroundColor: palette.brandWash, borderColor: palette.brandDeep, borderWidth: 1 },
+    scopeText: { color: palette.ink1, fontSize: font.label, fontWeight: weight.medium },
+    createRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    inlineActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    rowBetween: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
+    deleteOutlineButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 4, paddingHorizontal: 12, paddingVertical: 8 },
+    deleteText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
+    dangerButton: { alignItems: "center", backgroundColor: palette.errWash, borderRadius: radius.md - 2, paddingHorizontal: 12, paddingVertical: 9 },
+    dangerText: { color: palette.err, fontSize: font.label, fontWeight: weight.medium },
+    errorText: { color: palette.err, fontSize: font.caption, fontWeight: weight.semibold },
+    tabRow: { backgroundColor: palette.surface1, borderRadius: radius.sm, flexDirection: "row", gap: 3, padding: 3 },
+    tabButton: { alignItems: "center", borderRadius: radius.xs, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 8, paddingVertical: 7 },
+    tabButtonActive: { backgroundColor: palette.surface4, borderColor: palette.hairlineStrong, borderWidth: 1 },
+    tabText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    tabTextActive: { color: palette.ink1 },
+    footerDoneButton: { alignItems: "center", backgroundColor: palette.brand, borderRadius: radius.md, justifyContent: "center", minHeight: 44, minWidth: 104, paddingHorizontal: 18 },
+    footerDoneText: { color: palette.inkInverse, fontSize: font.body, fontWeight: weight.semibold },
+    searchResults: { gap: 8 },
+    hitRow: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 4, paddingTop: 10 },
+    hitTitle: { color: palette.ink1, fontSize: font.label, fontWeight: weight.semibold },
+    hitText: { color: palette.ink1, fontSize: font.label, lineHeight: 18 },
+    refPillBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    refPillText: {
+      color: palette.brandLight,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    disclosure: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
+    modeButton: { alignItems: "center", borderColor: palette.hairlineStrong, borderRadius: radius.sm, borderWidth: 1, flexBasis: "48%", flexDirection: "row", flexGrow: 1, flexShrink: 1, gap: 4, justifyContent: "center", minHeight: 38, minWidth: 0, paddingHorizontal: 6, paddingVertical: 7 },
+    modeButtonActive: { backgroundColor: palette.brand, borderColor: palette.hairline },
+    modeText: { color: palette.ink2, fontSize: font.label, fontWeight: weight.semibold },
+    modeTextActive: { color: palette.inkInverse },
+    modeExplainBox: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.sm, borderWidth: 1, gap: 4, padding: 6, width: "100%" },
+    modeExplainItem: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 5 },
+    modeExplainItemActive: { backgroundColor: palette.surface1, borderColor: palette.hairline, borderWidth: 1 },
+    modeExplainText: { color: palette.ink2, fontSize: font.caption, lineHeight: 16 },
+    modeExplainTextActive: { color: palette.ink1 },
+    modeExplainLabel: { color: palette.ink1, fontWeight: weight.semibold },
+    modeExplainLabelActive: { color: palette.ink1, fontWeight: weight.semibold },
+    protoSectionHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 4,
+      paddingHorizontal: 2,
+    },
+    protoSectionTitle: {
+      color: palette.ink1,
+      fontSize: font.title,
+      fontWeight: weight.semibold,
+    },
+    protoNewKbBtn: {
+      alignItems: "center",
+      backgroundColor: palette.brand,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      ...shadow.float,
+    },
+    protoNewKbBtnText: {
+      color: palette.inkInverse,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    kbList: {
+      gap: 10,
+    },
+    kbCard: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 6,
+      padding: 13,
+      ...shadow.float,
+    },
+    kbCardSelected: {
+      borderColor: palette.hairline,
+      borderWidth: 1,
+    },
+    kbHeaderRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    kbTitleGroup: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 6,
+      marginRight: 8,
+    },
+    kbIcon: {
+      fontSize: font.body,
+    },
+    kbTitle: {
+      color: palette.ink1,
+      flex: 1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    connectedBadge: {
+      alignItems: "center",
+      backgroundColor: palette.okWash,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    connectedText: {
+      color: palette.ok,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    kbDesc: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      lineHeight: 16,
+    },
+    kbFooterRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 12,
+      marginTop: 2,
+    },
+    kbStatText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    kbManageBtn: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 4,
+      marginLeft: "auto",
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+    },
+    kbManageBtnText: {
+      color: palette.ink2,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    emptyCard: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderStyle: "dashed",
+      borderWidth: 1,
+      padding: 24,
+    },
+    emptyCardTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    emptyCardSubtitle: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+      marginTop: 4,
+    },
+    docPanel: {
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      gap: 8,
+      padding: 13,
+      ...shadow.float,
+    },
+    docPanelHeader: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingBottom: 4,
+    },
+    docPanelTitle: {
+      color: palette.ink1,
+      fontSize: font.body,
+      fontWeight: weight.semibold,
+    },
+    uploadDocBtn: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    uploadDocBtnText: {
+      color: palette.ink1,
+      fontSize: font.caption,
+      fontWeight: weight.semibold,
+    },
+    emptyDocBox: {
+      paddingVertical: 14,
+    },
+    emptyDocText: {
+      color: palette.ink3,
+      fontSize: font.caption,
+      fontWeight: weight.regular,
+      textAlign: "center",
+    },
+    docItemRow: {
+      alignItems: "center",
+      borderBottomColor: palette.hairline,
+      borderBottomWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingVertical: 8,
+    },
+    docItemRowLast: {
+      borderBottomWidth: 0,
+    },
+    docInfo: {
+      flex: 1,
+      gap: 3,
+      marginRight: 8,
+    },
+    docTitle: {
+      color: palette.ink1,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+    docMeta: {
+      color: palette.ink3,
+      fontSize: font.micro,
+      fontWeight: weight.regular,
+    },
+    docActions: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    docStatusBadge: {
+      alignItems: "center",
+      backgroundColor: palette.surface1,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    docStatusBadgeReady: {
+      backgroundColor: palette.okWash,
+    },
+    docStatusBadgeFailed: {
+      backgroundColor: palette.errWash,
+    },
+    docStatusText: {
+      color: palette.ink2,
+      fontSize: font.micro,
+      fontWeight: weight.semibold,
+    },
+    docStatusTextReady: {
+      color: palette.ok,
+    },
+    docStatusTextFailed: {
+      color: palette.err,
+    },
+    docDeleteBtn: {
+      padding: 4,
+    },
+    docDeleteBtnText: {
+      color: palette.ink3,
+      fontSize: font.label,
+      fontWeight: weight.semibold,
+    },
+  });

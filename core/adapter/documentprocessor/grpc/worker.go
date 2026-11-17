@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	pb "myai/core/adapter/documentprocessor/grpc/pb"
+	"myai/core/processpolicy"
 )
 
 const workerTokenHeader = "x-myai-worker-token"
@@ -23,6 +24,7 @@ type worker struct {
 	client     pb.DocumentProcessorServiceClient
 	connection *grpc.ClientConn
 	command    *exec.Cmd
+	process    *processpolicy.Process
 	exited     chan error
 	closeOnce  sync.Once
 	config     Config
@@ -55,8 +57,8 @@ func (worker *worker) Close() error {
 		select {
 		case <-worker.exited:
 		case <-time.After(worker.config.ShutdownGrace):
-			if worker.command != nil && worker.command.Process != nil {
-				_ = worker.command.Process.Kill()
+			if worker.process != nil {
+				_ = worker.process.Kill()
 			}
 			<-worker.exited
 		}

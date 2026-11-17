@@ -6,8 +6,10 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
+	"strings"
 
 	domainhistory "myai/core/domain/history"
 )
@@ -27,32 +29,35 @@ type snapshotEntry struct {
 
 func (s *Service) scan(ctx context.Context) (map[string]snapshotEntry, error) {
 	result := make(map[string]snapshotEntry)
-	err := filepath.WalkDir(s.root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := fs.WalkDir(s.files.FS(), ".", func(rel string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if path == s.root {
+		if rel == "." {
 			return nil
 		}
-		name := entry.Name()
-		if entry.IsDir() {
-			if shouldHidePath(name) {
-				return filepath.SkipDir
+		if shouldHidePath(rel) || entry.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			if entry.IsDir() {
+				return fs.SkipDir
 			}
 			return nil
 		}
-		if shouldHidePath(name) {
+		if entry.IsDir() {
+			if err := s.validatePath(rel); err != nil {
+				if errors.Is(err, errUnsafePath) {
+					return fs.SkipDir
+				}
+				return err
+			}
 			return nil
 		}
-
-		rel, err := s.relative(path)
-		if err != nil {
-			return err
+		item, exists, err := s.snapshotPath(rel)
+		if errors.Is(err, errUnsafePath) {
+			return nil
 		}
-		item, exists, err := snapshotPath(s.root, path, rel)
 		if err != nil {
 			return err
 		}
@@ -67,56 +72,77 @@ func (s *Service) scan(ctx context.Context) (map[string]snapshotEntry, error) {
 	return result, nil
 }
 
-func snapshotPath(root string, abs string, rel string) (snapshotEntry, bool, error) {
-	linkInfo, err := os.Lstat(abs)
-	if errors.Is(err, os.ErrNotExist) {
-		return snapshotEntry{}, false, nil
-	}
-	if err != nil {
-		return snapshotEntry{}, false, err
-	}
-	if linkInfo.Mode()&os.ModeSymlink != 0 {
-		target, err := filepath.EvalSymlinks(abs)
+// Validate every existing component, including Windows junctions (ModeIrregular).
+// Root operations remain the containment boundary if a component changes later.
+func (s *Service) validatePath(rel string) error {
+	return validateRootPath(s.files, rel)
+}
+
+func validateRootPath(root *os.Root, rel string) error {
+	current := ""
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		current = path.Join(current, part)
+		info, err := root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
-			return snapshotEntry{}, false, nil
+			return err
 		}
-		target = filepath.Clean(target)
-		if !insideRoot(root, target) {
-			return snapshotEntry{}, false, nil
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 ||
+			(!info.IsDir() && !info.Mode().IsRegular()) ||
+			(i < len(parts)-1 && !info.IsDir()) {
+			return unsafePath(rel)
 		}
-		abs = target
 	}
+	return nil
+}
 
-	info, err := os.Stat(abs)
+func (s *Service) snapshotPath(rel string) (snapshotEntry, bool, error) {
+	if err := s.validatePath(rel); err != nil {
+		return snapshotEntry{}, false, err
+	}
+	linkInfo, err := s.files.Lstat(rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return snapshotEntry{}, false, nil
 	}
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
-	if info.IsDir() {
-		return snapshotEntry{}, false, nil
+	if !linkInfo.Mode().IsRegular() {
+		return snapshotEntry{}, false, unsafePath(rel)
 	}
-
-	entry := snapshotEntry{
-		Path: rel,
-		Size: info.Size(),
-		Mode: info.Mode(),
-	}
-
-	file, err := os.Open(abs)
+	file, err := s.files.Open(rel)
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
 	defer file.Close()
-
+	info, err := file.Stat()
+	if err != nil {
+		return snapshotEntry{}, false, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) {
+		return snapshotEntry{}, false, unsafePath(rel)
+	}
 	content, digest, err := readSnapshotContent(file, info.Size())
 	if err != nil {
 		return snapshotEntry{}, false, err
 	}
-	entry.Hash = digest
-	entry.Binary = isBinary(content)
-	entry.TooLarge = info.Size() > int64(maxSnapshotBytes)
+	finalInfo, err := file.Stat()
+	if err != nil {
+		return snapshotEntry{}, false, err
+	}
+	if finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
+		return snapshotEntry{}, false, errors.New("workspace file changed while reading")
+	}
+	if err := s.validatePath(rel); err != nil {
+		return snapshotEntry{}, false, err
+	}
+	entry := snapshotEntry{
+		Path: rel, Size: info.Size(), Mode: info.Mode(), Hash: digest,
+		Binary: isBinary(content), TooLarge: info.Size() > int64(maxSnapshotBytes),
+	}
 	entry.Available = !entry.Binary && !entry.TooLarge
 	if entry.Available {
 		entry.Content = append([]byte(nil), content...)
@@ -183,6 +209,9 @@ func snapshotToHistory(source map[string]snapshotEntry) map[string]domainhistory
 func historyToSnapshot(source map[string]domainhistory.FileSnapshot) map[string]snapshotEntry {
 	result := make(map[string]snapshotEntry, len(source))
 	for key, value := range source {
+		if shouldHidePath(key) || shouldHidePath(value.Path) {
+			continue
+		}
 		item := snapshotEntry{
 			Path:      value.Path,
 			Size:      value.Size,

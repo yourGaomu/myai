@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ const defaultDownloadMaxBytes = 20 * 1024 * 1024
 
 type Config struct {
 	BaseURL           string
+	APIKey            string
 	Timeout           time.Duration
 	DefaultTTLSeconds int64
 	DefaultMaxVisits  int64
@@ -29,7 +31,9 @@ type Config struct {
 
 type Client struct {
 	baseURL           string
+	apiKey            string
 	httpClient        *http.Client
+	managementClient  *http.Client
 	defaultTTLSeconds int64
 	defaultMaxVisits  int64
 }
@@ -91,13 +95,20 @@ func NewClient(config Config) (*Client, error) {
 
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("asset shortener base url is invalid")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("asset shortener base url must use http or https: %s", baseURL)
+		return nil, errors.New("asset shortener base url must use http or https")
 	}
 	if parsed.Host == "" {
-		return nil, fmt.Errorf("asset shortener base url host is empty: %s", baseURL)
+		return nil, errors.New("asset shortener base url host is empty")
+	}
+	if parsed.User != nil {
+		return nil, errors.New("asset shortener base url must not contain credentials; configure asset.api_key instead")
+	}
+	apiKey := strings.TrimSpace(config.APIKey)
+	if strings.ContainsAny(apiKey, "\r\n") {
+		return nil, errors.New("asset api key must not contain line breaks")
 	}
 
 	timeout := config.Timeout
@@ -105,14 +116,46 @@ func NewClient(config Config) (*Client, error) {
 		timeout = defaultUploadTimeout
 	}
 
-	return &Client{
+	client := &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
+		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 		defaultTTLSeconds: config.DefaultTTLSeconds,
 		defaultMaxVisits:  config.DefaultMaxVisits,
-	}, nil
+	}
+	// Keep management credentials separate from public short-link downloads.
+	client.managementClient = &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: client.checkManagementRedirect,
+	}
+	return client, nil
+}
+
+func (c *Client) checkManagementRedirect(request *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("asset management request stopped after 10 redirects")
+	}
+	initial := via[0].URL
+	if request.URL.Scheme != initial.Scheme || !strings.EqualFold(request.URL.Host, initial.Host) || request.URL.User != nil {
+		return errors.New("asset management request cannot redirect outside the configured origin")
+	}
+	// Never forward a management key to a public short link or object path,
+	// including when it is served by the same origin.
+	managementBase, _ := url.Parse(c.endpoint("/api/"))
+	managementPath := strings.TrimRight(managementBase.Path, "/") + "/"
+	if !strings.HasPrefix(path.Clean(request.URL.Path), managementPath) {
+		return errors.New("asset management request cannot redirect outside the management API")
+	}
+	return nil
+}
+
+func (c *Client) requireAPIKey() error {
+	if c.apiKey == "" {
+		return errors.New("asset api key is required; configure asset.api_key or ASSET_API_KEY")
+	}
+	return nil
 }
 
 func (c *Client) ShortURL(code string) string {
@@ -122,6 +165,9 @@ func (c *Client) ShortURL(code string) string {
 func (c *Client) UploadFile(ctx context.Context, request UploadFileRequest) (UploadFileResponse, error) {
 	if c == nil {
 		return UploadFileResponse{}, errors.New("asset client is nil")
+	}
+	if err := c.requireAPIKey(); err != nil {
+		return UploadFileResponse{}, err
 	}
 	if request.Reader == nil {
 		return UploadFileResponse{}, errors.New("file reader is nil")
@@ -171,24 +217,24 @@ func (c *Client) UploadFile(ctx context.Context, request UploadFileRequest) (Upl
 
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("/api/assets"), &body)
 	if err != nil {
-		return UploadFileResponse{}, err
+		return UploadFileResponse{}, c.managementError(err)
 	}
 	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	response, err := c.httpClient.Do(httpRequest)
+	response, err := c.managementClient.Do(httpRequest)
 	if err != nil {
-		return UploadFileResponse{}, err
+		return UploadFileResponse{}, c.managementError(err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return UploadFileResponse{}, fmt.Errorf("asset upload failed: %s %s", response.Status, strings.TrimSpace(string(data)))
+		return UploadFileResponse{}, c.managementResponseError("upload", response)
 	}
 
 	var payload UploadFileResponse
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return UploadFileResponse{}, err
+		return UploadFileResponse{}, safeRequestError("asset upload response could not be read", err)
 	}
 	if strings.TrimSpace(payload.ShortURL) == "" {
 		return UploadFileResponse{}, errors.New("asset upload response short_url is empty")
@@ -209,7 +255,7 @@ func (c *Client) DownloadAsset(ctx context.Context, request DownloadAssetRequest
 		return DownloadAssetResponse{}, err
 	}
 	if info.Kind != "object" {
-		return DownloadAssetResponse{}, fmt.Errorf("short link %s is not an uploaded asset", code)
+		return DownloadAssetResponse{}, errors.New("short link is not an uploaded asset")
 	}
 
 	maxBytes := request.MaxBytes
@@ -229,23 +275,22 @@ func (c *Client) DownloadAsset(ctx context.Context, request DownloadAssetRequest
 
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, shortURL, nil)
 	if err != nil {
-		return DownloadAssetResponse{}, err
+		return DownloadAssetResponse{}, safeRequestError("asset download request failed", err)
 	}
 	response, err := c.httpClient.Do(httpRequest)
 	if err != nil {
-		return DownloadAssetResponse{}, err
+		return DownloadAssetResponse{}, safeRequestError("asset download request failed", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return DownloadAssetResponse{}, fmt.Errorf("asset download failed: %s %s", response.Status, strings.TrimSpace(string(data)))
+		return DownloadAssetResponse{}, fmt.Errorf("asset download failed: HTTP %d %s", response.StatusCode, http.StatusText(response.StatusCode))
 	}
 
 	limited := io.LimitReader(response.Body, maxBytes+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		return DownloadAssetResponse{}, err
+		return DownloadAssetResponse{}, safeRequestError("asset download response could not be read", err)
 	}
 	truncated := int64(len(data)) > maxBytes
 	if truncated {
@@ -269,6 +314,12 @@ func (c *Client) DownloadAsset(ctx context.Context, request DownloadAssetRequest
 }
 
 func (c *Client) GetLinkInfo(ctx context.Context, code string) (LinkInfo, error) {
+	if c == nil {
+		return LinkInfo{}, errors.New("asset client is nil")
+	}
+	if err := c.requireAPIKey(); err != nil {
+		return LinkInfo{}, err
+	}
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return LinkInfo{}, errors.New("asset code is empty")
@@ -276,24 +327,58 @@ func (c *Client) GetLinkInfo(ctx context.Context, code string) (LinkInfo, error)
 
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("/api/links/"+url.PathEscape(code)), nil)
 	if err != nil {
-		return LinkInfo{}, err
+		return LinkInfo{}, c.managementError(err)
 	}
-	response, err := c.httpClient.Do(httpRequest)
+	httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
+	response, err := c.managementClient.Do(httpRequest)
 	if err != nil {
-		return LinkInfo{}, err
+		return LinkInfo{}, c.managementError(err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return LinkInfo{}, fmt.Errorf("asset info failed: %s %s", response.Status, strings.TrimSpace(string(data)))
+		return LinkInfo{}, c.managementResponseError("info", response)
 	}
 
 	var info LinkInfo
 	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
-		return LinkInfo{}, err
+		return LinkInfo{}, safeRequestError("asset info response could not be read", err)
 	}
 	return info, nil
+}
+
+func (c *Client) managementError(err error) error {
+	return safeRequestError("asset management request failed", err)
+}
+
+func safeRequestError(message string, err error) error {
+	// Never retain a transport or parser error: even an inner url.Error.Err can
+	// contain a full Location header, Authorization value or signed object URL.
+	// Rebuild only safe cancellation/timeout categories from trusted sentinels.
+	switch {
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("%s: %w", message, context.Canceled)
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("%s: %w", message, context.DeadlineExceeded)
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		return fmt.Errorf("%s: %w", message, os.ErrDeadlineExceeded)
+	}
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return fmt.Errorf("%s: %w", message, os.ErrDeadlineExceeded)
+	}
+	return errors.New(message)
+}
+
+func (c *Client) managementResponseError(operation string, response *http.Response) error {
+	switch response.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("asset %s authentication failed (%d); check asset.api_key or ASSET_API_KEY", operation, response.StatusCode)
+	default:
+		// A proxy or server may echo Authorization in its error response. Do not
+		// forward response bodies into tool results or conversation history.
+		return fmt.Errorf("asset %s failed: HTTP %d %s", operation, response.StatusCode, http.StatusText(response.StatusCode))
+	}
 }
 
 func (c *Client) endpoint(endpointPath string) string {
@@ -325,32 +410,35 @@ func (c *Client) resolveShortURL(request DownloadAssetRequest) (string, string, 
 func (c *Client) codeFromShortURL(rawURL string) (string, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", err
+		return "", errors.New("asset url is invalid")
 	}
 	base, err := url.Parse(c.baseURL)
 	if err != nil {
-		return "", err
+		return "", errors.New("asset shortener base url is invalid")
+	}
+	if parsed.User != nil {
+		return "", errors.New("asset url must not contain credentials")
 	}
 	if parsed.Scheme != base.Scheme || parsed.Host != base.Host {
-		return "", fmt.Errorf("asset url must use configured short-link host: %s", base.Host)
+		return "", errors.New("asset url must use configured short-link host")
 	}
 
 	basePath := strings.TrimRight(base.EscapedPath(), "/")
 	assetPath := parsed.EscapedPath()
 	if basePath != "" {
 		if assetPath != basePath && !strings.HasPrefix(assetPath, basePath+"/") {
-			return "", fmt.Errorf("asset url path is outside configured short-link base path: %s", assetPath)
+			return "", errors.New("asset url path is outside configured short-link base path")
 		}
 		assetPath = strings.TrimPrefix(assetPath, basePath)
 	}
 
 	parts := strings.Split(strings.Trim(assetPath, "/"), "/")
 	if len(parts) != 2 || parts[0] != "s" || parts[1] == "" {
-		return "", fmt.Errorf("asset url must look like %s", c.ShortURL("<code>"))
+		return "", errors.New("asset url must use the configured short-link base path followed by /s/<code>")
 	}
 	code, err := url.PathUnescape(parts[1])
 	if err != nil {
-		return "", err
+		return "", errors.New("asset code is invalid")
 	}
 	return strings.TrimSpace(code), nil
 }

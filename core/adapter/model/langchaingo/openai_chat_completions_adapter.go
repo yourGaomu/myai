@@ -26,15 +26,26 @@ func (OpenAIChatCompletionsAdapter) ValidateConfig(config modelport.CreationConf
 }
 
 func (OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
+	return createOpenAIChatModel(config, false)
+}
+
+func createOpenAIChatModel(config modelport.CreationConfig, legacyMaxTokens bool) (modelport.ChatModelPort, error) {
 	if err := (OpenAIChatCompletionsAdapter{}).ValidateConfig(config); err != nil {
 		return nil, err
 	}
+	token := config.APIKey
+	if domainmodel.NormalizeAuthType(config.AuthType) == domainmodel.AuthTypeNone {
+		// The SDK requires a nonempty token even for local unauthenticated
+		// providers. The transport always strips this placeholder.
+		token = "no-auth"
+	}
 	options := []openai.Option{
-		openai.WithToken(config.APIKey),
+		openai.WithToken(token),
 		openai.WithBaseURL(config.BaseURL),
 		openai.WithModel(config.ModelName),
 	}
-	var transport http.RoundTripper = assistantReplayTransport{base: http.DefaultTransport}
+	var transport http.RoundTripper = assistantReplayTransport{base: modelTransport{base: http.DefaultTransport}}
+	transport = generationSettingsTransport{base: transport, legacyMaxTokens: legacyMaxTokens}
 	if domainmodel.NormalizeAuthType(config.AuthType) == domainmodel.AuthTypeNone {
 		transport = stripAuthorizationTransport{base: transport}
 	}
@@ -44,7 +55,7 @@ func (OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model}, nil
+	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
 }
 
 type stripAuthorizationTransport struct {

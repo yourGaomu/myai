@@ -1,91 +1,58 @@
 package executor
 
 import (
-	"strings"
-
+	generationcommand "myai/core/application/chat/generation/command"
 	"myai/core/contextmgr"
+	compaction "myai/core/domain/compaction"
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/session"
 )
 
-const minimumReservedResponseTokens = 1024
-
+// Compatibility callers have no actual tool schema. Reserve a conservative
+// schema allowance and the configured output limit using the shared budget.
 func promptToolResultBudget(current *session.Session, calls []domainmessage.ToolCall) int {
 	if current == nil {
 		return 0
 	}
-	windowTokens := contextmgr.NormalizeWindowK(current.ContextWindowK) * 1000
-	baseTokens := 0
-	if len(current.Messages) > 0 && current.Messages[0].Role == domainmessage.RoleSystem {
-		baseTokens += contextmgr.EstimateMessagesTokens(current.Messages[:1])
+	window := contextmgr.ResolveWindowTokens(current.ContextWindowK, 0)
+	output := 2048
+	if current.GenerationSettings.MaxOutputTokens != nil {
+		output = *current.GenerationSettings.MaxOutputTokens
 	}
-	if summary := strings.TrimSpace(current.Summary); summary != "" {
-		summaryTokens := contextmgr.EstimateTextTokens(summary)
-		if summaryTokens > 1024 {
-			summaryTokens = 1024
-		}
-		baseTokens += summaryTokens + 4
-	}
-	if current.CurrentPlan != nil {
-		baseTokens += 512
-	}
+	budget := contextmgr.NewRequestBudget(window, 2048, output)
+	snapshot := contextmgr.BuildSnapshotWithBudget(current.Messages, contextmgr.CheckpointForRequest(current.Messages, legacyCheckpoint(current)), current.CompactedMessages, current.ContextWindowK, budget.ReservedTokens())
+	messages := append(domainmessage.CloneAll(snapshot.Messages), domainmessage.ToolCallMessage(calls))
+	return budget.AvailableTokens(messages)
+}
 
-	callTokens := 0
-	if len(calls) > 0 {
-		callTokens = contextmgr.EstimateMessagesTokens([]domainmessage.Message{domainmessage.ToolCallMessage(calls)})
+func promptToolResultBudgetForRequest(command generationcommand.ToolExecution, calls []domainmessage.ToolCall) int {
+	if command.RequestBudget == nil {
+		return promptToolResultBudget(command.Session, calls)
 	}
-	reservedResponseTokens := windowTokens / 8
-	if reservedResponseTokens < minimumReservedResponseTokens {
-		reservedResponseTokens = minimumReservedResponseTokens
+	messages := domainmessage.CloneAll(command.PromptMessages)
+	assistant := domainmessage.ToolCallMessage(calls)
+	if command.AssistantMessage != nil {
+		assistant = domainmessage.Assistant(command.AssistantMessage.Text(), command.AssistantMessage.Reasoning, calls)
 	}
+	messages = append(messages, assistant)
+	return command.RequestBudget.AvailableTokens(messages)
+}
 
-	available := windowTokens - baseTokens - contextmgr.CurrentTurnTokens(current.Messages) - callTokens - reservedResponseTokens
-	maximumBatch := windowTokens / 2
-	if available > maximumBatch {
-		available = maximumBatch
+func legacyCheckpoint(current *session.Session) compaction.Checkpoint {
+	if current.CompactionCheckpoint != nil {
+		return *current.CompactionCheckpoint.Clone()
 	}
-	if available < 0 {
-		return 0
-	}
-	return available
+	return compaction.LegacyCheckpoint(current.Summary, current.CompactedMessages, current.CompactionSourceHash)
 }
 
 func limitToolResultsForPrompt(messages []domainmessage.Message, entries []domaintool.ExecutionEntry, budgetTokens int) ([]domainmessage.Message, []domaintool.ExecutionEntry) {
-	if contextmgr.EstimateMessagesTokens(messages) <= budgetTokens {
-		return messages, entries
-	}
+	limited, annotated, _ := limitToolResultsForRequest(messages, entries, budgetTokens)
+	return limited, annotated
+}
 
-	maximumFieldTokens := 0
-	for _, message := range messages {
-		for _, part := range message.Parts {
-			if part.Type != domainmessage.PartToolResult || part.ToolResult == nil {
-				continue
-			}
-			contentTokens := contextmgr.EstimateTextTokens(part.ToolResult.Content)
-			errorTokens := contextmgr.EstimateTextTokens(part.ToolResult.ErrorMessage)
-			if contentTokens > maximumFieldTokens {
-				maximumFieldTokens = contentTokens
-			}
-			if errorTokens > maximumFieldTokens {
-				maximumFieldTokens = errorTokens
-			}
-		}
-	}
-
-	low, high := 0, maximumFieldTokens
-	limited := truncateToolResultFields(messages, 0)
-	for low <= high {
-		middle := (low + high) / 2
-		candidate := truncateToolResultFields(messages, middle)
-		if contextmgr.EstimateMessagesTokens(candidate) <= budgetTokens {
-			limited = candidate
-			low = middle + 1
-		} else {
-			high = middle - 1
-		}
-	}
-
+func limitToolResultsForRequest(messages []domainmessage.Message, entries []domaintool.ExecutionEntry, budgetTokens int) ([]domainmessage.Message, []domaintool.ExecutionEntry, error) {
+	limited, budgetErr := contextmgr.LimitToolResults(messages, budgetTokens)
 	promptResults := make(map[string]domainmessage.ToolResult)
 	for _, message := range limited {
 		if result, ok := message.FirstToolResult(); ok {
@@ -102,33 +69,8 @@ func limitToolResultsForPrompt(messages []domainmessage.Message, entries []domai
 		if !ok || promptResult.Content == entry.Content && promptResult.ErrorMessage == entry.Error {
 			continue
 		}
-		entry.PromptContent = promptResult.Content
-		entry.PromptError = promptResult.ErrorMessage
+		entry.PromptContent, entry.PromptError = promptResult.Content, promptResult.ErrorMessage
 		entry.PromptTruncated = true
 	}
-	return limited, annotatedEntries
-}
-
-func truncateToolResultFields(messages []domainmessage.Message, maxFieldTokens int) []domainmessage.Message {
-	limited := domainmessage.CloneAll(messages)
-	for messageIndex := range limited {
-		for partIndex := range limited[messageIndex].Parts {
-			part := &limited[messageIndex].Parts[partIndex]
-			if part.Type != domainmessage.PartToolResult || part.ToolResult == nil {
-				continue
-			}
-			content := contextmgr.TruncateTextToTokens(part.ToolResult.Content, maxFieldTokens)
-			errorMessage := contextmgr.TruncateTextToTokens(part.ToolResult.ErrorMessage, maxFieldTokens)
-			if content != part.ToolResult.Content || errorMessage != part.ToolResult.ErrorMessage {
-				if !part.ToolResult.PromptTruncated {
-					part.ToolResult.FullContent = part.ToolResult.Content
-					part.ToolResult.FullErrorMessage = part.ToolResult.ErrorMessage
-				}
-				part.ToolResult.PromptTruncated = true
-			}
-			part.ToolResult.Content = content
-			part.ToolResult.ErrorMessage = errorMessage
-		}
-	}
-	return limited
+	return limited, annotatedEntries, budgetErr
 }

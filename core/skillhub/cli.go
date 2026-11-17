@@ -10,8 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
+
+	"myai/core/processpolicy"
 )
 
 const (
@@ -68,6 +69,7 @@ type CommandResult struct {
 	Command  []string `json:"command"`
 	WorkDir  string   `json:"work_dir"`
 	Output   string   `json:"output"`
+	Stderr   string   `json:"stderr,omitempty"`
 	ExitCode int      `json:"exit_code"`
 }
 
@@ -306,10 +308,32 @@ func (c *Client) withRegistry(args ...string) []string {
 
 func (c *Client) runSkillHub(ctx context.Context, workspace string, args ...string) (CommandResult, error) {
 	if runtime.GOOS == "windows" && c.command == DefaultCommand {
-		script := skillHubShellScript(args)
-		return c.runner.Run(ctx, workspace, c.bashCommand(), "-lc", script)
+		// The official Windows installation uses a Python script, not a native
+		// executable. Pass its absolute path and every request value as argv.
+		// No request data is interpreted by bash, PowerShell, or cmd.exe.
+		if script := installedPythonCLI(); script != "" {
+			python := "python"
+			if _, err := exec.LookPath(python); err != nil {
+				if _, pyErr := exec.LookPath("py"); pyErr == nil {
+					python = "py"
+				}
+			}
+			return c.runner.Run(ctx, workspace, python, append([]string{script}, args...)...)
+		}
 	}
 	return c.runner.Run(ctx, workspace, c.command, args...)
+}
+
+func installedPythonCLI() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, ".skillhub", "skills_store_cli.py")
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		return path
+	}
+	return ""
 }
 
 func (c *Client) bashCommand() string {
@@ -331,26 +355,6 @@ func (c *Client) bashCommand() string {
 		}
 	}
 	return "bash"
-}
-
-func skillHubShellScript(args []string) string {
-	parts := []string{`export PYTHONIOENCODING=utf-8;`, `export PATH="$HOME/.local/bin:$PATH";`}
-	if runtime.GOOS == "windows" {
-		parts = append(parts, "python", `"$HOME/.skillhub/skills_store_cli.py"`)
-	} else {
-		parts = append(parts, "skillhub")
-	}
-	for _, arg := range args {
-		parts = append(parts, shellQuote(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return strconv.Quote(value)
 }
 
 func normalizeInstallTarget(namespace string, name string) (string, string) {
@@ -411,20 +415,22 @@ type ExecRunner struct{}
 func (ExecRunner) Run(ctx context.Context, workDir string, name string, args ...string) (CommandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = workDir
+	cmd.Env = processpolicy.Environment(map[string]string{"PYTHONIOENCODING": "utf-8"})
 
-	var output bytes.Buffer
+	var output, stderr bytes.Buffer
 	cmd.Stdout = &output
-	cmd.Stderr = &output
+	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := processpolicy.Run(cmd)
 	result := CommandResult{
 		Command:  append([]string{name}, args...),
 		WorkDir:  workDir,
 		Output:   strings.TrimSpace(output.String()),
+		Stderr:   strings.TrimSpace(stderr.String()),
 		ExitCode: exitCode(err),
 	}
 	if err != nil {
-		return result, commandError(name, result.Output, err)
+		return result, commandError(name, strings.TrimSpace(result.Output+"\n"+result.Stderr), err)
 	}
 	return result, nil
 }

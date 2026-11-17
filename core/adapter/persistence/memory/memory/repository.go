@@ -51,9 +51,19 @@ func (repository *Repository) List(_ context.Context, filter memoryport.ListFilt
 		}
 		items = append(items, cloneMemory(memory))
 	}
-	sort.Slice(items, func(left, right int) bool { return items[left].UpdatedAt.After(items[right].UpdatedAt) })
-	if filter.Limit > 0 && len(items) > filter.Limit {
-		items = items[:filter.Limit]
+	sort.Slice(items, func(left, right int) bool {
+		if filter.OrderByContent {
+			leftTime, rightTime := items[left].ContentUpdatedAt(), items[right].ContentUpdatedAt()
+			if leftTime.Equal(rightTime) {
+				return items[left].ID < items[right].ID
+			}
+			return leftTime.After(rightTime)
+		}
+		return items[left].UpdatedAt.After(items[right].UpdatedAt)
+	})
+	limit := memoryport.NormalizeListLimit(filter.Limit)
+	if len(items) > limit {
+		items = items[:limit]
 	}
 	return items, nil
 }
@@ -189,7 +199,6 @@ func (repository *Repository) RecordUse(_ context.Context, memoryID string, used
 	usedAt = usedAt.UTC()
 	memory.UseCount++
 	memory.LastUsedAt = &usedAt
-	memory.UpdatedAt = usedAt
 	repository.memories[memory.ID] = cloneMemory(memory)
 	return nil
 }
@@ -355,6 +364,9 @@ func filterMemory(memory domainmemory.Memory, filter memoryport.ListFilter) bool
 		if !containsString(memory.Tags, strings.ToLower(strings.TrimSpace(tag))) {
 			return false
 		}
+	}
+	if len(filter.SearchTerms) > 0 && !memory.MatchesSearchTerms(filter.SearchTerms) {
+		return false
 	}
 	if strings.TrimSpace(filter.Text) != "" {
 		query := strings.ToLower(strings.TrimSpace(filter.Text))

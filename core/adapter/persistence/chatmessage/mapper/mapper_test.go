@@ -34,7 +34,7 @@ func TestMapperConvertsMemoryMessagesAtPersistenceBoundary(t *testing.T) {
 	if len(records) != 4 {
 		t.Fatalf("record count = %d, want 4", len(records))
 	}
-	if records[0].ID != "id-1" || records[0].Role != repository.RoleSystem || records[0].SyntheticReason != "runtime_instruction" {
+	if records[0].ID != "id-1" || records[0].Role != repository.RoleUser || records[0].SyntheticReason != "runtime_instruction" {
 		t.Fatalf("unexpected runtime record: %#v", records[0])
 	}
 	if records[1].ID != "id-2" || records[1].Role != repository.RoleUser || records[1].Content != "hello" {

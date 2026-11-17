@@ -1,8 +1,12 @@
 package chat
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"myai/core/adapter/chat/pendinginput"
 
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
@@ -47,7 +51,22 @@ func TestContinuationPromptBoundsLargeTaskReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, `"result_truncated": true`) || !strings.Contains(prompt, `"omitted_changed_files": 3`) || !strings.Contains(prompt, "...[truncated]") {
-		t.Fatalf("expected bounded report metadata, got:\n%s", prompt)
+	if !strings.Contains(prompt, `"result_truncated": true`) || !strings.Contains(prompt, "...[truncated]") {
+		t.Fatal("large result lacks an explicit truncation marker")
+	}
+	if utf8.RuneCountInString(prompt) > pendinginput.MaxPendingRunes {
+		t.Fatal("complete continuation prompt exceeds the parent queue limit")
+	}
+	start := strings.Index(prompt, "<subagent_report>\n") + len("<subagent_report>\n")
+	end := strings.LastIndex(prompt, "\n</subagent_report>")
+	var report struct {
+		ChangedFiles        []string `json:"changed_files"`
+		OmittedChangedFiles int      `json:"omitted_changed_files"`
+	}
+	if err := json.Unmarshal([]byte(prompt[start:end]), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.OmittedChangedFiles < 3 || len(report.ChangedFiles)+report.OmittedChangedFiles != len(files) {
+		t.Fatal("completion summary lost its omitted file count")
 	}
 }

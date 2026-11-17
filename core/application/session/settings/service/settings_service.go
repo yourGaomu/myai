@@ -97,8 +97,10 @@ func (s SettingsService) SetContextWindow(ctx context.Context, command settingsc
 	if s.Memory == nil {
 		return nil, errors.New("session manager is nil")
 	}
-	if err := contextmgr.ValidateWindowK(command.WindowK); err != nil {
-		return nil, err
+	if command.WindowK != 0 {
+		if err := contextmgr.ValidateWindowK(command.WindowK); err != nil {
+			return nil, err
+		}
 	}
 
 	current, err := s.ensureInMemory(ctx, command.SessionID)
@@ -163,6 +165,23 @@ func (s SettingsService) SetRAGSettings(ctx context.Context, command settingscom
 		return nil, err
 	}
 	if err := s.Memory.SetRAGSettingsForSession(current.ID, settings); err != nil {
+		return nil, err
+	}
+	return s.Memory.GetSession(current.ID)
+}
+
+func (s SettingsService) SetToolAllowlist(ctx context.Context, sessionID string, allowed []string, enforce bool) (*session.Session, error) {
+	current, err := s.ensureInMemory(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	memory, ok := s.Memory.(interface {
+		SetToolAllowlistForSession(string, []string, bool) error
+	})
+	if !ok {
+		return nil, errors.New("session memory does not support tool allowlists")
+	}
+	if err := memory.SetToolAllowlistForSession(current.ID, allowed, enforce); err != nil {
 		return nil, err
 	}
 	return s.Memory.GetSession(current.ID)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 )
 
@@ -9,9 +10,12 @@ const defaultRuntimeSessionID = "__default__"
 
 type sessionRuntime struct {
 	// mu 保护读取和修改当前任务状态；它不应阻塞正在运行的任务。
-	mu       sync.Mutex
-	cancelMu sync.Mutex
-	cancel   context.CancelFunc
+	mu                 sync.Mutex
+	cancelMu           sync.Mutex
+	cancel             context.CancelFunc
+	permMu             sync.Mutex
+	allowedTools       map[string]bool
+	allowedPermissions map[string]bool
 }
 
 type sessionRuntimeManager struct {
@@ -86,4 +90,62 @@ func (r *sessionRuntime) pause() bool {
 	}
 	cancel()
 	return true
+}
+
+func (r *sessionRuntime) allowPermissionRule(scope, toolName, permission string) {
+	if r == nil {
+		return
+	}
+	tool := strings.TrimSpace(toolName)
+	perm := strings.TrimSpace(permission)
+	r.permMu.Lock()
+	defer r.permMu.Unlock()
+	switch scope {
+	case "session_tool":
+		if tool != "" {
+			if r.allowedTools == nil {
+				r.allowedTools = make(map[string]bool)
+			}
+			r.allowedTools[tool] = true
+		}
+	case "session_permission":
+		if perm != "" {
+			if r.allowedPermissions == nil {
+				r.allowedPermissions = make(map[string]bool)
+			}
+			r.allowedPermissions[perm] = true
+		} else if tool != "" {
+			if r.allowedTools == nil {
+				r.allowedTools = make(map[string]bool)
+			}
+			r.allowedTools[tool] = true
+		}
+	}
+}
+
+func (r *sessionRuntime) isPermissionAllowed(toolName, permission string) bool {
+	if r == nil {
+		return false
+	}
+	tool := strings.TrimSpace(toolName)
+	perm := strings.TrimSpace(permission)
+	r.permMu.Lock()
+	defer r.permMu.Unlock()
+	if tool != "" && r.allowedTools[tool] {
+		return true
+	}
+	if perm != "" && r.allowedPermissions[perm] {
+		return true
+	}
+	return false
+}
+
+func (r *sessionRuntime) clearPermissionRules() {
+	if r == nil {
+		return
+	}
+	r.permMu.Lock()
+	r.allowedTools = nil
+	r.allowedPermissions = nil
+	r.permMu.Unlock()
 }

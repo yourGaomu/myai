@@ -1,7 +1,6 @@
 package local
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,8 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"unicode/utf8"
+
 	domainexecution "myai/core/domain/execution"
 	executionport "myai/core/port/execution"
+	"myai/core/processpolicy"
 )
 
 const (
@@ -73,13 +75,14 @@ func (executor *Executor) Run(ctx context.Context, request domainexecution.RunRe
 
 	cmd, shellName := shellCommand(runCtx, command)
 	cmd.Dir = workDir
+	cmd.Env = processpolicy.Environment(nil)
 	stdout := newLimitedBuffer(outputLimit)
 	stderr := newLimitedBuffer(outputLimit)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
 	start := time.Now()
-	err = cmd.Run()
+	err = processpolicy.Run(cmd)
 	result := domainexecution.RunResult{
 		Command: command, WorkDir: filepath.ToSlash(relativePath(executor.workspace, workDir)),
 		ExitCode: 0, Stdout: stdout.String(), Stderr: stderr.String(),
@@ -93,6 +96,11 @@ func (executor *Executor) Run(ctx context.Context, request domainexecution.RunRe
 		result.ExitCode = -1
 		result.ErrorMessage = "command timed out"
 		return result, nil
+	}
+	if runCtx.Err() != nil {
+		result.ExitCode = -1
+		result.ErrorMessage = "command canceled"
+		return result, runCtx.Err()
 	}
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
@@ -130,6 +138,9 @@ func (executor *Executor) cleanWorkDir(workDir string) (string, error) {
 
 func shellCommand(ctx context.Context, command string) (*exec.Cmd, string) {
 	if runtime.GOOS == "windows" {
+		// Windows PowerShell otherwise encodes redirected output using a legacy
+		// code page. Set both the console and native-program pipe encoding.
+		command = "$utf8 = New-Object System.Text.UTF8Encoding $false; [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; " + command
 		return exec.CommandContext(ctx, "powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command), "powershell"
 	}
 	return exec.CommandContext(ctx, "sh", "-c", command), "sh"
@@ -187,27 +198,59 @@ func relativePath(root string, path string) string {
 }
 
 type limitedBuffer struct {
-	buffer    bytes.Buffer
+	head      []byte
+	tail      []byte
 	limit     int
+	total     int64
 	truncated bool
 }
 
-func newLimitedBuffer(limit int) *limitedBuffer { return &limitedBuffer{limit: limit} }
+func newLimitedBuffer(limit int) *limitedBuffer { return &limitedBuffer{limit: max(0, limit)} }
 
 func (buffer *limitedBuffer) Write(content []byte) (int, error) {
-	remaining := buffer.limit - buffer.buffer.Len()
-	if buffer.limit <= 0 || remaining <= 0 {
-		buffer.truncated = true
-		return len(content), nil
+	written := len(content)
+	buffer.total += int64(written)
+	buffer.truncated = buffer.total > int64(buffer.limit)
+	headLimit := (buffer.limit + 1) / 2
+	if remaining := headLimit - len(buffer.head); remaining > 0 {
+		count := min(remaining, len(content))
+		buffer.head = append(buffer.head, content[:count]...)
+		content = content[count:]
 	}
-	if len(content) > remaining {
-		buffer.truncated = true
-		_, _ = buffer.buffer.Write(content[:remaining])
-		return len(content), nil
+	tailLimit := buffer.limit - headLimit
+	if tailLimit > 0 && len(content) > 0 {
+		if len(content) >= tailLimit {
+			buffer.tail = append(buffer.tail[:0], content[len(content)-tailLimit:]...)
+		} else {
+			if overflow := len(buffer.tail) + len(content) - tailLimit; overflow > 0 {
+				copy(buffer.tail, buffer.tail[overflow:])
+				buffer.tail = buffer.tail[:len(buffer.tail)-overflow]
+			}
+			buffer.tail = append(buffer.tail, content...)
+		}
 	}
-	_, _ = buffer.buffer.Write(content)
-	return len(content), nil
+	return written, nil
 }
 
-func (buffer *limitedBuffer) String() string  { return buffer.buffer.String() }
+func (buffer *limitedBuffer) String() string {
+	if !buffer.truncated {
+		return strings.ToValidUTF8(string(buffer.head)+string(buffer.tail), "?")
+	}
+	// Trim incomplete runes at the two cut boundaries. Invalid source encoding
+	// is replaced one byte at a time so rendered output stays within the limit.
+	head := buffer.head
+	for len(head) > 0 {
+		_, size := utf8.DecodeLastRune(head)
+		if size != 1 || head[len(head)-1] < utf8.RuneSelf {
+			break
+		}
+		head = head[:len(head)-1]
+	}
+	tail := buffer.tail
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return strings.ToValidUTF8(string(head), "?") + strings.ToValidUTF8(string(tail), "?")
+}
+
 func (buffer *limitedBuffer) Truncated() bool { return buffer.truncated }

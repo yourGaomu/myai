@@ -446,6 +446,9 @@ type BackgroundTurnEventPayload struct {
 	Error     string         `json:"error,omitempty"`
 	Run       *AgentRun      `json:"run,omitempty"`
 	Event     *AgentRunEvent `json:"event,omitempty"`
+	ApprovalID string `json:"approval_id,omitempty"`
+	Permission *PermissionAskPayload `json:"permission,omitempty"`
+	Question *UserQuestionPayload `json:"question,omitempty"`
 }
 
 type AgentRunListPayload struct {
@@ -500,6 +503,7 @@ type PermissionAskPayload struct {
 type PermissionResultPayload struct {
 	ApprovalID string `json:"approval_id"`
 	Allowed    bool   `json:"allowed"`
+	Scope      string `json:"scope,omitempty"`
 }
 
 type UserQuestionItemPayload struct {
@@ -850,6 +854,8 @@ type SessionContextQueryResultPayload struct {
 }
 
 type ModelSummary struct {
+	ContextWindowTokens int `json:"context_window_tokens"`
+	MaxOutputTokens int `json:"max_output_tokens"`
 	ID        string             `json:"id"`
 	Name      string             `json:"name,omitempty"`
 	Provider  string             `json:"provider,omitempty"`
@@ -882,6 +888,8 @@ type ModelSwitchResultPayload struct {
 }
 
 type ModelConfigAddPayload struct {
+	ContextWindowTokens *int `json:"context_window_tokens,omitempty"`
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
 	ID        string             `json:"id"`
 	Name      string             `json:"name,omitempty"`
 	Provider  string             `json:"provider,omitempty"`
@@ -1341,6 +1349,8 @@ type ChangeEntry struct {
 	Deleted        bool   `json:"deleted"`
 	Renamed        bool   `json:"renamed"`
 	Restorable     bool   `json:"restorable"`
+	AddedLines     int    `json:"added_lines,omitempty"`
+	RemovedLines   int    `json:"removed_lines,omitempty"`
 }
 
 type ChangesListResultPayload struct {
@@ -1359,6 +1369,7 @@ type ChangeDiffPayload struct {
 }
 
 type ChangeDiffResultPayload struct {
+	ExpectedHash string `json:"expected_hash,omitempty"`
 	Path       string `json:"path"`
 	Diff       string `json:"diff,omitempty"`
 	Truncated  bool   `json:"truncated"`
@@ -1369,6 +1380,7 @@ type ChangeDiffResultPayload struct {
 
 type ChangeRevertPayload struct {
 	Path string `json:"path"`
+	ExpectedHash string `json:"expected_hash,omitempty"`
 }
 
 type ChangeRevertResultPayload struct {
@@ -1423,6 +1435,7 @@ type HistoryRevertPayload struct {
 }
 
 type HistoryRevertResultPayload struct {
+	InverseCheckpointID string `json:"inverse_checkpoint_id,omitempty"`
 	CheckpointID string   `json:"checkpoint_id"`
 	Reverted     bool     `json:"reverted"`
 	Paths        []string `json:"paths"`

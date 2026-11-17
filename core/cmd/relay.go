@@ -85,6 +85,9 @@ func configuredRelayAgentCredentials() ([]relay.AgentCredential, error) {
 		if userID == "" || deviceID == "" || token == "" {
 			return errors.New("relay agent credential requires non-empty user, device, and token")
 		}
+		if err := appconfig.ValidateCredential("relay agent token", token); err != nil {
+			return err
+		}
 		key := userID + "/" + deviceID
 		if _, exists := seen[key]; exists {
 			return errors.New("duplicate relay agent credential: " + key)

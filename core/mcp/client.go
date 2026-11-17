@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -16,6 +17,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"myai/core/processpolicy"
+	"myai/core/trust"
 )
 
 const (
@@ -24,13 +28,22 @@ const (
 )
 
 type Client struct {
-	// Client 通过子进程 stdin/stdout 实现 JSON-RPC；pending 用请求 ID 关联并发响应。
+	// 1. stdio 使用 pending 关联响应；HTTP 在同一请求中完成 JSON-RPC 往返。
 	config          ServerConfig
 	timeout         time.Duration
 	protocolVersion string
 
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
+	cmd           *exec.Cmd
+	process       *processpolicy.Process
+	processClosed chan struct{}
+	stdin         io.WriteCloser
+	httpClient    *http.Client
+	httpURL       string
+	httpHeaders   http.Header
+	httpCancel    context.CancelFunc
+	httpContext   context.Context
+	httpSessionMu sync.Mutex
+	httpSessionID string
 
 	writeGate chan struct{}
 	stderrMu  sync.Mutex
@@ -124,16 +137,35 @@ func NewClient(config ServerConfig) *Client {
 }
 
 func (c *Client) Start(ctx context.Context) error {
+	// 1. HTTP 服务由外部部署，本地只握手，不启动或托管短链后端进程。
+	if strings.TrimSpace(c.config.URL) != "" {
+		return c.startHTTP(ctx)
+	}
 	// 启动后必须先完成 MCP initialize 握手，成功后才能 list/call tools。
 	if c.config.Command == "" {
 		return errors.New("mcp command is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.config = NormalizeConfig(Config{Servers: []ServerConfig{c.config}}, c.config.TrustWorkspace).Servers[0]
+	declaration, err := TrustRequest(c.config, c.config.TrustWorkspace)
+	if err != nil {
+		return fmt.Errorf("prepare mcp execution trust: %w", err)
+	}
+	if err := c.config.Trust.Authorize(ctx, declaration); err != nil {
+		return fmt.Errorf("authorize mcp stdio execution: %w", err)
+	}
+	explicitEnv, err := expandProcessEnv(c.config.Env, os.LookupEnv)
+	if err != nil {
+		return err
 	}
 
 	cmd := exec.Command(c.config.Command, c.config.Args...)
 	if c.config.WorkingDir != "" {
 		cmd.Dir = c.config.WorkingDir
 	}
-	cmd.Env = mcpProcessEnv(c.config.Env)
+	cmd.Env = mcpProcessEnv(explicitEnv)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -141,24 +173,34 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return err
 	}
 
-	if err := cmd.Start(); err != nil {
+	process, err := processpolicy.Start(cmd)
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return err
 	}
 
 	c.cmd = cmd
+	c.process = process
+	c.processClosed = make(chan struct{})
 	c.stdin = stdin
 
 	go c.readLoop(stdout)
 	go c.logStderr(stderr)
 	go func() {
-		if err := cmd.Wait(); err != nil {
+		defer close(c.processClosed)
+		if err := process.Wait(); err != nil {
 			c.markClosed(err)
 			return
 		}
@@ -219,11 +261,20 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 }
 
 func (c *Client) Close() error {
+	// 1. 关闭在途 HTTP 请求和空闲连接，热更新后旧客户端不再发送请求。
+	if c.httpCancel != nil {
+		c.httpCancel()
+	}
+	if c.httpClient != nil {
+		c.httpClient.CloseIdleConnections()
+	}
 	if c.stdin != nil {
 		_ = c.stdin.Close()
 	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
+	if c.process != nil {
+		_ = c.process.Kill()
+		_ = c.process.Wait()
+		<-c.processClosed
 	}
 	c.markClosed(errors.New("mcp client closed"))
 	return nil
@@ -256,6 +307,21 @@ func (c *Client) request(ctx context.Context, method string, params any, out any
 	defer cancel()
 
 	id := c.nextID.Add(1)
+	if c.httpClient != nil {
+		response, err := c.sendHTTP(ctx, rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
+		if err != nil {
+			return err
+		}
+		if response.Error != nil {
+			return response.Error
+		}
+		if out != nil {
+			if err := json.Unmarshal(response.Result, out); err != nil {
+				return fmt.Errorf("decode mcp response for %s failed: %w", method, err)
+			}
+		}
+		return nil
+	}
 	ch := make(chan rpcResult, 1)
 
 	c.pendingMu.Lock()
@@ -311,6 +377,14 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 }
 
 func (c *Client) writeJSON(ctx context.Context, value any) error {
+	if c.httpClient != nil {
+		request, ok := value.(rpcRequest)
+		if !ok {
+			return errors.New("invalid HTTP MCP request")
+		}
+		_, err := c.sendHTTP(ctx, request)
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -354,6 +428,7 @@ func (c *Client) writeJSON(ctx context.Context, value any) error {
 	case <-ctx.Done():
 		_ = c.stdin.Close()
 		c.markClosed(ctx.Err())
+		_ = c.Close()
 		return ctx.Err()
 	case <-c.closed:
 		if c.closeErr != nil {
@@ -477,22 +552,88 @@ func (c *Client) contextWithTimeout(ctx context.Context) (context.Context, conte
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, ok := ctx.Deadline(); ok {
-		return context.WithCancel(ctx)
-	}
 	return context.WithTimeout(ctx, c.timeout)
 }
 
-func mcpProcessEnv(extra map[string]string) []string {
-	env := os.Environ()
-	for key, value := range extra {
-		key = strings.TrimSpace(key)
-		if key == "" {
+// TrustRequest returns the same normalized stdio declaration used at startup and
+// by the trust CLI. Env remains a template: approvals never depend on resolved
+// secret values, and the caller must authorize before expanding those templates.
+func TrustRequest(config ServerConfig, workspace string) (trust.Request, error) {
+	if strings.TrimSpace(workspace) == "" {
+		workspace = config.TrustWorkspace
+	}
+	if strings.TrimSpace(workspace) == "" {
+		return trust.Request{}, errors.New("mcp trust workspace is required")
+	}
+	normalized := NormalizeConfig(Config{Servers: []ServerConfig{config}}, workspace).Servers[0]
+	declaration := struct {
+		Name            string            `json:"name"`
+		URL             string            `json:"url"`
+		Headers         map[string]string `json:"headers"`
+		Command         string            `json:"command"`
+		Args            []string          `json:"args"`
+		Env             map[string]string `json:"env"`
+		WorkingDir      string            `json:"working_dir"`
+		Permission      string            `json:"permission"`
+		TimeoutSeconds  int               `json:"timeout_seconds"`
+		ProtocolVersion string            `json:"protocol_version"`
+		Disabled        bool              `json:"disabled"`
+		Required        bool              `json:"required"`
+	}{normalized.Name, normalized.URL, normalized.Headers, normalized.Command, normalized.Args,
+		normalized.Env, normalized.WorkingDir, normalized.Permission, normalized.TimeoutSeconds,
+		normalized.ProtocolVersion, normalized.Disabled, normalized.Required}
+	return trust.NewRequest(trust.KindMCP, workspace, workspace, declaration)
+}
+
+// Expansion is deliberately limited to ${NAME} references in explicitly declared
+// values. A missing reference fails startup without including environment values.
+func expandProcessEnv(extra map[string]string, lookup func(string) (string, bool)) (map[string]string, error) {
+	expanded := make(map[string]string, len(extra))
+	for name, template := range extra {
+		var value strings.Builder
+		for {
+			start := strings.Index(template, "${")
+			if start < 0 {
+				value.WriteString(template)
+				break
+			}
+			value.WriteString(template[:start])
+			template = template[start+2:]
+			end := strings.IndexByte(template, '}')
+			if end < 0 {
+				return nil, errors.New("invalid mcp environment reference")
+			}
+			reference := template[:end]
+			if !validEnvironmentReference(reference) {
+				return nil, errors.New("invalid mcp environment reference")
+			}
+			replacement, ok := lookup(reference)
+			if !ok {
+				return nil, errors.New("mcp environment reference is not set")
+			}
+			value.WriteString(replacement)
+			template = template[end+1:]
+		}
+		expanded[name] = value.String()
+	}
+	return expanded, nil
+}
+
+func validEnvironmentReference(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, letter := range name {
+		if letter == '_' || letter >= 'a' && letter <= 'z' || letter >= 'A' && letter <= 'Z' || index > 0 && letter >= '0' && letter <= '9' {
 			continue
 		}
-		env = append(env, key+"="+value)
+		return false
 	}
-	return env
+	return true
+}
+
+func mcpProcessEnv(extra map[string]string) []string {
+	return processpolicy.Environment(extra)
 }
 
 func parseResponseID(raw json.RawMessage) (int64, error) {

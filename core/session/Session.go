@@ -12,6 +12,7 @@ import (
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
+	tooldef "myai/core/tool/tool"
 )
 
 // systemPrompt 是所有会话共享的稳定前缀。Chat/Plan 切换不会修改它，动态规则由 runtime 层按轮注入。
@@ -97,6 +98,7 @@ type Session struct {
 	SystemInstruction    string
 	AllowedTools         []string
 	EnforceToolAllowlist bool
+	PermissionCeiling    []tooldef.Permission
 	WorkspaceRoot        string
 	WorkspaceSandboxID   string
 	MaxToolRounds        int
@@ -128,7 +130,9 @@ func newSession(id, model string, agentMode AgentMode, permissionMode Permission
 	messages = normalizeMessageMetadata(id, messages)
 	agentMode = NormalizeAgentMode(agentMode)
 	permissionMode = NormalizePermissionMode(permissionMode)
-	contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
+	if contextWindowK != 0 {
+		contextWindowK = contextmgr.NormalizeWindowK(contextWindowK)
+	}
 
 	return &Session{
 		ID:                   id,
@@ -196,6 +200,7 @@ func (s *Session) AppendMessage(message domainmessage.Message) {
 	if s == nil {
 		return
 	}
+	message = domainmessage.Clone(message)
 	if message.ID == "" {
 		message.ID = uuid.NewString()
 	}
@@ -285,6 +290,13 @@ func SystemPrompt() string {
 
 func SystemPromptWithInstruction(instruction string) string {
 	return defaultMessages(instruction)[0].Text()
+}
+
+func ClonePermissionCeiling(ceiling []tooldef.Permission) []tooldef.Permission {
+	if ceiling == nil {
+		return nil
+	}
+	return append(make([]tooldef.Permission, 0, len(ceiling)), ceiling...)
 }
 
 func NormalizeKind(kind Kind) Kind {

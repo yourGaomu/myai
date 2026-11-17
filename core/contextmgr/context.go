@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	compaction "myai/core/domain/compaction"
 	domainmessage "myai/core/domain/message"
@@ -21,6 +22,12 @@ const (
 
 type Info struct {
 	WindowK           int
+	WindowTokens      int
+	ReservedTokens    int
+	MessageLimit      int
+	DroppedMessages   int
+	FilteredMessages  int
+	SummaryTruncated  bool
 	FullTokens        int
 	SelectedTokens    int
 	SummaryTokens     int
@@ -67,18 +74,54 @@ func BuildSnapshotWithCheckpoint(messages []domainmessage.Message, checkpoint co
 }
 
 func BuildSnapshotWithBudget(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, windowK, reservedTokens int, fixedContext ...string) Snapshot {
+	budget := RequestBudget{WindowTokens: NormalizeWindowK(windowK) * 1000, SafetyTokens: max(0, reservedTokens)}
+	return buildRequestSnapshot(messages, checkpoint, compactedMessages, budget, nil, fixedContext...)
+}
+
+func BuildSnapshotForRequest(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, options RequestOptions) Snapshot {
+	return buildRequestSnapshot(messages, checkpoint, compactedMessages, options.Budget, &options.TurnContext)
+}
+
+func buildRequestSnapshot(messages []domainmessage.Message, checkpoint compaction.Checkpoint, compactedMessages int, budget RequestBudget, turn *TurnContext, fixedContext ...string) Snapshot {
+	// Validate against the original durable sequence before projecting old state.
 	if !CompactionCheckpointMatchesCheckpoint(messages, &checkpoint) {
 		checkpoint = compaction.Checkpoint{}
 		compactedMessages = 0
 	}
-	// base 始终放固定 system 和可选摘要，recent 再按 token 预算从新到旧选择完整消息块。
+	if budget.WindowTokens <= 0 {
+		budget.WindowTokens = DefaultWindowK * 1000
+	}
 	summary := strings.TrimSpace(checkpoint.Summary)
 	if summary == "" {
 		checkpoint = compaction.Checkpoint{}
+		compactedMessages = 0
 	}
-	summary = summaryForWindow(summary, windowK)
-	base, recent := buildBaseAndRecent(messages, summary, compactedMessages, fixedContext...)
-	info, selected := analyzePrepared(base, recent, messages, windowK, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages), reservedTokens)
+	originalSummary := summary
+	summary = summaryForWindow(summary, (budget.WindowTokens+999)/1000)
+	base, _ := splitSystemMessage(messages)
+	base = domainmessage.CloneAll(base)
+	for _, item := range fixedContext {
+		if item = strings.TrimSpace(item); item != "" {
+			base = append(base, domainmessage.Text(domainmessage.RoleSystem, item))
+		}
+	}
+	if summary != "" {
+		base = append(base, domainmessage.CompactionSummary(summary))
+	}
+	start := 0
+	if len(messages) > 0 && messages[0].Role == domainmessage.RoleSystem {
+		start = 1
+	}
+	if summary != "" {
+		start = max(start, NormalizeCompactedMessages(messages, compactedMessages))
+	}
+	recent, filtered := requestHistory(messages, start, turn)
+	info, selected := analyzePrepared(base, recent, messages, budget, summary != "", EstimateTextTokens(summary), displayCompactedMessages(messages, compactedMessages))
+	info.WindowTokens = budget.WindowTokens
+	info.ReservedTokens = budget.ReservedTokens()
+	info.MessageLimit = budget.MessageLimit()
+	info.FilteredMessages = filtered
+	info.SummaryTruncated = summary != originalSummary
 	info.SummaryVersion = info.CompactedMessages
 	info.SummaryHash = StableTextHash(summary)
 	cacheablePrefix := stableCacheablePrefix(selected)
@@ -88,27 +131,20 @@ func BuildSnapshotWithBudget(messages []domainmessage.Message, checkpoint compac
 	if checkpoint.Summary != "" {
 		info.Checkpoint = checkpoint.Clone()
 	}
-
-	return Snapshot{
-		Info:     info,
-		Messages: selected,
-		Prefix:   cacheablePrefix,
+	// Non-multiple-of-1000 model windows still use their exact token limit.
+	if info.SelectedTokens > budget.MessageLimit() {
+		info.Truncated = true
 	}
+	return Snapshot{Info: info, Messages: selected, Prefix: cacheablePrefix}
 }
 
 func stableCacheablePrefix(messages []domainmessage.Message) []domainmessage.Message {
-	lastUserIndex := -1
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == domainmessage.RoleUser && !messages[index].IsTurnContext() {
-			lastUserIndex = index
-			break
-		}
-	}
+	lastUserIndex := LatestUserInputIndex(messages)
 	if lastUserIndex < 0 {
 		return messages
 	}
 	turnStart := lastUserIndex
-	for turnStart > 0 && messages[turnStart-1].IsSynthetic() && !messages[turnStart-1].IsTurnContext() {
+	for turnStart > 0 && IsDynamicContext(messages[turnStart-1]) {
 		turnStart--
 	}
 	return messages[:turnStart]
@@ -197,15 +233,15 @@ func buildBaseAndRecent(messages []domainmessage.Message, summary string, compac
 	return base, rest
 }
 
-func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Message, fullMessages []domainmessage.Message, windowK int, hasSummary bool, summaryTokens int, compactedMessages int, reservedTokens int) (Info, []domainmessage.Message) {
-	windowK = NormalizeWindowK(windowK)
+func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Message, fullMessages []domainmessage.Message, requestBudget RequestBudget, hasSummary bool, summaryTokens int, compactedMessages int) (Info, []domainmessage.Message) {
+	windowK := (requestBudget.WindowTokens + 999) / 1000
 	if len(base) == 0 && len(recent) == 0 {
 		return Info{WindowK: windowK, SummaryTokens: summaryTokens, CompactedMessages: compactedMessages, HasSummary: hasSummary}, nil
 	}
 
 	fullTokens := EstimateMessagesTokens(fullMessages)
 	// 1. 工具定义与输出预留共享上下文窗口，历史只能使用剩余预算。
-	budget := max(0, windowK*1000-max(0, reservedTokens))
+	budget := requestBudget.MessageLimit()
 	baseTokens := EstimateMessagesTokens(base)
 
 	chunks := messageChunks(recent)
@@ -242,6 +278,7 @@ func analyzePrepared(base []domainmessage.Message, recent []domainmessage.Messag
 		FullMessages:      len(fullMessages),
 		SelectedMessages:  len(selected),
 		CompactedMessages: compactedMessages,
+		DroppedMessages:   max(0, fullSelectedMessages-len(selected)),
 		HasSummary:        hasSummary,
 		Truncated:         len(selected) < fullSelectedMessages || EstimateMessagesTokens(append(base, recent...)) > budget,
 	}, selected
@@ -278,18 +315,12 @@ func EstimateMessagesTokens(messages []domainmessage.Message) int {
 // CurrentTurnTokens returns the unavoidably selected tail beginning with the
 // latest user message, including synthetic runtime context attached to it.
 func CurrentTurnTokens(messages []domainmessage.Message) int {
-	lastUserIndex := -1
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Role == domainmessage.RoleUser && !messages[index].IsTurnContext() {
-			lastUserIndex = index
-			break
-		}
-	}
+	lastUserIndex := LatestUserInputIndex(messages)
 	if lastUserIndex < 0 {
 		return 0
 	}
 	turnStart := lastUserIndex
-	for turnStart > 0 && messages[turnStart-1].IsSynthetic() && !messages[turnStart-1].IsTurnContext() {
+	for turnStart > 0 && IsDynamicContext(messages[turnStart-1]) {
 		turnStart--
 	}
 	return EstimateMessagesTokens(messages[turnStart:])
@@ -397,8 +428,8 @@ func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
 	chunks := make([][]domainmessage.Message, 0, len(messages))
 	for start := 0; start < len(messages); {
 		end := start + 1
-		if messages[start].IsSynthetic() && !messages[start].IsTurnContext() {
-			for end < len(messages) && messages[end].IsSynthetic() && !messages[end].IsTurnContext() {
+		if IsDynamicContext(messages[start]) {
+			for end < len(messages) && IsDynamicContext(messages[end]) {
 				end++
 			}
 			if end < len(messages) && messages[end].Role == domainmessage.RoleUser {
@@ -425,8 +456,8 @@ func messageChunks(messages []domainmessage.Message) [][]domainmessage.Message {
 func summaryForWindow(summary string, windowK int) string {
 	windowTokens := NormalizeWindowK(windowK) * 1000
 	limit := windowTokens / 4
-	if limit > 1024 {
-		limit = 1024
+	if limit > 2048 {
+		limit = 2048
 	}
 	if limit < 256 {
 		limit = 256
@@ -437,7 +468,6 @@ func summaryForWindow(summary string, windowK int) string {
 // TruncateTextToTokens keeps durable decisions from the beginning and recent
 // open work from the end when a summary must fit a strict context budget.
 func TruncateTextToTokens(text string, maxTokens int) string {
-	text = strings.TrimSpace(text)
 	if text == "" || maxTokens <= 0 {
 		return ""
 	}
@@ -452,35 +482,39 @@ func TruncateTextToTokens(text string, maxTokens int) string {
 	contentBudget := maxTokens - markerTokens
 	head := truncatePrefixToTokens(text, contentBudget*3/5)
 	tail := truncateSuffixToTokens(text, contentBudget-EstimateTextTokens(head))
-	return strings.TrimSpace(head) + marker + strings.TrimSpace(tail)
+	return head + marker + tail
 }
 
 func truncatePrefixToTokens(text string, maxTokens int) string {
-	runes := []rune(text)
-	low, high := 0, len(runes)
-	for low < high {
-		middle := (low + high + 1) / 2
-		if EstimateTextTokens(string(runes[:middle])) <= maxTokens {
-			low = middle
-		} else {
-			high = middle - 1
+	units := 0
+	for index, r := range text {
+		weight := 1
+		if r > unicode.MaxASCII {
+			weight = 4
 		}
+		if units+weight > maxTokens*4 {
+			return text[:index]
+		}
+		units += weight
 	}
-	return string(runes[:low])
+	return text
 }
 
 func truncateSuffixToTokens(text string, maxTokens int) string {
-	runes := []rune(text)
-	low, high := 0, len(runes)
-	for low < high {
-		middle := (low + high + 1) / 2
-		if EstimateTextTokens(string(runes[len(runes)-middle:])) <= maxTokens {
-			low = middle
-		} else {
-			high = middle - 1
+	units := 0
+	for index := len(text); index > 0; {
+		r, size := utf8.DecodeLastRuneInString(text[:index])
+		weight := 1
+		if r > unicode.MaxASCII {
+			weight = 4
 		}
+		if units+weight > maxTokens*4 {
+			return text[index:]
+		}
+		units += weight
+		index -= size
 	}
-	return string(runes[len(runes)-low:])
+	return text
 }
 
 func estimatePartTokens(part domainmessage.Part) int {
@@ -536,7 +570,6 @@ func writeStablePart(builder *strings.Builder, part domainmessage.Part) {
 }
 
 func EstimateTextTokens(text string) int {
-	text = strings.TrimSpace(text)
 	if text == "" {
 		return 0
 	}
@@ -544,9 +577,6 @@ func EstimateTextTokens(text string) int {
 	ascii := 0
 	nonASCII := 0
 	for _, r := range text {
-		if unicode.IsSpace(r) {
-			continue
-		}
 		if r <= unicode.MaxASCII {
 			ascii++
 			continue

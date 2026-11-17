@@ -15,6 +15,8 @@ type AddConfig struct {
 	APIKey                    string
 	ModelName                 string
 	IsDefault                 bool
+	ContextWindowTokens       int
+	MaxOutputTokens           int
 	DefaultGenerationSettings generation.Settings
 }
 
@@ -29,6 +31,8 @@ type UpdateConfig struct {
 	BaseURL                   string
 	APIKey                    string
 	ModelName                 string
+	ContextWindowTokens       *int
+	MaxOutputTokens           *int
 	DefaultGenerationSettings generation.Settings
 }
 
