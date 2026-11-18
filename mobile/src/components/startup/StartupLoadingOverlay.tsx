@@ -122,8 +122,8 @@ export function StartupLoadingOverlay({ durationMs = 2000, onDone, visible }: Pr
 
       <Animated.View style={[styles.content, { opacity, transform: [{ translateY }] }]}>
         <View style={styles.characterWrap}>
-          <CharacterHalo ringSize={154}>
-            <CharacterAvatar accessibilityLabel="MYAI 正在启动" height={300} size={156} slot="startup" variant="full" />
+          <CharacterHalo ringSize={164}>
+            <CharacterAvatar accessibilityLabel="MYAI 正在启动" height={188} size={188} slot="startup" variant="full" />
           </CharacterHalo>
         </View>
         <Text style={styles.title}>MYAI</Text>

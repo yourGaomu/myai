@@ -95,10 +95,19 @@ export const motionSlotSpecs: MotionSlotSpec[] = [
 // 内置静态与透明 WebP 资产表（Expo Metro 通过静态 require 打包）
 export const builtinMotionAssets = {
   startupFull: require("../../assets/motion/startup.webp") as ImageSource,
-  workingFull: require("../../assets/motion/working.webp") as ImageSource,
+  idleFull: require("../../assets/motion/idle.webp") as ImageSource,
   thinkingFull: require("../../assets/motion/thinking.webp") as ImageSource,
-  workingAvatar: require("../../assets/motion/avatar-working.webp") as ImageSource,
+  workingFull: require("../../assets/motion/working.webp") as ImageSource,
+  subagentFull: require("../../assets/motion/subagent.webp") as ImageSource,
+  attentionFull: require("../../assets/motion/attention.webp") as ImageSource,
+  doneFull: require("../../assets/motion/done.webp") as ImageSource,
+  startupAvatar: require("../../assets/motion/avatar-startup.webp") as ImageSource,
+  idleAvatar: require("../../assets/motion/avatar-idle.webp") as ImageSource,
   thinkingAvatar: require("../../assets/motion/avatar-thinking.webp") as ImageSource,
+  workingAvatar: require("../../assets/motion/avatar-working.webp") as ImageSource,
+  subagentAvatar: require("../../assets/motion/avatar-subagent.webp") as ImageSource,
+  attentionAvatar: require("../../assets/motion/avatar-attention.webp") as ImageSource,
+  doneAvatar: require("../../assets/motion/avatar-done.webp") as ImageSource,
   staticHero: require("../../assets/hero-character.png") as ImageSource,
   staticAvatar: require("../../assets/avatar.png") as ImageSource,
 } as const;
@@ -145,6 +154,16 @@ export function activityStatusLabel(activity: ExtendedAgentActivity, statusText?
   }
 }
 
+const builtinSlotMap: Record<MotionSlot, { avatar: ImageSource; full: ImageSource }> = {
+  startup: { full: builtinMotionAssets.startupFull, avatar: builtinMotionAssets.startupAvatar },
+  idle: { full: builtinMotionAssets.idleFull, avatar: builtinMotionAssets.idleAvatar },
+  thinking: { full: builtinMotionAssets.thinkingFull, avatar: builtinMotionAssets.thinkingAvatar },
+  working: { full: builtinMotionAssets.workingFull, avatar: builtinMotionAssets.workingAvatar },
+  subagent: { full: builtinMotionAssets.subagentFull, avatar: builtinMotionAssets.subagentAvatar },
+  attention: { full: builtinMotionAssets.attentionFull, avatar: builtinMotionAssets.attentionAvatar },
+  done: { full: builtinMotionAssets.doneFull, avatar: builtinMotionAssets.doneAvatar },
+};
+
 export function defaultBuiltinSource(
   slot: MotionSlot,
   variant: "full" | "avatar",
@@ -153,20 +172,8 @@ export function defaultBuiltinSource(
   if (prefersStatic) {
     return variant === "avatar" ? builtinMotionAssets.staticAvatar : builtinMotionAssets.staticHero;
   }
-  switch (slot) {
-    case "startup":
-      return variant === "avatar" ? builtinMotionAssets.workingAvatar : builtinMotionAssets.startupFull;
-    case "thinking":
-    case "attention":
-      return variant === "avatar" ? builtinMotionAssets.thinkingAvatar : builtinMotionAssets.thinkingFull;
-    case "working":
-    case "subagent":
-      return variant === "avatar" ? builtinMotionAssets.workingAvatar : builtinMotionAssets.workingFull;
-    case "idle":
-    case "done":
-    default:
-      return variant === "avatar" ? builtinMotionAssets.staticAvatar : builtinMotionAssets.staticHero;
-  }
+  const pair = builtinSlotMap[slot] ?? builtinSlotMap.idle;
+  return variant === "avatar" ? pair.avatar : pair.full;
 }
 
 export type ResolvedMotionMedia = {

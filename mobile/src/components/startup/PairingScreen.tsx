@@ -97,8 +97,8 @@ export function PairingScreen(props: Props) {
         contentContainerStyle={[styles.content, { paddingBottom: props.bottomInset + 16, paddingTop: props.topInset + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <CharacterHalo ringSize={138}>
-          <CharacterAvatar accessibilityLabel="MyAI 角色" height={176} size={160} slot="idle" variant="full" />
+        <CharacterHalo ringSize={146}>
+          <CharacterAvatar accessibilityLabel="MyAI 角色" height={168} size={168} slot="idle" variant="full" />
         </CharacterHalo>
         <Text style={styles.title}>连接你的电脑</Text>
         <Text style={styles.sub}>在电脑上启动 MyAI Agent，{"\n"}输入终端里显示的配对码。</Text>
