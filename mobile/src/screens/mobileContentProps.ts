@@ -60,8 +60,6 @@ export type SettingsContentProps = {
   onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
-  assetAPIKey: string;
-  assetBaseURL: string;
   compact?: CompactInfo;
   context?: ContextInfo;
   generation?: SessionGenerationPreferences;
@@ -127,8 +125,6 @@ export type SettingsContentProps = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
-  onAssetAPIKeyChange: (value: string) => void;
-  onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
@@ -270,6 +266,8 @@ export type KnowledgeContentProps = {
   onSetRAG: (settings: RAGSettings) => boolean;
   onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
   onUploadDocument: () => void;
+  onCancelUpload: () => void;
+  uploadingDocument: boolean;
   profiles: KnowledgeIndexProfile[];
   searchResult: KnowledgeSearchPreviewResultPayload | null;
   aiMemories: AIMemory[];

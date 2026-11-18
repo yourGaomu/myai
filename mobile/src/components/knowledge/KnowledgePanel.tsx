@@ -42,6 +42,8 @@ export type KnowledgePanelProps = {
   onSetRAG: (settings: RAGSettings) => boolean;
   onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
   onUploadDocument: () => void;
+  onCancelUpload: () => void;
+  uploadingDocument: boolean;
   pendingKnowledge: boolean;
   pendingSettings: boolean;
   profiles: KnowledgeIndexProfile[];
@@ -73,6 +75,8 @@ export function KnowledgePanel({
   onSetRAG,
   onUpdateKnowledgeBase,
   onUploadDocument,
+  onCancelUpload,
+  uploadingDocument,
   pendingKnowledge,
   pendingSettings,
   profiles,
@@ -263,9 +267,11 @@ export function KnowledgePanel({
           <View style={styles.docPanelHeader}>
             <Text style={styles.docPanelTitle}>已索引文档</Text>
             <Pressable
-              disabled={pendingKnowledge}
+              disabled={pendingKnowledge && !uploadingDocument}
               onPress={() => {
-                if (selectedBase) {
+                if (uploadingDocument) {
+                  onCancelUpload();
+                } else if (selectedBase) {
                   onUploadDocument();
                 } else if (sortedBases.length > 0) {
                   selectBase(sortedBases[0].id);
@@ -276,12 +282,12 @@ export function KnowledgePanel({
               }}
               style={({ pressed }) =>
                 buttonFeedback(
-                  [styles.uploadDocBtn, pendingKnowledge && styles.disabledButton],
+                  [styles.uploadDocBtn, pendingKnowledge && !uploadingDocument && styles.disabledButton],
                   pressed,
                 )
               }
             >
-              <Text style={styles.uploadDocBtnText}>上传文档</Text>
+              <Text style={styles.uploadDocBtnText}>{uploadingDocument ? "取消上传" : "上传文档"}</Text>
             </Pressable>
           </View>
 

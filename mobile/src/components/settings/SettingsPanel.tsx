@@ -47,8 +47,6 @@ type Props = {
   onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
-  assetAPIKey: string;
-  assetBaseURL: string;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
   clientToken: string;
@@ -116,8 +114,6 @@ type Props = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
-  onAssetAPIKeyChange: (value: string) => void;
-  onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
@@ -217,8 +213,6 @@ export function SettingsPanel({
   onSelectSection,
   activeModel,
   activeSession,
-  assetAPIKey,
-  assetBaseURL,
   bindCode,
   buttonFeedback,
   clientToken,
@@ -283,8 +277,6 @@ export function SettingsPanel({
   onRefreshPlugins,
   onReloadPlugins,
   onSetPluginEnabled,
-  onAssetAPIKeyChange,
-  onAssetBaseURLChange,
   onRelayURLChange,
   onSetAgentMode,
   onSetContextWindowK,
@@ -677,31 +669,8 @@ export function SettingsPanel({
         style={styles.input}
         value={relayURL}
       />
-      <TextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        onChangeText={onAssetBaseURLChange}
-        placeholder="资源服务地址，例如 https://assets.mikasa.wiki"
-        placeholderTextColor={palette.ink4}
-        style={styles.input}
-        value={assetBaseURL}
-      />
-      <TextInput
-        accessibilityLabel="Asset API Key"
-        autoCapitalize="none"
-        autoComplete="off"
-        autoCorrect={false}
-        onChangeText={onAssetAPIKeyChange}
-        placeholder="独立的 Asset API Key"
-        placeholderTextColor={palette.ink4}
-        secureTextEntry
-        style={styles.input}
-        value={assetAPIKey}
-      />
       <Text style={styles.settingMeta}>
-        {assetBaseURL.trim()
-          ? "已配置资源服务地址，可用于在对话中发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"
-          : "提示：配置「资源服务地址」与 Asset API Key 后，即可在对话「+」菜单里发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"}
+        配对并连接后，即可在对话「+」菜单中上传手机本地文件或图片，单个文件最大 50 MiB。
       </Text>
       <View style={styles.row}>
         <TextInput

@@ -185,15 +185,16 @@ export function useRelayConnection({
             if (!nativeConnectedRef.current) {
               throw new Error("Relay native socket is not connected");
             }
+            const handleSendFailure = () => {
+              nativeConnectingRef.current = false;
+              nativeConnectedRef.current = false;
+              setConnected(false);
+              setStatus("Relay send failed");
+              onDisconnectedRef.current();
+            };
             void sendRelayForegroundServiceMessage(data).then((sent) => {
-              if (!sent) {
-                nativeConnectingRef.current = false;
-                nativeConnectedRef.current = false;
-                setConnected(false);
-                setStatus("Relay send failed");
-                onDisconnectedRef.current();
-              }
-            });
+              if (!sent) handleSendFailure();
+            }, handleSendFailure);
           },
           // Closing the JS adapter must not stop the process-wide foreground service.
           close() {
@@ -359,6 +360,7 @@ export function useRelayConnection({
       setConnected(false);
       setStatus("WebSocket error");
       addErrorMessageRef.current("Relay 连接异常，请检查网络和服务器日志。");
+      onDisconnectedRef.current();
     };
     socket.onmessage = (event) => {
       try {

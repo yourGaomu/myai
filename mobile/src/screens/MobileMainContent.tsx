@@ -28,8 +28,6 @@ export function MobileMainContent({
           onSelectSection={settings.onSelectSection}
           activeModel={settings.activeModel}
           activeSession={settings.activeSession}
-          assetAPIKey={settings.assetAPIKey}
-          assetBaseURL={settings.assetBaseURL}
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
           clientToken={common.clientToken}
@@ -97,8 +95,6 @@ export function MobileMainContent({
           mcpReloading={settings.mcpReloading}
           mcpMessage={settings.mcpMessage}
           onSetPluginEnabled={settings.onSetPluginEnabled}
-          onAssetAPIKeyChange={settings.onAssetAPIKeyChange}
-          onAssetBaseURLChange={settings.onAssetBaseURLChange}
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}
           onSetContextWindowK={settings.onSetContextWindowK}
@@ -222,6 +218,8 @@ export function MobileMainContent({
             onSetRAG: knowledge.onSetRAG,
             onUpdateKnowledgeBase: knowledge.onUpdateKnowledgeBase,
             onUploadDocument: knowledge.onUploadDocument,
+            onCancelUpload: knowledge.onCancelUpload,
+            uploadingDocument: knowledge.uploadingDocument,
             pendingKnowledge: common.pendingActions.knowledge,
             pendingSettings: common.pendingActions.settings,
             profiles: knowledge.profiles,

@@ -99,6 +99,12 @@ export type MessageType =
   | "background_turn_event"
   | "asset_list"
   | "asset_list_result"
+  | "asset_upload_begin"
+  | "asset_upload_chunk"
+  | "asset_upload_status"
+  | "asset_upload_complete"
+  | "asset_upload_cancel"
+  | "asset_upload_result"
   | "knowledge_catalog_list"
   | "knowledge_catalog_list_result"
   | "knowledge_category_create"
@@ -1112,6 +1118,8 @@ export type AssetListPayload = {
 
 export type AssetSummary = {
   id: string;
+  asset_id?: string;
+  business_id?: string;
   session_id?: string;
   request_id?: string;
   tool_call_id?: string;
@@ -1120,21 +1128,51 @@ export type AssetSummary = {
   file_name?: string;
   content_type?: string;
   size?: number;
-  short_url: string;
+  checksum?: string;
+  short_url?: string;
   code?: string;
   expires_at?: string;
+  max_visits?: number;
   created_at?: string;
 };
 
 export type UploadedAssetPayload = {
-  code: string;
-  short_url: string;
-  bucket?: string;
-  object_key?: string;
+  asset_id: string;
+  business_id?: string;
   file_name: string;
   content_type?: string;
-  size?: number;
+  size: number;
+  checksum?: string;
+  short_url?: string;
+  code?: string;
   expires_at?: string;
+  max_visits?: number;
+};
+
+export type AssetUploadOperation = "begin" | "chunk" | "status" | "complete" | "cancel";
+
+export type AssetUploadBeginPayload = {
+  file_name: string;
+  content_type: string;
+  size: number;
+  idempotency_key: string;
+};
+
+export type AssetUploadChunkPayload = {
+  upload_id: string;
+  offset: number;
+  data: string;
+};
+
+export type AssetUploadIDPayload = { upload_id: string };
+
+export type AssetUploadResultPayload = {
+  operation: AssetUploadOperation;
+  upload_id: string;
+  offset: number;
+  chunk_size: number;
+  max_file_bytes: number;
+  asset?: UploadedAssetPayload;
 };
 
 export type AssetListResultPayload = {
@@ -1226,8 +1264,7 @@ export type KnowledgeDocumentListPayload = {
 
 export type KnowledgeDocumentIngestPayload = {
   knowledge_base_id: string;
-  url?: string;
-  code?: string;
+  asset_id: string;
 };
 
 export type KnowledgeDocumentRetryPayload = {

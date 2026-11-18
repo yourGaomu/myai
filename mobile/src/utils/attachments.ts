@@ -22,8 +22,8 @@ export function messageWithAttachedFiles(content: string, files: ChatAttachment[
   const fileBlocks = files.map((file) => {
     if (isUploadedAssetAttachment(file)) {
       return [
-        `<uploaded_file name="${escapeAttribute(file.file_name)}" content_type="${escapeAttribute(file.content_type || "")}" size="${file.size || 0}" short_url="${escapeAttribute(file.short_url)}" code="${escapeAttribute(file.code)}" expires_at="${escapeAttribute(file.expires_at || "")}">`,
-        "The user uploaded this file from mobile. Use the short_url to inspect or download it when needed.",
+        `<uploaded_file asset_id="${escapeAttribute(file.asset_id)}" name="${escapeAttribute(file.file_name)}" content_type="${escapeAttribute(file.content_type || "")}" size="${file.size}">`,
+        "[User attachment]",
         "</uploaded_file>",
       ].join("\n");
     }
@@ -52,18 +52,17 @@ export function parseAttachedFiles(content: string): ChatAttachment[] {
   let uploadedMatch: RegExpExecArray | null;
   while ((uploadedMatch = uploadedPattern.exec(content))) {
     const attributes = parseAttributes(uploadedMatch[1]);
-    const shortURL = attributes.short_url || "";
-    if (!shortURL) {
+    const assetID = attributes.asset_id || "";
+    const size = Number(attributes.size);
+    if (!assetID || !Number.isSafeInteger(size) || size < 0) {
       continue;
     }
     attachments.push({
       kind: "uploaded_asset",
-      code: attributes.code || shortURL,
-      short_url: shortURL,
+      asset_id: assetID,
       file_name: attributes.name || "已上传文件",
       content_type: attributes.content_type || undefined,
-      size: numberAttribute(attributes.size),
-      expires_at: attributes.expires_at || undefined,
+      size,
     });
   }
 
@@ -110,7 +109,7 @@ export function displayMessageText(content: string) {
 
 export function attachmentKey(file: ChatAttachment) {
   if (isUploadedAssetAttachment(file)) {
-    return `asset:${file.code || file.short_url}`;
+    return `asset:${file.asset_id}`;
   }
   return `workspace:${file.path}`;
 }
@@ -121,7 +120,7 @@ export function attachmentTitle(file: ChatAttachment) {
 
 export function attachmentMeta(file: ChatAttachment) {
   if (isUploadedAssetAttachment(file)) {
-    return `${file.short_url} / ${formatAttachmentSize(file.size)} / 已上传`;
+    return `${file.asset_id} / ${formatAttachmentSize(file.size)} / 已上传`;
   }
   return `${file.path} / ${formatAttachmentSize(file.size)}${file.truncated ? " / truncated" : ""}`;
 }

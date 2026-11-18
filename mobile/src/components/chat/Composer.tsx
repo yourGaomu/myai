@@ -27,6 +27,7 @@ type Props = {
   onSend: () => void;
   onTogglePlan: () => void;
   onUploadFile: (kind?: "all" | "image") => void;
+  onCancelUpload: () => void;
   pendingPause: boolean;
   pendingSend: boolean;
   pendingUpload: boolean;
@@ -105,7 +106,7 @@ export function Composer(props: Props) {
         {attachedFiles.length > 0 || pendingUpload ? (
           <ScrollView contentContainerStyle={styles.tray} horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
             {attachedFiles.map((file) => {
-              const imageUri = isUploadedAssetAttachment(file) ? file.local_uri || file.short_url : undefined;
+              const imageUri = isUploadedAssetAttachment(file) ? file.local_uri : undefined;
               return (
                 <View key={attachmentKey(file)} style={styles.chip}>
                   {isImageAttachment(file) && imageUri ? (
@@ -124,6 +125,9 @@ export function Composer(props: Props) {
               <View style={styles.chip}>
                 <ActivityIndicator color={palette.brand} size="small" />
                 <Text style={styles.chipText}>正在上传…</Text>
+                <Pressable accessibilityLabel="取消上传" hitSlop={6} onPress={props.onCancelUpload} style={styles.chipRemove}>
+                  <Feather color={palette.ink3} name="x" size={14} />
+                </Pressable>
               </View>
             ) : null}
           </ScrollView>

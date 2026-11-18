@@ -17,6 +17,8 @@ export function ChatAttachmentCard({ attachment, buttonFeedback }: Props) {
     return (
       <SharedAssetCard
         asset={{
+          assetID: attachment.asset_id,
+          maxVisits: attachment.max_visits,
           code: attachment.code,
           contentType: attachment.content_type,
           expiresAt: attachment.expires_at,

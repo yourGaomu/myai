@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import type { SubagentTask } from "../../../protocol";
 import type { ButtonFeedback } from "../../../types/ui";
 import type { ToolCallStep } from "../../../utils/chatRenderItems";
-import { parseSharedAsset } from "../../../utils/toolAssets";
+import { parseSharedAssets } from "../../../utils/toolAssets";
 import { parseToolArgs, toolCommand, toolIcon, toolKind, toolTarget, toolVerb } from "../../../utils/toolDisplay";
 import { fontFamily, font, radius, weight } from "../../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
@@ -30,7 +30,7 @@ export function ToolStepRow({ buttonFeedback, onInspectSubagent, subagentTasks, 
   const kind = toolKind(tool.name);
   const target = useMemo(() => toolTarget(tool.name, tool.arguments), [tool.arguments, tool.name]);
   const request = useMemo(() => requestText(tool), [tool]);
-  const sharedAsset = parseSharedAsset(tool.name, tool.result || "");
+  const sharedAssets = parseSharedAssets(tool.name, tool.result || "");
   const output = tool.error || tool.result || "";
 
   // 按 parent_tool_call_id 精确配对子代理任务
@@ -84,8 +84,8 @@ export function ToolStepRow({ buttonFeedback, onInspectSubagent, subagentTasks, 
             {failed ? `执行异常${tool.errorCode ? ` · ${tool.errorCode}` : ""}` : running ? "执行中" : "返回"}
             {tool.truncated ? " · 已截断" : ""}
           </Text>
-          {sharedAsset && !failed ? (
-            <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+          {sharedAssets.length > 0 && !failed ? (
+            sharedAssets.map((asset) => <SharedAssetCard key={asset.assetID} asset={asset} buttonFeedback={buttonFeedback} />)
           ) : (
             <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={styles.outputScroll}>
               <Text selectable style={[styles.code, failed && styles.codeError]}>

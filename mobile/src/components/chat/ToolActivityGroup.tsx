@@ -6,7 +6,7 @@ import { useAppTheme } from "../../theme/ThemeProvider";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { isPermissionEvent, type ToolActivityGroupItem } from "../../utils/chatRenderItems";
-import { parseSharedAsset } from "../../utils/toolAssets";
+import { parseSharedAssets } from "../../utils/toolAssets";
 import { SharedAssetCard } from "./SharedAssetCard";
 import { useChatStyles, type ChatStyles } from "./styles";
 
@@ -66,7 +66,7 @@ function ToolActivityStep({
     );
   }
 
-  const sharedAsset = parseSharedAsset(message.toolName, message.text);
+  const sharedAssets = parseSharedAssets(message.toolName, message.text);
   const failed = Boolean(message.toolError);
   const dotStyle = message.role === "tool_call" ? styles.toolDotWarn : failed ? styles.toolDotErr : styles.toolDotOk;
 
@@ -90,8 +90,8 @@ function ToolActivityStep({
       {message.text ? (
         <View style={styles.toolGroupStepSection}>
           <Text style={styles.toolGroupStepLabel}>{failed ? "错误" : "结果"}</Text>
-          {sharedAsset && !failed ? (
-            <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+          {sharedAssets.length > 0 && !failed ? (
+            sharedAssets.map((asset) => <SharedAssetCard key={asset.assetID} asset={asset} buttonFeedback={buttonFeedback} />)
           ) : (
             <Text numberOfLines={8} selectable style={[styles.toolGroupCode, failed && styles.toolErrorText]}>
               {message.text}

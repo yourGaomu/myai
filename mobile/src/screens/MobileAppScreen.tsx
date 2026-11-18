@@ -14,6 +14,7 @@ import { BottomDock } from "../components/layout/BottomDock";
 import { SideDrawer } from "../components/navigation/SideDrawer";
 import type { ChangeEntry } from "../protocol";
 import { useAssetState } from "../hooks/useAssetState";
+import { useAssetUpload } from "../hooks/useAssetUpload";
 import { useAgentRunState } from "../hooks/useAgentRunState";
 import { useChangeHistoryActions } from "../hooks/useChangeHistoryActions";
 import { useChangeHistoryState } from "../hooks/useChangeHistoryState";
@@ -83,13 +84,9 @@ export function MobileAppScreen() {
   } = useMobileUiState();
   const handleTokenRestored = useCallback(() => setStatus("Paired"), [setStatus]);
   const {
-    assetAPIKey,
-    assetBaseURL,
     clientToken,
     deviceID,
     relayURL,
-    setAssetAPIKey,
-    setAssetBaseURL,
     setClientToken,
     setDeviceID,
     setRelayURL,
@@ -344,6 +341,10 @@ export function MobileAppScreen() {
     socketRef,
     userID,
   });
+  const { uploadMobileAsset, handleAssetUploadMessage, disconnectAssetUploads, reconnectAssetUploads } = useAssetUpload({
+    sendEnvelope,
+    isConnected: () => socketRef.current?.readyState === WebSocket.OPEN,
+  });
 
   useEffect(() => {
     if (!connected || !clientToken) {
@@ -552,11 +553,12 @@ export function MobileAppScreen() {
     searchKnowledge,
     setRAGSettings,
     updateKnowledgeBase,
+    cancelDocumentUpload,
+    uploadingDocument,
     uploadDocument,
   } = useKnowledgeActions({
+    uploadMobileAsset,
     activeKnowledgeBase,
-    assetAPIKey,
-    assetBaseURL,
     clientToken,
     onError: (message) => addMessage(sessionID, "error", message),
     sendEnvelope,
@@ -615,11 +617,11 @@ export function MobileAppScreen() {
     refreshCurrentFiles,
     removeAttachedFile,
     sendMessageWithFiles,
+    cancelFileUpload,
     uploadLocalFile,
   } = useFileActions({
+    uploadMobileAsset,
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
-    assetAPIKey,
-    assetBaseURL,
     attachedFiles,
     changeDiffPath: changeDiff?.path,
     fileParent,
@@ -772,6 +774,7 @@ export function MobileAppScreen() {
   });
 
   const handleRemoteMessage = useRemoteMessageHandler({
+    handleAssetUploadMessage,
     activeRequestIDRef,
     addErrorMessage: (targetSessionID, message) => addMessage(targetSessionID, "error", message),
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
@@ -932,13 +935,19 @@ export function MobileAppScreen() {
   }, [clientToken, setStatus]);
 
   const handleConnected = useCallback(() => {
+    reconnectAssetUploads();
     reconnectAttemptRef.current = 0;
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
     refreshAllRemoteState();
-  }, [refreshAllRemoteState]);
+  }, [reconnectAssetUploads, refreshAllRemoteState]);
+
+  const handleDisconnected = useCallback(() => {
+    disconnectAssetUploads();
+    scheduleReconnect();
+  }, [disconnectAssetUploads, scheduleReconnect]);
 
   const connect = useRelayConnection({
     addErrorMessage: (message) => addMessage(sessionID, "error", message),
@@ -946,7 +955,7 @@ export function MobileAppScreen() {
     deviceID,
     normalizedRelayURL,
     onConnected: handleConnected,
-    onDisconnected: scheduleReconnect,
+    onDisconnected: handleDisconnected,
     onMessage: handleRemoteMessage,
     setConnected,
     setStatus,
@@ -1336,6 +1345,7 @@ export function MobileAppScreen() {
         onSend={sendUserMessage}
         onTogglePlan={() => setAgentMode(planMode ? "chat" : "plan")}
         onUploadFile={uploadLocalFile}
+        onCancelUpload={cancelFileUpload}
         pendingPause={currentPauseBusy}
         pendingSend={Boolean(currentChat.pendingRequestID) || pendingActions.settings}
         pendingUpload={pendingActions.upload}
@@ -1496,6 +1506,8 @@ export function MobileAppScreen() {
           onSetRAG: setRAGSettings,
           onUpdateKnowledgeBase: updateKnowledgeBase,
           onUploadDocument: uploadDocument,
+          onCancelUpload: cancelDocumentUpload,
+          uploadingDocument,
           onApproveAIMemoryCandidate: approveAIMemoryCandidate,
           onCreateAIMemory: createAIMemory,
           onDeleteAIMemory: deleteAIMemory,
@@ -1537,8 +1549,6 @@ export function MobileAppScreen() {
           onSelectSection: setSettingsSection,
           activeModel,
           activeSession,
-          assetAPIKey,
-          assetBaseURL,
           bindCode,
           compact: sessionCompacts[sessionID],
           connected,
@@ -1607,8 +1617,6 @@ export function MobileAppScreen() {
           mcpReloading: pendingActions.mcp,
           mcpMessage,
           onSetPluginEnabled: setPluginEnabled,
-          onAssetAPIKeyChange: setAssetAPIKey,
-          onAssetBaseURLChange: setAssetBaseURL,
           onRelayURLChange: setRelayURL,
           onSetAgentMode: setAgentMode,
           onSetContextWindowK: setContextWindowK,
