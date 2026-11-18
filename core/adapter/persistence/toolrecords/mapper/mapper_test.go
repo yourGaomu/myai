@@ -68,6 +68,10 @@ func TestMapperConvertsSharedAssetToAssetRecord(t *testing.T) {
 	mapper := Mapper{IDs: &sequentialIDs{}}
 
 	records := mapper.AssetRecords([]domaintool.SharedAsset{{
+		AssetID:    "asset-123",
+		BusinessID: "business-123",
+		Checksum:   "sha256:test",
+		MaxVisits:  5,
 		SessionID:  "session-1",
 		RequestID:  "request-1",
 		ToolCallID: "call-1",
@@ -81,7 +85,7 @@ func TestMapperConvertsSharedAssetToAssetRecord(t *testing.T) {
 	if len(records) != 1 || records[0].ID != "id-1" {
 		t.Fatalf("unexpected asset records: %#v", records)
 	}
-	if records[0].SessionID != "session-1" || records[0].ShortCode != "abc" || records[0].ExpiresAt != &expiresAt {
+	if records[0].SessionID != "session-1" || records[0].AssetID != "asset-123" || records[0].BusinessID != "business-123" || records[0].Checksum != "sha256:test" || records[0].MaxVisits != 5 || records[0].ShortCode != "abc" || records[0].ExpiresAt != &expiresAt {
 		t.Fatalf("unexpected asset record: %#v", records[0])
 	}
 	// 1. 实时通知已经分配身份时，落库必须沿用，不能让前端得到第二个资源。

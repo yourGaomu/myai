@@ -1,6 +1,7 @@
 package mapper
 
 import (
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"reflect"
 	"testing"
 	"time"
@@ -78,6 +79,31 @@ func TestSessionDocumentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUploadOnlyAssetPersistsWithoutShortURL(t *testing.T) {
+	record := repository.AssetRecord{
+		ID: "record-upload", AssetID: "asset-upload", BusinessID: "business-upload", Checksum: "sha256:test",
+		SessionID: "session-1", FileName: "guide.md", Size: 5,
+	}
+	document := AssetDocumentFromRecord(record)
+	encoded, err := bson.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields bson.M
+	if err := bson.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["short_url"]; exists {
+		t.Fatal("upload-only asset stored an empty public URL")
+	}
+	if fields["asset_id"] != "asset-upload" || fields["business_id"] != "business-upload" || fields["checksum"] != "sha256:test" {
+		t.Fatalf("asset identity not persisted: %#v", fields)
+	}
+	if got := AssetRecordFromDocument(document); !reflect.DeepEqual(got, record) {
+		t.Fatalf("upload-only round trip mismatch: got %#v want %#v", got, record)
+	}
+}
+
 func TestRecordDocumentMappersRoundTrip(t *testing.T) {
 	now := time.Date(2026, 7, 11, 10, 30, 0, 0, time.UTC)
 	temperature := 0.3
@@ -95,7 +121,8 @@ func TestRecordDocumentMappersRoundTrip(t *testing.T) {
 	}
 
 	asset := repository.AssetRecord{
-		ID: "asset-1", SessionID: "session-1", LocalPath: "out.txt",
+		ID: "record-1", AssetID: "asset-1", BusinessID: "business-1", Checksum: "sha256:test", MaxVisits: 5,
+		SessionID: "session-1", LocalPath: "out.txt",
 		ShortURL: "https://example.test/a", Size: 12, CreatedAt: now,
 	}
 	if got := AssetRecordFromDocument(AssetDocumentFromRecord(asset)); !reflect.DeepEqual(got, asset) {

@@ -15,11 +15,31 @@ import (
 	knowledgeport "myai/core/port/knowledge"
 )
 
+func TestIngestUsesAssetIDAndRejectsEmptyIDBeforeReading(t *testing.T) {
+	fixtures := newDocumentFixtures()
+	var request domainknowledge.DocumentSourceRequest
+	reader := fixtures.service.Sources.(sourceReader)
+	reader.request = &request
+	fixtures.service.Sources = reader
+	result, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: " asset-guide "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.AssetID != "asset-guide" || request.MaxBytes != defaultMaxDocumentBytes || result.Document.ID != "document-1" {
+		t.Fatalf("unexpected ingest source request or result: %#v %#v", request, result)
+	}
+	request = domainknowledge.DocumentSourceRequest{}
+	_, err = fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: " "})
+	if err == nil || !strings.Contains(err.Error(), "asset_id is required") || request.AssetID != "" {
+		t.Fatalf("empty asset ID reached source: %#v error=%v", request, err)
+	}
+}
+
 func TestIngestRemovesUploadWhenDocumentWasNeverCommitted(t *testing.T) {
 	fixtures := newDocumentFixtures()
 	fixtures.documents.saveErr = errors.New("mongo unavailable")
 
-	_, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", URL: "asset://guide"})
+	_, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: "asset-guide"})
 	if err == nil || !strings.Contains(err.Error(), "mongo unavailable") {
 		t.Fatalf("expected document save error, got %v", err)
 	}
@@ -35,7 +55,7 @@ func TestIngestKeepsOriginalAndMarksDocumentFailedWhenSubmitFails(t *testing.T) 
 	fixtures := newDocumentFixtures()
 	fixtures.indexing.submitErr = errors.New("profile unavailable")
 
-	result, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", URL: "asset://guide"})
+	result, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: "asset-guide"})
 	if err == nil || !strings.Contains(err.Error(), "profile unavailable") {
 		t.Fatalf("expected submit error, got %v", err)
 	}
@@ -54,7 +74,7 @@ func TestIngestMarksDocumentAndJobFailedWhenAsyncSchedulingFails(t *testing.T) {
 	fixtures := newDocumentFixtures()
 	fixtures.async.err = errors.New("task queue is full")
 
-	result, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", URL: "asset://guide"})
+	result, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: "asset-guide"})
 	if err == nil || !strings.Contains(err.Error(), "task queue is full") {
 		t.Fatalf("expected scheduling error, got %v", err)
 	}
@@ -73,7 +93,7 @@ func TestIngestCompensatesWhenUploadReportsFailure(t *testing.T) {
 	fixtures := newDocumentFixtures()
 	fixtures.objects.putErr = errors.New("upload response lost")
 
-	_, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", URL: "asset://guide"})
+	_, err := fixtures.service.Ingest(context.Background(), documentcommand.Ingest{KnowledgeBaseID: "knowledge-1", AssetID: "asset-guide"})
 	if err == nil || !strings.Contains(err.Error(), "upload response lost") {
 		t.Fatalf("expected upload error, got %v", err)
 	}
@@ -190,12 +210,18 @@ func (repository *documentRepository) MarkDeleted(context.Context, string, time.
 type documentObjectStore struct {
 	deleteCalls int
 	putErr      error
+	data        []byte
 }
 
-func (store *documentObjectStore) Put(_ context.Context, objectKey string, _ io.Reader, size int64, contentType string) (domainknowledge.ObjectRef, error) {
+func (store *documentObjectStore) Put(_ context.Context, objectKey string, reader io.Reader, size int64, contentType string) (domainknowledge.ObjectRef, error) {
 	if store.putErr != nil {
 		return domainknowledge.ObjectRef{}, store.putErr
 	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return domainknowledge.ObjectRef{}, err
+	}
+	store.data = data
 	return domainknowledge.ObjectRef{ObjectKey: objectKey, ContentHash: "content-hash", Size: size, ContentType: contentType}, nil
 }
 func (*documentObjectStore) Open(context.Context, string) (io.ReadCloser, error) { return nil, nil }
@@ -209,9 +235,13 @@ func (store *documentObjectStore) DeleteUncommitted(context.Context, string) err
 
 type sourceReader struct {
 	content domainknowledge.DocumentSourceContent
+	request *domainknowledge.DocumentSourceRequest
 }
 
-func (reader sourceReader) Read(context.Context, domainknowledge.DocumentSourceRequest) (domainknowledge.DocumentSourceContent, error) {
+func (reader sourceReader) Read(_ context.Context, request domainknowledge.DocumentSourceRequest) (domainknowledge.DocumentSourceContent, error) {
+	if reader.request != nil {
+		*reader.request = request
+	}
 	return reader.content, nil
 }
 

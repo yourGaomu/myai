@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import * as DocumentPicker from "expo-document-picker";
 
 import { maxAttachedFiles } from "../constants/app";
@@ -6,7 +6,8 @@ import type { FileEntry, FileReadResultPayload, RelayMessage } from "../protocol
 import type { PendingAction, ViewMode } from "../types/app";
 import type { ChatAttachment, UploadedAssetAttachment } from "../types/chat";
 import { attachmentKey, inferMimeType, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
-import { uploadMobileAsset } from "../utils/assetUpload";
+import { AssetUploadCanceledError } from "../utils/assetUpload";
+import type { UploadMobileAsset } from "./useAssetUpload";
 import { newRequestID } from "../utils/ids";
 import { parentPathOf } from "../utils/paths";
 
@@ -14,8 +15,7 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 
 type Args = {
   addErrorMessage: (message: string) => void;
-  assetAPIKey: string;
-  assetBaseURL: string;
+  uploadMobileAsset: UploadMobileAsset;
   attachedFiles: ChatAttachment[];
   changeDiffPath?: string;
   fileParent: string;
@@ -35,8 +35,7 @@ type Args = {
 // 统一处理远程 workspace 文件与手机本地上传文件，两者最终都转换成聊天附件。
 export function useFileActions({
   addErrorMessage,
-  assetAPIKey,
-  assetBaseURL,
+  uploadMobileAsset,
   attachedFiles,
   changeDiffPath,
   fileParent,
@@ -125,35 +124,26 @@ export function useFileActions({
     setViewMode("chat");
   }, [addErrorMessage, filePreview, setAttachedFiles, setViewMode]);
 
-  const uploadLocalFile = useCallback(async (kind: "all" | "image" = "all") => {
-    // 手机文件先上传 Asset 服务，聊天消息只携带短链接元数据，避免大文件经过 WebSocket。
-    if (!assetBaseURL.trim()) {
-      addErrorMessage("请先在「设置 › 连接与配对」填写 Asset 服务地址，再上传手机文件。");
-      return;
-    }
-    if (!assetAPIKey.trim()) {
-      addErrorMessage("请先在「设置 › 连接与配对」填写独立的 Asset API Key，再上传手机文件（仅本次运行保存）。");
-      return;
-    }
+  const uploadControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => uploadControllerRef.current?.abort(), []);
+  const cancelFileUpload = useCallback(() => uploadControllerRef.current?.abort(), []);
 
+  const uploadLocalFile = useCallback(async (kind: "all" | "image" = "all") => {
+    if (uploadControllerRef.current) return;
+    const controller = new AbortController();
+    uploadControllerRef.current = controller;
     startPending("upload");
     try {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: false,
+        base64: false,
         type: kind === "image" ? ["image/*"] : ["image/*", "*/*"],
       });
-      if (result.canceled || !result.assets?.[0]) {
-        return;
-      }
-
+      if (controller.signal.aborted || result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      const uploaded = await uploadMobileAsset({
-        asset,
-        apiKey: assetAPIKey,
-        baseURL: assetBaseURL,
-        sessionID,
-      });
+      const uploaded = await uploadMobileAsset({ asset, sessionID, signal: controller.signal });
+      if (controller.signal.aborted) return;
       const attachment: UploadedAssetAttachment = {
         ...uploaded,
         content_type: uploaded.content_type || inferMimeType(asset.name, asset.mimeType),
@@ -162,21 +152,20 @@ export function useFileActions({
         local_uri: asset.uri,
       };
       setAttachedFiles((current) => {
-        if (current.some((file) => attachmentKey(file) === attachmentKey(attachment))) {
-          return current;
-        }
-        if (current.length >= maxAttachedFiles) {
-          return [...current.slice(1), attachment];
-        }
+        if (current.some((file) => attachmentKey(file) === attachmentKey(attachment))) return current;
+        if (current.length >= maxAttachedFiles) return [...current.slice(1), attachment];
         return [...current, attachment];
       });
       setViewMode("chat");
     } catch (error) {
-      addErrorMessage(uploadFailureMessage(error));
+      if (!(error instanceof AssetUploadCanceledError)) {
+        addErrorMessage(error instanceof Error ? error.message : "文件上传失败，请稍后重试。");
+      }
     } finally {
+      uploadControllerRef.current = null;
       stopPending("upload");
     }
-  }, [addErrorMessage, assetAPIKey, assetBaseURL, sessionID, setAttachedFiles, setViewMode, startPending, stopPending]);
+  }, [addErrorMessage, sessionID, setAttachedFiles, setViewMode, startPending, stopPending, uploadMobileAsset]);
 
   const removeAttachedFile = useCallback((key: string) => {
     setAttachedFiles((current) => current.filter((file) => attachmentKey(file) !== key));
@@ -204,6 +193,7 @@ export function useFileActions({
   );
 
   return {
+    cancelFileUpload,
     attachFilePreview,
     clearAttachedFiles,
     goToParent,
@@ -215,23 +205,4 @@ export function useFileActions({
     sendMessageWithFiles,
     uploadLocalFile,
   };
-}
-
-function uploadFailureMessage(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error || "");
-  const normalized = raw.toLowerCase();
-
-  if (normalized.includes("network request failed") || normalized.includes("failed to fetch")) {
-    return "无法连接资源服务，请检查资源服务地址、服务器端口和手机网络。";
-  }
-  if (normalized.includes("asset service url is required")) {
-    return "请先在设置中填写资源服务地址。";
-  }
-  if (normalized.includes("request timed out") || normalized.includes("timeout")) {
-    return "文件上传超时，请检查网络后重试。";
-  }
-  if (normalized.includes("upload failed") || normalized.includes("asset upload failed")) {
-    return `文件上传失败：${raw.replace(/^asset upload failed:\s*/i, "")}`;
-  }
-  return raw ? `文件上传失败：${raw}` : "文件上传失败，请稍后重试。";
 }

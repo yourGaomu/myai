@@ -38,6 +38,9 @@ func assessAskApproval(command toolcommand.Permission) askApproval {
 // External publication and executable declarations need per-call consent even
 // in full mode. A workspace path alone is never authorization to publish it.
 func requiresExplicitApproval(command toolcommand.Permission) bool {
+	if command.ExplicitApproval {
+		return true
+	}
 	switch command.Name {
 	case "share_file", "install_skill":
 		return true

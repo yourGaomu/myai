@@ -8,6 +8,7 @@ import type { AgentTurnItem, AgentTurnTimelineStep } from "../../utils/chatRende
 import { copyToClipboard } from "../../utils/clipboard";
 import { usageBreakdown } from "../../utils/tokenUsage";
 import { font, radius, weight } from "../../constants/theme";
+import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
 import { Spinner } from "../common/Spinner";
@@ -40,6 +41,8 @@ export function AgentTurnCard({
   workspaceChanges,
 }: Props) {
   const { keepThinkingExpanded, palette } = useAppTheme();
+  const { isWallpaperActive, settings: wallpaper } = useWallpaper();
+  const useWallpaperBackdrop = isWallpaperActive && wallpaper.cardBackdrop;
   const styles = useThemedStyles(makeStyles);
   const running = turn.status === "running";
   const steps = useMemo<AgentTurnTimelineStep[]>(() => {
@@ -105,7 +108,7 @@ export function AgentTurnCard({
   };
 
   return (
-    <View style={styles.turn}>
+    <View style={[styles.turn, useWallpaperBackdrop && styles.turnWallpaperBackdrop]}>
       <View style={styles.meta}>
         <View style={styles.avatar}>
           <CharacterAvatar circular size={24} slot={running ? "working" : "idle"} variant="avatar" />
@@ -252,6 +255,14 @@ function useRunningClock(running: boolean, startedAt?: string) {
 const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
   StyleSheet.create({
     turn: { alignSelf: "stretch", gap: 10, width: "100%" },
+    turnWallpaperBackdrop: {
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
     meta: { alignItems: "center", flexDirection: "row", gap: 8 },
     avatar: { height: 24, width: 24 },
     avatarSpin: { left: -3, position: "absolute", top: -3 },

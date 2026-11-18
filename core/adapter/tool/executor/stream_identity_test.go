@@ -48,7 +48,7 @@ func TestConcurrentSameNameToolsKeepIndependentCallIdentity(t *testing.T) {
 func TestSharedAssetEventUsesSameIDAsPersistedBatch(t *testing.T) {
 	var streamed domaintool.SharedAsset
 	executor := Executor{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
-		"share_file": fakeTool{name: "share_file", permission: tooldef.PermissionExecute, result: `{"file_name":"结果.png","content_type":"image/png","short_url":"https://example.com/a","code":"a"}`},
+		"share_file": fakeTool{name: "share_file", permission: tooldef.PermissionExecute, result: `{"asset_id":"asset-image","file_name":"结果.png","content_type":"image/png","short_url":"https://example.com/a","code":"a"}`},
 	}}}
 	approved := false
 	result, err := executor.Execute(context.Background(), generationcommand.ToolExecution{

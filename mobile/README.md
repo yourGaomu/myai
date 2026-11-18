@@ -13,14 +13,15 @@ Then open the app with Expo Go or an Android emulator.
 
 ## Relay URL
 
-The current deployed services use:
+The app uses a Relay address such as:
 
 ```text
-https://relay.mikasa.wiki
-https://assets.mikasa.wiki
+https://relay.example.com
 ```
 
-These are also the defaults in the app. On first launch the app shows the
+Use your actual deployment address. File uploads use the same authenticated
+Relay connection; there is no separate attachment-server address or backend
+machine API key in the mobile app. On first launch the app shows the
 pairing screen: enter the six-digit bind code printed by the PC Agent and tap
 `配对并连接`. Pairing fills the correct user/device identity and exchanges a
 client token, then the app connects automatically; the bind code is not used as
@@ -50,6 +51,37 @@ Do not use `127.0.0.1` on a real phone unless the Relay also runs on that phone.
 5. Open the sidebar to switch sessions or open `文件`, `变更`, `知识库与记忆`, and `设置`.
 6. In `文件`, browse and preview files from the PC Agent workspace and add them to the chat.
 7. In `变更`, inspect changes compared with the SQLite workspace history baseline, preview diffs, open files, and revert restorable files.
+
+## Files and MCP backend
+
+Selected files travel through the paired, authenticated Relay WebSocket to the
+Agent using `asset_upload_begin/chunk/status/complete/cancel` and
+`asset_upload_result`. Upload ownership includes the verified user, device,
+paired client and session. The mobile app sends at most **256 KiB** of raw file
+data per chunk, with a **512 KiB** limit for the complete upload JSON envelope
+including Base64 and metadata. Accepted file sizes range from **1 byte to
+50 MiB** (1–52428800 bytes, inclusive); empty files (0 bytes) are rejected.
+
+The Agent stages the file and calls its host files service through the
+`short_links` MCP backend. It combines the mobile chunks into backend parts:
+non-final parts are **32 MiB**, and each backend MCP request is limited to
+**48 MiB** including Base64 and JSON overhead. These limits are distinct from
+the mobile chunk size; the model never transports the file bytes.
+
+Uploading creates an **AssetID** and structured asset metadata without a public
+short link. Chats and knowledge-base imports reference `asset_id`; a public
+share is a separate action requiring explicit approval. The host reads metadata
+and downloads through MCP, while document parsing stays in MyAI. Resource cards
+accept upload-only metadata with no `short_url` or `code`.
+
+File features require an independently deployed compatible new backend with
+its existing ten tools plus `get_asset_info`, `get_asset_download_url` and
+`create_asset_shortlink`. Configure `SHORT_LINKS_MCP_URL` and
+`SHORT_LINKS_API_KEY` on the Agent only. Unknown values stay empty and disabled;
+missing MCP or required tools produces an explicit file error with no legacy
+fallback. See [the integration guide](../doc/FEATURE_SHORT_LINKS_MCP_INTEGRATION.md)
+for the deployment contract. This README does not claim that deployment or
+end-to-end validation has completed.
 
 ## Build Android APK
 

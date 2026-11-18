@@ -4,7 +4,6 @@
 
 export const mockRelaySettings = {
   relayURL: "https://relay.mikasa.wiki",
-  assetBaseURL: "https://assets.mikasa.wiki",
   bindCode: "682914",
   clientToken: "tok_mobile_8a7d9f2c1b",
   deviceID: "pixel-9-pro-dev",

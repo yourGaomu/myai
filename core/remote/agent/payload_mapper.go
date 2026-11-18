@@ -283,19 +283,19 @@ func modelSummaries(models []llm.ModelInfo) []protocol.ModelSummary {
 	summaries := make([]protocol.ModelSummary, 0, len(models))
 	for _, model := range models {
 		summaries = append(summaries, protocol.ModelSummary{
-			ID:        model.ID,
-			Name:      model.Name,
-			Provider:  model.Provider,
-			Protocol:  string(model.Protocol),
-			AuthType:  string(model.AuthType),
-			BaseURL:   model.BaseURL,
-			HasAPIKey: model.HasAPIKey,
-			ModelName: model.ModelName,
-			Enabled:   model.Enabled,
-			IsDefault: model.IsDefault,
+			ID:                  model.ID,
+			Name:                model.Name,
+			Provider:            model.Provider,
+			Protocol:            string(model.Protocol),
+			AuthType:            string(model.AuthType),
+			BaseURL:             model.BaseURL,
+			HasAPIKey:           model.HasAPIKey,
+			ModelName:           model.ModelName,
+			Enabled:             model.Enabled,
+			IsDefault:           model.IsDefault,
 			ContextWindowTokens: model.ContextWindowTokens,
-			MaxOutputTokens: model.MaxOutputTokens,
-			Defaults:  generationSettingsPayload(model.DefaultGenerationSettings),
+			MaxOutputTokens:     model.MaxOutputTokens,
+			Defaults:            generationSettingsPayload(model.DefaultGenerationSettings),
 		})
 	}
 	return summaries
@@ -320,6 +320,10 @@ func assetSummaries(assets []sessionresult.AssetListItem) []protocol.AssetSummar
 	for _, asset := range assets {
 		summaries = append(summaries, protocol.AssetSummary{
 			ID:          asset.ID,
+			AssetID:     asset.AssetID,
+			BusinessID:  asset.BusinessID,
+			Checksum:    asset.Checksum,
+			MaxVisits:   asset.MaxVisits,
 			SessionID:   asset.SessionID,
 			RequestID:   asset.RequestID,
 			ToolCallID:  asset.ToolCallID,

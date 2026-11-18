@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -72,10 +73,53 @@ func (t *Tool) Permission() tooldef.Permission {
 	return t.permission
 }
 
+// RequiresExplicitApproval is consumed by the command dispatcher even in full
+// permission mode: publication always needs a deliberate user decision.
+func (t *Tool) RequiresExplicitApproval() bool {
+	if strings.TrimSpace(t.serverName) != "short_links" {
+		return false
+	}
+	switch t.originalName {
+	case "create_url_shortlink", "create_burn_link", "create_asset_shortlink", "upload_file_and_share":
+		return true
+	default:
+		return false
+	}
+}
+
+func hiddenModelTool(serverName, originalName string) bool {
+	if strings.TrimSpace(serverName) != "short_links" {
+		return false
+	}
+	switch originalName {
+	case "upload_file_and_share", "begin_asset_upload", "upload_asset_part", "get_asset_upload_status", "complete_asset_upload", "cancel_asset_upload", "get_asset_download_url":
+		return true
+	default:
+		return false
+	}
+}
+
 func (t *Tool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
 	result, err := t.client.CallTool(ctx, t.originalName, args)
 	if err != nil {
+		if strings.TrimSpace(t.serverName) == "short_links" {
+			if errors.Is(err, context.Canceled) {
+				return tooldef.ToolOutput{}, context.Canceled
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return tooldef.ToolOutput{}, context.DeadlineExceeded
+			}
+			return tooldef.ToolOutput{}, errors.New("short_links MCP call failed")
+		}
 		return tooldef.ToolOutput{}, err
+	}
+	if strings.TrimSpace(t.serverName) == "short_links" {
+		if result.IsError {
+			return tooldef.FailedOutput(domaintool.ResultStatusFailed, "mcp_tool_error", "short_links tool returned an error"), nil
+		}
+		if t.originalName == "create_asset_shortlink" || t.originalName == "upload_file_and_share" || t.originalName == "get_asset_info" {
+			return normalizedFileOutput(result, t.originalName, args), nil
+		}
 	}
 
 	output := formatCallResult(result)

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { font, radius, weight } from "../../constants/theme";
+import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
 
@@ -56,7 +57,8 @@ export function ChatEmptyState({
   onOpenChanges,
   onPickSuggestion,
 }: Props) {
-  const { palette } = useAppTheme();
+  const { isDark, palette } = useAppTheme();
+  const { isWallpaperActive } = useWallpaper();
   const styles = useThemedStyles(makeStyles);
   const device = deviceID.trim() || "电脑";
 
@@ -66,14 +68,18 @@ export function ChatEmptyState({
         <CharacterAvatar accessibilityLabel="MyAI 角色" height={162} size={146} slot="idle" variant="full" />
       </View>
 
-      <Text style={styles.title}>{name ? `${greeting()}，${name}` : greeting()}</Text>
-      <Text style={styles.sub}>{connected ? `${device} 已就绪，说说接下来要做什么` : `${device} 暂未连线，可先浏览本地视图`}</Text>
+      <Text style={[styles.title, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
+        {name ? `${greeting()}，${name}` : greeting()}
+      </Text>
+      <Text style={[styles.sub, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
+        {connected ? `${device} 已就绪，说说接下来要做什么` : `${device} 暂未连线，可先浏览本地视图`}
+      </Text>
 
       {changesCount > 0 && onOpenChanges ? (
         <Pressable
           accessibilityRole="button"
           onPress={onOpenChanges}
-          style={({ pressed }) => [styles.changesPill, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.changesPill, isWallpaperActive && styles.pillGlass, pressed && styles.pressed]}
         >
           <View style={styles.changesDot} />
           <Text style={styles.changesText}>工作区有 {changesCount} 项未提交变更 · 点击审查</Text>
@@ -87,7 +93,7 @@ export function ChatEmptyState({
             accessibilityRole="button"
             key={item.title}
             onPress={() => onPickSuggestion(item.text)}
-            style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+            style={({ pressed }) => [styles.item, isWallpaperActive && styles.itemGlass, pressed && styles.itemPressed]}
           >
             <View style={styles.iconBox}>
               <Feather color={palette.brandLight} name={item.icon} size={18} />
@@ -195,6 +201,23 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     itemPressed: {
       backgroundColor: palette.pressed,
+    },
+    itemGlass: {
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+    },
+    pillGlass: {
+      backgroundColor: palette.floatingGlass,
+    },
+    textShadowDark: {
+      textShadowColor: "rgba(0,0,0,0.45)",
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 6,
+    },
+    textShadowLight: {
+      textShadowColor: "rgba(255,255,255,0.7)",
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 6,
     },
     pressed: {
       opacity: 0.78,

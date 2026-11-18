@@ -20,6 +20,7 @@ import (
 	queryapi "myai/core/application/session/query/api"
 	settingsapi "myai/core/application/session/settings/api"
 	skillapi "myai/core/application/skill/api"
+	filesport "myai/core/port/files"
 	modelport "myai/core/port/model"
 	repository "myai/core/port/repository"
 )
@@ -68,8 +69,9 @@ type ChatDependencies struct {
 	// OnPendingTurnError receives errors from asynchronous parent-agent wakeups.
 	// The wakeup itself is best-effort; durable mailbox messages remain queued
 	// when generation fails and can be retried by a later event or recovery.
-	OnPendingTurnError func(error)
-	FlushPersistence   func(context.Context) error
+	OnPendingTurnError  func(error)
+	FlushPersistence    func(context.Context) error
+	RecordUploadedAsset func(context.Context, string, string, filesport.Asset) error
 	// BlockSession persists a session tombstone before destructive store writes.
 	// ResumeSession starts a new epoch after a successful clear or restore.
 	BlockSession  func(context.Context, string) error

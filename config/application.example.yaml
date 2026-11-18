@@ -91,13 +91,6 @@ persistence:
     max_bytes: 67108864
     retain_done: 10000
 
-asset:
-  shortener_base_url: ""
-  api_key: ""
-  upload_timeout_seconds: 60
-  ttl_seconds: 604800
-  max_visits: 0
-
 skill:
   root: "/app/skills"
   registry: ""
@@ -131,7 +124,8 @@ hooks:
 mcp:
   servers: []
 
-# 1. 外部短链 MCP：部署环境可直接设置 SHORT_LINKS_MCP_URL、SHORT_LINKS_API_KEY。
-# 1.1 地址留空不注册；非空时自动加入名为 short_links 的可选 MCP 服务，离线不阻止 Agent 启动。
+# 外部文件/短链 MCP：未知实际地址和 key 均留空，当前默认停用。
+# 部署方设置 SHORT_LINKS_MCP_URL（包含 /api/mcp）和 SHORT_LINKS_API_KEY；key 仅由 Agent 持有。
+# URL 为空不注册；服务可选不影响普通聊天启动，但文件操作缺服务/工具时明确失败，没有旧接口回退。
 short_links:
   mcp_url: ""

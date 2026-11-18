@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   KnowledgeBase,
@@ -21,14 +21,14 @@ import type { PendingAction } from "../types/app";
 import type { KnowledgeBaseChanges } from "../types/knowledge";
 import { newRequestID } from "../utils/ids";
 import * as DocumentPicker from "expo-document-picker";
-import { uploadMobileAsset } from "../utils/assetUpload";
+import { AssetUploadCanceledError } from "../utils/assetUpload";
+import type { UploadMobileAsset } from "./useAssetUpload";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 
 type Args = {
   activeKnowledgeBase?: KnowledgeBase;
-  assetAPIKey: string;
-  assetBaseURL: string;
+  uploadMobileAsset: UploadMobileAsset;
   clientToken: string;
   sessionID: string;
   sendEnvelope: SendEnvelope;
@@ -39,8 +39,7 @@ type Args = {
 
 export function useKnowledgeActions({
   activeKnowledgeBase,
-  assetAPIKey,
-  assetBaseURL,
+  uploadMobileAsset,
   clientToken,
   sessionID,
   sendEnvelope,
@@ -158,40 +157,39 @@ export function useKnowledgeActions({
     return sent;
   }, [clientToken, sendEnvelope, startPending, stopPending]);
 
+  const documentUploadRef = useRef<AbortController | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  useEffect(() => () => documentUploadRef.current?.abort(), []);
+  const cancelDocumentUpload = useCallback(() => documentUploadRef.current?.abort(), []);
+
   const uploadDocument = useCallback(async () => {
-    if (!activeKnowledgeBase?.id) return;
-    if (!assetBaseURL.trim()) {
-      onError("请先在设置中填写资源服务地址，再上传知识库文档。");
-      return;
-    }
-    if (!assetAPIKey.trim()) {
-      onError("请先在设置中填写独立的 Asset API Key，再上传知识库文档（仅本次运行保存）。");
-      return;
-    }
+    if (!activeKnowledgeBase?.id || documentUploadRef.current) return;
+    const controller = new AbortController();
+    documentUploadRef.current = controller;
+    setUploadingDocument(true);
     startPending("knowledge");
+    let ingestSent = false;
     try {
       const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, base64: false });
-      if (picked.canceled || !picked.assets?.[0]) {
-        stopPending("knowledge");
-        return;
-      }
-      const uploaded = await uploadMobileAsset({ asset: picked.assets[0], apiKey: assetAPIKey, baseURL: assetBaseURL, sessionID });
+      if (controller.signal.aborted || picked.canceled || !picked.assets?.[0]) return;
+      const uploaded = await uploadMobileAsset({ asset: picked.assets[0], sessionID, signal: controller.signal });
+      if (controller.signal.aborted) return;
       const payload: KnowledgeDocumentIngestPayload = {
         knowledge_base_id: activeKnowledgeBase.id,
-        url: uploaded.short_url,
-        code: uploaded.code,
+        asset_id: uploaded.asset_id,
       };
-      if (!sendEnvelope("knowledge_document_ingest", {
-        request_id: newRequestID(),
-        payload,
-      })) {
-        throw new Error("Document ingest request could not be sent");
-      }
+      ingestSent = sendEnvelope("knowledge_document_ingest", { request_id: newRequestID(), payload });
+      if (!ingestSent) throw new Error("知识库导入请求发送失败，请检查 Relay 连接。");
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Document upload failed");
-      stopPending("knowledge");
+      if (!(error instanceof AssetUploadCanceledError)) {
+        onError(error instanceof Error ? error.message : "文档上传失败。");
+      }
+    } finally {
+      documentUploadRef.current = null;
+      setUploadingDocument(false);
+      if (!ingestSent) stopPending("knowledge");
     }
-  }, [activeKnowledgeBase?.id, assetAPIKey, assetBaseURL, onError, sendEnvelope, sessionID, startPending, stopPending]);
+  }, [activeKnowledgeBase?.id, onError, sendEnvelope, sessionID, startPending, stopPending, uploadMobileAsset]);
 
   const retryDocument = useCallback((knowledgeBaseID: string, jobID: string) => {
     startPending("knowledge");
@@ -243,6 +241,8 @@ export function useKnowledgeActions({
   }, [clientToken, onError, sendEnvelope, sessionID, startPending, stopPending]);
 
   return {
+    cancelDocumentUpload,
+    uploadingDocument,
     createCategory,
     createKnowledgeBase,
     deleteCategory,

@@ -16,15 +16,17 @@ type Props = {
 export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
   const { palette } = useAppTheme();
   const styles = useChatStyles();
-  const [imageLoading, setImageLoading] = useState(isPreviewableImageAsset(asset));
+  // Public short links can be single-use. Only a picked local file is safe to
+  // load automatically; opening a public link always requires a user action.
+  const imageSource = previewURL;
+  const [imageLoading, setImageLoading] = useState(Boolean(previewURL) && isPreviewableImageAsset(asset));
   const [imageFailed, setImageFailed] = useState(false);
   const [fullScreenVisible, setFullScreenVisible] = useState(false);
-  const [imageSource, setImageSource] = useState(previewURL || asset.shortURL);
   const title = asset.fileName || asset.path || "共享文件";
   const meta = [asset.size !== undefined ? formatBytes(asset.size) : "", asset.contentType || "", asset.expiresAt ? `有效期至 ${formatDateTime(asset.expiresAt)}` : ""]
     .filter(Boolean)
     .join(" / ");
-  const showImagePreview = isPreviewableImageAsset(asset) && !imageFailed;
+  const showImagePreview = Boolean(imageSource) && isPreviewableImageAsset(asset) && !imageFailed;
 
   return (
     <View style={[styles.assetCard, showImagePreview && styles.assetImageCard]}>
@@ -36,11 +38,6 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
         >
           <Image
             onError={() => {
-              if (previewURL && imageSource === previewURL && previewURL !== asset.shortURL) {
-                setImageSource(asset.shortURL);
-                setImageLoading(true);
-                return;
-              }
               setImageFailed(true);
               setImageLoading(false);
             }}
@@ -94,15 +91,15 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
             />
           </Pressable>
 
-          <View style={styles.imageModalFooter}>
+          {asset.shortURL ? <View style={styles.imageModalFooter}>
             <Pressable
-              onPress={() => void Linking.openURL(asset.shortURL)}
+              onPress={() => void Linking.openURL(asset.shortURL!)}
               style={({ pressed }) => buttonFeedback(styles.imageModalActionBtn, pressed)}
             >
               <Feather color={palette.ink1} name="link" size={14} />
               <Text style={styles.imageModalActionBtnText}>浏览器中打开</Text>
             </Pressable>
-          </View>
+          </View> : null}
         </View>
       </Modal>
       <View style={styles.assetDetailsRow}>
@@ -121,12 +118,12 @@ export function SharedAssetCard({ asset, buttonFeedback, previewURL }: Props) {
           {meta ? <Text style={styles.assetMeta}>{meta}</Text> : null}
           {imageFailed ? <Text style={styles.assetPreviewStatus}>无法预览</Text> : null}
           <Text numberOfLines={1} selectable style={styles.assetURL}>
-            {asset.shortURL}
+            {asset.shortURL || `已上传 · ${asset.assetID}`}
           </Text>
         </View>
-        <Pressable onPress={() => void Linking.openURL(asset.shortURL)} style={({ pressed }) => buttonFeedback(styles.assetOpenButton, pressed)}>
+        {asset.shortURL ? <Pressable onPress={() => void Linking.openURL(asset.shortURL!)} style={({ pressed }) => buttonFeedback(styles.assetOpenButton, pressed)}>
           <Text style={styles.assetOpenButtonText}>打开</Text>
-        </Pressable>
+        </Pressable> : null}
       </View>
     </View>
   );

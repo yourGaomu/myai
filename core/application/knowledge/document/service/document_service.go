@@ -44,6 +44,10 @@ func (service DocumentService) Ingest(ctx context.Context, command documentcomma
 	if err := service.validateDependencies(); err != nil {
 		return documentresult.Ingest{}, err
 	}
+	assetID := strings.TrimSpace(command.AssetID)
+	if assetID == "" {
+		return documentresult.Ingest{}, errors.New("asset_id is required")
+	}
 	knowledgeBaseID := strings.TrimSpace(command.KnowledgeBaseID)
 	base, err := service.KnowledgeBases.Get(ctx, knowledgeBaseID)
 	if err != nil {
@@ -52,7 +56,7 @@ func (service DocumentService) Ingest(ctx context.Context, command documentcomma
 	if !base.RAGEnabled || base.Deletion.Deleted {
 		return documentresult.Ingest{}, fmt.Errorf("knowledge base %q is not enabled for RAG", knowledgeBaseID)
 	}
-	content, err := service.Sources.Read(ctx, domainknowledge.DocumentSourceRequest{URL: command.URL, Code: command.Code, MaxBytes: defaultMaxDocumentBytes})
+	content, err := service.Sources.Read(ctx, domainknowledge.DocumentSourceRequest{AssetID: assetID, MaxBytes: defaultMaxDocumentBytes})
 	if err != nil {
 		return documentresult.Ingest{}, err
 	}

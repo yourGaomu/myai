@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	filesport "myai/core/port/files"
 )
 
 type shutdownTestCloser struct {
@@ -50,6 +52,35 @@ func TestApplicationCloseContextClosesResourcesAndReportsFailure(t *testing.T) {
 	case <-closed:
 	default:
 		t.Fatal("workspace resource was not closed")
+	}
+}
+
+type shutdownFileService struct {
+	filesport.Service
+	close func() error
+}
+
+func (s shutdownFileService) Close() error { return s.close() }
+
+func TestApplicationReleasesFileTransfersBeforeDependencies(t *testing.T) {
+	filesClosed := false
+	app := &Application{
+		fileService: shutdownFileService{close: func() error {
+			filesClosed = true
+			return nil
+		}},
+		workspaceCloser: shutdownTestCloser{close: func() error {
+			if !filesClosed {
+				t.Error("dependencies closed before file transfer leases were released")
+			}
+			return nil
+		}},
+	}
+	if err := app.CloseContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !filesClosed {
+		t.Fatal("file transfer leases were not released on application close")
 	}
 }
 

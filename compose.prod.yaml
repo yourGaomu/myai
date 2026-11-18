@@ -61,6 +61,8 @@ services:
       REDIS_ADDR: ${REDIS_ADDR:-}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
+      # External MCP-only files/short-links backend. Empty URL disables registration;
+      # file operations fail explicitly until a compatible backend and key are configured.
       SHORT_LINKS_MCP_URL: ${SHORT_LINKS_MCP_URL:-}
       SHORT_LINKS_API_KEY: ${SHORT_LINKS_API_KEY:-}
       RAG_ID_NODE: ${RAG_ID_NODE:-}
@@ -106,11 +108,6 @@ services:
       RAG_MINIO_REGION: ${RAG_MINIO_REGION:-}
       RAG_MINIO_USE_SSL: ${RAG_MINIO_USE_SSL:-false}
       RAG_MINIO_AUTO_CREATE_BUCKET: ${RAG_MINIO_AUTO_CREATE_BUCKET:-}
-      ASSET_SHORTENER_BASE_URL: ${ASSET_SHORTENER_BASE_URL:-}
-      ASSET_API_KEY: ${ASSET_API_KEY:-}
-      ASSET_UPLOAD_TIMEOUT_SECONDS: ${ASSET_UPLOAD_TIMEOUT_SECONDS:-}
-      ASSET_TTL_SECONDS: ${ASSET_TTL_SECONDS:-}
-      ASSET_MAX_VISITS: ${ASSET_MAX_VISITS:-}
       WORKSPACE_HISTORY_PATH: /var/lib/myai/history
       PERSISTENCE_OUTBOX_PATH: ${PERSISTENCE_OUTBOX_PATH:-}
       PERSISTENCE_OUTBOX_MAX_PENDING: ${PERSISTENCE_OUTBOX_MAX_PENDING:-}

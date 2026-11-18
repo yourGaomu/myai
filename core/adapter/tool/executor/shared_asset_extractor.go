@@ -13,41 +13,55 @@ import (
 type SharedAssetExtractor struct{}
 
 func (SharedAssetExtractor) Extract(command toolcommand.AssetExtraction) (domaintool.SharedAsset, bool) {
-	// 只有 share_file 的成功 JSON 结果可以转换为 Asset，其他工具输出保持普通文本。
-	if command.Call.Name != "share_file" || command.Output.Failed() || strings.TrimSpace(command.Output.Content) == "" {
+	if command.Output.Normalized().Status != domaintool.ResultStatusSuccess {
 		return domaintool.SharedAsset{}, false
 	}
 
-	var payload sharedAssetResultDTO
-	if err := json.Unmarshal([]byte(command.Output.Content), &payload); err != nil {
-		return domaintool.SharedAsset{}, false
-	}
-	payload.ShortURL = strings.TrimSpace(payload.ShortURL)
-	if payload.ShortURL == "" {
-		return domaintool.SharedAsset{}, false
-	}
-
-	var expiresAt *time.Time
-	if value := strings.TrimSpace(payload.ExpiresAt); value != "" {
-		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-			expiresAt = &parsed
+	var asset domaintool.SharedAsset
+	if command.Output.SharedAsset != nil {
+		// Trusted adapters attach typed metadata before formatting MCP output.
+		asset = domaintool.CloneSharedAssets([]domaintool.SharedAsset{*command.Output.SharedAsset})[0]
+	} else {
+		// Only the local publication tool's canonical JSON is an asset result.
+		if command.Call.Name != "share_file" {
+			return domaintool.SharedAsset{}, false
+		}
+		var payload sharedAssetResultDTO
+		if err := json.Unmarshal([]byte(command.Output.Content), &payload); err != nil {
+			return domaintool.SharedAsset{}, false
+		}
+		if strings.TrimSpace(payload.ShortURL) == "" {
+			return domaintool.SharedAsset{}, false
+		}
+		asset = domaintool.SharedAsset{
+			AssetID: payload.AssetID, BusinessID: payload.BusinessID,
+			LocalPath: payload.Path, FileName: payload.FileName, ContentType: payload.ContentType,
+			Size: payload.Size, ShortURL: payload.ShortURL, ShortCode: payload.Code, MaxVisits: payload.MaxVisits,
+		}
+		if value := strings.TrimSpace(payload.ExpiresAt); value != "" {
+			if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+				asset.ExpiresAt = &parsed
+			}
 		}
 	}
 
-	return domaintool.SharedAsset{
-		// 1. 实时事件和后续落库使用同一个资源 ID，历史刷新时可以去重。
-		ID:          (uuidadapter.Generator{}).NewID(),
-		SessionID:   command.SessionID,
-		RequestID:   command.RequestID,
-		ToolCallID:  command.Call.ID,
-		ToolName:    command.Call.Name,
-		LocalPath:   strings.TrimSpace(payload.Path),
-		FileName:    strings.TrimSpace(payload.FileName),
-		ContentType: strings.TrimSpace(payload.ContentType),
-		Size:        payload.Size,
-		ShortURL:    payload.ShortURL,
-		ShortCode:   strings.TrimSpace(payload.Code),
-		ExpiresAt:   expiresAt,
-		CreatedAt:   command.CreatedAt,
-	}, true
+	asset.AssetID = strings.TrimSpace(asset.AssetID)
+	if asset.AssetID == "" || asset.Size < 0 || asset.MaxVisits < -1 {
+		return domaintool.SharedAsset{}, false
+	}
+	asset.BusinessID = strings.TrimSpace(asset.BusinessID)
+	asset.Checksum = strings.TrimSpace(asset.Checksum)
+	asset.LocalPath = strings.TrimSpace(asset.LocalPath)
+	asset.FileName = strings.TrimSpace(asset.FileName)
+	asset.ContentType = strings.TrimSpace(asset.ContentType)
+	asset.ShortURL = strings.TrimSpace(asset.ShortURL)
+	asset.ShortCode = strings.TrimSpace(asset.ShortCode)
+	// Use one local event ID for streaming and persistence, and bind it to this call.
+	asset.ID = (uuidadapter.Generator{}).NewID()
+	asset.SessionID = command.SessionID
+	asset.RequestID = command.RequestID
+	asset.ToolCallID = command.Call.ID
+	asset.ToolName = command.Call.Name
+	asset.CreatedAt = command.CreatedAt
+	return asset, true
 }

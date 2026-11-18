@@ -10,43 +10,41 @@ import (
 	"path/filepath"
 	"strings"
 
-	"myai/core/asset"
 	"myai/core/pathpolicy"
+	"myai/core/port/files"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
 
-const maxShareFileBytes = 50 * 1024 * 1024
-
-type assetUploader interface {
-	UploadFile(ctx context.Context, request asset.UploadFileRequest) (asset.UploadFileResponse, error)
-}
+const maxShareFileBytes = files.MaxFileBytes
 
 type ShareFileTool struct {
 	workspace string
-	uploader  assetUploader
+	files     files.Service
 }
 
 type shareFileArgs struct {
 	Path       string `json:"path"`
 	Title      string `json:"title"`
-	Scope      string `json:"scope"`
 	TTLSeconds int64  `json:"ttl_seconds"`
 	MaxVisits  int64  `json:"max_visits"`
 }
 
 type shareFileResult struct {
+	AssetID     string `json:"asset_id"`
+	BusinessID  string `json:"business_id,omitempty"`
 	Path        string `json:"path"`
 	ShortURL    string `json:"short_url"`
 	Code        string `json:"code"`
 	FileName    string `json:"file_name"`
-	ContentType string `json:"content_type,omitempty"`
+	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
 	ExpiresAt   string `json:"expires_at,omitempty"`
+	MaxVisits   int64  `json:"max_visits"`
 }
 
-func NewShareFileToolWithWorkspaceAndUploader(workspace string, uploader assetUploader) *ShareFileTool {
-	return &ShareFileTool{workspace: workspace, uploader: uploader}
+func NewShareFileToolWithWorkspaceAndFiles(workspace string, service files.Service) *ShareFileTool {
+	return &ShareFileTool{workspace: workspace, files: service}
 }
 
 func (t *ShareFileTool) Name() string {
@@ -54,7 +52,7 @@ func (t *ShareFileTool) Name() string {
 }
 
 func (t *ShareFileTool) Description() string {
-	return "Upload a local workspace file to the configured asset short-link service and return a short URL for mobile preview or download. Use this after creating files the user should open on another device."
+	return "Share a local workspace file through the configured MCP files service and return its asset ID and short URL for preview or download on another device. Sharing publishes the file and requires explicit user consent."
 }
 
 func (t *ShareFileTool) Schema() any {
@@ -69,17 +67,14 @@ func (t *ShareFileTool) Schema() any {
 				"type":        "string",
 				"description": "Optional display title for the uploaded asset.",
 			},
-			"scope": map[string]any{
-				"type":        "string",
-				"description": "Optional scope tag, such as session id or project name.",
-			},
 			"ttl_seconds": map[string]any{
 				"type":        "integer",
-				"description": "Optional expiry time in seconds. Uses configured default when omitted.",
+				"description": "Optional lifetime in seconds. Zero or omitted means no expiry.",
 			},
 			"max_visits": map[string]any{
 				"type":        "integer",
-				"description": "Optional maximum visits. Uses configured default when omitted.",
+				"minimum":     -1,
+				"description": "Optional access limit: omitted or -1 means unlimited; zero disables access; a positive value limits visits.",
 			},
 		},
 		"required": []string{"path"},
@@ -90,9 +85,13 @@ func (t *ShareFileTool) Permission() tooldef.Permission {
 	return tooldef.PermissionExecute
 }
 
+func (t *ShareFileTool) RequiresExplicitApproval() bool {
+	return true
+}
+
 func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	if t.uploader == nil {
-		return tooldef.ToolOutput{}, errors.New("asset short-link service is not configured; set asset.shortener_base_url")
+	if t.files == nil {
+		return tooldef.ToolOutput{}, errors.New("MCP files service is not configured")
 	}
 
 	workspace, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
@@ -134,26 +133,31 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 		return tooldef.ToolOutput{}, errors.New("workspace file changed before sharing")
 	}
 
-	response, err := t.uploader.UploadFile(ctx, asset.UploadFileRequest{
-		Reader:      file,
-		FileName:    filepath.Base(input.Path),
-		Title:       input.Title,
-		Scope:       input.Scope,
-		ContentType: contentTypeFromPath(input.Path),
-		TTLSeconds:  input.TTLSeconds,
-		MaxVisits:   input.MaxVisits,
+	response, err := t.files.Share(ctx, files.ShareRequest{
+		UploadRequest: files.UploadRequest{
+			Reader:      file,
+			FileName:    filepath.Base(input.Path),
+			ContentType: contentTypeFromPath(input.Path),
+			Size:        opened.Size(),
+		},
+		Title:      input.Title,
+		TTLSeconds: input.TTLSeconds,
+		MaxVisits:  input.MaxVisits,
 	})
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
 
 	result := shareFileResult{
+		AssetID:     response.AssetID,
+		BusinessID:  response.BusinessID,
 		Path:        filepath.ToSlash(relativePath(workspace, input.Path)),
 		ShortURL:    response.ShortURL,
 		Code:        response.Code,
 		FileName:    response.FileName,
 		ContentType: response.ContentType,
 		Size:        response.Size,
+		MaxVisits:   response.MaxVisits,
 	}
 	if response.ExpiresAt != nil {
 		result.ExpiresAt = response.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")
@@ -167,7 +171,7 @@ func (t *ShareFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 }
 
 func normalizeShareFileArgs(workspace string, args json.RawMessage) (shareFileArgs, error) {
-	var input shareFileArgs
+	input := shareFileArgs{MaxVisits: -1}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &input); err != nil {
 			return shareFileArgs{}, err
@@ -189,12 +193,11 @@ func normalizeShareFileArgs(workspace string, args json.RawMessage) (shareFileAr
 	input.Path = path
 
 	input.Title = strings.TrimSpace(input.Title)
-	input.Scope = strings.TrimSpace(input.Scope)
 	if input.TTLSeconds < 0 {
 		input.TTLSeconds = 0
 	}
-	if input.MaxVisits < 0 {
-		input.MaxVisits = 0
+	if input.MaxVisits < -1 {
+		return input, errors.New("max_visits must be -1, zero, or a positive integer")
 	}
 	return input, nil
 }

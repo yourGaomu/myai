@@ -30,8 +30,7 @@ type ObjectInfo struct {
 }
 
 type DocumentSourceRequest struct {
-	URL      string
-	Code     string
+	AssetID  string
 	MaxBytes int64
 }
 

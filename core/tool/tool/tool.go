@@ -33,6 +33,10 @@ type UserInteraction interface {
 	RequiresUserInteraction() bool
 }
 
+type ExplicitApproval interface {
+	RequiresExplicitApproval() bool
+}
+
 // SandboxedShell attests that this shell invocation will use an OS sandbox.
 // A copied workspace or a nonempty workspace identifier is not sufficient.
 type SandboxedShell interface {

@@ -20,16 +20,6 @@ func TestMapperCreatesIndependentRuntimeConfigs(t *testing.T) {
 		t.Fatalf("unexpected model config: %#v", model)
 	}
 
-	asset := mapper.AssetConfig(AssetProperties{
-		BaseURL:              "https://asset.test",
-		APIKey:               "test-asset-key",
-		UploadTimeoutSeconds: 30,
-		TTLSeconds:           60,
-	})
-	if asset.Timeout != 30*time.Second || asset.DefaultTTLSeconds != 60 || asset.APIKey != "test-asset-key" {
-		t.Fatalf("unexpected asset config: %#v", asset)
-	}
-
 	minio := mapper.MinIOConfig(MinIOProperties{
 		Endpoint:         "minio.example.test:9000",
 		AccessKey:        "access-key",

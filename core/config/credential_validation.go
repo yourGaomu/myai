@@ -17,9 +17,6 @@ func (p Properties) ValidateCredentials() error {
 	if strings.TrimSpace(p.Redis.Address) != "" {
 		values = append(values, credential{"redis.password", p.Redis.Password})
 	}
-	if strings.TrimSpace(p.Asset.BaseURL) != "" {
-		values = append(values, credential{"asset.api_key", p.Asset.APIKey})
-	}
 	if strings.TrimSpace(p.RAG.MinIO.Endpoint) != "" {
 		values = append(values,
 			credential{"rag.minio.access_key", p.RAG.MinIO.AccessKey},

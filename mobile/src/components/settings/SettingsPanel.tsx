@@ -47,8 +47,6 @@ type Props = {
   onSelectSection: (section: SettingsSection | null) => void;
   activeModel?: ModelSummary;
   activeSession?: SessionSummary;
-  assetAPIKey: string;
-  assetBaseURL: string;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
   clientToken: string;
@@ -116,8 +114,6 @@ type Props = {
   mcpReloading: boolean;
   mcpMessage: string;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
-  onAssetAPIKeyChange: (value: string) => void;
-  onAssetBaseURLChange: (value: string) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetContextWindowK: (windowK: number) => void;
@@ -217,8 +213,6 @@ export function SettingsPanel({
   onSelectSection,
   activeModel,
   activeSession,
-  assetAPIKey,
-  assetBaseURL,
   bindCode,
   buttonFeedback,
   clientToken,
@@ -283,8 +277,6 @@ export function SettingsPanel({
   onRefreshPlugins,
   onReloadPlugins,
   onSetPluginEnabled,
-  onAssetAPIKeyChange,
-  onAssetBaseURLChange,
   onRelayURLChange,
   onSetAgentMode,
   onSetContextWindowK,
@@ -677,31 +669,8 @@ export function SettingsPanel({
         style={styles.input}
         value={relayURL}
       />
-      <TextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        onChangeText={onAssetBaseURLChange}
-        placeholder="资源服务地址，例如 https://assets.mikasa.wiki"
-        placeholderTextColor={palette.ink4}
-        style={styles.input}
-        value={assetBaseURL}
-      />
-      <TextInput
-        accessibilityLabel="Asset API Key"
-        autoCapitalize="none"
-        autoComplete="off"
-        autoCorrect={false}
-        onChangeText={onAssetAPIKeyChange}
-        placeholder="独立的 Asset API Key"
-        placeholderTextColor={palette.ink4}
-        secureTextEntry
-        style={styles.input}
-        value={assetAPIKey}
-      />
       <Text style={styles.settingMeta}>
-        {assetBaseURL.trim()
-          ? "已配置资源服务地址，可用于在对话中发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"
-          : "提示：配置「资源服务地址」与 Asset API Key 后，即可在对话「+」菜单里发送手机本地文件或截图图片；Asset API Key 仅本次运行保存，重启后需重新输入。"}
+        配对并连接后，即可在对话「+」菜单中上传手机本地文件或图片，单个文件最大 50 MiB。
       </Text>
       <View style={styles.row}>
         <TextInput
@@ -1257,7 +1226,7 @@ export function SettingsPanel({
           </Text>
 
           <Text style={styles.activeHeroMeta}>
-            {activeModel ? modelDisplayName(activeModel) : activeSession?.model || "默认模型"} · {activePermission === "ask" ? "询问授权" : activePermission === "readonly" ? "只读保护" : "完全开放"} · {activeSession?.context_window_k || currentWindowK}K 窗口
+            {activeModel ? modelDisplayName(activeModel) : activeSession?.model || "默认模型"} · {permissionModeLabel(activePermission)} · {activeSession?.context_window_k || currentWindowK}K 窗口
             {activeSession?.usage?.total_tokens !== undefined ? ` · ${formatTokenCount(activeSession.usage.total_tokens)} 令牌` : ""}
           </Text>
 
@@ -1901,7 +1870,7 @@ export function SettingsPanel({
                 }
               >
                 <View style={styles.flex}>
-                  <View style={styles.row}>
+                  <View style={[styles.row, { flexWrap: "wrap" }]}>
                     <Feather color={palette.ink1} name={item.icon} size={14} />
                     <Text style={styles.permissionCardTitle}>
                       {item.label}
@@ -1971,7 +1940,7 @@ export function SettingsPanel({
         <>
           <View style={styles.controlBlock}>
             <View style={styles.controlHeader}>
-              <View style={styles.flex}>
+              <View style={[styles.flex, { minWidth: 200 }]}>
                 <Text style={styles.controlTitle}>Jev 意图分类配置</Text>
                 <Text style={styles.settingMeta}>
                   配置远程 Jev 服务地址、密钥、模型与置信度阈值；支持直接使用尚未保存的表单值进行“测试连接”。
@@ -2112,8 +2081,8 @@ export function SettingsPanel({
         </View>
 
         {/* Confidence Thresholds */}
-        <View style={[styles.row, styles.generationDefaultsRow]}>
-          <View style={[styles.generationField, styles.flex, styles.generationDefaultsInput]}>
+        <View style={wideLayout ? [styles.row, styles.generationDefaultsRow] : styles.sectionStack}>
+          <View style={[styles.generationField, wideLayout && styles.flex]}>
             <View style={styles.generationFieldHeader}>
               <Text style={styles.generationLabel}>规划阈值 (plan_confidence)</Text>
               <Text style={styles.generationMeta}>默认 0.55</Text>
@@ -2131,11 +2100,11 @@ export function SettingsPanel({
               value={intentPlanConfidence}
             />
             <Text style={styles.generationMeta}>
-              implementation 置信度 ≥ 该值时先生成计划 (plan_only)
+              置信度 ≥ 该值时先生成计划 (plan_only)
             </Text>
           </View>
 
-          <View style={[styles.generationField, styles.flex, styles.generationDefaultsInput]}>
+          <View style={[styles.generationField, wideLayout && styles.flex]}>
             <View style={styles.generationFieldHeader}>
               <Text style={styles.generationLabel}>直执阈值 (execute_confidence)</Text>
               <Text style={styles.generationMeta}>默认 0.85</Text>
@@ -2250,8 +2219,8 @@ export function SettingsPanel({
 
       {/* 判断记录列表与详情 (Intent Traces) */}
       <View style={styles.controlBlock}>
-        <View style={styles.sectionHeaderRow}>
-          <View style={styles.flex}>
+        <View style={styles.sectionStack}>
+          <View>
             <Text style={styles.controlTitle}>判断记录 (Intent Traces)</Text>
             <Text style={styles.settingMeta}>
               展示每次 Jev 请求的时间、状态、会话/请求 ID、路由决策、置信度与 HTTP 状态；点击记录可请求并查看完整 request_body 与 response_body。
@@ -3487,7 +3456,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     borderRadius: radius.md - 2,
     borderWidth: 1,
     flexGrow: 1,
-    minWidth: 132,
+    minWidth: 240,
     padding: 10,
   },
   modelInfoButton: {
@@ -3595,8 +3564,10 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   skillPath: {
     color: palette.ink2,
+    flexShrink: 1,
     fontSize: font.caption,
     fontWeight: weight.regular,
+    minWidth: 0,
   },
   controlBlock: {
     backgroundColor: palette.surface1,
@@ -3609,6 +3580,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   controlHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     justifyContent: "space-between",
   },
@@ -3628,15 +3600,19 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   generationFieldHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
     justifyContent: "space-between",
   },
   generationLabel: {
     color: palette.ink1,
+    flexShrink: 1,
     fontSize: font.body,
     fontWeight: weight.semibold,
   },
   generationEffective: {
     color: palette.info,
+    flexShrink: 1,
     fontSize: font.label,
     fontWeight: weight.semibold,
   },
@@ -3647,6 +3623,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   generationInput: {
     flex: 1,
+    minWidth: 0,
   },
   inheritButton: {
     alignItems: "center",
@@ -3664,6 +3641,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   generationMeta: {
     color: palette.ink2,
+    flexShrink: 1,
     fontSize: font.caption,
     fontWeight: weight.regular,
   },
@@ -3801,6 +3779,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   contextSummaryHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     justifyContent: "space-between",
   },
@@ -3828,6 +3807,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   checkpointHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     justifyContent: "space-between",
   },
@@ -3869,11 +3849,13 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   compactHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     justifyContent: "space-between",
   },
   compactTitle: {
     color: palette.ink1,
+    flexShrink: 1,
     fontSize: font.body,
     fontWeight: weight.semibold,
   },
@@ -3939,6 +3921,8 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   sectionHeaderRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
     justifyContent: "space-between",
     marginBottom: 4,
   },
@@ -3988,6 +3972,8 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   activeHeroTopRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     justifyContent: "space-between",
   },
   activeTagRow: {
@@ -4078,7 +4064,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     borderRadius: radius.md - 2,
     borderWidth: 1,
     flexGrow: 1,
-    minWidth: 120,
+    minWidth: 136,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -4110,6 +4096,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   planSummaryHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     justifyContent: "space-between",
   },
@@ -4258,6 +4245,8 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
     justifyContent: "space-between",
     padding: 14,
   },
@@ -4268,6 +4257,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   permissionCardTitle: {
     color: palette.ink1,
+    flexShrink: 1,
     fontSize: font.body,
     fontWeight: weight.semibold,
   },
@@ -4282,7 +4272,6 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     borderRadius: radius.xs,
     paddingHorizontal: 5,
     paddingVertical: 1,
-    marginLeft: 6,
   },
   recommendBadgeText: {
     color: palette.brandLight,
@@ -4334,7 +4323,6 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     borderColor: palette.hairline,
     borderRadius: radius.xs,
     borderWidth: 1,
-    marginLeft: 6,
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
@@ -4468,6 +4456,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   intentTraceFooterRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     justifyContent: "space-between",
   },

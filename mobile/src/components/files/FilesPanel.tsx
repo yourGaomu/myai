@@ -6,6 +6,7 @@ import type { AssetSummary, ChangeEntry, FileEntry, FileReadResultPayload } from
 import type { ButtonFeedback } from "../../types/ui";
 import { copyToClipboard } from "../../utils/clipboard";
 import { formatBytes, formatShortTime } from "../../utils/format";
+import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { useListStyles } from "../common/listStyles";
@@ -177,7 +178,7 @@ export function FilesPanel(props: Props) {
         </>
       ) : (
         <>
-          <Text style={list.hint}>本会话上传和生成的文件，点开用浏览器查看。</Text>
+          <Text style={list.hint}>本会话上传和生成的文件；有分享链接时可点开，长按复制资源标识或链接。</Text>
           <View style={list.bleed}>
             {filteredAssets.length === 0 ? (
               props.pendingAssets ? (
@@ -188,24 +189,27 @@ export function FilesPanel(props: Props) {
                 </Text>
               )
             ) : (
-              filteredAssets.map((asset, index) => (
-                <Fragment key={asset.id || asset.short_url}>
-                  {index > 0 ? <View style={list.divider} /> : null}
-                  <Row
-                    icon={(asset.content_type || "").startsWith("image/") ? "image" : "file"}
-                    onLongPress={() => void handleCopyPath(asset.short_url)}
-                    onPress={() => void Linking.openURL(asset.short_url)}
-                    sub={[
-                      asset.size !== undefined ? formatBytes(asset.size) : "",
-                      asset.created_at ? formatShortTime(asset.created_at) : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    title={asset.file_name || asset.path || "共享文件"}
-                    trailing="external-link"
-                  />
-                </Fragment>
-              ))
+              filteredAssets.map((summary, index) => {
+                const asset = assetSummaryToSharedAsset(summary);
+                const copyValue = asset.shortURL || asset.assetID;
+                return (
+                  <Fragment key={summary.id || asset.assetID}>
+                    {index > 0 ? <View style={list.divider} /> : null}
+                    <Row
+                      icon={(asset.contentType || "").startsWith("image/") ? "image" : "file"}
+                      onLongPress={() => void handleCopyPath(copyValue)}
+                      onPress={() => asset.shortURL ? void Linking.openURL(asset.shortURL) : void handleCopyPath(asset.assetID)}
+                      sub={[
+                        asset.size !== undefined ? formatBytes(asset.size) : "",
+                        summary.created_at ? formatShortTime(summary.created_at) : "",
+                        asset.shortURL ? "" : "已上传 · 长按复制资源标识",
+                      ].filter(Boolean).join(" · ")}
+                      title={asset.fileName || asset.path || "共享文件"}
+                      trailing={asset.shortURL ? "external-link" : "file"}
+                    />
+                  </Fragment>
+                );
+              })
             )}
           </View>
         </>

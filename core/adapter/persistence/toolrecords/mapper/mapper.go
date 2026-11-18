@@ -33,6 +33,10 @@ func (m Mapper) AssetRecords(assets []domaintool.SharedAsset) []repository.Asset
 		}
 		records = append(records, repository.AssetRecord{
 			ID:          id,
+			AssetID:     asset.AssetID,
+			BusinessID:  asset.BusinessID,
+			Checksum:    asset.Checksum,
+			MaxVisits:   asset.MaxVisits,
 			SessionID:   asset.SessionID,
 			RequestID:   asset.RequestID,
 			ToolCallID:  asset.ToolCallID,

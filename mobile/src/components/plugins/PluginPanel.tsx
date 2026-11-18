@@ -71,13 +71,13 @@ export function PluginPanel({ buttonFeedback, message, onRefresh, onReload, onSe
 const createStyles = ({ font, palette }: AppTheme) =>
   StyleSheet.create({
     stack: { gap: 10 },
-    headerCard: { alignItems: "center", backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
+    headerCard: { alignItems: "center", backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", flexWrap: "wrap", gap: 10, padding: 12 },
     card: { alignItems: "center", backgroundColor: palette.surface1, borderColor: palette.hairline, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12 },
     flex: { flex: 1, minWidth: 0 },
     title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold },
     name: { color: palette.ink1, flexShrink: 1, fontSize: font.body, fontWeight: weight.semibold },
     meta: { color: palette.ink2, fontSize: font.label, marginTop: 3 },
-    nameRow: { alignItems: "center", flexDirection: "row", gap: 8 },
+    nameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
     badge: { backgroundColor: palette.okWash, borderRadius: radius.sm, color: palette.ok, fontSize: font.micro, paddingHorizontal: 6, paddingVertical: 2, textTransform: "uppercase" },
     badgeFailed: { backgroundColor: palette.errWash, color: palette.err },
     error: { color: palette.err, fontSize: font.label, marginTop: 5 },

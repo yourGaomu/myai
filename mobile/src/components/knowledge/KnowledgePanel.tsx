@@ -42,6 +42,8 @@ export type KnowledgePanelProps = {
   onSetRAG: (settings: RAGSettings) => boolean;
   onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
   onUploadDocument: () => void;
+  onCancelUpload: () => void;
+  uploadingDocument: boolean;
   pendingKnowledge: boolean;
   pendingSettings: boolean;
   profiles: KnowledgeIndexProfile[];
@@ -73,6 +75,8 @@ export function KnowledgePanel({
   onSetRAG,
   onUpdateKnowledgeBase,
   onUploadDocument,
+  onCancelUpload,
+  uploadingDocument,
   pendingKnowledge,
   pendingSettings,
   profiles,
@@ -263,9 +267,11 @@ export function KnowledgePanel({
           <View style={styles.docPanelHeader}>
             <Text style={styles.docPanelTitle}>已索引文档</Text>
             <Pressable
-              disabled={pendingKnowledge}
+              disabled={pendingKnowledge && !uploadingDocument}
               onPress={() => {
-                if (selectedBase) {
+                if (uploadingDocument) {
+                  onCancelUpload();
+                } else if (selectedBase) {
                   onUploadDocument();
                 } else if (sortedBases.length > 0) {
                   selectBase(sortedBases[0].id);
@@ -276,12 +282,12 @@ export function KnowledgePanel({
               }}
               style={({ pressed }) =>
                 buttonFeedback(
-                  [styles.uploadDocBtn, pendingKnowledge && styles.disabledButton],
+                  [styles.uploadDocBtn, pendingKnowledge && !uploadingDocument && styles.disabledButton],
                   pressed,
                 )
               }
             >
-              <Text style={styles.uploadDocBtnText}>上传文档</Text>
+              <Text style={styles.uploadDocBtnText}>{uploadingDocument ? "取消上传" : "上传文档"}</Text>
             </Pressable>
           </View>
 
@@ -1343,12 +1349,15 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     protoSectionHeader: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
       marginBottom: 4,
       paddingHorizontal: 2,
     },
     protoSectionTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.title,
       fontWeight: weight.semibold,
     },
@@ -1481,11 +1490,14 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     docPanelHeader: {
       alignItems: "center",
       flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
       justifyContent: "space-between",
       paddingBottom: 4,
     },
     docPanelTitle: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.body,
       fontWeight: weight.semibold,
     },
@@ -1528,6 +1540,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       flex: 1,
       gap: 3,
       marginRight: 8,
+      minWidth: 0,
     },
     docTitle: {
       color: palette.ink1,
@@ -1542,6 +1555,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     docActions: {
       alignItems: "center",
       flexDirection: "row",
+      flexShrink: 0,
       gap: 6,
     },
     docStatusBadge: {

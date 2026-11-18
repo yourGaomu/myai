@@ -389,6 +389,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	return service.ChatDependencies{
 		ContinuationControl: continuationControl,
 		FlushPersistence:    sessionQueue.Flush,
+		RecordUploadedAsset: uploadedAssetRecorder(configuration, sessionQueue),
 		BlockSession:        sessionQueue.BlockSession,
 		ResumeSession:       sessionQueue.ResumeSession,
 		Models:              configuration.Models,

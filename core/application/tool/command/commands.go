@@ -53,6 +53,7 @@ type Permission struct {
 	WorkspaceRoot       string
 	Isolated            bool
 	RequireConfirmation bool
+	ExplicitApproval    bool
 	Ask                 PermissionAskFunc
 }
 

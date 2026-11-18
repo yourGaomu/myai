@@ -72,6 +72,7 @@ import type { PendingAction, PermissionState, UserQuestionState } from "../types
 import { shortID } from "../utils/ids";
 
 type Args = {
+  handleAssetUploadMessage: (message: RelayMessage) => boolean;
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (sessionID: string, message: string) => void;
   addEventMessage: (sessionID: string, message: string) => void;
@@ -238,6 +239,7 @@ type Args = {
 
 // 所有服务端协议消息都在这里收口：先按 request_id 找到目标 Session，再更新对应领域状态。
 export function useRemoteMessageHandler({
+  handleAssetUploadMessage,
   activeRequestIDRef,
   addErrorMessage,
   addEventMessage,
@@ -351,6 +353,7 @@ export function useRemoteMessageHandler({
 
   return useCallback(
     (message: RelayMessage) => {
+      if (handleAssetUploadMessage(message)) return;
       // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
       switch (message.type) {
         case "user_message_queued": {
@@ -1225,6 +1228,7 @@ export function useRemoteMessageHandler({
       }
     },
     [
+      handleAssetUploadMessage,
       activeRequestIDRef,
       addErrorMessage,
       addEventMessage,

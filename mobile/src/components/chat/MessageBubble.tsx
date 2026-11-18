@@ -6,7 +6,7 @@ import { font, radius } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import type { ChatItem } from "../../types/chat";
 import { copyToClipboard } from "../../utils/clipboard";
-import { parseSharedAsset } from "../../utils/toolAssets";
+import { parseSharedAssets } from "../../utils/toolAssets";
 import { toolIcon, toolKind } from "../../utils/toolDisplay";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { CharacterAvatar } from "../common/CharacterAvatar";
@@ -27,8 +27,8 @@ export function MessageBubble({ buttonFeedback, hideReasoning = false, message, 
   const { palette } = useAppTheme();
   const styles = useChatStyles();
   const local = useThemedStyles(makeLocalStyles);
-  const sharedAsset = parseSharedAsset(message.toolName, message.text);
-  const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || Boolean(sharedAsset)));
+  const sharedAssets = parseSharedAssets(message.toolName, message.text);
+  const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || sharedAssets.length > 0));
   const [copied, setCopied] = useState(false);
 
   const canRegenerate = message.role === "assistant" && (message.status === "paused" || message.status === "error");
@@ -75,8 +75,8 @@ export function MessageBubble({ buttonFeedback, hideReasoning = false, message, 
             {message.text ? (
               <View style={styles.toolSection}>
                 <Text style={[styles.toolSectionTitle, failed && styles.toolErrorText]}>{failed ? "错误" : "返回"}</Text>
-                {sharedAsset && !failed ? (
-                  <SharedAssetCard asset={sharedAsset} buttonFeedback={buttonFeedback} />
+                {sharedAssets.length > 0 && !failed ? (
+                  sharedAssets.map((asset) => <SharedAssetCard key={asset.assetID} asset={asset} buttonFeedback={buttonFeedback} />)
                 ) : (
                   <Text selectable style={[styles.toolCode, failed && styles.toolErrorText]}>{message.text}</Text>
                 )}

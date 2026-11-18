@@ -6,40 +6,34 @@ import (
 	"errors"
 	"strings"
 
-	"myai/core/asset"
-	"myai/core/asset/parser"
+	"myai/core/adapter/documentparser"
+	"myai/core/port/files"
 	tooldef "myai/core/tool/tool"
 )
 
 const defaultReadAssetMaxBytes = 10 * 1024 * 1024
 
-type assetDownloader interface {
-	DownloadAsset(ctx context.Context, request asset.DownloadAssetRequest) (asset.DownloadAssetResponse, error)
-}
-
 type ReadAssetTool struct {
-	downloader assetDownloader
+	files files.Service
 }
 
 type readAssetArgs struct {
-	URL      string `json:"url"`
-	Code     string `json:"code"`
+	AssetID  string `json:"asset_id"`
 	MaxBytes int64  `json:"max_bytes"`
 	MaxChars int    `json:"max_chars"`
 }
 
 type readAssetResult struct {
-	URL         string        `json:"url"`
-	Code        string        `json:"code"`
-	FileName    string        `json:"file_name,omitempty"`
-	ContentType string        `json:"content_type,omitempty"`
-	Size        int64         `json:"size,omitempty"`
-	Truncated   bool          `json:"truncated"`
-	Parsed      parser.Result `json:"parsed"`
+	AssetID     string                `json:"asset_id"`
+	FileName    string                `json:"file_name,omitempty"`
+	ContentType string                `json:"content_type,omitempty"`
+	Size        int64                 `json:"size,omitempty"`
+	Truncated   bool                  `json:"truncated"`
+	Parsed      documentparser.Result `json:"parsed"`
 }
 
-func NewReadAssetToolWithDownloader(downloader assetDownloader) *ReadAssetTool {
-	return &ReadAssetTool{downloader: downloader}
+func NewReadAssetToolWithFiles(service files.Service) *ReadAssetTool {
+	return &ReadAssetTool{files: service}
 }
 
 func (t *ReadAssetTool) Name() string {
@@ -47,30 +41,27 @@ func (t *ReadAssetTool) Name() string {
 }
 
 func (t *ReadAssetTool) Description() string {
-	return "Download and parse a file previously uploaded to the configured asset short-link service. Use this when the user uploads a mobile file or provides an uploaded_file short_url."
+	return "Download and parse an uploaded file through the configured MCP files service. Use the asset_id returned by file upload or share_file."
 }
 
 func (t *ReadAssetTool) Schema() any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"url": map[string]any{
+			"asset_id": map[string]any{
 				"type":        "string",
-				"description": "The asset short URL, usually from an uploaded_file short_url field.",
-			},
-			"code": map[string]any{
-				"type":        "string",
-				"description": "Optional short-link code. Use this instead of url when only the code is known.",
+				"description": "The asset ID returned by file upload or share_file.",
 			},
 			"max_bytes": map[string]any{
 				"type":        "integer",
-				"description": "Maximum bytes to download. Defaults to 10MB and is capped by the configured asset client.",
+				"description": "Maximum bytes to download. Defaults to 10MB and is capped by the files service.",
 			},
 			"max_chars": map[string]any{
 				"type":        "integer",
 				"description": "Maximum text characters to return after parsing. Defaults to 12000.",
 			},
 		},
+		"required": []string{"asset_id"},
 	}
 }
 
@@ -79,27 +70,25 @@ func (t *ReadAssetTool) Permission() tooldef.Permission {
 }
 
 func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	if t.downloader == nil {
-		return tooldef.ToolOutput{}, errors.New("asset short-link service is not configured; set asset.shortener_base_url")
+	if t.files == nil {
+		return tooldef.ToolOutput{}, errors.New("MCP files service is not configured")
 	}
 	input, err := normalizeReadAssetArgs(args)
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
 
-	// 下载与内容解析分离：Asset Client 处理短链接，parser 根据文件类型提取可供模型阅读的文本。
-	download, err := t.downloader.DownloadAsset(ctx, asset.DownloadAssetRequest{
-		URL:      input.URL,
-		Code:     input.Code,
+	download, err := t.files.Download(ctx, files.DownloadRequest{
+		AssetID:  input.AssetID,
 		MaxBytes: input.MaxBytes,
 	})
 	if err != nil {
 		return tooldef.ToolOutput{}, err
 	}
 
-	parsed := parser.Parse(ctx, parser.Request{
-		FileName:    download.FileName,
-		ContentType: download.ContentType,
+	parsed := documentparser.Parse(ctx, documentparser.Request{
+		FileName:    download.Asset.FileName,
+		ContentType: download.Asset.ContentType,
 		Data:        download.Data,
 		MaxChars:    input.MaxChars,
 	})
@@ -109,13 +98,15 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 	}
 
 	result := readAssetResult{
-		URL:         download.URL,
-		Code:        download.Code,
-		FileName:    download.FileName,
-		ContentType: download.ContentType,
-		Size:        download.Size,
+		AssetID:     download.Asset.AssetID,
+		FileName:    download.Asset.FileName,
+		ContentType: download.Asset.ContentType,
+		Size:        download.Asset.Size,
 		Truncated:   download.Truncated || parsed.Truncated,
 		Parsed:      parsed,
+	}
+	if result.AssetID == "" {
+		result.AssetID = input.AssetID
 	}
 
 	output, err := json.MarshalIndent(result, "", "  ")
@@ -130,23 +121,22 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 func normalizeReadAssetArgs(args json.RawMessage) (readAssetArgs, error) {
 	input := readAssetArgs{
 		MaxBytes: defaultReadAssetMaxBytes,
-		MaxChars: parser.DefaultMaxTextChars,
+		MaxChars: documentparser.DefaultMaxTextChars,
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &input); err != nil {
 			return readAssetArgs{}, err
 		}
 	}
-	input.URL = strings.TrimSpace(input.URL)
-	input.Code = strings.TrimSpace(input.Code)
-	if input.URL == "" && input.Code == "" {
-		return readAssetArgs{}, errors.New("url or code is required")
+	input.AssetID = strings.TrimSpace(input.AssetID)
+	if input.AssetID == "" {
+		return readAssetArgs{}, errors.New("asset_id is required")
 	}
 	if input.MaxBytes <= 0 {
 		input.MaxBytes = defaultReadAssetMaxBytes
 	}
 	if input.MaxChars <= 0 {
-		input.MaxChars = parser.DefaultMaxTextChars
+		input.MaxChars = documentparser.DefaultMaxTextChars
 	}
 	return input, nil
 }

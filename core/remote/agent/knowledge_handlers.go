@@ -144,7 +144,7 @@ func (a *Agent) handleKnowledgeDocumentIngest(ctx context.Context, conn *websock
 		return fmt.Errorf("decode knowledge document ingest failed: %w", err)
 	}
 	return a.mutateKnowledgeDocuments(ctx, conn, message, payload.KnowledgeBaseID, "Document accepted for indexing.", func() error {
-		_, err := a.knowledgeService.IngestDocument(ctx, documentcommand.Ingest{KnowledgeBaseID: payload.KnowledgeBaseID, URL: payload.URL, Code: payload.Code})
+		_, err := a.knowledgeService.IngestDocument(ctx, documentcommand.Ingest{KnowledgeBaseID: payload.KnowledgeBaseID, AssetID: payload.AssetID})
 		return err
 	})
 }
