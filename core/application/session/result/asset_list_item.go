@@ -4,6 +4,10 @@ import "time"
 
 type AssetListItem struct {
 	ID          string
+	AssetID     string
+	BusinessID  string
+	Checksum    string
+	MaxVisits   int64
 	SessionID   string
 	RequestID   string
 	ToolCallID  string

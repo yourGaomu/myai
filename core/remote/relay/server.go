@@ -241,6 +241,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		return
 	}
 	defer conn.Close()
+	if role == "client" {
+		// Cap allocation before decoding hostile mobile JSON. Uploads have the
+		// tighter 512 KiB frame limit checked below, including whitespace.
+		conn.SetReadLimit(8 * 1024 * 1024)
+	}
 	peer := newPeer(conn)
 	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 	conn.SetPongHandler(func(string) error {
@@ -282,7 +287,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 	for {
 		// Relay 保持业务消息原样，只在注册连接和路由失败时生成自己的 ack/error。
 		var message protocol.Message
-		if err := conn.ReadJSON(&message); err != nil {
+		_, raw, readErr := conn.ReadMessage()
+		if readErr == nil {
+			readErr = json.Unmarshal(raw, &message)
+		}
+		if err := readErr; err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				return
 			}
@@ -294,6 +303,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		// Count any valid message as activity as well, so an active heartbeat or
 		// request cannot be closed by the read deadline while its Pong is delayed.
 		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+
+		if role == "client" && protocol.IsAssetUploadRequest(message.Type) && len(raw) > protocol.AssetUploadMaxJSONBytes {
+			if err := writeError(peer, message, "upload JSON exceeds 524288 bytes"); err != nil {
+				return
+			}
+			continue
+		}
 
 		log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
 		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, authenticatedAgent, &agentUserID, &agentDeviceID); err != nil {
@@ -372,10 +388,14 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 	case protocol.TypePermissionResult:
 		return s.forwardControlReply(message)
 	case protocol.TypeError:
-		var payload struct { RequestType protocol.MessageType `json:"request_type"` }
+		var payload struct {
+			RequestType protocol.MessageType `json:"request_type"`
+		}
 		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
 			return s.forwardControlReply(message)
 		}
+		return s.forwardToClient(message)
+	case protocol.TypeAssetUploadResult:
 		return s.forwardToClient(message)
 	case protocol.TypeUserQuestionListResult:
 		return s.forwardToClient(message)
@@ -444,6 +464,22 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
+	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
+		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
+			return fmt.Errorf("client token is invalid or expired")
+		}
+		if err := protocol.ValidateAssetUploadMessage(message); err != nil {
+			return err
+		}
+		if !s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr) {
+			return fmt.Errorf("client request id is already owned by another client: request=%s", message.RequestID)
+		}
+		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
+		if err := s.forwardToAgent(message); err != nil {
+			s.unregisterClient(message.RequestID)
+			return err
+		}
+		return nil
 	case protocol.TypeHeartbeat:
 		// Heartbeats also keep an idle mobile connection registered for push-style
 		// events (for example subagent_task_event).  Validate the paired identity
@@ -504,7 +540,9 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 	}
 	terminal := isTerminalResponseForRequest(client.RequestType, message.Type)
 	if message.Type == protocol.TypeError {
-		var payload struct { RequestType protocol.MessageType `json:"request_type"` }
+		var payload struct {
+			RequestType protocol.MessageType `json:"request_type"`
+		}
 		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
 			terminal = false
 		}
@@ -516,7 +554,9 @@ func (s *Server) forwardToClient(message protocol.Message) error {
 }
 
 func (s *Server) forwardEventToClients(message protocol.Message) error {
-	if err := s.rememberInteraction(message); err != nil { return err }
+	if err := s.rememberInteraction(message); err != nil {
+		return err
+	}
 	peers := s.getClientConnections(message.UserID, message.DeviceID)
 	if len(peers) == 0 {
 		return nil
@@ -615,6 +655,8 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypeMCPReloadResult
 	case protocol.TypePluginEnable, protocol.TypePluginDisable:
 		return responseType == protocol.TypePluginMutationResult
+	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
+		return responseType == protocol.TypeAssetUploadResult
 	case protocol.TypeAssetList:
 		return responseType == protocol.TypeAssetListResult
 	case protocol.TypeKnowledgeCatalogList:
@@ -733,8 +775,8 @@ func writeError(p *peer, received protocol.Message, text string) error {
 		struct {
 			protocol.ErrorPayload
 			RequestType protocol.MessageType `json:"request_type"`
-			ApprovalID string `json:"approval_id,omitempty"`
-			QuestionID string `json:"question_id,omitempty"`
+			ApprovalID  string               `json:"approval_id,omitempty"`
+			QuestionID  string               `json:"question_id,omitempty"`
 		}{ErrorPayload: protocol.ErrorPayload{Message: text}, RequestType: received.Type, ApprovalID: controlReplyID(received, "approval_id"), QuestionID: controlReplyID(received, "question_id")},
 	)
 	if err != nil {

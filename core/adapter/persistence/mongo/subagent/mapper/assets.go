@@ -12,7 +12,9 @@ func taskAssetDocuments(assets []domaintool.SharedAsset) []sharedpo.AssetDocumen
 	items := make([]sharedpo.AssetDocument, 0, len(assets))
 	for _, asset := range assets {
 		items = append(items, sharedpo.AssetDocument{
-			ID: asset.ID, SessionID: asset.SessionID, RequestID: asset.RequestID,
+			ID: asset.ID, AssetID: asset.AssetID, BusinessID: asset.BusinessID,
+			Checksum: asset.Checksum, MaxVisits: asset.MaxVisits,
+			SessionID: asset.SessionID, RequestID: asset.RequestID,
 			ToolCallID: asset.ToolCallID, ToolName: asset.ToolName, LocalPath: asset.LocalPath,
 			FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
 			ShortURL: asset.ShortURL, ShortCode: asset.ShortCode,
@@ -29,7 +31,9 @@ func taskAssetDomains(documents []sharedpo.AssetDocument) []domaintool.SharedAss
 	items := make([]domaintool.SharedAsset, 0, len(documents))
 	for _, asset := range documents {
 		items = append(items, domaintool.SharedAsset{
-			ID: asset.ID, SessionID: asset.SessionID, RequestID: asset.RequestID,
+			ID: asset.ID, AssetID: asset.AssetID, BusinessID: asset.BusinessID,
+			Checksum: asset.Checksum, MaxVisits: asset.MaxVisits,
+			SessionID: asset.SessionID, RequestID: asset.RequestID,
 			ToolCallID: asset.ToolCallID, ToolName: asset.ToolName, LocalPath: asset.LocalPath,
 			FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
 			ShortURL: asset.ShortURL, ShortCode: asset.ShortCode,

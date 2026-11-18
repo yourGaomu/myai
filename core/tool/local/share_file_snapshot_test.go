@@ -21,7 +21,7 @@ func TestSnapshotArtifactStillRequiresPublicationConsentAndCanUpload(t *testing.
 		t.Fatal(err)
 	}
 	uploader := &fakeAssetUploader{}
-	tool := NewShareFileToolWithWorkspaceAndUploader(workspace, uploader)
+	tool := NewShareFileToolWithWorkspaceAndFiles(workspace, uploader)
 	for _, path := range []string{"report.txt", filepath.Join(workspace, "report.txt")} {
 		raw, _ := json.Marshal(map[string]string{"path": path})
 		command := toolcommand.Permission{Name: tool.Name(), Arguments: string(raw), Permission: tool.Permission(), Mode: session.PermissionModeFull, WorkspaceRoot: workspace}

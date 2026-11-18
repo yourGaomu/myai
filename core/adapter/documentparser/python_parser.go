@@ -1,4 +1,4 @@
-package parser
+package documentparser
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func parsePython(ctx context.Context, fileType string, filePath string, request 
 	timeoutCtx, cancel := context.WithTimeout(ctx, defaultPythonParserTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, pythonBinary(), scriptPath)
+	cmd := exec.CommandContext(timeoutCtx, pythonBinary(), "-I", scriptPath)
 	cmd.Stdin = bytes.NewReader(payload)
 
 	var stdout bytes.Buffer

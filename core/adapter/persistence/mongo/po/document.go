@@ -101,6 +101,10 @@ type ToolCallReferenceDocument struct {
 
 type AssetDocument struct {
 	ID          string     `bson:"_id"`
+	AssetID     string     `bson:"asset_id,omitempty"`
+	BusinessID  string     `bson:"business_id,omitempty"`
+	Checksum    string     `bson:"checksum,omitempty"`
+	MaxVisits   int64      `bson:"max_visits,omitempty"`
 	SessionID   string     `bson:"session_id"`
 	RequestID   string     `bson:"request_id,omitempty"`
 	ToolCallID  string     `bson:"tool_call_id,omitempty"`
@@ -109,7 +113,7 @@ type AssetDocument struct {
 	FileName    string     `bson:"file_name,omitempty"`
 	ContentType string     `bson:"content_type,omitempty"`
 	Size        int64      `bson:"size,omitempty"`
-	ShortURL    string     `bson:"short_url"`
+	ShortURL    string     `bson:"short_url,omitempty"`
 	ShortCode   string     `bson:"short_code,omitempty"`
 	ExpiresAt   *time.Time `bson:"expires_at,omitempty"`
 	Deleted     bool       `bson:"deleted,omitempty"`

@@ -290,7 +290,7 @@ func TestProductionCodeDoesNotImportLegacyPackages(t *testing.T) {
 }
 
 func isLegacyImportPath(importPath string) bool {
-	if strings.HasPrefix(importPath, "myai/core/store/") || strings.HasPrefix(importPath, "myai/utills") {
+	if strings.HasPrefix(importPath, "myai/core/store/") || strings.HasPrefix(importPath, "myai/utills") || importPath == "myai/core/asset" || strings.HasPrefix(importPath, "myai/core/asset/") {
 		return true
 	}
 	switch importPath {

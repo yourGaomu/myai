@@ -25,7 +25,7 @@ func TestShareFileRefusesProtectedPathsBeforeUploading(t *testing.T) {
 			}
 			uploader := &fakeAssetUploader{}
 			raw, _ := json.Marshal(map[string]string{"path": path})
-			if _, err := NewShareFileToolWithWorkspaceAndUploader(workspace, uploader).Call(context.Background(), raw); err == nil {
+			if _, err := NewShareFileToolWithWorkspaceAndFiles(workspace, uploader).Call(context.Background(), raw); err == nil {
 				t.Fatal("protected file was shared")
 			}
 			if uploader.request.Reader != nil {
@@ -44,7 +44,7 @@ func TestShareFileRefusesSymlinkTargetAndProtectedAlias(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	uploader := &fakeAssetUploader{}
-	tool := NewShareFileToolWithWorkspaceAndUploader(workspace, uploader)
+	tool := NewShareFileToolWithWorkspaceAndFiles(workspace, uploader)
 	if _, err := tool.Call(context.Background(), []byte(`{"path":"report.txt"}`)); err == nil {
 		t.Fatal("outside symlink was shared")
 	}

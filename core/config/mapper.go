@@ -11,7 +11,6 @@ import (
 	opensandboxadapter "myai/core/adapter/sandbox/opensandbox"
 	milvusadapter "myai/core/adapter/vectorstore/milvus"
 	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
-	"myai/core/asset"
 	generation "myai/core/domain/generation"
 	domainknowledge "myai/core/domain/knowledge"
 	domainmodel "myai/core/domain/model"
@@ -124,16 +123,6 @@ func cloneInt(value *int) *int {
 	}
 	cloned := *value
 	return &cloned
-}
-
-func (Mapper) AssetConfig(properties AssetProperties) asset.Config {
-	return asset.Config{
-		BaseURL:           properties.BaseURL,
-		APIKey:            properties.APIKey,
-		Timeout:           time.Duration(properties.UploadTimeoutSeconds) * time.Second,
-		DefaultTTLSeconds: properties.TTLSeconds,
-		DefaultMaxVisits:  properties.MaxVisits,
-	}
 }
 
 func (Mapper) MinIOConfig(properties MinIOProperties) minioadapter.Config {

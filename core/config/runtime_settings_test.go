@@ -13,7 +13,6 @@ func TestHistoryPathAndModelCapacityEnvironmentMapping(t *testing.T) {
 	t.Setenv("WORKSPACE_HISTORY_PATH", persistent)
 	t.Setenv("MYAI_CONTEXT_WINDOW_TOKENS", "128000")
 	t.Setenv("MYAI_MAX_OUTPUT_LIMIT", "16000")
-	t.Setenv("ASSET_API_KEY", "test-asset-key")
 	v := viper.New()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
@@ -23,8 +22,5 @@ func TestHistoryPathAndModelCapacityEnvironmentMapping(t *testing.T) {
 	}
 	if properties.WorkspaceHistory.Path != persistent || properties.Model.ContextWindowTokens != 128000 || properties.Model.MaxOutputLimit != 16000 {
 		t.Fatal("history path and model capacities did not use their configured environment settings")
-	}
-	if properties.Asset.APIKey != "test-asset-key" {
-		t.Fatal("asset credential did not use its explicit configuration")
 	}
 }

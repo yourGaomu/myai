@@ -46,7 +46,9 @@ func AssetListItems(records []repository.AssetRecord) []sessionresult.AssetListI
 	items := make([]sessionresult.AssetListItem, 0, len(records))
 	for _, record := range records {
 		items = append(items, sessionresult.AssetListItem{
-			ID: record.ID, SessionID: record.SessionID, RequestID: record.RequestID,
+			ID: record.ID, AssetID: record.AssetID, BusinessID: record.BusinessID,
+			Checksum: record.Checksum, MaxVisits: record.MaxVisits,
+			SessionID: record.SessionID, RequestID: record.RequestID,
 			ToolCallID: record.ToolCallID, ToolName: record.ToolName, LocalPath: record.LocalPath,
 			FileName: record.FileName, ContentType: record.ContentType, Size: record.Size,
 			ShortURL: record.ShortURL, ShortCode: record.ShortCode,

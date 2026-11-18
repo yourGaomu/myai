@@ -17,10 +17,11 @@ import (
 	adapterredis "myai/core/adapter/cache/redis"
 	generationadapter "myai/core/adapter/chat/generation"
 	grpcprocessor "myai/core/adapter/documentprocessor/grpc"
-	assetsource "myai/core/adapter/documentsource/asset"
+	shortlinkssource "myai/core/adapter/documentsource/shortlinks"
 	embeddingmemory "myai/core/adapter/embedding/memory"
 	openaiembedding "myai/core/adapter/embedding/openaicompatible"
 	localexecutor "myai/core/adapter/execution/local"
+	shortlinksfiles "myai/core/adapter/files/shortlinks"
 	contenthashid "myai/core/adapter/id/contenthash"
 	snowflakeid "myai/core/adapter/id/snowflake"
 	uuidadapter "myai/core/adapter/id/uuid"
@@ -84,7 +85,6 @@ import (
 	subagentapi "myai/core/application/subagent/api"
 	subagentcommand "myai/core/application/subagent/command"
 	subagentservice "myai/core/application/subagent/service"
-	"myai/core/asset"
 	chatcomposition "myai/core/composition/chat"
 	appconfig "myai/core/config"
 	domainmemory "myai/core/domain/memory"
@@ -96,6 +96,7 @@ import (
 	agentrunport "myai/core/port/agentrun"
 	cacheport "myai/core/port/cache"
 	executionport "myai/core/port/execution"
+	filesport "myai/core/port/files"
 	historyport "myai/core/port/history"
 	intentport "myai/core/port/intent"
 	knowledgeport "myai/core/port/knowledge"
@@ -130,7 +131,7 @@ type Application struct {
 	memoryExtractionService     *memoryextractionservice.Service
 	memoryRetrievalService      memoryretrievalapi.ContextPreparer
 	cache                       cacheport.CurrentSessionCache
-	assetClient                 *asset.Client
+	fileService                 filesport.Service
 	knowledgeBaseRepository     knowledgeport.KnowledgeBaseRepository
 	knowledgeCategoryRepository knowledgeport.KnowledgeCategoryRepository
 	documentRepository          knowledgeport.DocumentRepository
@@ -197,7 +198,7 @@ func InitApp() {
 		instance = &Application{workspace: configuredWorkspace}
 		// 初始化顺序存在依赖关系：配置和基础设施必须先于工具注册与应用服务装配。
 		instance.InitConfig()
-		instance.InitAssetClient()
+		instance.InitFileService()
 		instance.InitMongoDb()
 		instance.InitRedisDb()
 		//这里选取存储模式
@@ -519,7 +520,7 @@ func (app *Application) InitKnowledgeStorage() {
 
 func (app *Application) initKnowledgeDocumentService() {
 	objectCleanup, _ := app.documentObjectStore.(knowledgeport.UncommittedDocumentObjectCleaner)
-	if app.indexingService == nil || app.assetClient == nil || app.documentObjectStore == nil || objectCleanup == nil || app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.chunkRepository == nil || app.indexingJobRepository == nil || app.indexingStateRepository == nil {
+	if app.indexingService == nil || app.fileService == nil || app.documentObjectStore == nil || objectCleanup == nil || app.knowledgeBaseRepository == nil || app.documentRepository == nil || app.chunkRepository == nil || app.indexingJobRepository == nil || app.indexingStateRepository == nil {
 		return
 	}
 	ids, err := snowflakeid.New(app.properties.RAG.IDNode)
@@ -532,7 +533,7 @@ func (app *Application) initKnowledgeDocumentService() {
 		Chunks:         app.chunkRepository,
 		Objects:        app.documentObjectStore,
 		ObjectCleanup:  objectCleanup,
-		Sources:        assetsource.Source{Client: app.assetClient},
+		Sources:        shortlinkssource.Source{Client: app.fileService},
 		Indexing:       app.indexingService,
 		Jobs:           app.indexingJobRepository,
 		States:         app.indexingStateRepository,
@@ -678,17 +679,12 @@ func (app *Application) InitCache() {
 	app.cache = adapterredis.NewCurrentSessionCache(app.redisDb)
 }
 
-func (app *Application) InitAssetClient() {
-	properties := app.properties.Asset
-	if properties.BaseURL == "" {
-		return
-	}
+func (app *Application) InitFileService() {
+	app.fileService = shortlinksfiles.New(func() *mcp.Manager { return app.mcpManager })
+}
 
-	client, err := asset.NewClient((appconfig.Mapper{}).AssetConfig(properties))
-	if err != nil {
-		panic(fmt.Errorf("init asset client failed: %w", err))
-	}
-	app.assetClient = client
+func (app *Application) GetFileService() filesport.Service {
+	return app.fileService
 }
 
 func (app *Application) InitThreadPool() {
@@ -991,6 +987,9 @@ func (app *Application) CloseContext(ctx context.Context) error {
 	if app.outboxJournal != nil {
 		errs = append(errs, closeResource("persistence journal", app.outboxJournal.Close))
 	}
+	if closer, ok := app.fileService.(interface{ Close() error }); ok {
+		errs = append(errs, closeResource("files", closer.Close))
+	}
 	if app.pluginManager != nil {
 		errs = append(errs, closeResource("plugins", app.pluginManager.Close))
 	}
@@ -1196,10 +1195,8 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 		local.NewAskUserTool(),
 	}
-	if app.assetClient != nil {
-		localTools = append(localTools, local.NewReadAssetToolWithDownloader(app.assetClient))
-		localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndUploader(app.workspace, app.assetClient))
-	}
+	localTools = append(localTools, local.NewReadAssetToolWithFiles(app.fileService))
+	localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndFiles(app.workspace, app.fileService))
 	if app.knowledgeSearchService != nil {
 		localTools = append(localTools, local.NewKnowledgeSearchTool(app.knowledgeSearchService))
 	}

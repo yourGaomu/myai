@@ -434,21 +434,21 @@ type AgentRunCompletedPayload struct {
 // BackgroundTurnEventPayload is an unsolicited session-scoped event. TurnID
 // identifies a new continuation, never the foreground request that spawned it.
 type BackgroundTurnEventPayload struct {
-	TurnID    string         `json:"turn_id"`
-	RequestID string         `json:"request_id,omitempty"`
-	SessionID string         `json:"session_id"`
-	RunID     string         `json:"run_id,omitempty"`
-	Sequence  uint64         `json:"sequence"`
-	Kind      string         `json:"kind"`
-	Status    string         `json:"status,omitempty"`
-	Content   string         `json:"content,omitempty"`
-	Reasoning string         `json:"reasoning,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	Run       *AgentRun      `json:"run,omitempty"`
-	Event     *AgentRunEvent `json:"event,omitempty"`
-	ApprovalID string `json:"approval_id,omitempty"`
+	TurnID     string                `json:"turn_id"`
+	RequestID  string                `json:"request_id,omitempty"`
+	SessionID  string                `json:"session_id"`
+	RunID      string                `json:"run_id,omitempty"`
+	Sequence   uint64                `json:"sequence"`
+	Kind       string                `json:"kind"`
+	Status     string                `json:"status,omitempty"`
+	Content    string                `json:"content,omitempty"`
+	Reasoning  string                `json:"reasoning,omitempty"`
+	Error      string                `json:"error,omitempty"`
+	Run        *AgentRun             `json:"run,omitempty"`
+	Event      *AgentRunEvent        `json:"event,omitempty"`
+	ApprovalID string                `json:"approval_id,omitempty"`
 	Permission *PermissionAskPayload `json:"permission,omitempty"`
-	Question *UserQuestionPayload `json:"question,omitempty"`
+	Question   *UserQuestionPayload  `json:"question,omitempty"`
 }
 
 type AgentRunListPayload struct {
@@ -854,19 +854,19 @@ type SessionContextQueryResultPayload struct {
 }
 
 type ModelSummary struct {
-	ContextWindowTokens int `json:"context_window_tokens"`
-	MaxOutputTokens int `json:"max_output_tokens"`
-	ID        string             `json:"id"`
-	Name      string             `json:"name,omitempty"`
-	Provider  string             `json:"provider,omitempty"`
-	Protocol  string             `json:"protocol,omitempty"`
-	AuthType  string             `json:"auth_type,omitempty"`
-	BaseURL   string             `json:"base_url,omitempty"`
-	HasAPIKey bool               `json:"has_api_key"`
-	ModelName string             `json:"model_name,omitempty"`
-	Enabled   bool               `json:"enabled"`
-	IsDefault bool               `json:"is_default"`
-	Defaults  GenerationSettings `json:"defaults,omitempty"`
+	ContextWindowTokens int                `json:"context_window_tokens"`
+	MaxOutputTokens     int                `json:"max_output_tokens"`
+	ID                  string             `json:"id"`
+	Name                string             `json:"name,omitempty"`
+	Provider            string             `json:"provider,omitempty"`
+	Protocol            string             `json:"protocol,omitempty"`
+	AuthType            string             `json:"auth_type,omitempty"`
+	BaseURL             string             `json:"base_url,omitempty"`
+	HasAPIKey           bool               `json:"has_api_key"`
+	ModelName           string             `json:"model_name,omitempty"`
+	Enabled             bool               `json:"enabled"`
+	IsDefault           bool               `json:"is_default"`
+	Defaults            GenerationSettings `json:"defaults,omitempty"`
 }
 
 type ModelListPayload struct{}
@@ -888,18 +888,18 @@ type ModelSwitchResultPayload struct {
 }
 
 type ModelConfigAddPayload struct {
-	ContextWindowTokens *int `json:"context_window_tokens,omitempty"`
-	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
-	ID        string             `json:"id"`
-	Name      string             `json:"name,omitempty"`
-	Provider  string             `json:"provider,omitempty"`
-	Protocol  string             `json:"protocol,omitempty"`
-	AuthType  string             `json:"auth_type,omitempty"`
-	BaseURL   string             `json:"base_url"`
-	APIKey    string             `json:"api_key,omitempty"`
-	ModelName string             `json:"model_name,omitempty"`
-	IsDefault bool               `json:"is_default,omitempty"`
-	Defaults  GenerationSettings `json:"defaults,omitempty"`
+	ContextWindowTokens *int               `json:"context_window_tokens,omitempty"`
+	MaxOutputTokens     *int               `json:"max_output_tokens,omitempty"`
+	ID                  string             `json:"id"`
+	Name                string             `json:"name,omitempty"`
+	Provider            string             `json:"provider,omitempty"`
+	Protocol            string             `json:"protocol,omitempty"`
+	AuthType            string             `json:"auth_type,omitempty"`
+	BaseURL             string             `json:"base_url"`
+	APIKey              string             `json:"api_key,omitempty"`
+	ModelName           string             `json:"model_name,omitempty"`
+	IsDefault           bool               `json:"is_default,omitempty"`
+	Defaults            GenerationSettings `json:"defaults,omitempty"`
 }
 
 type ModelConfigAddResultPayload struct {
@@ -1077,6 +1077,10 @@ type AssetListPayload struct {
 
 type AssetSummary struct {
 	ID          string     `json:"id"`
+	AssetID     string     `json:"asset_id,omitempty"`
+	BusinessID  string     `json:"business_id,omitempty"`
+	Checksum    string     `json:"checksum,omitempty"`
+	MaxVisits   int64      `json:"max_visits,omitempty"`
 	SessionID   string     `json:"session_id"`
 	RequestID   string     `json:"request_id,omitempty"`
 	ToolCallID  string     `json:"tool_call_id,omitempty"`
@@ -1085,7 +1089,7 @@ type AssetSummary struct {
 	FileName    string     `json:"file_name,omitempty"`
 	ContentType string     `json:"content_type,omitempty"`
 	Size        int64      `json:"size,omitempty"`
-	ShortURL    string     `json:"short_url"`
+	ShortURL    string     `json:"short_url,omitempty"`
 	Code        string     `json:"code,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -1180,8 +1184,7 @@ type KnowledgeDocumentListPayload struct {
 
 type KnowledgeDocumentIngestPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	URL             string `json:"url,omitempty"`
-	Code            string `json:"code,omitempty"`
+	AssetID         string `json:"asset_id"`
 }
 
 type KnowledgeDocumentRetryPayload struct {
@@ -1370,16 +1373,16 @@ type ChangeDiffPayload struct {
 
 type ChangeDiffResultPayload struct {
 	ExpectedHash string `json:"expected_hash,omitempty"`
-	Path       string `json:"path"`
-	Diff       string `json:"diff,omitempty"`
-	Truncated  bool   `json:"truncated"`
-	Binary     bool   `json:"binary"`
-	Restorable bool   `json:"restorable"`
-	Message    string `json:"message,omitempty"`
+	Path         string `json:"path"`
+	Diff         string `json:"diff,omitempty"`
+	Truncated    bool   `json:"truncated"`
+	Binary       bool   `json:"binary"`
+	Restorable   bool   `json:"restorable"`
+	Message      string `json:"message,omitempty"`
 }
 
 type ChangeRevertPayload struct {
-	Path string `json:"path"`
+	Path         string `json:"path"`
 	ExpectedHash string `json:"expected_hash,omitempty"`
 }
 
@@ -1435,11 +1438,11 @@ type HistoryRevertPayload struct {
 }
 
 type HistoryRevertResultPayload struct {
-	InverseCheckpointID string `json:"inverse_checkpoint_id,omitempty"`
-	CheckpointID string   `json:"checkpoint_id"`
-	Reverted     bool     `json:"reverted"`
-	Paths        []string `json:"paths"`
-	Message      string   `json:"message,omitempty"`
+	InverseCheckpointID string   `json:"inverse_checkpoint_id,omitempty"`
+	CheckpointID        string   `json:"checkpoint_id"`
+	Reverted            bool     `json:"reverted"`
+	Paths               []string `json:"paths"`
+	Message             string   `json:"message,omitempty"`
 }
 
 type AIMemoryScope struct {

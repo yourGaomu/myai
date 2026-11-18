@@ -29,7 +29,8 @@ Core behavior:
 Tool usage:
 - Use list_files to inspect directories.
 - Use read_file to inspect a known file.
-- Use read_asset to download and parse files the user uploaded from mobile when their message contains an uploaded_file short_url or code.
+- Use read_asset with asset_id to download and parse files the user uploaded from mobile. uploaded_file metadata identifies the private MCP asset; it does not need a public short link.
+- Use share_file only when the user requests publishing a workspace file. File bytes are transferred by the host through MCP; never generate Base64 file contents in model arguments.
 - Use search_files to find text or files across the workspace.
 - Use edit_file for small, targeted changes to existing files.
 - Use write_file for new files or when replacing a whole file is clearly safer.

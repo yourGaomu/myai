@@ -128,6 +128,19 @@ func TestTokenUsagePayloadPtrOmitsZeroValue(t *testing.T) {
 	}
 }
 
+func TestAssetSummariesPreserveUploadedAssetIdentityWithoutPublicShare(t *testing.T) {
+	createdAt := time.Now().UTC()
+	result := assetSummaries([]sessionresult.AssetListItem{{
+		ID: "row", AssetID: "asset", BusinessID: "business", Checksum: "checksum", MaxVisits: 5,
+		SessionID: "session", RequestID: "first-complete", FileName: "report.txt", Size: 3, CreatedAt: createdAt,
+	}})
+	if len(result) != 1 || result[0].AssetID != "asset" || result[0].BusinessID != "business" ||
+		result[0].Checksum != "checksum" || result[0].MaxVisits != 5 || result[0].ShortURL != "" ||
+		result[0].RequestID != "first-complete" || !result[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("uploaded asset fields lost in transport mapping: %#v", result)
+	}
+}
+
 func TestLocalHistoryUpToDateChecksCountIDAndVersion(t *testing.T) {
 	remote := sessionresult.MessageHistoryMeta{
 		MessageCount:   2,

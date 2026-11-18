@@ -97,6 +97,8 @@ func (a *Agent) dispatchRelayMessage(ctx, connectionCtx context.Context, conn *w
 		return a.handleRelayMessage(connectionCtx, conn, message)
 	case protocol.TypeUserMessage, protocol.TypeSessionRegenerate, protocol.TypeSessionPlanExecute, protocol.TypeAIMemoryDreamRun, protocol.TypeSubagentTaskResume:
 		return a.handleRelayMessage(ctx, conn, message)
+	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
+		return a.enqueueUploadOperation(connectionCtx, conn, message)
 	case protocol.TypeSubagentTaskWait:
 		return a.handleRelayMessage(connectionCtx, conn, message)
 	default:
@@ -105,17 +107,25 @@ func (a *Agent) dispatchRelayMessage(ctx, connectionCtx context.Context, conn *w
 }
 
 func (a *Agent) waitForOperations(ctx context.Context) error {
+	// Queued handlers may start tracked completion/reply workers. Join queue
+	// admission first so tasks.Wait cannot race a new Add from an idle queue.
+	if err := a.operations.wait(ctx); err != nil {
+		return err
+	}
+	if err := a.catalogOperations.wait(ctx); err != nil {
+		return err
+	}
+	if err := a.uploadOperations.wait(ctx); err != nil {
+		return err
+	}
 	joined := make(chan struct{})
 	go func() { a.tasks.Wait(); close(joined) }()
 	select {
 	case <-joined:
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if err := a.operations.wait(ctx); err != nil {
-		return err
-	}
-	return a.catalogOperations.wait(ctx)
 }
 
 func (a *Agent) startAsyncOperation(ctx context.Context, conn *websocket.Conn, message protocol.Message, handle func(context.Context, *websocket.Conn, protocol.Message)) error {

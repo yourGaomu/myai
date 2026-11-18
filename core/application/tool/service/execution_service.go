@@ -230,10 +230,15 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 			return baseAsk(request)
 		}
 	}
+	explicitApproval := false
+	if publication, ok := registeredTool.(tooldef.ExplicitApproval); ok {
+		explicitApproval = publication.RequiresExplicitApproval()
+	}
 	permissionDecision := s.permissionService().Allow(toolcommand.Permission{
 		Name: call.Name, Arguments: call.Arguments, Permission: permission, Mode: command.PermissionMode,
 		WorkspaceRoot: command.WorkspaceRoot, Isolated: command.Isolated,
 		RequireConfirmation: hookResult.Decision == toolresult.HookDecisionAsk,
+		ExplicitApproval:    explicitApproval,
 		Ask:                 ask,
 	})
 	output := domaintool.ToolOutput{}

@@ -19,6 +19,7 @@ type ToolOutput struct {
 	ErrorCode    string
 	ErrorMessage string
 	Truncated    bool
+	SharedAsset  *SharedAsset
 }
 
 func SuccessOutput(content string) ToolOutput {

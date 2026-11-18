@@ -207,6 +207,10 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 func AssetDocumentFromRecord(record repository.AssetRecord) po.AssetDocument {
 	return po.AssetDocument{
 		ID:          record.ID,
+		AssetID:     record.AssetID,
+		BusinessID:  record.BusinessID,
+		Checksum:    record.Checksum,
+		MaxVisits:   record.MaxVisits,
 		SessionID:   record.SessionID,
 		RequestID:   record.RequestID,
 		ToolCallID:  record.ToolCallID,
@@ -227,6 +231,10 @@ func AssetDocumentFromRecord(record repository.AssetRecord) po.AssetDocument {
 func AssetRecordFromDocument(document po.AssetDocument) repository.AssetRecord {
 	return repository.AssetRecord{
 		ID:          document.ID,
+		AssetID:     document.AssetID,
+		BusinessID:  document.BusinessID,
+		Checksum:    document.Checksum,
+		MaxVisits:   document.MaxVisits,
 		SessionID:   document.SessionID,
 		RequestID:   document.RequestID,
 		ToolCallID:  document.ToolCallID,

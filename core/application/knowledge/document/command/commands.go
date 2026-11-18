@@ -2,8 +2,7 @@ package command
 
 type Ingest struct {
 	KnowledgeBaseID string
-	URL             string
-	Code            string
+	AssetID         string
 }
 
 type Retry struct {

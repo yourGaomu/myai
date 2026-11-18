@@ -164,13 +164,6 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 			MaxBytes:   v.GetInt64("persistence.outbox.max_bytes"),
 			RetainDone: v.GetInt("persistence.outbox.retain_done"),
 		}},
-		Asset: AssetProperties{
-			BaseURL:              strings.TrimSpace(v.GetString("asset.shortener_base_url")),
-			APIKey:               strings.TrimSpace(v.GetString("asset.api_key")),
-			UploadTimeoutSeconds: v.GetInt("asset.upload_timeout_seconds"),
-			TTLSeconds:           v.GetInt64("asset.ttl_seconds"),
-			MaxVisits:            v.GetInt64("asset.max_visits"),
-		},
 		Skill: SkillProperties{
 			Root:     strings.TrimSpace(v.GetString("skill.root")),
 			Registry: strings.TrimSpace(v.GetString("skill.registry")),

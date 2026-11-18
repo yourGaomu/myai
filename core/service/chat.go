@@ -60,6 +60,7 @@ type ChatService struct {
 	lifecycleOperations   *sessionOperationCoordinator
 	generations           map[string]*sessionGeneration
 	lifecycleBlocks       map[string]string
+	fileUploadEpochs      map[string]uint64
 	userAcceptanceMu      sync.Mutex
 	pendingUserAcceptance map[string]generationcommand.PersistUserMessage
 	userAcceptanceSlots   map[string]bool
@@ -1580,6 +1581,10 @@ func (s *ChatService) lockSessionLifecycle(ctx context.Context, sessionID, reaso
 	if s.lifecycleBlocks == nil {
 		s.lifecycleBlocks = make(map[string]string)
 	}
+	if s.fileUploadEpochs == nil {
+		s.fileUploadEpochs = make(map[string]uint64)
+	}
+	s.fileUploadEpochs[sessionID]++
 	if reason != sessionBlockRestore || s.lifecycleBlocks[sessionID] != sessionBlockClear {
 		s.lifecycleBlocks[sessionID] = reason
 	}

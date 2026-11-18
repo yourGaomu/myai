@@ -7,7 +7,6 @@ type Properties struct {
 	Redis            RedisProperties
 	RAG              RAGProperties
 	Thread           ThreadProperties
-	Asset            AssetProperties
 	Skill            SkillProperties
 	Sandbox          SandboxProperties
 	Subagent         SubagentProperties
@@ -163,14 +162,6 @@ type MinIOProperties struct {
 type ThreadProperties struct {
 	Core      int
 	QueueSize int
-}
-
-type AssetProperties struct {
-	BaseURL              string
-	APIKey               string
-	UploadTimeoutSeconds int
-	TTLSeconds           int64
-	MaxVisits            int64
 }
 
 type SkillProperties struct {

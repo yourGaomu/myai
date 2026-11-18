@@ -23,7 +23,6 @@ func TestValidateCredentialsRejectsExamplesWithoutValues(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var properties Properties
 			properties.Redis.Address = "redis.example.test:6379"
-			properties.Asset.BaseURL = "https://assets.example.test"
 			properties.RAG.MinIO.Endpoint = "storage.example.test:9000"
 			properties.RAG.MinIO.AccessKey, properties.RAG.MinIO.SecretKey = "test-access", "test-secret"
 			properties.Sandbox.Provider = "opensandbox"
@@ -47,7 +46,6 @@ func TestValidateCredentialsAllowsDisabledServicesAndLocalModels(t *testing.T) {
 	disabled := false
 	properties := Properties{
 		Redis:   RedisProperties{Password: "replace-with-unused-key"},
-		Asset:   AssetProperties{APIKey: "replace-with-unused-key"},
 		Sandbox: SandboxProperties{Provider: "local", OpenSandbox: OpenSandboxProperties{APIKey: "replace-with-unused-key"}},
 		RAG: RAGProperties{
 			MinIO:     MinIOProperties{AccessKey: "replace-with-unused-key", SecretKey: "replace-with-unused-key"},

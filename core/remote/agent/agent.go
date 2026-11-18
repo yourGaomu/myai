@@ -18,8 +18,10 @@ import (
 
 	subagentcommand "myai/core/application/subagent/command"
 	domainsubagent "myai/core/domain/subagent"
+	"myai/core/port/files"
 	subagentport "myai/core/port/subagent"
 	"myai/core/remote/protocol"
+	"myai/core/remote/uploads"
 )
 
 type Agent struct {
@@ -50,6 +52,14 @@ type Agent struct {
 	userQuestionWaiters   *userQuestionWaiterRegistry
 	userQuestionTimeout   time.Duration
 	activeSubagentWaits   atomic.Int32
+	uploadService         files.Service
+	fileUploadAdmission   func(context.Context, string) (uint64, error)
+	fileAssetRecorder     uploads.Recorder
+	uploadMu              sync.Mutex
+	uploadReceiver        *uploads.Receiver
+	uploadsClosed         bool
+	uploadOperations      operationQueue
+	activeUploadReplies   atomic.Int32
 }
 
 // WithMCPManager attaches the narrow application-level MCP reload facade.
@@ -61,12 +71,12 @@ func (a *Agent) WithMCPManager(manager MCPManagerFacade) *Agent {
 	return a
 }
 
-func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource, pluginManager PluginManagerFacade) *Agent {
+func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade, changeService WorkspaceChangeFacade, knowledgeService KnowledgeFacade, memoryService MemoryFacade, memoryExtraction MemoryExtractionFacade, memoryDream MemoryDreamFacade, subagentService SubagentFacade, subagentEvents SubagentEventSource, pluginManager PluginManagerFacade, options ...Option) *Agent {
 	if config.BindingCode == "" {
 		config.BindingCode = newBindingCode()
 	}
 
-	return &Agent{
+	a := &Agent{
 		config:              config,
 		chatService:         chatService,
 		fileService:         fileService,
@@ -84,6 +94,12 @@ func New(config Config, chatService ChatFacade, fileService WorkspaceFileFacade,
 		userQuestionWaiters: newUserQuestionWaiterRegistry(),
 		userQuestionTimeout: 15 * time.Minute,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(a)
+		}
+	}
+	return a
 }
 
 func (a *Agent) Run(ctx context.Context) (runErr error) {
@@ -112,6 +128,9 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer func() {
 		cancelRun()
+		if err := a.closeFileUploads(); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close file uploads: %w", err))
+		}
 		joinCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := a.waitForOperations(joinCtx); err != nil {
@@ -170,6 +189,7 @@ func (a *Agent) runConnection(ctx context.Context) (bool, error) {
 		return false, relayDialError(err, response)
 	}
 	defer conn.Close()
+	conn.SetReadLimit(8 * 1024 * 1024)
 
 	fmt.Println("agent connected.")
 	if err := a.writeMessage(conn, protocol.TypeAgentOnline, protocol.AgentOnlinePayload{
@@ -333,7 +353,11 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 	defer cancel()
 	for {
 		var message protocol.Message
-		if err := conn.ReadJSON(&message); err != nil {
+		_, raw, readErr := conn.ReadMessage()
+		if readErr == nil {
+			readErr = json.Unmarshal(raw, &message)
+		}
+		if err := readErr; err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				done <- nil
 				return
@@ -342,6 +366,13 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 			return
 		}
 
+		if protocol.IsAssetUploadRequest(message.Type) && len(raw) > protocol.AssetUploadMaxJSONBytes {
+			if writeErr := a.writeHandlerError(conn, message, errors.New("upload JSON exceeds 524288 bytes")); writeErr != nil {
+				done <- writeErr
+				return
+			}
+			continue
+		}
 		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
 		if waitCtx.Err() != nil {
 			done <- waitCtx.Err()
@@ -482,6 +513,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		a.enqueueCatalogMutation(ctx, conn, message, func(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 			return a.handlePluginToggle(ctx, conn, message, false)
 		})
+	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
+		return a.handleAssetUpload(ctx, conn, message)
 	case protocol.TypeAssetList:
 		return a.handleAssetList(ctx, conn, message)
 	case protocol.TypeKnowledgeCatalogList:
