@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import type { SubagentDefinition, SubagentTask, SubagentTaskEvent } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
+import { PulseDot, RunningEdgeRail, ShimmerProgressBar } from "../common/MotionEffects";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
 import { radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
@@ -327,6 +328,7 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
   const [expanded, setExpanded] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const running = task.status === "queued" || task.status === "running" || task.status === "waiting_subagents" || task.status === "waiting_permission";
+  const visualProgress = task.status === "succeeded" ? 100 : Math.min(92, Math.max(24, events.length * 10));
   const canMessage = running && task.status !== "waiting_permission";
   const pendingChanges = task.status === "succeeded" && (task.change_set?.status === "pending" || task.change_set?.status === "conflict");
   const canResume = task.unread && (task.status === "succeeded" || task.status === "failed");
@@ -344,7 +346,8 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
     if (sent) setMessageDraft("");
   };
   return (
-    <View style={[styles.item, styles.taskItem, { marginLeft: Math.min(depth, 4) * 18 }]}>
+    <View style={[styles.item, styles.taskItem, running && styles.taskItemRunning, { marginLeft: Math.min(depth, 4) * 18 }]}>
+      <RunningEdgeRail active={running} />
       <Pressable
         accessibilityLabel={expanded ? "收起任务详情" : "展开任务详情"}
         accessibilityRole="button"
@@ -354,10 +357,20 @@ function TaskItem({ buttonFeedback, depth, events, onApply, onCancel, onCheck, o
       >
         <View style={styles.flex}>
           <View style={styles.taskTitleRow}>
+            {running ? <PulseDot color={task.status === "waiting_permission" ? palette.warn : palette.brandLight} size={7} /> : null}
             <Text numberOfLines={2} style={[styles.itemTitle, styles.taskTitle]}>{task.title}</Text>
             {canResume ? <View style={styles.unreadDot} /> : null}
           </View>
           <Text style={styles.meta}>{depth > 0 ? `子任务 ${depth} · ` : ""}{task.definition_id} · {taskStatusLabels[task.status]}</Text>
+          {running ? (
+            <ShimmerProgressBar
+              active
+              height={3}
+              progress={visualProgress}
+              style={styles.taskBar}
+              tone={task.status === "waiting_permission" ? "warn" : "brand"}
+            />
+          ) : null}
         </View>
         <View style={styles.taskHeaderSide}>
           <Text style={styles.badge}>{task.change_set?.files?.length || 0} 文件</Text>
@@ -561,7 +574,9 @@ const createStyles = ({ font, palette }: AppTheme) =>
     taskHeader: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 66, padding: 12 },
     taskHeaderPressed: { backgroundColor: palette.surface1 },
     taskHeaderSide: { alignItems: "center", flexDirection: "row", flexShrink: 0, gap: 7 },
-    taskItem: { overflow: "hidden", padding: 0 },
+    taskItem: { overflow: "hidden", padding: 0, position: "relative" },
+    taskItemRunning: { borderColor: palette.brandDeep, paddingLeft: 4 },
+    taskBar: { marginTop: 7 },
     taskPreview: { borderTopColor: palette.hairline, borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
     taskPreviewError: { color: palette.err },
     taskPreviewText: { color: palette.ink1, fontSize: font.label, lineHeight: 17 },

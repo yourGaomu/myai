@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 
 import type { ChatAttachment } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
@@ -9,6 +11,7 @@ import { radius, weight } from "../../constants/theme";
 import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
+import { PulseDot, useReduceMotion } from "../common/MotionEffects";
 
 type Props = {
   attachedFiles: ChatAttachment[];
@@ -42,11 +45,27 @@ export function Composer(props: Props) {
   const { isWallpaperActive } = useWallpaper();
   const styles = useThemedStyles(makeStyles);
   const { attachedFiles, canPause, messageInput, pendingPause, pendingSend, pendingUpload, planMode } = props;
+  const reduceMotion = useReduceMotion();
   const [focused, setFocused] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const busy = pendingSend || canPause || pendingPause;
   const showStop = canPause || pendingPause;
   const ready = !busy && (messageInput.trim() !== "" || attachedFiles.length > 0);
+  const sendScale = useRef(new Animated.Value(1)).current;
+  const prevReadyRef = useRef(ready);
+
+  useEffect(() => {
+    if (ready && !prevReadyRef.current && !reduceMotion) {
+      sendScale.setValue(0.88);
+      Animated.spring(sendScale, {
+        bounciness: 10,
+        speed: 22,
+        toValue: 1,
+        useNativeDriver: true,
+      }).start();
+    }
+    prevReadyRef.current = ready;
+  }, [ready, reduceMotion, sendScale]);
   const placeholder = busy
     ? "MyAI 正在执行…"
     : planMode
@@ -88,7 +107,7 @@ export function Composer(props: Props) {
     <View style={styles.wrap}>
       {props.permissionSummary ? (
         <Pressable accessibilityRole="button" onPress={props.onOpenPermission} style={({ pressed }) => [styles.pill, pressed && styles.pressed]}>
-          <View style={styles.pillDot} />
+          <PulseDot color={palette.warn} size={7} />
           <Feather color={palette.warn} name="shield" size={15} />
           <Text numberOfLines={1} style={styles.pillText}>待处理授权：{props.permissionSummary}</Text>
           <Text style={styles.pillLink}>点击查看</Text>
@@ -178,9 +197,29 @@ export function Composer(props: Props) {
               {pendingPause ? <ActivityIndicator color={palette.canvas} size="small" /> : <View style={styles.stopSquare} />}
             </Pressable>
           ) : (
-            <Pressable accessibilityLabel="发送" disabled={!ready} onPress={props.onSend} style={({ pressed }) => [styles.send, ready && styles.sendReady, pressed && styles.pressed]}>
-              <Feather color={ready ? palette.inkInverse : palette.ink4} name="arrow-up" size={19} />
-            </Pressable>
+            <Animated.View style={{ transform: [{ scale: sendScale }] }}>
+              <Pressable
+                accessibilityLabel="发送"
+                disabled={!ready}
+                onPress={() => {
+                  if (Platform.OS !== "web") {
+                    void Haptics.selectionAsync().catch(() => {});
+                  }
+                  props.onSend();
+                }}
+                style={({ pressed }) => [styles.send, ready && styles.sendReady, pressed && styles.pressed]}
+              >
+                {ready ? (
+                  <LinearGradient
+                    colors={[palette.brandLight, palette.brand]}
+                    end={{ x: 1, y: 1 }}
+                    start={{ x: 0, y: 0 }}
+                    style={StyleSheet.absoluteFill}
+                  />
+                ) : null}
+                <Feather color={ready ? palette.inkInverse : palette.ink4} name="arrow-up" size={19} />
+              </Pressable>
+            </Animated.View>
           )}
         </View>
       </View>

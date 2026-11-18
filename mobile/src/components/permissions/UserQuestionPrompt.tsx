@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import type { UserQuestionState } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { FadeSlideView } from "../common/MotionEffects";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -74,7 +76,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
 
       {currentItem ? (
         <ScrollView nestedScrollEnabled style={styles.questions}>
-          <View style={styles.item}>
+          <FadeSlideView direction="right" keyProp={currentItem.id} style={styles.item}>
             <Text style={styles.prompt}>
               {total > 1 ? `${safeIndex + 1}. ` : ""}
               {currentItem.prompt}
@@ -88,6 +90,9 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                   accessibilityState={{ selected }}
                   disabled={question.submitted}
                   onPress={() => {
+                    if (Platform.OS !== "web") {
+                      void Haptics.selectionAsync().catch(() => {});
+                    }
                     setAnswer(currentItem.id, option);
                     if (total > 1 && safeIndex < total - 1) {
                       setTimeout(() => setActiveIndex(safeIndex + 1), 160);
@@ -110,7 +115,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                 value={answers[currentItem.id] || ""}
               />
             ) : null}
-          </View>
+          </FadeSlideView>
         </ScrollView>
       ) : null}
 

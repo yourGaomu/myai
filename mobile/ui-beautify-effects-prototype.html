@@ -1,0 +1,1416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MyAI Mobile · 美化、特效与动效交互原型</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --page-bg: #0B0D11;
+    --stage-card: #14171E;
+    --stage-border: rgba(255,255,255,0.085);
+    --ink-page: #F2F4F8;
+    --ink-dim: #959DAB;
+
+    /* 与 mobile/src/constants/theme.ts 暗色基础色对齐 */
+    --canvas: #0F1114;
+    --surface1: #171A1F;
+    --surface2: #1D2129;
+    --surface3: #252A33;
+    --well: #23272E;
+    --hairline: rgba(255,255,255,0.08);
+    --hairline-strong: rgba(255,255,255,0.16);
+    --glass: rgba(23,26,31,0.78);
+    --glass-border: rgba(255,255,255,0.13);
+    --glass-highlight: rgba(255,255,255,0.20);
+
+    --ink1: #ECEEF1;
+    --ink2: #A3A9B4;
+    --ink3: #868D99;
+    --ink4: #5E6573;
+
+    /* 强调色（默认：冰川青），由右上角切换器动态覆盖 */
+    --brand: #3CCBE8;
+    --brand-light: #67D6EE;
+    --brand-dark: #2AA9C4;
+    --brand-wash: rgba(60,203,232,0.14);
+    --brand-wash-strong: rgba(60,203,232,0.23);
+    --brand-deep: rgba(60,203,232,0.45);
+    --brand-glow: rgba(60,203,232,0.36);
+    --ambient-glow: rgba(60,203,232,0.17);
+    --ink-inverse: #03232C;
+
+    --ok: #5CD69B;
+    --ok-wash: rgba(92,214,155,0.14);
+    --warn: #F2C94C;
+    --warn-wash: rgba(242,201,76,0.14);
+    --info: #8FB8FF;
+    --info-wash: rgba(143,184,255,0.14);
+    --err: #FF8A75;
+
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable", "Segoe UI", Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  body.light-theme {
+    --canvas: #F5F7FA;
+    --surface1: #FFFFFF;
+    --surface2: #EEF2F6;
+    --surface3: #E3E9F0;
+    --well: #EAEFF5;
+    --hairline: rgba(15,23,42,0.08);
+    --hairline-strong: rgba(15,23,42,0.16);
+    --glass: rgba(255,255,255,0.84);
+    --glass-border: rgba(15,23,42,0.10);
+    --glass-highlight: rgba(255,255,255,0.9);
+    --ink1: #11161D;
+    --ink2: #4B5565;
+    --ink3: #687486;
+    --ink4: #94A3B8;
+    --ok: #139A5C;
+    --ok-wash: rgba(19,154,92,0.11);
+    --warn: #C4840D;
+    --warn-wash: rgba(196,132,13,0.12);
+    --info: #2563EB;
+    --info-wash: rgba(37,99,235,0.10);
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(60,203,232,0.09), transparent 60%),
+      radial-gradient(900px 500px at 85% 5%, rgba(91,155,255,0.08), transparent 60%),
+      var(--page-bg);
+    color: var(--ink-page);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+    padding: 0 28px 100px;
+  }
+
+  /* ---------- 顶部工具栏 ---------- */
+  .studio-bar {
+    position: sticky; top: 0; z-index: 100;
+    margin: 0 -28px 32px; padding: 14px 28px;
+    background: rgba(11,13,17,0.86);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--stage-border);
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+  }
+  .studio-brand { display: flex; align-items: center; gap: 12px; }
+  .studio-dot { width: 10px; height: 10px; border-radius: 99px; background: var(--brand); box-shadow: 0 0 14px var(--brand); animation: pulseRing 2.2s infinite; }
+  .studio-title { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; }
+  .studio-badge { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 99px; background: var(--brand-wash); border: 1px solid var(--brand-deep); color: var(--brand-light); font-weight: 600; }
+  .studio-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .ctrl-group { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 11px; background: rgba(255,255,255,0.045); border: 1px solid var(--stage-border); }
+  .ctrl-btn {
+    appearance: none; border: 1px solid transparent; background: transparent; color: var(--ink-dim);
+    font-family: var(--sans); font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 8px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s var(--ease-out);
+  }
+  .ctrl-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
+  .ctrl-btn.active { background: rgba(255,255,255,0.11); color: #fff; border-color: rgba(255,255,255,0.14); }
+  .ctrl-btn.primary { background: linear-gradient(135deg, var(--brand-light), var(--brand)); color: var(--ink-inverse); border: none; box-shadow: 0 4px 16px -4px var(--brand-glow); }
+  .ctrl-btn.primary:hover { transform: translateY(-1px); filter: brightness(1.06); }
+  .ctrl-btn.primary:active { transform: scale(0.96); }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  .wrap { max-width: 1520px; margin: 0 auto; }
+
+  /* ---------- 页头 ---------- */
+  .hero-header { padding: 8px 0 36px; border-bottom: 1px solid var(--stage-border); margin-bottom: 42px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; color: var(--brand-light); text-transform: uppercase; margin-bottom: 10px; }
+  .hero-h1 { font-size: clamp(26px, 3.2vw, 38px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.18; }
+  .hero-sub { margin-top: 12px; max-width: 880px; color: var(--ink-dim); font-size: 14.5px; line-height: 1.7; }
+  .hero-sub strong { color: var(--ink-page); }
+  .pill-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 24px; }
+  .pillar { background: var(--stage-card); border: 1px solid var(--stage-border); border-radius: 14px; padding: 16px 18px; position: relative; overflow: hidden; }
+  .pillar::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--brand-deep), transparent); }
+  .pillar-kicker { font-family: var(--mono); font-size: 10.5px; color: var(--brand-light); letter-spacing: 0.08em; font-weight: 700; margin-bottom: 6px; }
+  .pillar-title { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; }
+  .pillar-desc { font-size: 12.5px; color: var(--ink-dim); line-height: 1.6; }
+
+  /* ---------- 分区 ---------- */
+  .section { margin-top: 52px; }
+  .sec-head { margin-bottom: 22px; }
+  .sec-title-wrap { display: flex; align-items: center; gap: 12px; }
+  .sec-num { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--brand-light); padding: 3px 9px; border-radius: 99px; background: var(--brand-wash); border: 1px solid var(--brand-deep); }
+  .sec-title { font-size: 21px; font-weight: 750; letter-spacing: -0.02em; }
+  .sec-sub { color: var(--ink-dim); font-size: 13.5px; max-width: 780px; margin-top: 4px; }
+
+  .phones-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 32px; align-items: start; }
+  .phone-col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .phone-meta { width: 100%; max-width: 375px; display: flex; flex-direction: column; gap: 8px; }
+  .phone-meta h3 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .phone-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mini-btn {
+    appearance: none; border: 1px solid var(--stage-border); background: rgba(255,255,255,0.055); color: var(--ink-page);
+    font-family: var(--sans); font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 8px; cursor: pointer; transition: all 0.18s ease;
+  }
+  .mini-btn:hover { border-color: var(--brand-deep); color: var(--brand-light); background: var(--brand-wash); }
+  .mini-btn.active { background: var(--brand-wash-strong); border-color: var(--brand); color: var(--brand-light); }
+  .mini-btn:active { transform: scale(0.95); }
+  .phone-caption { font-size: 12.2px; color: var(--ink-dim); line-height: 1.6; }
+
+  /* ---------- 手机外壳 ---------- */
+  .phone {
+    width: 375px; height: 790px; border-radius: 44px; background: var(--canvas); color: var(--ink1);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 0 0 8px #07080B, 0 0 0 9.5px rgba(255,255,255,0.14), 0 32px 72px -18px rgba(0,0,0,0.85);
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+  body.light-theme .phone { box-shadow: 0 0 0 8px #1B1F27, 0 0 0 9.5px rgba(255,255,255,0.22), 0 32px 72px -18px rgba(0,0,0,0.55); }
+  .statusbar { height: 44px; padding: 0 24px 6px; display: flex; align-items: flex-end; justify-content: space-between; font-size: 12.5px; font-weight: 700; position: relative; z-index: 20; flex-shrink: 0; }
+  .sb-right { font-size: 11px; opacity: 0.85; }
+  .home-indicator { position: absolute; left: 50%; transform: translateX(-50%); bottom: 7px; width: 124px; height: 4.5px; border-radius: 99px; background: var(--ink1); opacity: 0.24; z-index: 40; pointer-events: none; }
+
+  /* 壁纸叠加（模拟已有的对话壁纸系统） */
+  .wallpaper-bg { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.4s ease; z-index: 0; }
+  body.with-wallpaper .wallpaper-bg { opacity: 1; }
+  .wallpaper-orb-a { position: absolute; width: 320px; height: 320px; border-radius: 50%; left: -70px; top: 80px; background: radial-gradient(circle, var(--brand-glow), transparent 70%); filter: blur(28px); animation: driftA 9s ease-in-out infinite alternate; }
+  .wallpaper-orb-b { position: absolute; width: 280px; height: 280px; border-radius: 50%; right: -60px; bottom: 120px; background: radial-gradient(circle, rgba(143,184,255,0.26), transparent 70%); filter: blur(26px); animation: driftB 11s ease-in-out infinite alternate; }
+
+  /* 极光氛围光 */
+  .ambient-aurora { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+  .aurora-blob { position: absolute; border-radius: 50%; filter: blur(42px); opacity: 0.55; }
+  .aurora-1 { width: 280px; height: 280px; top: 10%; left: 50%; transform: translateX(-50%); background: radial-gradient(circle, var(--brand-glow), transparent 72%); animation: floatSlow 6s ease-in-out infinite alternate; }
+  .aurora-2 { width: 220px; height: 220px; bottom: 12%; right: -40px; background: radial-gradient(circle, rgba(143,184,255,0.22), transparent 72%); animation: floatSlow2 8s ease-in-out infinite alternate; }
+
+  /* 角色 + 光环 + 粒子 */
+  .char-box { position: relative; display: grid; place-items: center; }
+  .char-img { position: relative; z-index: 3; object-fit: contain; user-select: none; pointer-events: none; filter: drop-shadow(0 12px 24px rgba(0,0,0,0.36)); }
+  .halo-ring { position: absolute; border-radius: 50%; border: 1.5px solid var(--brand-deep); box-shadow: inset 0 0 24px var(--brand-wash), 0 0 28px var(--ambient-glow); z-index: 1; pointer-events: none; }
+  .halo-pulse { position: absolute; border-radius: 50%; border: 1px solid var(--brand); z-index: 1; pointer-events: none; animation: haloRipple 2.8s var(--ease-out) infinite; }
+  .float-particle { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--brand-light); box-shadow: 0 0 8px var(--brand); opacity: 0; z-index: 2; animation: particleRise 3.8s ease-in-out infinite; }
+
+  /* 在线呼吸点 */
+  .pdot { position: relative; width: 8px; height: 8px; display: inline-grid; place-items: center; flex-shrink: 0; }
+  .pdot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); position: relative; z-index: 2; }
+  .pdot b { position: absolute; inset: -3px; border-radius: 50%; background: var(--ok); opacity: 0.45; animation: dotPing 2s cubic-bezier(0,0,0.2,1) infinite; }
+  .pdot.busy i, .pdot.busy b { background: var(--brand); }
+  .pdot.warn i, .pdot.warn b { background: var(--warn); }
+
+  /* ---------- 屏 1：启动过场 ---------- */
+  .startup-stage { flex: 1; position: relative; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 30px 44px; }
+  .startup-stage.animate .st-hero { animation: heroPop 0.65s var(--ease-out) both; }
+  .startup-stage.animate .st-title { animation: slideUpFade 0.5s 0.14s var(--ease-out) both; }
+  .startup-stage.animate .st-status { animation: slideUpFade 0.5s 0.24s var(--ease-out) both; }
+  .startup-stage.animate .st-track { animation: slideUpFade 0.5s 0.32s var(--ease-out) both; }
+  .st-hero { width: 200px; height: 220px; margin-bottom: 8px; }
+  .st-hero .halo-ring, .st-hero .halo-pulse { width: 158px; height: 158px; }
+  .st-hero .char-img { width: 174px; height: 210px; animation: gentleBob 3.4s ease-in-out infinite; }
+  .st-title { font-size: 28px; font-weight: 800; letter-spacing: 0.26em; text-indent: 0.26em; background: linear-gradient(135deg, var(--ink1) 30%, var(--brand-light)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .st-status { margin-top: 8px; font-size: 13px; color: var(--ink2); font-weight: 500; min-height: 20px; transition: opacity 0.18s ease; }
+  .st-track { margin-top: 22px; width: 196px; height: 6px; border-radius: 99px; background: var(--surface3); border: 1px solid var(--hairline); overflow: hidden; }
+  .st-fill { height: 100%; width: 16%; border-radius: 99px; background: linear-gradient(90deg, var(--brand-dark), var(--brand), var(--brand-light)); box-shadow: 0 0 12px var(--brand-glow); position: relative; overflow: hidden; transition: width 0.55s var(--ease-out); }
+  .st-fill::after { content: ""; position: absolute; inset: 0; width: 48px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent); animation: shimmerSweep 1.35s ease-in-out infinite; }
+
+  /* ---------- 悬浮顶栏 ---------- */
+  .app-header { padding: 4px 14px 6px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 15; flex-shrink: 0; }
+  .hdr-btn {
+    width: 38px; height: 38px; border-radius: 19px; background: var(--glass); border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 6px 16px rgba(0,0,0,0.18); backdrop-filter: blur(16px);
+    color: var(--ink1); display: grid; place-items: center; cursor: pointer; transition: transform 0.16s ease, border-color 0.2s ease;
+  }
+  .hdr-btn:hover { border-color: var(--brand-deep); }
+  .hdr-btn:active { transform: scale(0.9); }
+  .home-pill {
+    display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border-radius: 99px;
+    background: var(--glass); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 8px 20px rgba(0,0,0,0.18);
+    backdrop-filter: blur(16px); font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--ink1); transition: transform 0.16s ease;
+  }
+  .home-pill:active { transform: scale(0.96); }
+  .hero-island { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+  .island-avatar { width: 48px; height: 48px; border-radius: 24px; display: grid; place-items: center; position: relative; }
+  .island-avatar.busy::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--brand); border-right-color: var(--brand-light); animation: spin 1.1s linear infinite; }
+  .island-pill {
+    margin-top: -6px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 99px;
+    background: var(--glass); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 6px 14px rgba(0,0,0,0.22);
+    backdrop-filter: blur(14px); font-size: 11px; font-weight: 600; position: relative; z-index: 3; transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+  .hero-island.is-busy .island-pill { border-color: var(--brand-deep); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 16px var(--ambient-glow); }
+
+  /* ---------- 屏 2：对话空首页 ---------- */
+  .empty-stage { flex: 1; position: relative; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 18px 8px; min-height: 0; }
+  .empty-hero { width: 152px; height: 152px; margin-bottom: 6px; }
+  .empty-hero .halo-ring, .empty-hero .halo-pulse { width: 130px; height: 130px; }
+  .empty-hero .halo-pulse { animation-duration: 3.4s; }
+  .empty-hero .char-img { width: 142px; height: 154px; animation: gentleBob 3.8s ease-in-out infinite; }
+  .empty-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; text-align: center; }
+  .empty-sub { margin-top: 5px; font-size: 12.5px; color: var(--ink2); text-align: center; }
+  .changes-pill {
+    margin-top: 12px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 99px;
+    background: var(--brand-wash); border: 1px solid var(--brand-deep); color: var(--brand-light); font-size: 11.5px; font-weight: 600;
+    box-shadow: 0 0 18px -4px var(--brand-glow); cursor: pointer; transition: transform 0.16s ease;
+  }
+  .changes-pill:active { transform: scale(0.96); }
+  .suggest-list { width: 100%; margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
+  .suggest-card {
+    position: relative; overflow: hidden; display: flex; align-items: center; gap: 11px; padding: 11px 12px 11px 14px; border-radius: 15px;
+    background: var(--glass); border: 1px solid var(--hairline); box-shadow: inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(12px);
+    cursor: pointer; transition: transform 0.18s var(--ease-out), border-color 0.2s ease;
+  }
+  .suggest-card::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(180deg, var(--brand-light), var(--brand-dark)); opacity: 0.75; }
+  .suggest-card::after { content: ""; position: absolute; inset: 0; transform: translateX(-120%); background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.12) 50%, transparent 65%); pointer-events: none; }
+  .suggest-card:hover { border-color: var(--brand-deep); transform: translateY(-1px); }
+  .suggest-card:hover::after { animation: cardSweep 0.75s ease forwards; }
+  .suggest-card:active { transform: scale(0.97); }
+  .suggest-icon { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(145deg, var(--brand-wash-strong), var(--brand-wash)); border: 1px solid var(--brand-deep); color: var(--brand-light); display: grid; place-items: center; flex-shrink: 0; }
+  .suggest-body { flex: 1; min-width: 0; }
+  .suggest-title { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .suggest-sub { font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+  /* 错峰入场编排 */
+  .stagger-on .sg-0 { animation: slideUpFade 0.45s 0.02s var(--ease-out) both; }
+  .stagger-on .sg-1 { animation: slideUpFade 0.45s 0.10s var(--ease-out) both; }
+  .stagger-on .sg-2 { animation: slideUpFade 0.45s 0.17s var(--ease-out) both; }
+  .stagger-on .sg-3 { animation: slideUpFade 0.45s 0.24s var(--ease-out) both; }
+  .stagger-on .sg-4 { animation: slideUpFade 0.45s 0.31s var(--ease-out) both; }
+  .stagger-on .sg-5 { animation: slideUpFade 0.45s 0.38s var(--ease-out) both; }
+  .stagger-on .sg-6 { animation: slideUpFade 0.45s 0.45s var(--ease-out) both; }
+
+  /* ---------- 输入区 ---------- */
+  .composer-dock { padding: 6px 14px 20px; position: relative; z-index: 15; flex-shrink: 0; }
+  .perm-pill {
+    margin-bottom: 8px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 13px;
+    background: var(--warn-wash); border: 1px solid rgba(242,201,76,0.42); box-shadow: 0 6px 18px -6px rgba(242,201,76,0.28);
+    font-size: 11.5px; font-weight: 600; animation: slideUpFade 0.28s var(--ease-out) both;
+  }
+  .perm-pill .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .perm-pill .a { color: var(--warn); flex-shrink: 0; }
+  .composer-box {
+    border-radius: 20px; background: var(--glass); border: 1px solid var(--hairline-strong);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 10px 26px rgba(0,0,0,0.22); backdrop-filter: blur(18px);
+    padding: 10px 10px 8px; transition: border-color 0.25s ease, box-shadow 0.25s ease; position: relative; overflow: hidden;
+  }
+  .composer-box.focused { border-color: var(--brand); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 3px var(--brand-wash), 0 12px 26px rgba(0,0,0,0.24); }
+  .composer-box.plan-active { border-color: var(--brand); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 22px -4px var(--brand-glow); }
+  .composer-box.plan-active::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--brand-light), transparent); background-size: 200% 100%; animation: topBeam 2.4s linear infinite;
+  }
+  .plan-banner { display: flex; align-items: center; gap: 6px; padding: 5px 9px; margin-bottom: 6px; border-radius: 10px; background: linear-gradient(90deg, var(--brand-wash-strong), var(--brand-wash)); border: 1px solid var(--brand-deep); color: var(--brand-light); font-size: 11px; font-weight: 600; }
+  .composer-input { width: 100%; border: none; outline: none; background: transparent; color: var(--ink1); font-family: var(--sans); font-size: 13px; line-height: 19px; resize: none; min-height: 24px; max-height: 54px; padding: 2px 4px 6px; }
+  .composer-input::placeholder { color: var(--ink4); }
+  .composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .composer-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tool-circle { width: 30px; height: 30px; border-radius: 15px; background: var(--well); border: 1px solid var(--hairline); color: var(--ink2); display: grid; place-items: center; cursor: pointer; transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+  .tool-circle:active { transform: scale(0.88); }
+  .tool-circle.on { background: var(--brand-wash-strong); border-color: var(--brand); color: var(--brand-light); }
+  .model-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 9px; border-radius: 99px; background: var(--well); border: 1px solid var(--hairline); color: var(--ink2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .send-btn { width: 32px; height: 32px; border-radius: 16px; border: none; display: grid; place-items: center; background: var(--surface3); color: var(--ink4); cursor: pointer; transition: all 0.26s var(--ease-spring); }
+  .send-btn.ready { background: linear-gradient(135deg, var(--brand-light), var(--brand)); color: var(--ink-inverse); transform: scale(1.06); box-shadow: 0 0 18px var(--brand-glow); }
+  .send-btn.ready:active { transform: scale(0.88); }
+
+  /* ---------- 屏 3：对话进行中 ---------- */
+  .chat-feed { flex: 1; overflow-y: auto; padding: 4px 14px 8px; display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 5; scrollbar-width: none; }
+  .chat-feed::-webkit-scrollbar { display: none; }
+  .user-bubble {
+    align-self: flex-end; max-width: 82%; padding: 10px 14px; border-radius: 18px 18px 5px 18px;
+    background: linear-gradient(145deg, var(--brand-wash-strong), var(--brand-wash)); border: 1px solid var(--brand-deep);
+    box-shadow: inset 0 1px 0 var(--glass-highlight); font-size: 13px; line-height: 1.5; animation: bubbleInRight 0.34s var(--ease-out) both;
+  }
+  .turn-card {
+    position: relative; border-radius: 18px; padding: 12px 13px; background: var(--glass); border: 1px solid var(--hairline);
+    box-shadow: inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(14px); overflow: hidden; animation: slideUpFade 0.36s var(--ease-out) both;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .turn-card.running { border-color: var(--brand-deep); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 26px -10px var(--brand-glow); }
+  .turn-card.running::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: linear-gradient(180deg, transparent, var(--brand-light), var(--brand), transparent); background-size: 100% 200%; animation: railFlow 1.6s linear infinite;
+  }
+  .turn-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .turn-avatar { width: 28px; height: 28px; border-radius: 14px; position: relative; display: grid; place-items: center; flex-shrink: 0; }
+  .turn-avatar.spinning::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--hairline-strong); border-top-color: var(--brand); animation: spin 0.9s linear infinite; }
+  .turn-name { font-size: 12.5px; font-weight: 700; }
+  .shimmer-status { font-size: 11.5px; font-weight: 600; margin-left: auto; background: linear-gradient(90deg, var(--ink3) 0%, var(--brand-light) 50%, var(--ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: textShimmer 1.8s linear infinite; }
+  .done-pill { margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--ok-wash); color: var(--ok); animation: otpPop 0.3s var(--ease-spring) both; }
+  .timeline-box { border-radius: 12px; background: var(--surface1); border: 1px solid var(--hairline); padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; }
+  .tl-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+  .tl-node { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; position: relative; }
+  .tl-node.active { background: var(--brand); box-shadow: 0 0 10px var(--brand); }
+  .tl-node.active::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: var(--brand); opacity: 0.4; animation: dotPing 1.4s infinite; }
+  .tl-pill { margin-left: auto; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 6px; background: var(--well); color: var(--ink3); flex-shrink: 0; }
+  .turn-answer { margin-top: 9px; font-size: 12.5px; line-height: 1.62; color: var(--ink1); }
+  .turn-code { margin-top: 7px; padding: 7px 10px; border-radius: 9px; background: var(--surface1); border: 1px solid var(--hairline); font-family: var(--mono); font-size: 11px; color: var(--brand-light); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .typing-cursor { display: inline-block; width: 6px; height: 13px; background: var(--brand); border-radius: 2px; vertical-align: middle; margin-left: 3px; animation: blink 0.9s steps(2) infinite; }
+
+  /* ---------- 屏 4：配对页 ---------- */
+  .pairing-stage { flex: 1; position: relative; z-index: 5; display: flex; flex-direction: column; align-items: center; padding: 10px 22px 18px; }
+  .pair-hero { width: 132px; height: 132px; margin-bottom: 4px; }
+  .pair-hero .halo-ring, .pair-hero .halo-pulse { width: 112px; height: 112px; }
+  .pair-hero .char-img { width: 122px; height: 132px; animation: gentleBob 3.6s ease-in-out infinite; }
+  .pair-title { font-size: 21px; font-weight: 750; letter-spacing: -0.02em; }
+  .pair-sub { font-size: 12px; color: var(--ink2); text-align: center; margin-top: 6px; line-height: 1.55; }
+  .otp-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; width: 100%; margin-top: 20px; }
+  .otp-cell { height: 48px; border-radius: 12px; background: var(--glass); border: 1px solid var(--hairline-strong); box-shadow: inset 0 1px 0 var(--glass-highlight); display: grid; place-items: center; font-family: var(--mono); font-size: 20px; font-weight: 700; transition: border-color 0.18s ease, box-shadow 0.2s ease; }
+  .otp-cell.focused { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-wash), 0 0 16px -4px var(--brand-glow); animation: focusBreath 1.8s ease-in-out infinite; }
+  .otp-cell.focused::after { content: ""; width: 2px; height: 20px; background: var(--brand); border-radius: 2px; animation: blink 1s infinite; }
+  .otp-cell.filled { border-color: var(--brand-deep); background: var(--brand-wash); color: var(--brand-light); }
+  .otp-cell.pop { animation: otpPop 0.28s var(--ease-spring) both; }
+  .otp-row.shake { animation: shake 0.4s ease; }
+  .otp-keypad { margin-top: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; width: 100%; }
+  .key-btn { height: 36px; border-radius: 10px; background: var(--surface1); border: 1px solid var(--hairline); color: var(--ink1); font-family: var(--mono); font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.1s ease, background-color 0.15s ease; }
+  .key-btn:active { transform: scale(0.92); background: var(--brand-wash); }
+  .pair-cta { margin-top: 14px; width: 100%; height: 46px; border-radius: 14px; border: 1px solid var(--hairline); background: var(--well); color: var(--ink3); font-family: var(--sans); font-size: 14px; font-weight: 700; cursor: pointer; position: relative; overflow: hidden; transition: all 0.28s var(--ease-out); }
+  .pair-cta.ready { background: linear-gradient(135deg, var(--brand-light), var(--brand)); color: var(--ink-inverse); border-color: transparent; box-shadow: 0 10px 26px -6px var(--brand-glow); }
+  .pair-cta.ready::after { content: ""; position: absolute; inset: 0; width: 60px; background: linear-gradient(105deg, transparent, rgba(255,255,255,0.55), transparent); animation: shimmerSweep 1.8s ease-in-out infinite; }
+  .pair-cta.ready:active { transform: scale(0.97); }
+  .pair-cta.success { background: var(--ok); color: #fff; border-color: transparent; box-shadow: 0 10px 26px -6px rgba(92,214,155,0.5); }
+  .relay-bar { margin-top: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink3); padding: 6px 12px; border-radius: 99px; background: var(--surface1); border: 1px solid var(--hairline); }
+
+  /* ---------- 屏 5：设置 + 侧栏 + 转场 ---------- */
+  .sec-topbar { display: flex; align-items: center; gap: 10px; padding: 4px 14px 8px; position: relative; z-index: 15; }
+  .sec-topbar-title { font-size: 16.5px; font-weight: 700; letter-spacing: -0.01em; }
+  .settings-scroll { flex: 1; overflow-y: auto; padding: 8px 16px 26px; position: relative; z-index: 5; scrollbar-width: none; }
+  .settings-scroll::-webkit-scrollbar { display: none; }
+  .device-card {
+    display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 18px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, var(--brand-wash), var(--glass)); border: 1px solid var(--brand-deep);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 10px 24px -10px var(--brand-glow); cursor: pointer; transition: transform 0.18s ease;
+  }
+  .device-card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.10) 50%, transparent 60%); transform: translateX(-100%); animation: cardSweepLoop 5s ease-in-out infinite; pointer-events: none; }
+  .device-card:active { transform: scale(0.98); }
+  .device-icon { width: 44px; height: 44px; border-radius: 13px; background: linear-gradient(135deg, var(--brand-light), var(--brand-dark)); color: var(--ink-inverse); display: grid; place-items: center; box-shadow: 0 6px 16px -4px var(--brand-glow); flex-shrink: 0; }
+  .set-group-label { font-size: 11px; font-weight: 650; color: var(--ink3); padding: 16px 6px 6px; }
+  .set-group-card { border-radius: 16px; background: var(--glass); border: 1px solid var(--hairline); box-shadow: inset 0 1px 0 var(--glass-highlight); overflow: hidden; }
+  .set-row { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-top: 1px solid var(--hairline); cursor: pointer; transition: background-color 0.16s ease; }
+  .set-row:first-child { border-top: none; }
+  .set-row:hover { background: var(--brand-wash); }
+  .set-row:hover .row-chev { transform: translateX(3px); color: var(--brand-light); }
+  .set-row:active { background: var(--brand-wash-strong); }
+  .row-icon { width: 30px; height: 30px; border-radius: 9px; background: var(--well); border: 1px solid var(--hairline); color: var(--brand-light); display: grid; place-items: center; flex-shrink: 0; }
+  .row-lbl { flex: 1; font-size: 13px; font-weight: 550; min-width: 0; }
+  .row-val { font-size: 11.5px; color: var(--ink3); }
+  .row-chev { color: var(--ink4); transition: transform 0.2s var(--ease-out), color 0.2s ease; flex-shrink: 0; }
+
+  .drawer-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.52); opacity: 0; pointer-events: none; transition: opacity 0.24s ease; z-index: 30; }
+  .drawer-scrim.open { opacity: 1; pointer-events: auto; }
+  .drawer-sheet {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 82%; background: var(--surface1); border-right: 1px solid var(--glass-border);
+    border-radius: 0 22px 22px 0; padding: 48px 12px 24px; transform: translateX(-104%); transition: transform 0.3s var(--ease-out);
+    z-index: 31; display: flex; flex-direction: column; gap: 6px; box-shadow: 20px 0 40px rgba(0,0,0,0.3);
+  }
+  .drawer-sheet.open { transform: translateX(0); }
+  .drawer-profile { display: flex; align-items: center; gap: 10px; padding: 6px 6px 14px; border-bottom: 1px solid var(--hairline); margin-bottom: 6px; }
+  .drawer-nav { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border-radius: 11px; font-size: 13px; font-weight: 550; color: var(--ink1); position: relative; cursor: pointer; opacity: 0; transform: translateX(-12px); border: 1px solid transparent; }
+  .drawer-sheet.open .drawer-nav { animation: drawerItemIn 0.34s var(--ease-out) forwards; }
+  .drawer-sheet.open .drawer-nav:nth-child(3) { animation-delay: 0.05s; }
+  .drawer-sheet.open .drawer-nav:nth-child(4) { animation-delay: 0.09s; }
+  .drawer-sheet.open .drawer-nav:nth-child(5) { animation-delay: 0.13s; }
+  .drawer-sheet.open .drawer-nav:nth-child(6) { animation-delay: 0.17s; }
+  .drawer-nav.active { background: var(--brand-wash); border-color: var(--brand-deep); }
+  .drawer-nav.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--brand); }
+  .nav-badge { margin-left: auto; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--brand-wash-strong); color: var(--brand-light); }
+
+  .subpage-layer { position: absolute; inset: 0; background: var(--canvas); z-index: 25; display: flex; flex-direction: column; transform: translateX(24px); opacity: 0; transition: transform 0.26s var(--ease-out), opacity 0.22s ease; pointer-events: none; }
+  .subpage-layer.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+
+  /* ---------- 屏 6：子代理 ---------- */
+  .sub-list { flex: 1; padding: 8px 14px 20px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; position: relative; z-index: 5; }
+  .sub-banner { padding: 12px 14px; border-radius: 16px; background: linear-gradient(135deg, var(--brand-wash-strong), var(--info-wash)); border: 1px solid var(--brand-deep); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .sub-card { border-radius: 16px; background: var(--glass); border: 1px solid var(--hairline); padding: 12px; position: relative; overflow: hidden; }
+  .sub-card.active { border-color: var(--brand-deep); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 6px 20px -8px var(--brand-glow); }
+  .sub-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sub-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; min-width: 0; }
+  .sub-desc { font-size: 11.5px; color: var(--ink2); margin-top: 6px; }
+  .sub-track { margin-top: 9px; height: 4px; border-radius: 99px; background: var(--surface3); overflow: hidden; }
+  .sub-bar { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand-dark), var(--brand-light)); position: relative; overflow: hidden; transition: width 0.6s var(--ease-out); }
+  .sub-bar::after { content: ""; position: absolute; inset: 0; width: 44px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent); animation: shimmerSweep 1.2s linear infinite; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 6px; background: var(--brand-wash); border: 1px solid var(--brand-deep); color: var(--brand-light); white-space: nowrap; flex-shrink: 0; }
+
+  /* ---------- 屏 7~9：扩展卡片、弹层与 Diff/分段器 ---------- */
+  .plan-card { border-radius: 16px; background: var(--glass); border: 1px solid var(--brand-deep); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 8px 22px -10px var(--brand-glow); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .plan-step-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+  .check-pop { width: 15px; height: 15px; border-radius: 50%; background: var(--ok-wash); border: 1px solid var(--ok); color: var(--ok); display: inline-grid; place-items: center; font-size: 10px; font-weight: 800; animation: otpPop 0.32s var(--ease-spring) both; flex-shrink: 0; }
+  .plan-exec-btn { height: 34px; border-radius: 10px; border: none; background: linear-gradient(135deg, var(--brand-light), var(--brand)); color: var(--ink-inverse); font-family: var(--sans); font-size: 12px; font-weight: 700; cursor: pointer; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 6px 16px -4px var(--brand-glow); }
+  .plan-exec-btn::after { content: ""; position: absolute; inset: 0; width: 48px; background: linear-gradient(105deg, transparent, rgba(255,255,255,0.55), transparent); animation: shimmerSweep 1.6s ease-in-out infinite; }
+  .plan-exec-btn:active { transform: scale(0.96); }
+
+  .qa-card { border-radius: 16px; background: var(--glass); border: 1px solid var(--hairline-strong); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .qa-slide { animation: slideInQuestion 0.26s var(--ease-out) both; }
+  .qa-opt { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface1); border: 1px solid var(--hairline); font-size: 12px; cursor: pointer; transition: all 0.18s var(--ease-spring); }
+  .qa-opt.selected { background: var(--brand-wash); border-color: var(--brand); color: var(--ink1); transform: scale(1.015); box-shadow: 0 0 14px -4px var(--brand-glow); }
+  .qa-opt:active { transform: scale(0.97); }
+
+  .code-copy-btn { appearance: none; border: 1px solid var(--hairline); background: var(--well); color: var(--ink2); font-family: var(--sans); font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: all 0.2s var(--ease-spring); }
+  .code-copy-btn.copied { background: var(--ok-wash); border-color: var(--ok); color: var(--ok); animation: otpPop 0.28s var(--ease-spring); }
+
+  .jump-rail { position: absolute; right: 8px; top: 76px; z-index: 25; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 5px; border-radius: 99px; background: var(--glass); border: 1px solid var(--glass-border); box-shadow: 0 6px 18px rgba(0,0,0,0.28); cursor: pointer; }
+  .jump-tick { height: 2px; border-radius: 2px; background: var(--ink4); transition: all 0.2s ease; }
+  .jump-tick.active { width: 12px !important; background: var(--brand); box-shadow: 0 0 6px var(--brand); }
+  .jump-popover { position: absolute; right: 38px; top: 72px; width: 206px; border-radius: 14px; background: var(--surface2); border: 1px solid var(--glass-border); box-shadow: 0 14px 32px rgba(0,0,0,0.45); padding: 9px; z-index: 26; transform-origin: top right; transform: scale(0.88) translateX(8px); opacity: 0; pointer-events: none; transition: transform 0.22s var(--ease-spring), opacity 0.18s ease; }
+  .jump-popover.open { transform: scale(1) translateX(0); opacity: 1; pointer-events: auto; }
+
+  .ctx-meter-track { height: 8px; border-radius: 99px; background: var(--surface3); overflow: hidden; margin-top: 8px; }
+  .ctx-meter-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand-dark), var(--brand-light)); transition: width 0.55s var(--ease-out), background 0.3s ease; position: relative; overflow: hidden; }
+  .ctx-meter-fill.warn { background: linear-gradient(90deg, #D97706, var(--warn), var(--err)); box-shadow: 0 0 12px rgba(242,201,76,0.45); }
+  .ctx-meter-fill::after { content: ""; position: absolute; inset: 0; width: 44px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent); animation: shimmerSweep 1.5s linear infinite; }
+
+  .modal-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.58); backdrop-filter: blur(5px); z-index: 35; display: grid; place-items: center; padding: 20px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+  .modal-scrim.open { opacity: 1; pointer-events: auto; }
+  .confirm-card { width: 100%; border-radius: 20px; background: var(--surface2); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 20px 44px rgba(0,0,0,0.55); padding: 16px; transform: scale(0.88) translateY(8px); transition: transform 0.26s var(--ease-spring); }
+  .modal-scrim.open .confirm-card { transform: scale(1) translateY(0); }
+  .danger-icon-pulse { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,138,117,0.14); border: 1px solid rgba(255,138,117,0.38); color: var(--err); display: grid; place-items: center; position: relative; flex-shrink: 0; }
+  .danger-icon-pulse::after { content: ""; position: absolute; inset: -4px; border-radius: 13px; border: 1px solid var(--err); opacity: 0.45; animation: dotPing 1.8s infinite; }
+
+  .seg-wrap { position: relative; display: grid; grid-template-columns: 1fr 1fr; background: var(--well); border-radius: 11px; padding: 3px; border: 1px solid var(--hairline); }
+  .seg-pill-bg { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 8px; background: var(--surface1); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 3px 10px rgba(0,0,0,0.18); transition: transform 0.28s var(--ease-spring); }
+  .seg-btn { position: relative; z-index: 2; height: 32px; border: none; background: transparent; color: var(--ink2); font-family: var(--sans); font-size: 12px; font-weight: 600; cursor: pointer; transition: color 0.18s ease; }
+  .seg-btn.active { color: var(--ink1); }
+
+  .diff-box { border-radius: 13px; background: var(--surface1); border: 1px solid var(--hairline); overflow: hidden; font-family: var(--mono); font-size: 11px; }
+  .diff-hunk { padding: 7px 10px; border-left: 3px solid transparent; transition: background-color 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease; }
+  .diff-hunk.flash { background: var(--brand-wash-strong); border-left-color: var(--brand); box-shadow: inset 0 0 18px var(--brand-wash); }
+  .diff-add { background: rgba(92,214,155,0.11); color: var(--ok); padding: 2px 6px; border-radius: 4px; margin-top: 3px; }
+  .diff-del { background: rgba(255,138,117,0.11); color: var(--err); padding: 2px 6px; border-radius: 4px; }
+
+  .skel-row { height: 38px; border-radius: 10px; background: var(--surface1); border: 1px solid var(--hairline); position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 0 12px; }
+  .skel-bar { height: 10px; border-radius: 5px; background: var(--surface3); position: relative; overflow: hidden; }
+  .skel-bar::after { content: ""; position: absolute; inset: 0; width: 60px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.16), transparent); animation: shimmerSweep 1.25s linear infinite; }
+
+  @keyframes slideInQuestion { 0% { opacity: 0; transform: translateX(18px); } 100% { opacity: 1; transform: translateX(0); } }
+
+  /* ---------- 落地清单 ---------- */
+  .spec-wrap { margin-top: 56px; border-radius: 18px; background: var(--stage-card); border: 1px solid var(--stage-border); overflow: hidden; }
+  .spec-head { padding: 18px 22px; border-bottom: 1px solid var(--stage-border); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .spec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .spec-table th { text-align: left; padding: 12px 18px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); border-bottom: 1px solid var(--stage-border); background: rgba(255,255,255,0.02); }
+  .spec-table td { padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; line-height: 1.55; }
+  .spec-table tr:last-child td { border-bottom: none; }
+  .code-tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--brand-wash); border: 1px solid var(--brand-deep); color: var(--brand-light); margin: 2px 3px 2px 0; }
+  .muted { color: var(--ink-dim); font-size: 11.5px; }
+
+  /* ---------- 减少动态效果（与 RN AccessibilityInfo.isReduceMotionEnabled 对齐） ---------- */
+  body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation: none !important; transition: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
+
+  /* ---------- Keyframes ---------- */
+  @keyframes pulseRing { 0%,100% { box-shadow: 0 0 0 0 var(--brand-glow); } 50% { box-shadow: 0 0 0 6px transparent; } }
+  @keyframes dotPing { 0% { transform: scale(0.95); opacity: 0.7; } 75%,100% { transform: scale(2.15); opacity: 0; } }
+  @keyframes haloRipple { 0% { transform: scale(0.92); opacity: 0.55; } 100% { transform: scale(1.26); opacity: 0; } }
+  @keyframes particleRise { 0% { transform: translateY(10px) scale(0.6); opacity: 0; } 35% { opacity: 0.75; } 85% { opacity: 0.25; } 100% { transform: translateY(-48px) scale(1.1); opacity: 0; } }
+  @keyframes gentleBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+  @keyframes floatSlow { 0% { transform: translate(-50%,0) scale(1); } 100% { transform: translate(-46%,18px) scale(1.08); } }
+  @keyframes floatSlow2 { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(-20px,-16px) scale(1.1); } }
+  @keyframes driftA { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(42px,34px) scale(1.15); } }
+  @keyframes driftB { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(-36px,-28px) scale(1.12); } }
+  @keyframes heroPop { 0% { opacity: 0; transform: translateY(18px) scale(0.88); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes slideUpFade { 0% { opacity: 0; transform: translateY(14px) scale(0.985); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes bubbleInRight { 0% { opacity: 0; transform: translate(16px,8px) scale(0.96); } 100% { opacity: 1; transform: translate(0,0) scale(1); } }
+  @keyframes shimmerSweep { 0% { transform: translateX(-80px); } 100% { transform: translateX(260px); } }
+  @keyframes cardSweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(130%); } }
+  @keyframes cardSweepLoop { 0%,70% { transform: translateX(-100%); } 100% { transform: translateX(110%); } }
+  @keyframes textShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+  @keyframes railFlow { 0% { background-position: 0% 0%; } 100% { background-position: 0% 200%; } }
+  @keyframes topBeam { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+  @keyframes otpPop { 0% { transform: scale(0.84); } 55% { transform: scale(1.09); } 100% { transform: scale(1); } }
+  @keyframes focusBreath { 0%,100% { box-shadow: 0 0 0 3px var(--brand-wash), 0 0 12px -4px var(--brand-glow); } 50% { box-shadow: 0 0 0 4px var(--brand-wash-strong), 0 0 20px -2px var(--brand-glow); } }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+  @keyframes drawerItemIn { to { opacity: 1; transform: translateX(0); } }
+</style>
+</head>
+<body>
+
+<div class="studio-bar">
+  <div class="studio-brand">
+    <span class="studio-dot"></span>
+    <span class="studio-title">MyAI Mobile · 美化与动效交互原型</span>
+    <span class="studio-badge">可 OTA · 无需重新打包</span>
+  </div>
+  <div class="studio-controls">
+    <div class="ctrl-group" id="themeGroup">
+      <button class="ctrl-btn active" data-theme="dark">暗色</button>
+      <button class="ctrl-btn" data-theme="light">浅色</button>
+    </div>
+    <div class="ctrl-group" id="accentGroup">
+      <button class="ctrl-btn active" data-accent="cyan"><span class="swatch" style="background:#3CCBE8"></span>冰川青</button>
+      <button class="ctrl-btn" data-accent="blue"><span class="swatch" style="background:#5B9BFF"></span>深空蓝</button>
+      <button class="ctrl-btn" data-accent="mint"><span class="swatch" style="background:#38D399"></span>薄荷绿</button>
+      <button class="ctrl-btn" data-accent="amber"><span class="swatch" style="background:#F2B84B"></span>琥珀金</button>
+    </div>
+    <button class="ctrl-btn" id="wallpaperToggle">叠加壁纸</button>
+    <button class="ctrl-btn" id="reduceMotionToggle">减少动态效果</button>
+    <button class="ctrl-btn primary" id="replayAllBtn">重播全部动效</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="hero-header">
+    <div class="eyebrow">MYAI MOBILE · MOTION &amp; AMBIENT EFFECTS PROPOSAL</div>
+    <h1 class="hero-h1">页面美化、特效与交互动画原型</h1>
+    <p class="hero-sub">
+      在保留现有 Midnight Glass 信息密度与配色体系的前提下，为 <strong>启动过场、对话首页、AI 执行中、配对引导、侧栏/设置转场、子代理面板</strong> 6 个场景加入氛围光、玻璃高光、错峰入场、执行流光与弹性微反馈。
+      每台手机都可以<strong>直接点击操作</strong>；右上角可切换深浅模式、4 套强调色、壁纸叠加，以及「减少动态效果」无障碍模式。
+    </p>
+    <div class="pill-grid">
+      <div class="pillar">
+        <div class="pillar-kicker">01 · 氛围层次</div>
+        <div class="pillar-title">极光氛围光 + 玻璃顶边高光</div>
+        <div class="pillar-desc">卡片顶部 1px 内高光；启动 / 配对 / 空首页加入缓慢漂移的品牌色光晕与角色呼吸光环，减少纯色平铺带来的「死板感」。</div>
+      </div>
+      <div class="pillar">
+        <div class="pillar-kicker">02 · 入场编排</div>
+        <div class="pillar-title">错峰入场与轻量转场</div>
+        <div class="pillar-desc">角色 → 问候 → 提醒 → 建议卡片依次上浮；侧栏条目逐行滑入；二级页面 24px 右侧滑入 + 淡入，消除硬切。</div>
+      </div>
+      <div class="pillar">
+        <div class="pillar-kicker">03 · 执行感知</div>
+        <div class="pillar-title">AI 执行流光与状态脉冲</div>
+        <div class="pillar-desc">运行中的回答卡片左侧流动光轨、时间线当前节点呼吸、顶部状态岛旋转光环，一眼看出 AI 正在工作。</div>
+      </div>
+      <div class="pillar">
+        <div class="pillar-kicker">04 · 可落地</div>
+        <div class="pillar-title">零新增原生依赖</div>
+        <div class="pillar-desc">仅使用已安装的 Animated、LinearGradient、expo-haptics 等，落地后可直接走 preview 通道 OTA 推送到 v1.2.0。</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ SECTION 01 ============ -->
+  <section class="section">
+    <div class="sec-head">
+      <div class="sec-title-wrap"><span class="sec-num">01</span><h2 class="sec-title">第一印象与核心对话链路</h2></div>
+      <p class="sec-sub">启动过场 · 对话空首页 · 对话进行中（打开 App 后最先看到、停留最久的三个画面）</p>
+    </div>
+
+    <div class="phones-grid">
+      <!-- PHONE 1 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>1. 启动过场 · StartupLoadingOverlay</h3>
+          <div class="phone-actions"><button class="mini-btn" onclick="replayStartup()">重播过场</button></div>
+          <p class="phone-caption">新增：背景极光漂移、角色光环波纹 + 上浮粒子 + 轻微悬浮、MYAI 渐变字标、进度条扫光、状态文字淡入淡出切换。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="ambient-aurora"><div class="aurora-blob aurora-1"></div><div class="aurora-blob aurora-2"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="startup-stage animate" id="startupStage">
+            <div class="char-box st-hero">
+              <div class="halo-ring"></div><div class="halo-pulse"></div>
+              <span class="float-particle" style="left:16px;bottom:34px;animation-delay:0s"></span>
+              <span class="float-particle" style="right:20px;bottom:52px;animation-delay:1.1s"></span>
+              <span class="float-particle" style="left:46px;top:24px;animation-delay:2.1s"></span>
+              <img class="char-img" src="assets/motion/startup.webp" onerror="this.onerror=null;this.src='assets/hero-character.png'" alt="startup" />
+            </div>
+            <div class="st-title">MYAI</div>
+            <div class="st-status" id="startupStatus">正在启动...</div>
+            <div class="st-track"><div class="st-fill" id="startupFill"></div></div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 2 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>2. 对话空首页 · ChatEmptyState</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="replayEmpty()">重播入场</button>
+            <button class="mini-btn" onclick="toggleEmptyChanges()">切换变更提醒</button>
+          </div>
+          <p class="phone-caption">新增：在线呼吸点、角色光环与粒子、7 段错峰入场、建议卡片左侧渐变光条 + 悬停扫光 + 按压回弹；点卡片会填入输入框并点亮发送键。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="ambient-aurora"><div class="aurora-blob aurora-1" style="top:14%;opacity:0.42"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="app-header">
+            <button class="hdr-btn" title="侧栏"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h12"/></svg></button>
+            <button class="home-pill"><span class="pdot"><i></i><b></b></span><span>Workstation · 在线</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="hdr-btn" title="新对话"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          </div>
+          <div class="empty-stage stagger-on" id="emptyStage">
+            <div class="char-box empty-hero sg-0">
+              <div class="halo-ring"></div><div class="halo-pulse"></div>
+              <span class="float-particle" style="left:12px;bottom:22px;animation-delay:0.2s"></span>
+              <span class="float-particle" style="right:14px;bottom:40px;animation-delay:1.6s"></span>
+              <img class="char-img" src="assets/hero-character.png" alt="hero" />
+            </div>
+            <div class="empty-title sg-1">晚上好，Developer</div>
+            <div class="empty-sub sg-2">Workstation 已就绪，说说接下来要做什么</div>
+            <div class="changes-pill sg-3" id="emptyChanges"><span class="pdot busy"><i></i><b></b></span><span>工作区有 3 项未提交变更 · 点击审查</span></div>
+            <div class="suggest-list">
+              <div class="suggest-card sg-4" onclick="pickSuggestion('总结一下当前未提交的代码改动，并指出潜在风险')">
+                <div class="suggest-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+                <div class="suggest-body"><div class="suggest-title">总结当前代码变更</div><div class="suggest-sub">读取工作区改动并生成评审摘要</div></div>
+              </div>
+              <div class="suggest-card sg-5" onclick="pickSuggestion('跑一遍项目测试，定位并修复失败的用例')">
+                <div class="suggest-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="suggest-body"><div class="suggest-title">运行测试并定位报错</div><div class="suggest-sub">执行单元验证，失败时直接给出修复建议</div></div>
+              </div>
+              <div class="suggest-card sg-6" onclick="pickSuggestion('讲讲这个项目的目录结构、核心模块和交互链路')">
+                <div class="suggest-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+                <div class="suggest-body"><div class="suggest-title">梳理目录与模块架构</div><div class="suggest-sub">快速了解核心模块划分与数据流</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="composer-dock">
+            <div class="composer-box" id="emptyBox">
+              <textarea class="composer-input" id="emptyInput" rows="1" placeholder="输入需求，MyAI 会在电脑上执行" oninput="syncSend('emptyInput','emptySend')" onfocus="this.parentElement.classList.add('focused')" onblur="this.parentElement.classList.remove('focused')"></textarea>
+              <div class="composer-tools">
+                <div class="composer-left">
+                  <button class="tool-circle" title="附件"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg></button>
+                  <button class="tool-circle" onclick="toggleEmptyPlan(this)" title="规划模式"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></button>
+                  <span class="model-chip">claude-sonnet-4</span>
+                </div>
+                <button class="send-btn" id="emptySend"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 3 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>3. 对话进行中 · AppHeader / AgentTurnCard / Composer</h3>
+          <div class="phone-actions">
+            <button class="mini-btn active" id="btnRunning" onclick="setChatState(true)">执行中</button>
+            <button class="mini-btn" id="btnDone" onclick="setChatState(false)">已完成</button>
+            <button class="mini-btn active" id="btnPlan" onclick="toggleChatPlan()">规划模式</button>
+            <button class="mini-btn" id="btnPerm" onclick="toggleChatPerm()">授权提醒</button>
+          </div>
+          <p class="phone-caption">新增：状态岛旋转光环 + 发光描边、回答卡片左侧流动光轨、状态文字扫光、完成时「已处理」徽章弹出、规划模式顶部流光、发送键弹性点亮。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="app-header">
+            <button class="hdr-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h12"/></svg></button>
+            <div class="hero-island is-busy" id="island">
+              <div class="island-avatar busy" id="islandAvatar">
+                <img src="assets/motion/avatar-working.webp" onerror="this.onerror=null;this.src='assets/avatar.png'" style="width:42px;height:42px;border-radius:21px;object-fit:cover" alt="avatar" />
+              </div>
+              <div class="island-pill"><span class="pdot busy" id="islandDot"><i></i><b></b></span><span id="islandLabel">正在修改文件</span></div>
+            </div>
+            <button class="hdr-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          </div>
+          <div class="chat-feed">
+            <div class="user-bubble">帮我优化手机端页面的特效和动画，让启动和交互更有呼吸感</div>
+            <div class="turn-card running" id="turnCard">
+              <div class="turn-head">
+                <div class="turn-avatar spinning" id="turnAvatar"><img src="assets/avatar.png" style="width:24px;height:24px;border-radius:12px;object-fit:cover" alt="MyAI" /></div>
+                <span class="turn-name">MyAI</span>
+                <span class="shimmer-status" id="turnStatus">正在执行 · 4.2s</span>
+              </div>
+              <div class="timeline-box">
+                <div class="tl-step"><span class="tl-node"></span><span>读取 constants/theme.ts 色彩系统</span><span class="tl-pill">0.3s</span></div>
+                <div class="tl-step"><span class="tl-node active" id="tlNode"></span><span id="tlLabel">编排错峰入场与流光光轨...</span><span class="tl-pill" id="tlTime">运行中</span></div>
+              </div>
+              <div class="turn-answer">已完成动效方案设计：卡片增加玻璃顶边高光与品牌流光边界，全部基于现有依赖实现，可直接热更新。<span class="typing-cursor" id="cursor"></span></div>
+              <div class="turn-code"><span>Animated.loop + LinearGradient</span><span style="color:var(--ok)">useNativeDriver</span></div>
+            </div>
+          </div>
+          <div class="composer-dock">
+            <div class="perm-pill" id="permPill" style="display:none"><span class="pdot warn"><i></i><b></b></span><span class="t">待处理授权：执行 npx tsc --noEmit</span><span class="a">点击查看</span></div>
+            <div class="composer-box plan-active" id="chatBox">
+              <div class="plan-banner" id="planBanner"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg><span>规划模式已开启 · 先输出方案步骤供你确认</span></div>
+              <textarea class="composer-input" id="chatInput" rows="1" placeholder="继续补充想法..." oninput="syncSend('chatInput','chatSend')">把空首页卡片的扫光效果也加进去</textarea>
+              <div class="composer-tools">
+                <div class="composer-left">
+                  <button class="tool-circle"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg></button>
+                  <button class="tool-circle on" id="planIcon" onclick="toggleChatPlan()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></button>
+                  <span class="model-chip">claude-sonnet-4</span>
+                </div>
+                <button class="send-btn ready" id="chatSend"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECTION 02 ============ -->
+  <section class="section">
+    <div class="sec-head">
+      <div class="sec-title-wrap"><span class="sec-num">02</span><h2 class="sec-title">引导、导航与多任务面板</h2></div>
+      <p class="sec-sub">配对引导页 · 侧栏与设置页转场 · 子代理并行面板（让辅助流程也有统一的质感与反馈）</p>
+    </div>
+
+    <div class="phones-grid">
+      <!-- PHONE 4 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>4. 配对引导页 · PairingScreen</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="autoFillOtp()">模拟输入</button>
+            <button class="mini-btn" onclick="shakeOtp()">模拟配对失败</button>
+            <button class="mini-btn" onclick="clearOtp()">清空</button>
+          </div>
+          <p class="phone-caption">新增：焦点格呼吸外发光 + 光标闪烁、每输入一位 Q 弹放大、满 6 位按钮点亮并扫光；配对失败时验证码整行左右抖动 + 震动反馈。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="ambient-aurora"><div class="aurora-blob aurora-1" style="top:6%;opacity:0.46"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="pairing-stage">
+            <div class="char-box pair-hero">
+              <div class="halo-ring"></div><div class="halo-pulse"></div>
+              <img class="char-img" src="assets/hero-character.png" alt="pair" />
+            </div>
+            <div class="pair-title">连接你的电脑</div>
+            <div class="pair-sub">在电脑上启动 MyAI Agent，<br/>输入终端里显示的配对码</div>
+            <div class="otp-row" id="otpRow">
+              <div class="otp-cell focused"></div><div class="otp-cell"></div><div class="otp-cell"></div>
+              <div class="otp-cell"></div><div class="otp-cell"></div><div class="otp-cell"></div>
+            </div>
+            <div class="otp-keypad">
+              <button class="key-btn" onclick="pressKey('1')">1</button><button class="key-btn" onclick="pressKey('2')">2</button><button class="key-btn" onclick="pressKey('3')">3</button>
+              <button class="key-btn" onclick="pressKey('4')">4</button><button class="key-btn" onclick="pressKey('5')">5</button><button class="key-btn" onclick="pressKey('6')">6</button>
+              <button class="key-btn" onclick="pressKey('7')">7</button><button class="key-btn" onclick="pressKey('8')">8</button><button class="key-btn" onclick="pressKey('9')">9</button>
+              <button class="key-btn" onclick="clearOtp()">清空</button><button class="key-btn" onclick="pressKey('0')">0</button><button class="key-btn" onclick="backspaceOtp()">⌫</button>
+            </div>
+            <button class="pair-cta" id="pairCta" onclick="pairClick()">请输入 6 位配对码</button>
+            <div class="relay-bar"><span class="pdot"><i></i><b></b></span><span>中继 relay.myai.dev</span></div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 5 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>5. 侧栏 &amp; 设置页转场 · SideDrawer / SettingsHome</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="toggleDrawer()">打开侧栏</button>
+            <button class="mini-btn" onclick="openSub('外观与主题')">二级页转场</button>
+          </div>
+          <p class="phone-caption">新增：渐变设备名片 + 周期性扫光、设置行彩色图标底座 + 箭头右移反馈、侧栏条目逐行滑入 + 选中光条、二级页面右滑淡入。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="sec-topbar">
+            <button class="hdr-btn" onclick="toggleDrawer()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h12"/></svg></button>
+            <span class="sec-topbar-title">设置</span>
+          </div>
+          <div class="settings-scroll">
+            <div class="device-card" onclick="openSub('连接与配对')">
+              <div class="device-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:14.5px;font-weight:700">Workstation-PC</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:3px;font-size:11.5px;color:var(--ink2)"><span class="pdot"><i></i><b></b></span><span>在线 · relay.myai.dev</span></div>
+              </div>
+              <svg class="row-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+
+            <div class="set-group-label">外观</div>
+            <div class="set-group-card">
+              <div class="set-row" onclick="openSub('外观与主题')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2"/></svg></span><span class="row-lbl">外观与主题</span><span class="row-val">暗色</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+              <div class="set-row" onclick="openSub('角色动效与 GIF')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span><span class="row-lbl">角色动效与 GIF</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+            </div>
+
+            <div class="set-group-label">Agent</div>
+            <div class="set-group-card">
+              <div class="set-row" onclick="openSub('模型')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg></span><span class="row-lbl">模型</span><span class="row-val">Sonnet</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+              <div class="set-row" onclick="openSub('自动规划')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span><span class="row-lbl">自动规划</span><span class="row-val">已启用</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+              <div class="set-row" onclick="openSub('工具权限')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span><span class="row-lbl">工具权限</span><span class="row-val">询问授权</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+              <div class="set-row" onclick="openSub('版本与热更新')"><span class="row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span><span class="row-lbl">版本与热更新</span><span class="row-val">v1.2.0</span><svg class="row-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></div>
+            </div>
+          </div>
+
+          <div class="drawer-scrim" id="drawerScrim" onclick="toggleDrawer(false)"></div>
+          <div class="drawer-sheet" id="drawerSheet">
+            <div class="drawer-profile">
+              <img src="assets/avatar.png" style="width:40px;height:40px;border-radius:20px;border:1.5px solid var(--brand-deep)" alt="me" />
+              <div>
+                <div style="font-size:14px;font-weight:700">MyAI</div>
+                <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink2)"><span class="pdot"><i></i><b></b></span><span>Workstation · 在线</span></div>
+              </div>
+            </div>
+            <div class="drawer-nav active" onclick="toggleDrawer(false)">新对话</div>
+            <div class="drawer-nav" onclick="toggleDrawer(false)">文件</div>
+            <div class="drawer-nav" onclick="toggleDrawer(false)">变更<span class="nav-badge">3</span></div>
+            <div class="drawer-nav" onclick="toggleDrawer(false)">知识库与记忆</div>
+            <div class="drawer-nav" onclick="toggleDrawer(false)">设置</div>
+          </div>
+
+          <div class="subpage-layer" id="subLayer">
+            <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+            <div class="sec-topbar">
+              <button class="hdr-btn" onclick="closeSub()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg></button>
+              <span class="sec-topbar-title" id="subTitle">详情</span>
+            </div>
+            <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div class="turn-card">
+                <div style="font-size:13.5px;font-weight:700;margin-bottom:4px">二级页面转场</div>
+                <div style="font-size:12px;color:var(--ink2);line-height:1.6">进入时 translateX 24→0 + 透明度 0→1（约 260ms，缓出曲线），返回时反向。比现在的硬切更顺，但不会拖慢操作。</div>
+              </div>
+              <button class="mini-btn active" style="align-self:flex-start;padding:8px 14px" onclick="closeSub()">返回</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 6 -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>6. 子代理并行面板 · SubagentPanel</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="replaySub()">重播入场</button>
+            <button class="mini-btn" onclick="advanceSub()">推进进度</button>
+          </div>
+          <p class="phone-caption">新增：顶部并行汇总横幅、运行中任务呼吸灯 + 发光描边、底部扫光进度条（进度变化平滑过渡）、完成任务徽章弹出。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="sec-topbar">
+            <button class="hdr-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg></button>
+            <span class="sec-topbar-title">子代理</span>
+          </div>
+          <div class="sub-list stagger-on" id="subList">
+            <div class="sub-banner sg-0">
+              <div>
+                <div style="font-size:13px;font-weight:700" id="subBannerTitle">2 个子代理正在并行执行</div>
+                <div style="font-size:11px;color:var(--ink2);margin-top:2px">共享工作区 · 实时同步状态</div>
+              </div>
+              <span class="pdot busy"><i></i><b></b></span>
+            </div>
+            <div class="sub-card active sg-1" id="subA">
+              <div class="sub-row"><div class="sub-name"><span class="pdot busy"><i></i><b></b></span><span>UI 布局审计</span></div><span class="tag" id="subATag">运行中 · 12s</span></div>
+              <div class="sub-desc">扫描 mobile/src/components 中的样式边界...</div>
+              <div class="sub-track"><div class="sub-bar" id="subABar" style="width:68%"></div></div>
+            </div>
+            <div class="sub-card active sg-2" id="subB">
+              <div class="sub-row"><div class="sub-name"><span class="pdot busy"><i></i><b></b></span><span>动画性能检查</span></div><span class="tag" id="subBTag">运行中 · 6s</span></div>
+              <div class="sub-desc">检查 useNativeDriver 覆盖率与帧耗时...</div>
+              <div class="sub-track"><div class="sub-bar" id="subBBar" style="width:42%"></div></div>
+            </div>
+            <div class="sub-card sg-3">
+              <div class="sub-row"><div class="sub-name"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block"></span><span>主题 Token 检查</span></div><span class="done-pill" style="margin-left:0">已完成</span></div>
+              <div class="sub-desc" style="color:var(--ink3)">已校验 4 套强调色在深浅模式下的对比度。</div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECTION 03 ============ -->
+  <section class="section">
+    <div class="sec-head">
+      <div class="sec-title-wrap"><span class="sec-num">03</span><h2 class="sec-title">进阶交互细节与通用控件（计划卡 · 追问卡 · 会话仪表盘 · 滑动分段与 Diff 闪烁）</h2></div>
+      <p class="sec-sub">覆盖刚刚补充梳理的 10 项细节优化：一处通用控件升级即可带动全 App 体验跃升。</p>
+    </div>
+
+    <div class="phones-grid">
+      <!-- PHONE 7: InlinePlanCard + UserQuestionPrompt + ChatJumpNav + CodeCopy -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>7. 计划卡 · 追问多选 · 跳转目录 · 代码复制</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="stepPlanDemo()">推进计划步骤</button>
+            <button class="mini-btn" onclick="nextQaQuestion()">切下一题</button>
+            <button class="mini-btn" onclick="toggleJumpNav()">展开右侧跳转</button>
+          </div>
+          <p class="phone-caption">新增：计划进度平滑充能 + 勾号弹跳 + 批准按钮扫光；多选题点选回弹与换题横滑；右侧高低音轨跳转栏弹簧展开；代码复制弹跳。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="sec-topbar">
+            <button class="hdr-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h12"/></svg></button>
+            <span class="sec-topbar-title">对话内联交互卡片</span>
+          </div>
+
+          <!-- Jump Nav Rail + Popover -->
+          <div class="jump-rail" onclick="toggleJumpNav()" title="快速跳转消息">
+            <span class="jump-tick" style="width:7px"></span>
+            <span class="jump-tick active" style="width:11px"></span>
+            <span class="jump-tick" style="width:8px"></span>
+            <span class="jump-tick" style="width:10px"></span>
+            <span style="font-size:9.5px;font-weight:700;color:var(--brand-light);margin-top:2px">Q4</span>
+          </div>
+          <div class="jump-popover" id="jumpPopover">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11.5px;font-weight:700">
+              <span>快速定位提问</span>
+              <span style="color:var(--brand-light);cursor:pointer" onclick="toggleJumpNav()">收起</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11px">
+              <div style="padding:5px 7px;border-radius:8px;background:var(--surface1);color:var(--ink2)">Q1 · 排查窄屏文字挤压问题</div>
+              <div style="padding:5px 7px;border-radius:8px;background:var(--brand-wash);border:1px solid var(--brand-deep);color:var(--brand-light);font-weight:600">Q2 · 设计全套动效原型图</div>
+              <div style="padding:5px 7px;border-radius:8px;background:var(--surface1);color:var(--ink2)">Q3 · 补充全局通用组件动效</div>
+            </div>
+          </div>
+
+          <div class="chat-feed" style="padding-right:36px">
+            <!-- InlinePlanCard -->
+            <div class="plan-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span class="row-icon" style="width:26px;height:26px;border-radius:8px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+                  <span style="font-size:13px;font-weight:700">执行计划 · v2</span>
+                </div>
+                <span class="tag" id="planDemoBadge">2/3 已完成</span>
+              </div>
+              <div class="sub-track" style="margin-top:2px"><div class="sub-bar" id="planDemoBar" style="width:66%"></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:2px" id="planStepsBox">
+                <div class="plan-step-row"><span class="check-pop">✓</span><span style="text-decoration:line-through;color:var(--ink3)">1. 梳理色彩与动画 Token</span></div>
+                <div class="plan-step-row"><span class="check-pop">✓</span><span style="text-decoration:line-through;color:var(--ink3)">2. 完成 9 台手机交互原型</span></div>
+                <div class="plan-step-row" id="planStep3"><span class="pdot busy"><i></i><b></b></span><span style="color:var(--ink1);font-weight:600">3. 确认后落地 RN 组件并热更新</span></div>
+              </div>
+              <button class="plan-exec-btn" onclick="stepPlanDemo()">▶ 批准并执行计划</button>
+            </div>
+
+            <!-- UserQuestionPrompt -->
+            <div class="qa-card">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:11px;font-weight:700;color:var(--brand-light)" id="qaHeaderBadge">需要你的确认 · 第 1/2 题</span>
+                <span style="font-size:10.5px;color:var(--ink3);cursor:pointer" onclick="nextQaQuestion()">换题预览 ›</span>
+              </div>
+              <div class="qa-slide" id="qaSlideBox">
+                <div style="font-size:12.5px;font-weight:650;margin-bottom:7px" id="qaPromptTitle">1. 动效落地优先级怎么安排？</div>
+                <div style="display:flex;flex-direction:column;gap:6px" id="qaOptionsBox">
+                  <div class="qa-opt selected" onclick="selectQaOpt(this)"><span>●</span><span>全部页面动效一起落地并推送 OTA</span></div>
+                  <div class="qa-opt" onclick="selectQaOpt(this)"><span>○</span><span>分两批推进（先核心对话，再辅助页）</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Markdown Code Block Copy Feedback -->
+            <div class="turn-code" style="margin-top:0">
+              <span>npm run update:android:preview</span>
+              <button class="code-copy-btn" id="codeCopyBtn" onclick="copyCodeDemo()">复制</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 8: SessionSheet Context Meter + PermissionSheet + ConfirmModal -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>8. 会话容量充能条 · 权限呼吸盾牌 · 确认弹窗</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="setCtxGauge(38)">正常容量 38%</button>
+            <button class="mini-btn" onclick="setCtxGauge(88)">高负载预警 88%</button>
+            <button class="mini-btn" onclick="toggleConfirmModal()">弹出危险确认框</button>
+          </div>
+          <p class="phone-caption">新增：上下文窗口进度条平滑充能（超 80% 自动变琥珀红发光预警）、权限审批琥珀呼吸盾牌、二次确认弹窗弹簧缩放弹出。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="sec-topbar">
+            <span class="sec-topbar-title">会话设置与安全授权</span>
+          </div>
+
+          <div class="settings-scroll" style="display:flex;flex-direction:column;gap:12px">
+            <!-- Context Window Gauge -->
+            <div class="turn-card">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12.5px;font-weight:700">上下文窗口容量</span>
+                <span style="font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--brand-light)" id="ctxValueLabel">76K / 200K (38%)</span>
+              </div>
+              <div class="ctx-meter-track">
+                <div class="ctx-meter-fill" id="ctxMeterFill" style="width:38%"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--ink3)">
+                <span id="ctxHintText">容量充裕 · 响应速度最佳</span>
+                <button class="mini-btn" style="padding:3px 8px;font-size:10.5px" onclick="setCtxGauge(22)">压缩上下文</button>
+              </div>
+            </div>
+
+            <!-- Permission Sheet Preview Card -->
+            <div class="turn-card" style="border-color:rgba(242,201,76,0.4)">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="danger-icon-pulse" style="background:var(--warn-wash);border-color:rgba(242,201,76,0.45);color:var(--warn)">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:700">请求执行终端命令</div>
+                  <div style="font-size:11px;color:var(--ink2)">PermissionSheet · 琥珀脉冲盾牌提醒</div>
+                </div>
+              </div>
+              <div class="turn-code" style="margin-top:9px;color:var(--ink1)">
+                <span>$ git commit -m "feat: motion polish"</span>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:9px">
+                <button class="mini-btn" style="flex:1;padding:7px">拒绝</button>
+                <button class="mini-btn active" style="flex:1;padding:7px">允许并继续</button>
+              </div>
+            </div>
+
+            <button class="mini-btn" style="padding:10px;text-align:center" onclick="toggleConfirmModal()">点击预览 ConfirmModal 弹簧缩放弹出</button>
+          </div>
+
+          <!-- ConfirmModal Spring Overlay -->
+          <div class="modal-scrim" id="confirmModalScrim" onclick="toggleConfirmModal(false)">
+            <div class="confirm-card" onclick="event.stopPropagation()">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <div class="danger-icon-pulse">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                </div>
+                <div style="font-size:14.5px;font-weight:700">回滚历史快照</div>
+              </div>
+              <div style="font-size:12px;color:var(--ink2);line-height:1.6;margin-bottom:14px">
+                确定恢复至「快照 #839f721」吗？卡片采用 <code>scale(0.88 → 1)</code> 弹簧曲线弹出，危险图标带呼吸警示环。
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="mini-btn" style="flex:1;padding:8px" onclick="toggleConfirmModal(false)">取消</button>
+                <button class="mini-btn" style="flex:1;padding:8px;background:var(--err);border-color:var(--err);color:#fff" onclick="toggleConfirmModal(false)">确认回滚</button>
+              </div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+
+      <!-- PHONE 9: Sliding Segmented + Diff Flash Highlight + Skeleton Shimmer -->
+      <div class="phone-col">
+        <div class="phone-meta">
+          <h3>9. 滑动分段器 · Diff 跳转高亮 · 列表骨架屏</h3>
+          <div class="phone-actions">
+            <button class="mini-btn" onclick="switchSeg(0)">切 Tab 1</button>
+            <button class="mini-btn" onclick="switchSeg(1)">切 Tab 2</button>
+            <button class="mini-btn" onclick="flashNextDiff()">↓ 下一处差异闪烁</button>
+            <button class="mini-btn" onclick="toggleSkel()">切换骨架屏</button>
+          </div>
+          <p class="phone-caption">新增：Segmented 胶囊底块弹簧横滑、Diff 跳转到位时目标代码块 600ms 柔光闪烁高亮、文件列表加载微光骨架屏。</p>
+        </div>
+        <div class="phone">
+          <div class="wallpaper-bg"><div class="wallpaper-orb-a"></div><div class="wallpaper-orb-b"></div></div>
+          <div class="statusbar"><span>21:30</span><span class="sb-right">5G · 96%</span></div>
+          <div class="sec-topbar">
+            <span class="sec-topbar-title">变更对比与文件骨架屏</span>
+          </div>
+
+          <div class="settings-scroll" style="display:flex;flex-direction:column;gap:11px">
+            <!-- Sliding Segmented -->
+            <div class="seg-wrap">
+              <div class="seg-pill-bg" id="segPillBg"></div>
+              <button class="seg-btn active" id="segBtn0" onclick="switchSeg(0)">未提交改动 (3)</button>
+              <button class="seg-btn" id="segBtn1" onclick="switchSeg(1)">历史快照 (12)</button>
+            </div>
+
+            <!-- Diff Viewer with Jump Flash -->
+            <div class="diff-box">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--hairline);background:var(--surface2)">
+                <span><strong style="color:var(--ok)">+18</strong> <strong style="color:var(--err);margin-left:6px">−4</strong></span>
+                <button class="mini-btn" style="padding:2px 8px;font-size:10.5px" onclick="flashNextDiff()">↓ 下一处差异 (闪烁定位)</button>
+              </div>
+              <div class="diff-hunk flash" id="diffHunk0">
+                <div style="color:var(--ink3)">@@ -42,4 +42,6 @@ export function Segmented()</div>
+                <div class="diff-del">- backgroundColor: palette.surface1,</div>
+                <div class="diff-add">+ transform: [{ translateX: slideAnim }],</div>
+              </div>
+              <div class="diff-hunk" id="diffHunk1" style="border-top:1px solid var(--hairline)">
+                <div style="color:var(--ink3)">@@ -108,3 +110,5 @@ export function DiffViewer()</div>
+                <div class="diff-add">+ Animated.sequence([flashIn, flashOut]).start();</div>
+              </div>
+            </div>
+
+            <!-- Skeleton Shimmer Preview -->
+            <div style="font-size:11.5px;font-weight:650;color:var(--ink3);margin-top:2px">文件列表加载骨架屏 (Skeleton Shimmer)</div>
+            <div id="skelBox" style="display:flex;flex-direction:column;gap:7px">
+              <div class="skel-row"><div class="skel-bar" style="width:24px;height:20px;border-radius:6px"></div><div class="skel-bar" style="width:62%"></div></div>
+              <div class="skel-row"><div class="skel-bar" style="width:24px;height:20px;border-radius:6px"></div><div class="skel-bar" style="width:48%"></div></div>
+              <div class="skel-row"><div class="skel-bar" style="width:24px;height:20px;border-radius:6px"></div><div class="skel-bar" style="width:74%"></div></div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 落地清单 ============ -->
+  <section class="spec-wrap">
+    <div class="spec-head">
+      <div>
+        <h3 style="font-size:16px;font-weight:700">全量 9 屏落地清单（原型确认后实施）</h3>
+        <p style="font-size:12.5px;color:var(--ink-dim);margin-top:2px">全部基于 v1.2.0 已安装依赖，不改原生配置 → 可直接 OTA 推送</p>
+      </div>
+      <span class="studio-badge">无需重新打包 APK</span>
+    </div>
+    <table class="spec-table">
+      <thead><tr><th style="width:18%">页面 / 组件</th><th style="width:26%">现状</th><th style="width:34%">新增效果</th><th style="width:22%">实现方式</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>启动过场</strong><br><span class="muted">StartupLoadingOverlay.tsx</span></td>
+          <td>纯色背景 + 角色 + 渐变进度条</td>
+          <td>背景氛围光漂移、角色光环波纹与悬浮、渐变字标、进度条扫光、状态文字淡入切换</td>
+          <td><span class="code-tag">LinearGradient</span><span class="code-tag">Animated.loop</span></td>
+        </tr>
+        <tr>
+          <td><strong>对话空首页</strong><br><span class="muted">ChatEmptyState.tsx</span></td>
+          <td>整页静态，建议卡片无入场与按压反馈</td>
+          <td>错峰上浮入场、角色光环、卡片左侧渐变光条、按压回弹 + 轻触震动、变更提醒呼吸点</td>
+          <td><span class="code-tag">Animated.stagger</span><span class="code-tag">expo-haptics</span></td>
+        </tr>
+        <tr>
+          <td><strong>对话进行中</strong><br><span class="muted">AppHeader / AgentTurnCard / Composer</span></td>
+          <td>运行态仅头像外一圈 Spinner</td>
+          <td>状态岛光环、回答卡片左侧流光轨、完成徽章弹出、规划模式顶部流光、发送键弹性点亮</td>
+          <td><span class="code-tag">Animated.spring</span><span class="code-tag">LinearGradient</span></td>
+        </tr>
+        <tr>
+          <td><strong>配对引导页</strong><br><span class="muted">PairingScreen.tsx</span></td>
+          <td>焦点格仅加粗描边，无输入反馈</td>
+          <td>焦点格呼吸发光、输入字符弹跳、按钮就绪扫光、失败时整行抖动 + 震动</td>
+          <td><span class="code-tag">Animated.sequence</span><span class="code-tag">expo-haptics</span></td>
+        </tr>
+        <tr>
+          <td><strong>导航 / 设置 / 子代理</strong><br><span class="muted">SideDrawer / SettingsHome / SubagentPanel / MobileMainContent</span></td>
+          <td>侧栏整体滑入；页面切换硬切；进度静态</td>
+          <td>侧栏条目逐行滑入、二级页面右滑淡入、设备名片扫光、设置行图标底座、子代理扫光进度条</td>
+          <td><span class="code-tag">Animated.parallel</span><span class="code-tag">useNativeDriver</span></td>
+        </tr>
+        <tr>
+          <td><strong>对话内联卡片与目录</strong><br><span class="muted">InlinePlanCard / UserQuestionPrompt / ChatJumpNav / MarkdownText</span></td>
+          <td>计划进度硬跳、换题硬切、跳转栏瞬间显隐</td>
+          <td>计划进度平滑充能+勾号弹入、追问点选回弹与换题横滑、右侧音轨跳转栏弹簧展开、复制弹跳</td>
+          <td><span class="code-tag">Animated.spring</span><span class="code-tag">expo-haptics</span></td>
+        </tr>
+        <tr>
+          <td><strong>通用分段 / 弹层 / Diff</strong><br><span class="muted">Segmented / SessionSheet / ConfirmModal / DiffViewer / FilesPanel</span></td>
+          <td>Tab 瞬移、弹窗平淡、Diff 跳转无高亮</td>
+          <td>Segmented 胶囊弹簧滑动、容量条充能预警、ConfirmModal 缩放弹出、Diff 跳转闪烁定位、骨架屏</td>
+          <td><span class="code-tag">Animated.spring</span><span class="code-tag">LinearGradient</span></td>
+        </tr>
+        <tr>
+          <td><strong>全局约束</strong></td>
+          <td>—</td>
+          <td>系统开启「减少动态效果」时关闭所有循环动画，仅保留必要的淡入；所有循环动画在页面不可见时停止</td>
+          <td><span class="code-tag">AccessibilityInfo</span><span class="code-tag">useMotionConfig</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+  const accents = {
+    cyan:  { brand:"#3CCBE8", light:"#67D6EE", dark:"#2AA9C4", wash:"rgba(60,203,232,0.14)",  washS:"rgba(60,203,232,0.23)",  deep:"rgba(60,203,232,0.45)",  glow:"rgba(60,203,232,0.36)",  amb:"rgba(60,203,232,0.17)",  inv:"#03232C" },
+    blue:  { brand:"#5B9BFF", light:"#84B6FF", dark:"#3B7BE3", wash:"rgba(91,155,255,0.15)",  washS:"rgba(91,155,255,0.24)",  deep:"rgba(91,155,255,0.46)",  glow:"rgba(91,155,255,0.35)",  amb:"rgba(91,155,255,0.16)",  inv:"#061D42" },
+    mint:  { brand:"#38D399", light:"#6AE2B6", dark:"#1FA977", wash:"rgba(56,211,153,0.14)",  washS:"rgba(56,211,153,0.23)",  deep:"rgba(56,211,153,0.44)",  glow:"rgba(56,211,153,0.33)",  amb:"rgba(56,211,153,0.16)",  inv:"#052B1E" },
+    amber: { brand:"#F2B84B", light:"#F7CF79", dark:"#CE9324", wash:"rgba(242,184,75,0.14)",  washS:"rgba(242,184,75,0.24)",  deep:"rgba(242,184,75,0.46)",  glow:"rgba(242,184,75,0.34)",  amb:"rgba(242,184,75,0.16)",  inv:"#2B1B03" }
+  };
+  const $ = (id) => document.getElementById(id);
+  function restart(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
+  function applyAccent(key) {
+    const a = accents[key], s = document.documentElement.style;
+    s.setProperty("--brand", a.brand); s.setProperty("--brand-light", a.light); s.setProperty("--brand-dark", a.dark);
+    s.setProperty("--brand-wash", a.wash); s.setProperty("--brand-wash-strong", a.washS); s.setProperty("--brand-deep", a.deep);
+    s.setProperty("--brand-glow", a.glow); s.setProperty("--ambient-glow", a.amb); s.setProperty("--ink-inverse", a.inv);
+  }
+  function bindGroup(groupId, onPick) {
+    document.querySelectorAll(`#${groupId} .ctrl-btn`).forEach((btn) => btn.addEventListener("click", () => {
+      document.querySelectorAll(`#${groupId} .ctrl-btn`).forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active"); onPick(btn);
+    }));
+  }
+  bindGroup("themeGroup", (b) => document.body.classList.toggle("light-theme", b.dataset.theme === "light"));
+  bindGroup("accentGroup", (b) => applyAccent(b.dataset.accent));
+  $("wallpaperToggle").addEventListener("click", (e) => e.currentTarget.classList.toggle("active", document.body.classList.toggle("with-wallpaper")));
+  $("reduceMotionToggle").addEventListener("click", (e) => e.currentTarget.classList.toggle("active", document.body.classList.toggle("reduce-motion")));
+
+  /* 1. 启动过场 */
+  let stTimers = [];
+  function setStatus(text) {
+    const el = $("startupStatus");
+    el.style.opacity = "0";
+    stTimers.push(setTimeout(() => { el.textContent = text; el.style.opacity = "1"; }, 160));
+  }
+  function replayStartup() {
+    stTimers.forEach(clearTimeout); stTimers = [];
+    restart($("startupStage"), "animate");
+    $("startupStatus").textContent = "正在启动..."; $("startupStatus").style.opacity = "1";
+    $("startupFill").style.width = "16%";
+    stTimers.push(setTimeout(() => { setStatus("加载本地外观..."); $("startupFill").style.width = "58%"; }, 650));
+    stTimers.push(setTimeout(() => { setStatus("连接中继通道..."); $("startupFill").style.width = "100%"; }, 1350));
+  }
+
+  /* 2. 空首页 */
+  function replayEmpty() { restart($("emptyStage"), "stagger-on"); }
+  function toggleEmptyChanges() { const p = $("emptyChanges"); p.style.display = p.style.display === "none" ? "inline-flex" : "none"; }
+  function syncSend(inputId, btnId) { $(btnId).classList.toggle("ready", $(inputId).value.trim().length > 0); }
+  function pickSuggestion(text) {
+    $("emptyInput").value = text; syncSend("emptyInput", "emptySend");
+    const box = $("emptyBox"); box.classList.add("focused"); setTimeout(() => box.classList.remove("focused"), 900);
+  }
+  function toggleEmptyPlan(btn) { btn.classList.toggle("on"); $("emptyBox").classList.toggle("plan-active", btn.classList.contains("on")); }
+
+  /* 3. 对话进行中 */
+  function setChatState(running) {
+    $("btnRunning").classList.toggle("active", running); $("btnDone").classList.toggle("active", !running);
+    $("turnCard").classList.toggle("running", running);
+    $("island").classList.toggle("is-busy", running);
+    $("islandAvatar").classList.toggle("busy", running);
+    $("islandDot").classList.toggle("busy", running);
+    $("turnAvatar").classList.toggle("spinning", running);
+    $("tlNode").classList.toggle("active", running);
+    $("cursor").style.display = running ? "inline-block" : "none";
+    $("islandLabel").textContent = running ? "正在修改文件" : "已就绪";
+    $("tlLabel").textContent = running ? "编排错峰入场与流光光轨..." : "完成 9 屏动效原型设计";
+    $("tlTime").textContent = running ? "运行中" : "1.8s";
+    const st = $("turnStatus");
+    st.className = running ? "shimmer-status" : "done-pill";
+    st.textContent = running ? "正在执行 · 4.2s" : "已处理 5.1s · 2 个操作";
+  }
+  function toggleChatPlan() {
+    const on = !$("chatBox").classList.contains("plan-active");
+    $("chatBox").classList.toggle("plan-active", on);
+    $("btnPlan").classList.toggle("active", on);
+    $("planIcon").classList.toggle("on", on);
+    $("planBanner").style.display = on ? "flex" : "none";
+  }
+  function toggleChatPerm() {
+    const pill = $("permPill"), show = pill.style.display === "none";
+    pill.style.display = show ? "flex" : "none"; $("btnPerm").classList.toggle("active", show);
+  }
+
+  /* 4. 配对 */
+  let otp = "", fillTimers = [];
+  function renderOtp(popIndex) {
+    const cells = document.querySelectorAll("#otpRow .otp-cell");
+    cells.forEach((c, i) => {
+      c.textContent = otp[i] || "";
+      c.classList.toggle("filled", !!otp[i]);
+      c.classList.toggle("focused", otp.length < 6 && i === otp.length);
+      if (i === popIndex) restart(c, "pop");
+    });
+    const cta = $("pairCta"), ready = otp.length === 6;
+    cta.classList.remove("success");
+    cta.classList.toggle("ready", ready);
+    cta.textContent = ready ? "配对并连接" : "请输入 6 位配对码";
+  }
+  function pressKey(d) { if (otp.length >= 6) return; otp += d; renderOtp(otp.length - 1); }
+  function backspaceOtp() { otp = otp.slice(0, -1); renderOtp(); }
+  function clearOtp() { fillTimers.forEach(clearTimeout); fillTimers = []; otp = ""; renderOtp(); }
+  function autoFillOtp() { clearOtp(); "482916".split("").forEach((d, i) => fillTimers.push(setTimeout(() => pressKey(d), i * 130))); }
+  function shakeOtp() {
+    if (otp.length < 6) { otp = "482910"; renderOtp(); }
+    restart($("otpRow"), "shake");
+    const cta = $("pairCta"); cta.classList.remove("ready"); cta.textContent = "配对失败，请检查配对码";
+    if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+  }
+  function pairClick() {
+    if (otp.length < 6) { autoFillOtp(); return; }
+    const cta = $("pairCta"); cta.classList.remove("ready"); cta.classList.add("success"); cta.textContent = "✓ 配对成功，正在进入对话";
+    setTimeout(() => renderOtp(), 1500);
+  }
+
+  /* 5. 侧栏 & 转场 */
+  function toggleDrawer(force) {
+    const sheet = $("drawerSheet"), next = typeof force === "boolean" ? force : !sheet.classList.contains("open");
+    sheet.classList.toggle("open", next); $("drawerScrim").classList.toggle("open", next);
+  }
+  function openSub(title) { $("subTitle").textContent = title; $("subLayer").classList.add("open"); }
+  function closeSub() { $("subLayer").classList.remove("open"); }
+
+  /* 6. 子代理 */
+  let subStep = 0;
+  function replaySub() {
+    restart($("subList"), "stagger-on");
+    subStep = 0; $("subABar").style.width = "68%"; $("subBBar").style.width = "42%";
+    $("subATag").textContent = "运行中 · 12s"; $("subBTag").textContent = "运行中 · 6s";
+    $("subA").classList.add("active"); $("subBannerTitle").textContent = "2 个子代理正在并行执行";
+  }
+  function advanceSub() {
+    subStep++;
+    if (subStep === 1) { $("subABar").style.width = "92%"; $("subBBar").style.width = "71%"; $("subATag").textContent = "运行中 · 18s"; $("subBTag").textContent = "运行中 · 11s"; }
+    else if (subStep === 2) { $("subABar").style.width = "100%"; $("subA").classList.remove("active"); $("subATag").textContent = "已完成"; $("subBBar").style.width = "88%"; $("subBannerTitle").textContent = "1 个子代理正在执行"; }
+    else replaySub();
+  }
+
+  /* 7. 计划卡 + 追问卡 + 跳转目录 + 代码复制 */
+  let planDemoDone = false;
+  function stepPlanDemo() {
+    planDemoDone = !planDemoDone;
+    $("planDemoBar").style.width = planDemoDone ? "100%" : "66%";
+    $("planDemoBadge").textContent = planDemoDone ? "3/3 已完成" : "2/3 已完成";
+    $("planStep3").innerHTML = planDemoDone
+      ? '<span class="check-pop">✓</span><span style="text-decoration:line-through;color:var(--ink3)">3. 确认后落地 RN 组件并热更新</span>'
+      : '<span class="pdot busy"><i></i><b></b></span><span style="color:var(--ink1);font-weight:600">3. 确认后落地 RN 组件并热更新</span>';
+  }
+  let qaIdx = 0;
+  const qaData = [
+    { badge:"需要你的确认 · 第 1/2 题", q:"1. 动效落地优先级怎么安排？", opts:["全部页面动效一起落地并推送 OTA","分两批推进（先核心对话，再辅助页）"] },
+    { badge:"需要你的确认 · 第 2/2 题", q:"2. 是否保留减少动态效果自动降级？", opts:["保留（跟随系统无障碍设置自动关闭循环光效）","仅提供手动开关"] }
+  ];
+  function nextQaQuestion() {
+    qaIdx = (qaIdx + 1) % qaData.length;
+    const item = qaData[qaIdx];
+    $("qaHeaderBadge").textContent = item.badge;
+    $("qaPromptTitle").textContent = item.q;
+    $("qaOptionsBox").innerHTML = item.opts.map((t, i) =>
+      `<div class="qa-opt ${i===0?'selected':''}" onclick="selectQaOpt(this)"><span>${i===0?'●':'○'}</span><span>${t}</span></div>`
+    ).join("");
+    restart($("qaSlideBox"), "qa-slide");
+  }
+  function selectQaOpt(el) {
+    el.parentElement.querySelectorAll(".qa-opt").forEach((node) => {
+      node.classList.remove("selected");
+      node.firstElementChild.textContent = "○";
+    });
+    el.classList.add("selected");
+    el.firstElementChild.textContent = "●";
+  }
+  function toggleJumpNav() { $("jumpPopover").classList.toggle("open"); }
+  function copyCodeDemo() {
+    const btn = $("codeCopyBtn");
+    btn.textContent = "✓ 已复制";
+    restart(btn, "copied");
+    setTimeout(() => { btn.classList.remove("copied"); btn.textContent = "复制"; }, 1600);
+  }
+
+  /* 8. 上下文容量条 + 确认弹窗 */
+  function setCtxGauge(pct) {
+    const fill = $("ctxMeterFill");
+    fill.style.width = pct + "%";
+    fill.classList.toggle("warn", pct >= 80);
+    const k = Math.round((pct / 100) * 200);
+    $("ctxValueLabel").textContent = `${k}K / 200K (${pct}%)`;
+    $("ctxHintText").textContent = pct >= 80 ? "容量接近上限 · 建议一键压缩上下文" : "容量充裕 · 响应速度最佳";
+  }
+  function toggleConfirmModal(force) {
+    const scrim = $("confirmModalScrim");
+    const next = typeof force === "boolean" ? force : !scrim.classList.contains("open");
+    scrim.classList.toggle("open", next);
+  }
+
+  /* 9. 滑动分段器 + Diff 闪烁 + 骨架屏 */
+  function switchSeg(idx) {
+    $("segPillBg").style.transform = idx === 0 ? "translateX(0%)" : "translateX(100%)";
+    $("segBtn0").classList.toggle("active", idx === 0);
+    $("segBtn1").classList.toggle("active", idx === 1);
+  }
+  let diffIdx = 0;
+  function flashNextDiff() {
+    diffIdx = (diffIdx + 1) % 2;
+    const h0 = $("diffHunk0"), h1 = $("diffHunk1");
+    h0.classList.remove("flash"); h1.classList.remove("flash");
+    void h0.offsetWidth;
+    (diffIdx === 0 ? h0 : h1).classList.add("flash");
+  }
+  function toggleSkel() {
+    const box = $("skelBox");
+    box.style.display = box.style.display === "none" ? "flex" : "none";
+  }
+
+  $("replayAllBtn").addEventListener("click", () => {
+    replayStartup(); replayEmpty(); replaySub(); autoFillOtp();
+    setCtxGauge(88); setTimeout(() => setCtxGauge(38), 900);
+  });
+  setTimeout(replayStartup, 200);
+</script>
+</body>
+</html>

@@ -309,10 +309,17 @@ export function makeChatStyles(theme: AppTheme) {
     markdownCodeLabel: { color: palette.ink3, fontFamily: monoFont, fontSize: font.micro },
     markdownCodeCopyBtn: {
       alignItems: "center",
+      borderColor: "transparent",
+      borderRadius: radius.xs,
+      borderWidth: 1,
       flexDirection: "row",
       gap: 4,
       paddingHorizontal: 6,
       paddingVertical: 2,
+    },
+    markdownCodeCopyBtnCopied: {
+      backgroundColor: palette.okWash,
+      borderColor: palette.okBorder,
     },
     markdownCodeCopyText: { color: palette.ink3, fontSize: font.micro, fontWeight: weight.medium },
     markdownCodeScroll: { maxWidth: "100%" },

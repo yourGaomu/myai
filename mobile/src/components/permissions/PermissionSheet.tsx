@@ -7,6 +7,7 @@ import { fontFamily, font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { PulseDot } from "../common/MotionEffects";
 
 type Props = {
   deviceID: string;
@@ -53,7 +54,10 @@ export function PermissionSheet({
           </View>
         </View>
         <View style={styles.headText}>
-          <Text style={styles.title}>{permissionTitle(name)}</Text>
+          <View style={styles.titleRow}>
+            <PulseDot color={palette.warn} size={7} />
+            <Text style={styles.title}>{permissionTitle(name)}</Text>
+          </View>
           <Text style={styles.sub}>MyAI 请求在 {deviceID.trim() || "电脑"} 上执行</Text>
         </View>
       </View>
@@ -128,7 +132,8 @@ const makeStyles = ({ palette }: AppTheme) =>
       width: 18,
     },
     headText: { flex: 1, minWidth: 0 },
-    title: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold, lineHeight: 23 },
+    titleRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 7 },
+    title: { color: palette.ink1, flexShrink: 1, fontSize: font.title, fontWeight: weight.semibold, lineHeight: 23 },
     sub: { color: palette.ink2, fontSize: font.label, marginTop: 2 },
     cmd: {
       backgroundColor: palette.well,

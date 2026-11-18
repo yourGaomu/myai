@@ -7,6 +7,8 @@ import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import type { AgentActivity } from "../../utils/agentActivity";
 import { activityStatusLabel, activityToMotionSlot } from "../../utils/motionRegistry";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { PulseDot } from "../common/MotionEffects";
+import { Spinner } from "../common/Spinner";
 import { HeaderIconButton } from "./ScreenHeader";
 
 type Tone = "ok" | "busy" | "wait" | "off";
@@ -109,7 +111,7 @@ export function AppHeader({
               onPress={onOpenSession}
               style={({ pressed }) => [styles.homePill, pressed && styles.pressed]}
             >
-              <View style={[styles.dot, { backgroundColor: dotColor }]} />
+              <PulseDot color={dotColor} pulse={tone !== "off"} size={7} />
               <Text numberOfLines={1} style={styles.homePillText}>
                 {connected ? `${deviceID.trim() || "本机"} · 在线` : base.label}
               </Text>
@@ -130,9 +132,14 @@ export function AppHeader({
                   slot={motionSlot}
                   variant="full"
                 />
+                {busy ? (
+                  <View pointerEvents="none" style={styles.avatarRing}>
+                    <Spinner color={palette.brandLight} size={50} />
+                  </View>
+                ) : null}
               </View>
-              <View style={styles.statusPill}>
-                <View style={[styles.dot, { backgroundColor: dotColor }]} />
+              <View style={[styles.statusPill, busy && styles.statusPillBusy]}>
+                <PulseDot color={dotColor} pulse={tone !== "off"} size={7} />
                 <Text numberOfLines={1} style={styles.statusText}>
                   {label}
                 </Text>
@@ -181,7 +188,7 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       borderRadius: radius.pill,
       borderWidth: 1,
       flexDirection: "row",
-      gap: 6,
+      gap: 7,
       marginTop: 4,
       maxWidth: 210,
       minHeight: 34,
@@ -201,7 +208,18 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       alignItems: "center",
       height: 50,
       justifyContent: "center",
+      position: "relative",
       width: 52,
+    },
+    avatarRing: {
+      alignItems: "center",
+      bottom: 0,
+      justifyContent: "center",
+      left: 0,
+      opacity: 0.72,
+      position: "absolute",
+      right: 0,
+      top: 0,
     },
     statusPill: {
       alignItems: "center",
@@ -210,24 +228,23 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       borderRadius: radius.pill,
       borderWidth: 1,
       flexDirection: "row",
-      gap: 5,
+      gap: 6,
       marginTop: -8,
       maxWidth: 148,
       paddingHorizontal: 10,
       paddingVertical: 3,
       ...shadow.card,
     },
+    statusPillBusy: {
+      borderColor: palette.brandDeep,
+    },
     statusText: {
       color: palette.ink1,
       fontSize: 11,
       fontWeight: weight.semibold,
     },
-    dot: {
-      borderRadius: radius.pill,
-      height: 7,
-      width: 7,
-    },
     pressed: {
       opacity: 0.78,
+      transform: [{ scale: 0.96 }],
     },
   });

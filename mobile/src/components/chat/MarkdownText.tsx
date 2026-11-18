@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -104,6 +105,9 @@ function MarkdownCodeBlock({ language, styles, text }: { language: string; style
 
   const handleCopy = async () => {
     if (await copyToClipboard(text)) {
+      if (Platform.OS !== "web") {
+        void Haptics.selectionAsync().catch(() => {});
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     }
@@ -113,7 +117,7 @@ function MarkdownCodeBlock({ language, styles, text }: { language: string; style
     <View style={styles.markdownCodeBlock}>
       <View style={styles.markdownCodeHead}>
         <Text style={styles.markdownCodeLabel}>{language || "code"}</Text>
-        <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void handleCopy()} style={styles.markdownCodeCopyBtn}>
+        <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void handleCopy()} style={[styles.markdownCodeCopyBtn, copied && styles.markdownCodeCopyBtnCopied]}>
           <Feather color={copied ? palette.ok : palette.ink3} name={copied ? "check" : "copy"} size={12} />
           <Text style={[styles.markdownCodeCopyText, copied && { color: palette.ok }]}>{copied ? "已复制" : "复制"}</Text>
         </Pressable>

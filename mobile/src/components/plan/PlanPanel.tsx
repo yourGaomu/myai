@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import type { Plan, PlanStep, SessionSummary } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import { useAppTheme } from "../../theme/ThemeProvider";
+import { ShimmerProgressBar } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
 import { usePlanStyles, type PlanStyles } from "./planStyles";
 
@@ -60,9 +61,12 @@ export function PlanPanel({ activeSession, clientToken, onExecutePlan, onOpenCha
               已完成 {progress.done}/{progress.total}
               {progress.running ? " · 执行中" : progress.failed ? " · 需要处理" : progress.waiting ? " · 等待依赖" : ""}
             </Text>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${progress.percent}%` }]} />
-            </View>
+            <ShimmerProgressBar
+              active={running}
+              height={6}
+              progress={progress.percent}
+              tone={progress.done === progress.total && progress.total > 0 ? "ok" : "brand"}
+            />
           </View>
 
           <View style={styles.steps}>

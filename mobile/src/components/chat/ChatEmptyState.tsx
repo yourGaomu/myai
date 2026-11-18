@@ -1,11 +1,14 @@
-import type { ComponentProps } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, type ComponentProps } from "react";
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { font, radius, weight } from "../../constants/theme";
 import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { CharacterHalo, PulseDot, useReduceMotion } from "../common/MotionEffects";
 
 type Props = {
   changesCount?: number;
@@ -49,6 +52,12 @@ function greeting() {
   return "晚上好";
 }
 
+function triggerHaptic() {
+  if (Platform.OS !== "web") {
+    void Haptics.selectionAsync().catch(() => {});
+  }
+}
+
 export function ChatEmptyState({
   changesCount = 0,
   connected,
@@ -60,50 +69,119 @@ export function ChatEmptyState({
   const { isDark, palette } = useAppTheme();
   const { isWallpaperActive } = useWallpaper();
   const styles = useThemedStyles(makeStyles);
+  const reduceMotion = useReduceMotion();
   const device = deviceID.trim() || "电脑";
+
+  const anims = useRef(
+    Array.from({ length: 5 }, () => ({
+      opacity: new Animated.Value(1),
+      translateY: new Animated.Value(0),
+    })),
+  ).current;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      anims.forEach((item) => {
+        item.opacity.setValue(1);
+        item.translateY.setValue(0);
+      });
+      return;
+    }
+
+    anims.forEach((item) => {
+      item.opacity.setValue(0);
+      item.translateY.setValue(14);
+    });
+
+    const composite = Animated.stagger(
+      65,
+      anims.map((item) =>
+        Animated.parallel([
+          Animated.timing(item.opacity, {
+            duration: 320,
+            easing: Easing.out(Easing.cubic),
+            toValue: 1,
+            useNativeDriver: true,
+          }),
+          Animated.timing(item.translateY, {
+            duration: 340,
+            easing: Easing.out(Easing.cubic),
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      ),
+    );
+    composite.start();
+    return () => composite.stop();
+  }, [anims, reduceMotion]);
+
+  const stageStyle = (idx: number) => ({
+    opacity: anims[idx].opacity,
+    transform: [{ translateY: anims[idx].translateY }],
+  });
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.heroWrap}>
-        <CharacterAvatar accessibilityLabel="MyAI 角色" height={162} size={146} slot="idle" variant="full" />
-      </View>
+      <Animated.View style={[styles.heroWrap, stageStyle(0)]}>
+        <CharacterHalo ringSize={132}>
+          <CharacterAvatar accessibilityLabel="MyAI 角色" height={162} size={146} slot="idle" variant="full" />
+        </CharacterHalo>
+      </Animated.View>
 
-      <Text style={[styles.title, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
-        {name ? `${greeting()}，${name}` : greeting()}
-      </Text>
-      <Text style={[styles.sub, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
-        {connected ? `${device} 已就绪，说说接下来要做什么` : `${device} 暂未连线，可先浏览本地视图`}
-      </Text>
+      <Animated.View style={[styles.headerBlock, stageStyle(1)]}>
+        <Text style={[styles.title, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
+          {name ? `${greeting()}，${name}` : greeting()}
+        </Text>
+        <Text style={[styles.sub, isWallpaperActive && (isDark ? styles.textShadowDark : styles.textShadowLight)]}>
+          {connected ? `${device} 已就绪，说说接下来要做什么` : `${device} 暂未连线，可先浏览本地视图`}
+        </Text>
 
-      {changesCount > 0 && onOpenChanges ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={onOpenChanges}
-          style={({ pressed }) => [styles.changesPill, isWallpaperActive && styles.pillGlass, pressed && styles.pressed]}
-        >
-          <View style={styles.changesDot} />
-          <Text style={styles.changesText}>工作区有 {changesCount} 项未提交变更 · 点击审查</Text>
-          <Feather color={palette.brandLight} name="chevron-right" size={14} />
-        </Pressable>
-      ) : null}
-
-      <View style={styles.list}>
-        {suggestions.map((item) => (
+        {changesCount > 0 && onOpenChanges ? (
           <Pressable
             accessibilityRole="button"
-            key={item.title}
-            onPress={() => onPickSuggestion(item.text)}
-            style={({ pressed }) => [styles.item, isWallpaperActive && styles.itemGlass, pressed && styles.itemPressed]}
+            onPress={() => {
+              triggerHaptic();
+              onOpenChanges();
+            }}
+            style={({ pressed }) => [styles.changesPill, isWallpaperActive && styles.pillGlass, pressed && styles.pressed]}
           >
-            <View style={styles.iconBox}>
-              <Feather color={palette.brandLight} name={item.icon} size={18} />
-            </View>
-            <View style={styles.itemBody}>
-              <Text numberOfLines={1} style={styles.itemTitle}>{item.title}</Text>
-              <Text numberOfLines={1} style={styles.itemSub}>{item.subtitle}</Text>
-            </View>
-            <Feather color={palette.ink4} name="arrow-up-left" size={16} />
+            <PulseDot color={palette.brand} size={7} />
+            <Text style={styles.changesText}>工作区有 {changesCount} 项未提交变更 · 点击审查</Text>
+            <Feather color={palette.brandLight} name="chevron-right" size={14} />
           </Pressable>
+        ) : null}
+      </Animated.View>
+
+      <View style={styles.list}>
+        {suggestions.map((item, idx) => (
+          <Animated.View key={item.title} style={stageStyle(Math.min(4, idx + 2))}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                triggerHaptic();
+                onPickSuggestion(item.text);
+              }}
+              style={({ pressed }) => [styles.item, isWallpaperActive && styles.itemGlass, pressed && styles.itemPressed]}
+            >
+              <View pointerEvents="none" style={styles.leftBar}>
+                <LinearGradient
+                  colors={[palette.brandLight, palette.brandDark]}
+                  end={{ x: 0, y: 1 }}
+                  start={{ x: 0, y: 0 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              </View>
+              <View style={styles.iconBox}>
+                <Feather color={palette.brandLight} name={item.icon} size={18} />
+              </View>
+              <View style={styles.itemBody}>
+                <Text numberOfLines={1} style={styles.itemTitle}>{item.title}</Text>
+                <Text numberOfLines={1} style={styles.itemSub}>{item.subtitle}</Text>
+              </View>
+              <Feather color={palette.ink4} name="arrow-up-left" size={16} />
+            </Pressable>
+          </Animated.View>
         ))}
       </View>
     </View>
@@ -122,7 +200,10 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     heroWrap: {
       alignItems: "center",
       justifyContent: "center",
-      marginBottom: 4,
+      marginBottom: 6,
+    },
+    headerBlock: {
+      alignItems: "center",
     },
     title: {
       color: palette.ink1,
@@ -144,16 +225,10 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderRadius: radius.pill,
       borderWidth: 1,
       flexDirection: "row",
-      gap: 6,
+      gap: 7,
       marginTop: 12,
       paddingHorizontal: 13,
       paddingVertical: 6,
-    },
-    changesDot: {
-      backgroundColor: palette.brand,
-      borderRadius: radius.pill,
-      height: 6,
-      width: 6,
     },
     changesText: {
       color: palette.brandLight,
@@ -174,13 +249,27 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       flexDirection: "row",
       gap: 12,
       minHeight: 58,
-      paddingHorizontal: 12,
+      overflow: "hidden",
+      paddingHorizontal: 13,
       paddingVertical: 11,
+      position: "relative",
+    },
+    leftBar: {
+      borderBottomRightRadius: 3,
+      borderTopRightRadius: 3,
+      bottom: 9,
+      left: 0,
+      overflow: "hidden",
+      position: "absolute",
+      top: 9,
+      width: 3,
     },
     iconBox: {
       alignItems: "center",
       backgroundColor: palette.brandWash,
+      borderColor: palette.brandDeep,
       borderRadius: radius.md,
+      borderWidth: 1,
       height: 36,
       justifyContent: "center",
       width: 36,
@@ -201,6 +290,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     itemPressed: {
       backgroundColor: palette.pressed,
+      transform: [{ scale: 0.98 }],
     },
     itemGlass: {
       backgroundColor: palette.floatingGlass,
@@ -221,5 +311,6 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     pressed: {
       opacity: 0.78,
+      transform: [{ scale: 0.97 }],
     },
   });
