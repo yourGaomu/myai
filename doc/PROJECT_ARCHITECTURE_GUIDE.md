@@ -40,17 +40,17 @@ flowchart LR
     RC[("Redis")]
     SQ[("SQLite history")]
     FS["Workspace files"]
-    AS["Asset / short-link service"]
     MCP["MCP servers"]
+    SL["short_links MCP<br/>文件 / 短链后端"]
 
-    M <-->|"/pair, /ws/client"| R
+    M <-->|"/pair, /ws/client<br/>认证上传 256 KiB 块"| R
     R <-->|"/ws/agent"| A
     A --> L
     A --> DB
     A --> RC
     A --> SQ
     A --> FS
-    A --> AS
+    A -->|"主机 files.Service"| SL
     A --> MCP
 ```
 
@@ -155,8 +155,8 @@ myai/
 │   ├── port/sandbox/               # 隔离环境 Port
 │   ├── skill/、skillhub/           # Skill 加载和安装
 │   ├── hook/                       # 生命周期和工具事件 Hook
-│   ├── mcp/                        # MCP 客户端和工具注册
-│   ├── asset/                      # 文件上传与短链接客户端
+│   ├── mcp/                        # MCP 客户端、工具发现与注册
+│   ├── port/files/                 # 主机文件上传、分享、元数据与下载接口
 │   └── infra/                      # Mongo、Redis 等底层客户端创建
 ├── mobile/                         # Expo React Native 手机端
 ├── resource/application.yaml       # 默认运行配置，通常包含敏感信息
@@ -479,8 +479,9 @@ Plan 指令要求模型输出：
 - `edit_file`
 - `shell`
 - `install_skill`
-- 配置 Asset 服务后可用 `read_asset`、`share_file`
-- 配置 MCP 后可注册外部 MCP 工具
+- `read_asset`、`share_file` 通过主机 `files.Service` 调用 `short_links` MCP；缺服务或必需工具时明确失败
+- 配置 MCP 后可注册外部 MCP 工具；素材分片与下载传输由主机处理，不让模型搬运 Base64
+- 普通上传只产生 AssetID 与结构化元数据；公开分享需要明确批准
 
 权限模式：
 
@@ -607,6 +608,14 @@ mobile/
 
 Go 的 `core/remote/protocol` 与 TypeScript 的 `mobile/src/protocol.ts` 是跨端契约。新增或修改消息类型时，必须同步修改两端并补充处理分支。
 
+### 14.3 MCP-only 文件生命周期
+
+手机上传只走配对后认证的 Relay WebSocket，使用 `asset_upload_begin/chunk/status/complete/cancel` 和 `asset_upload_result`，归属绑定用户、设备、客户端与会话。原始数据块最多 256 KiB，完整上传 JSON 信封最多 512 KiB，单文件大小范围为 1 字节至 50 MiB（1–52428800 字节，含边界），拒绝空文件（0 字节）；手机不持有后端机器 key，不直连管理上传接口。
+
+Agent 通过主机 `files.Service` 调用 `short_links` MCP，重组手机小块为远端分片。后端非末片为 32 MiB，单次 MCP 请求体上限为 48 MiB，包含 Base64 和 JSON 开销。普通上传只生成 AssetID 与 `structuredContent` 元数据；会话与知识库通过 `asset_id` 引用素材，公开分享另行批准后创建短链，上传结果可以没有 `short_url` / `code`。
+
+读取与知识库导入由主机通过 MCP 查询素材和获取下载地址，取回字节后交给 MyAI 解析。RAG MinIO 配置和基础设施继续保留。文件能力必须使用独立部署的兼容新版后端：现有 10 个工具之外还需 `get_asset_info`、`get_asset_download_url`、`create_asset_shortlink`。无 MCP 或缺少必需工具时明确失败，没有旧附件 HTTP 回退；普通聊天可以在文件能力停用时启动。完整契约见[文件与短链接 MCP 接入](FEATURE_SHORT_LINKS_MCP_INTEGRATION.md)。
+
 ## 15. 远程 Agent 的内部拆分
 
 `core/remote/agent` 是传输适配层，不直接实现 Chat 业务：
@@ -723,12 +732,6 @@ thread:
   core: 5
   queueSize: 10
 
-asset:
-  shortener_base_url: ""
-  upload_timeout_seconds: 60
-  ttl_seconds: 604800
-  max_visits: 0
-
 skill:
   root: "skills"
   registry: ""
@@ -737,7 +740,8 @@ mcp:
   servers: []
 
 short_links:
-  # 通过环境变量 SHORT_LINKS_MCP_URL 和 SHORT_LINKS_API_KEY 接入独立短链服务。
+  # 未知实际 URL/key 时留空并停用；环境变量为 SHORT_LINKS_MCP_URL、SHORT_LINKS_API_KEY。
+  # 新版后端端点包含 /api/mcp；key 仅由 Agent 持有，缺服务/工具时文件操作明确失败。
   mcp_url: ""
 
 hooks:

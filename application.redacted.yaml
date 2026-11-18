@@ -84,12 +84,6 @@ thread:
   core: 5
   queueSize: 10
 
-asset:
-  shortener_base_url: ""
-  upload_timeout_seconds: 60
-  ttl_seconds: 604800
-  max_visits: 0
-
 sandbox:
   # local runs commands on the host without OS isolation. Use opensandbox for isolated subagent workspaces.
   provider: local
@@ -113,3 +107,9 @@ subagent:
 
 mcp:
   servers: []
+
+# MCP-only 文件/短链默认停用；未知的实际地址与 key 保持为空。
+# 部署环境提供 SHORT_LINKS_MCP_URL（含 /api/mcp）和 SHORT_LINKS_API_KEY；key 不放入此文件或手机端。
+# 缺少 MCP 或必需工具时文件操作明确失败，不回退到旧附件服务。
+short_links:
+  mcp_url: ""

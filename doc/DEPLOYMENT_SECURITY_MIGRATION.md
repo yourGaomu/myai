@@ -44,7 +44,7 @@ docker cp myai-agent:/home/myai/.config/myai/workspaces "$backup_dir/history-wor
 
 本轮的敏感路径过滤与拒绝回传不会清洗旧数据库。旧 `file_changes` 的敏感正文 BLOB、WAL 和 SQLite 空闲页可能仍物理保留；baseline Reset 会过滤后重写记录，也不属于安全擦除，没有自动执行清洗或 `VACUUM`。将旧库、迁移备份和恢复备份都按秘密数据保护，优先轮换可能暴露过的凭据。是否另行清库或销毁备份应由数据所有者决定，本次迁移不自动删除历史。多文件回滚采用进程内补偿，不保证断电时原子恢复；失败后可能保留需要人工处理的恢复备份，仍须保密。
 
-同样在更新 checkout 或移除旧容器前，通过私有文件复制备份部署配置和旧 `UrlShortener` 本地配置，不要把内容放入终端日志。`UrlShortener/resource/application.yaml` 已退出 Git 索引并被忽略；当前工作区保留本地副本，但旧 checkout 更新时仍应先备份，干净 checkout 不再带有该文件。
+同样在更新 checkout 或移除旧容器前，通过私有文件复制备份部署配置及旧服务本地运行配置和数据，不要把内容放入终端日志。本次只按已核对清单清理旧代码、测试、模块、文档、示例和 Dockerfile，未删除整个目录。唯一已跟踪的私有运行 YAML 保持本地文件、Git 跟踪及索引状态不变，不读取、不删除、不执行 unstage；仅作为不参与当前构建、配置加载或运行的独立历史存档保留。忽略的运行配置与数据也保持原状。
 
 ## 2. 还原 history 与用户批准卷
 
@@ -194,12 +194,13 @@ MinIO API/Console 仍默认只发布到宿主 `127.0.0.1`；容器应走共享�
 | Relay 额外身份 `MYAI_RELAY_AGENT_CREDENTIALS` | 对应外部 Agent 的 relay token 与 user/device | 每个 `user/device=token` 必须与该 Agent 一一匹配；仅传给 Relay |
 | MinIO 账户或应用访问凭据 | `RAG_MINIO_ACCESS_KEY`、`RAG_MINIO_SECRET_KEY`，需要时加 `RAG_MINIO_SESSION_TOKEN` | root 部署变量为 `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`；应用可使用受限账户，必须具有目标桶所需权限 |
 | OpenSandbox `OPENSANDBOX_API_KEY` | `SANDBOX_OPENSANDBOX_API_KEY` | 服务端和客户端使用同一有效 key，停用时设置 `SANDBOX_PROVIDER=local` |
-| 外部短链后台创建的机器调用 key | `SHORT_LINKS_API_KEY` | MCP 使用 `X-API-Key`，URL 包含 `/api/mcp`；这是新后端的独立凭据 |
-| 归档 UrlShortener 的 `server.api_key` / `URL_SHORTENER_API_KEY` | `asset.api_key` / `ASSET_API_KEY` | 旧管理接口使用 `Authorization: Bearer`；新 MCP key 不会自动替代旧 key |
+| 外部短链后台创建的机器调用 key | `SHORT_LINKS_API_KEY` | 文件与短链共用 `short_links` MCP；`SHORT_LINKS_MCP_URL` 包含 `/api/mcp`，key 使用 `X-API-Key` 且仅由 Agent 持有 |
 
-修改服务端与客户端私有配置后，按各服务部署流程重建相应容器，使环境变量生效；单纯重载 MCP 不会重新读取宿主 `.env`。归档 UrlShortener 不在根 Compose 的服务列表，需要保留它的部署必须使用其独立启动流程，并在监听或连接存储之前提供有效 `URL_SHORTENER_API_KEY`。根 Compose 继续显式透传 `ASSET_SHORTENER_BASE_URL` 与 `ASSET_API_KEY`；`share_file`、`read_asset` 和现有移动端文件能力依赖旧服务，外部短链 MCP 不能替代这些本地文件通道。需要禁用时同时清空 URL 环境变量和 YAML 的 `asset.shortener_base_url`；仅将环境变量留空不会覆盖 YAML 的非空值。
+修改服务端与客户端私有配置后，按各服务部署流程重建相应容器，使环境变量生效；单纯重载 MCP 不会重新读取宿主 `.env`。文件能力要求另行部署兼容的新版后端，支持现有 10 个 MCP 工具以及 `get_asset_info`、`get_asset_download_url`、`create_asset_shortlink`。实际 URL/key 未确认时将 `SHORT_LINKS_MCP_URL`、`SHORT_LINKS_API_KEY` 留空并保持停用；空环境值通常沿用 YAML，因此还要清空 `short_links.mcp_url` 或显式禁用同名 MCP。不要从旧服务域名或 key 推测新配置。
 
-自动 `short_links` MCP 是 `required: false`、`permission: execute`，离线、缺 key 或鉴权失败会告警并跳过，不阻止首次启动。显式配置的同名服务器优先；若旧 YAML 仍为 `required: true`，离线依然会阻止启动。运行中的重载对失败候选保留旧工具与客户端。
+自动 `short_links` MCP 是 `required: false`、`permission: execute`，离线、缺 key 或鉴权失败会告警并跳过，不阻止普通聊天启动。文件上传、`read_asset`、`share_file` 和知识库文件导入均调用主机侧 files 服务；缺少 MCP 或必需工具时明确失败，没有旧 HTTP 附件回退。显式配置的同名服务器优先；`required: true` 会让初始化失败阻止启动。运行中的重载对失败候选保留旧工具与客户端。
+
+手机使用配对后认证的 Relay 上传通道，原始数据块最大 256 KiB、完整上传 JSON 信封最大 512 KiB；手机与主机上传的单文件大小范围为 1 字节至 50 MiB（1–52428800 字节，含边界），拒绝空文件（0 字节）。Agent 校验并重组后调用后端 MCP；远端非末片为 32 MiB，MCP 请求体上限为 48 MiB，包含 Base64 与 JSON 开销。普通上传只得到 AssetID 与 `structuredContent` 元数据，不创建公开链接；公开分享需明确批准后单独创建短链。下载字节仍由 MyAI 解析，RAG MinIO 和基础设施继续保留。详细契约见[文件与短链接 MCP 接入](FEATURE_SHORT_LINKS_MCP_INTEGRATION.md)。
 
 ## 7. 2026-11-10：磁盘待写日志升级
 
@@ -216,6 +217,6 @@ MinIO API/Console 仍默认只发布到宿主 `127.0.0.1`；容器应走共享�
 
 ## 8. 验证边界
 
-本轮离线验证仅读取模板与源码，纯 YAML 解析通过 `compose.prod.yaml`、`compose.build.yaml`、`config/application.example.yaml` 与 MinIO Compose；配置 loader/mapper、UrlShortener 启动前校验和临时 history 存储测试通过。无密钥探针在禁用网络传输的条件下确认可选 shortlink 初始注册失败仍可继续启动。
+本指南不将此前轮次的 YAML 解析、旧服务测试或无密钥探针作为 2026-11-18 MCP-only 文件迁移的验收结果。历史评估与修复记录保持原时点含义；本次变更及主协调方最终验证结果见 [MCP-only 文件迁移记录](MCP_ONLY_FILE_MIGRATION_20261118.md)。
 
-复核环境没有 Docker CLI，未执行 Docker 构建、真实 `docker compose config`、卷迁移或线上连通性测试。维护者应在具备 Docker 的环境先用指定无密钥临时 env 做 `config --quiet`，再按本文经审阅的维护窗口步骤迁移。配置解析通过不等同于真实网络、存储权限或部署凭据已验证。
+部署维护者应在具备 Docker 的环境先用无密钥临时 env 执行 `config --quiet`，再在维护窗口按本指南迁移并验证实际后端工具、身份、上传、读取与分享。不要输出完整插值配置。模板或离线检查通过不等同于真实网络、存储权限或部署凭据已验证；本次文档修改未执行 Docker 构建、卷迁移或线上部署。
