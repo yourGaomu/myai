@@ -53,3 +53,11 @@ compose $profile_args pull $services
 compose $profile_args up -d --force-recreate $services
 
 compose $profile_args ps
+
+# If an external Nginx container proxies the MCP/public endpoints, reload it
+# after the application containers receive new addresses. The reload is
+# best-effort and never makes the MyAI update fail.
+if [ "${MYAI_RELOAD_NGINX:-true}" = "true" ]; then
+  NGINX_CONTAINER="${MYAI_NGINX_CONTAINER:-myai-nginx}"
+  docker exec "$NGINX_CONTAINER" nginx -s reload 2>/dev/null || true
+fi
