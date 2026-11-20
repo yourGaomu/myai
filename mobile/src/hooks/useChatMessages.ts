@@ -3,32 +3,45 @@ import { useCallback, useRef, useState } from "react";
 import type { TokenUsage, ToolResultPayload } from "../protocol";
 import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
+import { attachmentKey } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
 
-type SessionChatState = {
+export type SessionChatState = {
   activeAssistantID: string;
+  historyIDs: ReadonlySet<string>;
+  historyConfirmed: boolean;
+  finishedRequests: ReadonlySet<string>;
   lastUsage: TokenUsage | null;
   messages: ChatItem[];
   pendingPermission: PermissionState | null;
+  pendingPermissions: PermissionState[];
   pendingQuestions: UserQuestionState[];
   pendingRequestID: string;
 };
 
-const localSessionID = "__local__";
+type HistorySource = "cache" | "server";
 
 function emptySessionChatState(): SessionChatState {
   return {
     activeAssistantID: "",
+    historyIDs: new Set(),
+    historyConfirmed: false,
+    finishedRequests: new Set(),
     lastUsage: null,
     messages: [],
     pendingPermission: null,
+    pendingPermissions: [],
     pendingQuestions: [],
     pendingRequestID: "",
   };
 }
 
 function chatSessionKey(sessionID: string) {
-  return sessionID.trim() || localSessionID;
+  return sessionID.trim();
+}
+
+function lookupSessionChat(chats: Record<string, SessionChatState>, key: string) {
+  return Object.prototype.hasOwnProperty.call(chats, key) ? chats[key] : emptySessionChatState();
 }
 
 // 按 Session 隔离聊天运行态；Ref 保存大量消息，version 只负责通知 React 重新渲染。
@@ -50,22 +63,17 @@ export function useChatMessages() {
       updater: (current: SessionChatState) => SessionChatState,
     ) => {
       const key = chatSessionKey(sessionID);
-      const current = sessionChatsRef.current[key] || emptySessionChatState();
-      const next = {
-        ...sessionChatsRef.current,
-        [key]: updater(current),
-      };
-      commitSessionChats(next);
+      const current = lookupSessionChat(sessionChatsRef.current, key);
+      const updated = updater(current);
+      if (updated === current) return;
+      commitSessionChats({ ...sessionChatsRef.current, [key]: updated });
     },
     [commitSessionChats],
   );
 
-  const getSessionChat = useCallback((sessionID: string) => {
-    return (
-      sessionChatsRef.current[chatSessionKey(sessionID)] ||
-      emptySessionChatState()
-    );
-  }, []);
+  const getSessionChat = useCallback((sessionID: string) => lookupSessionChat(sessionChatsRef.current, chatSessionKey(sessionID)), []);
+
+  const getSessionChats = useCallback(() => sessionChatsRef.current, []);
 
   const addMessage = useCallback(
     (sessionID: string, role: ChatItem["role"], text: string, requestID?: string, attachments?: ChatAttachment[]) => {
@@ -82,7 +90,7 @@ export function useChatMessages() {
       updateSessionChat(sessionID, (current) => ({
         ...current,
         messages: current.messages.map((item) =>
-          item.role === "user" && item.requestID === requestID
+          item.role === "user" && item.requestID === requestID && item.status !== "done"
             ? { ...item, status: "queued" }
             : item,
         ),
@@ -114,30 +122,40 @@ export function useChatMessages() {
       requestID?: string,
       toolCallID?: string,
     ) => {
-      updateSessionChat(sessionID, (current) => ({
-        ...current,
-        activeAssistantID: "",
-        messages: [
-          ...current.messages.map((item) =>
-            item.role === "assistant" &&
-            (item.requestID === requestID ||
-              item.id === current.activeAssistantID)
-              ? { ...item, status: "tool_running" as ChatMessageStatus }
-              : item,
-          ),
-          {
-            id: newRequestID(),
-            requestID,
-            createdAt: new Date().toISOString(),
-            role: "tool_call",
-            status: "tool_running",
-            text: "",
-            toolName: name,
-            toolCallID: toolCallID || undefined,
-            toolArguments: argumentsText,
-          },
-        ],
-      }));
+      updateSessionChat(sessionID, (current) => {
+        const sameCall = (item: ChatItem) => Boolean(toolCallID && item.toolCallID === toolCallID && item.requestID === requestID);
+        if (current.messages.some((item) => item.role === "tool_call" && sameCall(item))) return current;
+        const resultIndex = current.messages.findIndex((item) => item.role === "tool" && sameCall(item));
+        if (resultIndex < 0 && requestID && current.finishedRequests.has(requestID)) return current;
+        const call: ChatItem = {
+          id: newRequestID(),
+          requestID,
+          createdAt: new Date().toISOString(),
+          role: "tool_call",
+          status: resultIndex < 0 ? "tool_running" : "done",
+          text: "",
+          toolName: name,
+          toolCallID: toolCallID || undefined,
+          toolArguments: argumentsText,
+        };
+        if (resultIndex >= 0) {
+          const messages = [...current.messages];
+          messages.splice(resultIndex, 0, call);
+          return { ...current, messages };
+        }
+        return {
+          ...current,
+          activeAssistantID: keepOtherActiveAssistant(current, requestID),
+          messages: [
+            ...current.messages.map((item) =>
+              item.role === "assistant" && item.requestID === requestID && item.status === "streaming"
+                ? { ...item, status: "tool_running" as const }
+                : item,
+            ),
+            call,
+          ],
+        };
+      });
     },
     [updateSessionChat],
   );
@@ -156,80 +174,33 @@ export function useChatMessages() {
     ) => {
       updateSessionChat(sessionID, (current) => {
         const targetToolCallID = toolCallID || details?.tool_call_id;
-        let matchedToolCallID = "";
-
-        // 2.1 优先依据 toolCallID 精确查找运行中的工具调用
-        if (targetToolCallID) {
-          for (const item of current.messages) {
-            if (
-              item.role === "tool_call" &&
-              item.status === "tool_running" &&
-              item.toolCallID === targetToolCallID
-            ) {
-              matchedToolCallID = item.id;
-              break;
-            }
-          }
-        }
-
-        // 2.2 兼容兜底：若未提供 toolCallID 或未找到，按名称与入参匹配
-        if (!matchedToolCallID) {
-          for (const item of current.messages) {
-            if (
-              item.role === "tool_call" &&
-              item.status === "tool_running" &&
-              item.toolName === name &&
-              (!argumentsText || (item.toolArguments || "").trim() === argumentsText.trim())
-            ) {
-              matchedToolCallID = item.id;
-              break;
-            }
-          }
-        }
-
-        // 2.3 二次兜底：按同名运行中工具调用匹配
-        if (!matchedToolCallID) {
-          for (const item of current.messages) {
-            if (item.role === "tool_call" && item.status === "tool_running" && item.toolName === name) {
-              matchedToolCallID = item.id;
-              break;
-            }
-          }
-        }
-
-        return {
-          ...current,
-          activeAssistantID: "",
-          messages: [
-            ...current.messages.map((item) => {
-              if (item.id === matchedToolCallID) {
-                return { ...item, status: "done" as ChatMessageStatus };
-              }
-              if (
-                item.role === "assistant" &&
-                (item.requestID === requestID ||
-                  item.id === current.activeAssistantID)
-              ) {
-                return { ...item, status: "streaming" as ChatMessageStatus };
-              }
-              return item;
-            }),
-            {
-              id: newRequestID(),
-              requestID,
-              createdAt: new Date().toISOString(),
-              role: "tool",
-              text: result,
-              toolName: name,
-              toolCallID: targetToolCallID || undefined,
-              toolArguments: argumentsText,
-              toolError: failed ? details?.error_message || result : "",
-              toolStatus: details?.status,
-              toolErrorCode: details?.error_code,
-              toolTruncated: details?.truncated,
-            },
-          ],
+        const finished = Boolean(requestID && current.finishedRequests.has(requestID));
+        const sameCall = (item: ChatItem) => Boolean(targetToolCallID && item.toolCallID === targetToolCallID && item.requestID === requestID);
+        if (current.messages.some((item) => item.role === "tool" && sameCall(item))) return current;
+        const matchingCall = targetToolCallID
+          ? current.messages.find((item) => item.role === "tool_call" && sameCall(item))
+          : current.messages.find((item) => item.role === "tool_call" && item.requestID === requestID &&
+            item.status === "tool_running" && !item.toolCallID && item.toolName === name &&
+            (!argumentsText || item.toolArguments?.trim() === argumentsText.trim()));
+        if (finished && (!targetToolCallID || !matchingCall)) return current;
+        const message: ChatItem = {
+          id: newRequestID(),
+          requestID,
+          createdAt: new Date().toISOString(),
+          role: "tool",
+          text: result,
+          toolName: name,
+          toolCallID: targetToolCallID || undefined,
+          toolArguments: argumentsText,
+          toolError: failed ? details?.error_message || result : "",
+          toolStatus: details?.status,
+          toolErrorCode: details?.error_code,
+          toolTruncated: details?.truncated,
         };
+        const messages = current.messages.map((item) => item === matchingCall ? { ...item, status: "done" as const } : item);
+        const finalIndex = finished ? messages.findIndex((item) => item.requestID === requestID && item.finalReply) : -1;
+        messages.splice(finalIndex < 0 ? messages.length : finalIndex, 0, message);
+        return { ...current, activeAssistantID: keepOtherActiveAssistant(current, requestID), messages };
       });
     },
     [updateSessionChat],
@@ -248,8 +219,8 @@ export function useChatMessages() {
 
       // 同一阶段（未被 tool_call 隔断）的多个 delta 复用同一个 assistant 条目，被工具调用隔断后开启新段落以保持时间序交错。
       updateSessionChat(sessionID, (current) => {
-        const assistantID =
-          findAssistantID(current, requestID) || current.activeAssistantID;
+        if (requestID && current.finishedRequests.has(requestID)) return current;
+        const assistantID = findStreamingAssistantID(current, requestID);
         if (!assistantID) {
           const id = newRequestID();
           return {
@@ -293,218 +264,31 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
-  const completeAssistant = useCallback(
-    (
-      sessionID: string,
-      requestID: string | undefined,
-      status: ChatMessageStatus,
-      usage?: TokenUsage | null,
-      content?: string,
-      reasoning?: string,
-    ) => {
+  const completeAssistant = useCallback((
+    sessionID: string,
+    requestID: string | undefined,
+    status: ChatMessageStatus,
+    usage?: TokenUsage | null,
+    content?: string,
+    reasoning?: string,
+    messageID?: string,
+    runID?: string,
+  ) => {
+    updateSessionChat(sessionID, (current) => finishAssistant(current, requestID, status, { content, reasoning, usage, messageID, runID }));
+  }, [updateSessionChat]);
+
+  const markAssistantError = useCallback((sessionID: string, requestID: string | undefined, error?: string) => {
+    updateSessionChat(sessionID, (current) => finishAssistant(current, requestID, "error", { error: error || "Request failed." }));
+  }, [updateSessionChat]);
+
+  const settleSessionRun = useCallback((sessionID: string, requestID: string, status: "done" | "paused" | "error") => {
+    if (!requestID) return;
+    updateSessionChat(sessionID, (current) => {
       const completedAt = new Date().toISOString();
-      updateSessionChat(sessionID, (current) => {
-        const lastUserIndex = current.messages.reduce(
-          (acc, msg, idx) => (msg.role === "user" ? idx : acc),
-          -1,
-        );
-        const isInLatestTurn = (idx: number, item: ChatItem) =>
-          (requestID && item.requestID === requestID) || idx > lastUserIndex;
-
-        const hasAnyReasoning = Boolean(
-          current.messages.some(
-            (item, idx) =>
-              item.role === "assistant" &&
-              isInLatestTurn(idx, item) &&
-              Boolean(item.reasoning?.trim()),
-          ),
-        );
-        const assistantID =
-          findAssistantID(current, requestID) || current.activeAssistantID;
-        if (!assistantID) {
-          const updatedExisting = current.messages.map((item, idx) => {
-            if (!isInLatestTurn(idx, item)) {
-              return item;
-            }
-            if (item.role === "tool_call" && item.status === "tool_running") {
-              return { ...item, status: "done" as ChatMessageStatus };
-            }
-            if (
-              item.role === "assistant" &&
-              (item.requestID === requestID ||
-                item.status === "streaming" ||
-                item.status === "tool_running")
-            ) {
-              return {
-                ...item,
-                completedAt: item.completedAt || completedAt,
-                status,
-                usage: usage || item.usage,
-                text: (content && content.trim() !== "") ? content : (item.text || content || ""),
-                reasoning: (reasoning && reasoning.trim() !== "") ? reasoning : item.reasoning,
-              };
-            }
-            return item;
-          });
-          const fallbackReasoning = hasAnyReasoning ? undefined : reasoning || undefined;
-          if (!content && !fallbackReasoning && status === "done") {
-            return {
-              ...current,
-              activeAssistantID: "",
-              messages: updatedExisting,
-            };
-          }
-          const id = newRequestID();
-          return {
-            ...current,
-            activeAssistantID: "",
-            messages: [
-              ...updatedExisting,
-              {
-                completedAt,
-                id,
-                requestID,
-                createdAt: new Date().toISOString(),
-                role: "assistant",
-                reasoning: fallbackReasoning,
-                status,
-                text: content || "",
-                usage: usage || undefined,
-              },
-            ],
-          };
-        }
-
-        return {
-          ...current,
-          activeAssistantID:
-            current.activeAssistantID === assistantID
-              ? ""
-              : current.activeAssistantID,
-          messages: current.messages.map((item, idx) => {
-            if (item.id === assistantID) {
-              return {
-                ...item,
-                completedAt,
-                requestID: item.requestID || requestID,
-                reasoning:
-                  (reasoning && reasoning.trim() !== "")
-                    ? reasoning
-                    : (item.reasoning || (hasAnyReasoning ? undefined : reasoning || undefined)),
-                status,
-                text: (content && content.trim() !== "") ? content : (item.text || content || ""),
-                usage: usage || item.usage,
-              };
-            }
-            if (isInLatestTurn(idx, item)) {
-              if (item.role === "tool_call" && item.status === "tool_running") {
-                return { ...item, status: "done" as ChatMessageStatus };
-              }
-              if (
-                item.role === "assistant" &&
-                (item.requestID === requestID ||
-                  item.status === "streaming" ||
-                  item.status === "tool_running")
-              ) {
-                return {
-                  ...item,
-                  completedAt: item.completedAt || completedAt,
-                  status,
-                };
-              }
-            }
-            return item;
-          }),
-        };
-      });
-    },
-    [updateSessionChat],
-  );
-
-  const markAssistantError = useCallback(
-    (sessionID: string, requestID: string | undefined, message?: string) => {
-      const completedAt = new Date().toISOString();
-      updateSessionChat(sessionID, (current) => {
-        const lastUserIndex = current.messages.reduce(
-          (acc, msg, idx) => (msg.role === "user" ? idx : acc),
-          -1,
-        );
-        const isInLatestTurn = (idx: number, item: ChatItem) =>
-          (requestID && item.requestID === requestID) || idx > lastUserIndex;
-
-        const assistantID =
-          findAssistantID(current, requestID) || current.activeAssistantID;
-        if (!assistantID) {
-          const cleanedMessages = current.messages.map((item, idx) => {
-            if (!isInLatestTurn(idx, item)) {
-              return item;
-            }
-            if (item.role === "tool_call" && item.status === "tool_running") {
-              return { ...item, status: "done" as ChatMessageStatus };
-            }
-            if (
-              item.role === "assistant" &&
-              (item.status === "streaming" || item.status === "tool_running")
-            ) {
-              return { ...item, completedAt: item.completedAt || completedAt, status: "done" as ChatMessageStatus };
-            }
-            return item;
-          });
-          const id = newRequestID();
-          return {
-            ...current,
-            activeAssistantID: "",
-            messages: [
-              ...cleanedMessages,
-              {
-                completedAt,
-                id,
-                requestID,
-                createdAt: new Date().toISOString(),
-                role: "assistant",
-                status: "error",
-                text: message || "Request failed.",
-              },
-            ],
-          };
-        }
-
-        return {
-          ...current,
-          activeAssistantID:
-            current.activeAssistantID === assistantID
-              ? ""
-              : current.activeAssistantID,
-          messages: current.messages.map((item, idx) => {
-            if (item.id === assistantID) {
-              return {
-                ...item,
-                completedAt,
-                requestID: item.requestID || requestID,
-                status: "error",
-                text: item.text
-                  ? (message ? `${item.text}\n\n[错误: ${message}]` : item.text)
-                  : (message || "Request failed."),
-              };
-            }
-            if (isInLatestTurn(idx, item)) {
-              if (item.role === "tool_call" && item.status === "tool_running") {
-                return { ...item, status: "done" as ChatMessageStatus };
-              }
-              if (
-                item.role === "assistant" &&
-                (item.status === "streaming" || item.status === "tool_running")
-              ) {
-                return { ...item, completedAt: item.completedAt || completedAt, status: "done" as ChatMessageStatus };
-              }
-            }
-            return item;
-          }),
-        };
-      });
-    },
-    [updateSessionChat],
-  );
+      const settled = settleLiveRows(current, requestID, status, completedAt);
+      return settled.pendingRequestID === requestID ? { ...settled, pendingRequestID: "" } : settled;
+    });
+  }, [updateSessionChat]);
 
   const resetActiveAssistant = useCallback(
     (sessionID: string) => {
@@ -538,6 +322,10 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
+  const mergeSessionHistory = useCallback((sessionID: string, messages: ChatItem[], source: HistorySource) => {
+    updateSessionChat(sessionID, (current) => mergeHistory(current, messages, source));
+  }, [updateSessionChat]);
+
   const appendMessages = useCallback(
     (sessionID: string, nextMessages: ChatItem[]) => {
       if (nextMessages.length === 0) {
@@ -561,40 +349,64 @@ export function useChatMessages() {
     [updateSessionChat],
   );
 
-  const setSessionPendingPermission = useCallback(
-    (sessionID: string, permission: PermissionState | null) => {
-      updateSessionChat(sessionID, (current) => ({
-        ...current,
-        pendingPermission: permission,
-      }));
-    },
-    [updateSessionChat],
-  );
+  const setSessionPendingPermission = useCallback((sessionID: string, permission: PermissionState | null) => {
+    // Only a response or terminal turn with the matching identity can remove an approval.
+    if (!permission?.approvalID || !permission.requestID || permission.sessionID !== sessionID) return;
+    updateSessionChat(sessionID, (current) => {
+      const index = current.pendingPermissions.findIndex((item) => samePermission(item, permission));
+      const permissions = [...current.pendingPermissions];
+      if (index === -1) permissions.push(permission);
+      else {
+        const existing = permissions[index];
+        permissions[index] = { ...permission, requireFreshConsent: existing.requireFreshConsent || permission.requireFreshConsent };
+      }
+      return { ...current, pendingPermissions: permissions, pendingPermission: permissions[0] || null };
+    });
+  }, [updateSessionChat]);
 
-  const setSessionPendingQuestion = useCallback(
-    (sessionID: string, question: UserQuestionState | null) => {
-      updateSessionChat(sessionID, (current) => ({
-        ...current,
-        pendingQuestions: question
-          ? [
-              ...current.pendingQuestions.filter((item) => item.questionID !== question.questionID),
-              question,
-            ]
-          : [],
-      }));
-    },
-    [updateSessionChat],
-  );
+  const removeSessionPendingPermission = useCallback((sessionID: string, requestID: string, approvalID?: string) => {
+    if (!requestID) return;
+    updateSessionChat(sessionID, (current) => {
+      const permissions = current.pendingPermissions.filter((item) =>
+        item.requestID !== requestID || (approvalID !== undefined && item.approvalID !== approvalID),
+      );
+      if (permissions.length === current.pendingPermissions.length) return current;
+      return { ...current, pendingPermissions: permissions, pendingPermission: permissions[0] || null };
+    });
+  }, [updateSessionChat]);
 
-  const removeSessionPendingQuestion = useCallback(
-    (sessionID: string, questionID: string) => {
-      updateSessionChat(sessionID, (current) => ({
-        ...current,
-        pendingQuestions: current.pendingQuestions.filter((item) => item.questionID !== questionID),
-      }));
-    },
-    [updateSessionChat],
-  );
+  const setSessionPendingQuestion = useCallback((sessionID: string, question: UserQuestionState | null) => {
+    if (!question?.questionID || question.sessionID !== sessionID) return;
+    updateSessionChat(sessionID, (current) => {
+      const existing = current.pendingQuestions.find((item) => sameQuestion(item, question));
+      const next = existing ? {
+        ...question,
+        submitted: question.submitted ?? existing.submitted,
+        draftAnswers: question.draftAnswers ?? existing.draftAnswers,
+      } : question;
+      return { ...current, pendingQuestions: existing
+        ? current.pendingQuestions.map((item) => item === existing ? next : item)
+        : [...current.pendingQuestions, next] };
+    });
+  }, [updateSessionChat]);
+
+  const setSessionQuestionDraft = useCallback((question: UserQuestionState, answers: Record<string, string>) => {
+    updateSessionChat(question.sessionID, (current) => {
+      const existing = current.pendingQuestions.find((item) => sameQuestion(item, question));
+      if (!existing || existing.submitted) return current;
+      const updated = { ...existing, draftAnswers: { ...answers } };
+      return { ...current, pendingQuestions: current.pendingQuestions.map((item) => item === existing ? updated : item) };
+    });
+  }, [updateSessionChat]);
+
+  const removeSessionPendingQuestion = useCallback((sessionID: string, questionID: string, requestID?: string) => {
+    updateSessionChat(sessionID, (current) => {
+      const pendingQuestions = current.pendingQuestions.filter((item) =>
+        item.questionID !== questionID || (requestID !== undefined && item.requestID !== requestID),
+      );
+      return pendingQuestions.length === current.pendingQuestions.length ? current : { ...current, pendingQuestions };
+    });
+  }, [updateSessionChat]);
 
   const removePendingQuestions = useCallback(
     (questionIDs: string[]) => {
@@ -666,19 +478,29 @@ export function useChatMessages() {
         return;
       }
       const to = current[toKey] || emptySessionChatState();
+      const permissions = [...to.pendingPermissions];
+      for (const approval of from.pendingPermissions) {
+        const permission = { ...approval, sessionID: toKey };
+        if (!permissions.some((existing) => samePermission(existing, permission))) permissions.push(permission);
+      }
+      const questions = [...to.pendingQuestions];
+      for (const pending of from.pendingQuestions) {
+        const question = { ...pending, sessionID: toKey };
+        if (!questions.some((existing) => sameQuestion(existing, question))) questions.push(question);
+      }
       const next = {
         ...current,
         [toKey]: {
           ...to,
-          activeAssistantID: from.activeAssistantID || to.activeAssistantID,
+          historyIDs: new Set([...to.historyIDs, ...from.historyIDs]),
+          finishedRequests: new Set([...to.finishedRequests, ...from.finishedRequests]),
+          activeAssistantID: to.activeAssistantID || from.activeAssistantID,
           lastUsage: from.lastUsage || to.lastUsage,
-          messages: mergeMessages(from.messages, to.messages),
-          pendingPermission: from.pendingPermission || to.pendingPermission,
-          pendingQuestions: [
-            ...to.pendingQuestions,
-            ...from.pendingQuestions.filter((item) => !to.pendingQuestions.some((existing) => existing.questionID === item.questionID)),
-          ],
-          pendingRequestID: from.pendingRequestID || to.pendingRequestID,
+          messages: interleaveHistoryAndLive(to.messages, from.messages),
+          pendingPermission: permissions[0] || null,
+          pendingPermissions: permissions,
+          pendingQuestions: questions,
+          pendingRequestID: to.pendingRequestID || from.pendingRequestID,
         },
       };
       delete next[fromKey];
@@ -693,7 +515,7 @@ export function useChatMessages() {
         const existing = current.messages.find(
           (m) => m.role === "assistant" && m.requestID === turnID,
         );
-        if (existing) {
+        if (existing || current.finishedRequests.has(turnID)) {
           return current;
         }
         const id = newRequestID();
@@ -729,14 +551,19 @@ export function useChatMessages() {
     clearSessionPendingRequest,
     completeAssistant,
     getSessionChat,
+    getSessionChats,
     hasPendingRequest,
     markAssistantError,
     mergeSessionChats,
+    mergeSessionHistory,
     replaceMessages,
     resetActiveAssistant,
     setSessionLastUsage,
     setSessionPendingPermission,
+    removeSessionPendingPermission,
     setSessionPendingQuestion,
+    setSessionQuestionDraft,
+    settleSessionRun,
     removeSessionPendingQuestion,
     removePendingQuestions,
     setSessionPendingRequest,
@@ -753,21 +580,205 @@ function appendText(current: string, next: string) {
   return current + next;
 }
 
-function findAssistantID(current: SessionChatState, requestID?: string) {
-  if (!requestID) {
-    return "";
-  }
-
-  for (let index = current.messages.length - 1; index >= 0; index -= 1) {
-    const message = current.messages[index];
-    if (message.role === "tool_call" || message.role === "tool" || message.role === "user") {
-      return "";
-    }
-    if (message.role === "assistant" && message.requestID === requestID) {
-      return message.id;
-    }
+function findStreamingAssistantID(current: SessionChatState, requestID?: string) {
+  // A tool boundary closes that request's streaming segment. Frames from a
+  // different request in the same session do not close or reuse it.
+  for (let index = current.messages.length - 1; index >= 0; index--) {
+    const item = current.messages[index];
+    if (item.requestID !== requestID) continue;
+    if (item.role === "assistant") return item.status === "streaming" ? item.id : "";
+    if (item.role === "tool_call" || item.role === "tool" || item.role === "user") break;
   }
   return "";
+}
+
+function keepOtherActiveAssistant(current: SessionChatState, requestID?: string) {
+  const active = current.messages.find((item) => item.id === current.activeAssistantID);
+  return active && active.requestID !== requestID ? active.id : "";
+}
+
+function rememberFinished(current: ReadonlySet<string>, requestID?: string) {
+  if (!requestID || current.has(requestID)) return current;
+  const next = new Set(current);
+  next.add(requestID);
+  if (next.size > 256) next.delete(next.values().next().value!);
+  return next;
+}
+
+function settleLiveRows(current: SessionChatState, requestID: string | undefined, status: ChatMessageStatus, completedAt: string): SessionChatState {
+  const activeAssistantID = keepOtherActiveAssistant(current, requestID);
+  const finishedRequests = rememberFinished(current.finishedRequests, requestID);
+  let changed = activeAssistantID !== current.activeAssistantID || finishedRequests !== current.finishedRequests;
+  const messages = current.messages.map((item) => {
+    if (item.requestID !== requestID || !requestID && item.id !== current.activeAssistantID) return item;
+    if (item.role === "assistant" && (item.status === "streaming" || item.status === "tool_running")) {
+      changed = true;
+      return { ...item, status, completedAt };
+    }
+    if (item.role === "tool_call" && item.status === "tool_running" || item.role === "user" && status === "done" && item.status !== "done") {
+      changed = true;
+      return { ...item, status: "done" as const, completedAt };
+    }
+    return item;
+  });
+  return changed ? { ...current, activeAssistantID, finishedRequests, messages } : current;
+}
+
+function finishAssistant(
+  current: SessionChatState,
+  requestID: string | undefined,
+  status: ChatMessageStatus,
+  result: { content?: string; reasoning?: string; usage?: TokenUsage | null; error?: string; messageID?: string; runID?: string },
+): SessionChatState {
+  const completedAt = new Date().toISOString();
+  const settled = settleLiveRows(current, requestID, status, completedAt);
+  const { content, reasoning, usage, error, messageID, runID } = result;
+  const persisted = messageID ? settled.messages.find((item) => item.role === "assistant" && (item.historyID === messageID || item.id === messageID)) : undefined;
+  let live: ChatItem | undefined;
+  for (let index = settled.messages.length - 1; index >= 0; index--) {
+    const item = settled.messages[index];
+    const matchesRequest = requestID ? item.requestID === requestID : item.id === current.activeAssistantID;
+    if (!matchesRequest) continue;
+    if (item.role === "assistant") {
+      if (messageID && item.historyID && item.historyID !== messageID) break;
+      live = item;
+      break;
+    }
+    // A final answer after a tool is a different segment. Pausing or failing
+    // after the tool still belongs to the partial answer already on screen.
+    if (status === "done" && (item.role === "tool_call" || item.role === "tool" || item.role === "user")) break;
+  }
+  const target = persisted || live;
+  if (!target && !messageID && !content?.trim() && !reasoning?.trim() && status === "done") return settled;
+  const existingText = (status === "paused" ? live?.text || persisted?.text : persisted?.text || live?.text) || "";
+  let text = content?.trim() ? content : existingText;
+  if (status === "paused" && existingText.trim() && (!content?.trim() || !content.startsWith(existingText))) text = existingText;
+  if (error) {
+    const note = `[错误: ${error}]`;
+    text = !existingText ? error : existingText === error || existingText.endsWith(note) ? existingText : `${existingText}\n\n${note}`;
+  }
+  const replacement: ChatItem = {
+    ...target,
+    id: target?.id || messageID || newRequestID(),
+    historyID: messageID || target?.historyID,
+    finalReply: true,
+    requestID: requestID || target?.requestID,
+    runID: runID || target?.runID,
+    createdAt: target?.createdAt || completedAt,
+    completedAt: target?.completedAt || completedAt,
+    role: "assistant",
+    status,
+    text,
+    reasoning: reasoning?.trim() ? reasoning : live?.reasoning || target?.reasoning,
+    usage: usage || target?.usage,
+  };
+  let targetIndex = target ? settled.messages.indexOf(target) : -1;
+  let insertAfterAnchor = !target;
+  if (requestID) {
+    // Server timestamps can precede the local optimistic input (clock skew).
+    // Keep this reply attached to its request rather than stranding its user
+    // message below the reply, or moving a newer turn with it.
+    for (let index = settled.messages.length - 1; index > targetIndex; index--) {
+      const item = settled.messages[index];
+      if (item !== live && item !== persisted && item.requestID === requestID && (status === "done" || item.role === "user")) {
+        targetIndex = index;
+        insertAfterAnchor = true;
+        break;
+      }
+    }
+  }
+  if (targetIndex < 0) return { ...settled, messages: [...settled.messages, replacement] };
+  const messages = settled.messages.flatMap((item, index) => {
+    if (insertAfterAnchor && index === targetIndex) return [item, replacement];
+    if (item === target) return insertAfterAnchor ? [] : [replacement];
+    if (persisted && item === live) return [];
+    return [item];
+  });
+  return { ...settled, messages };
+}
+
+function samePermission(left: PermissionState, right: PermissionState) {
+  return left.approvalID === right.approvalID && left.requestID === right.requestID && left.sessionID === right.sessionID;
+}
+
+function sameQuestion(left: UserQuestionState, right: UserQuestionState) {
+  return left.questionID === right.questionID && left.requestID === right.requestID && left.sessionID === right.sessionID;
+}
+
+export function getSubmittedQuestions(chats: Readonly<Record<string, Pick<SessionChatState, "pendingQuestions">>>) {
+  const submitted = new Map<string, UserQuestionState>();
+  for (const chat of Object.values(chats)) {
+    for (const question of chat.pendingQuestions) {
+      if (question.submitted) submitted.set(question.questionID, question);
+    }
+  }
+  return submitted;
+}
+
+function mergeHistory(current: SessionChatState, incoming: ChatItem[], source: HistorySource): SessionChatState {
+  if (source === "cache" && (current.historyConfirmed || current.historyIDs.size > 0 || incoming.length === 0)) return current;
+  const historyIDs = new Set<string>();
+  const matched = new Set<string>();
+  const byHistoryID = new Map(current.messages.map((item) => [item.historyID || item.id, item]));
+  const local = current.messages.filter((item) => !item.historyID && !current.historyIDs.has(item.id));
+  const history: ChatItem[] = [];
+  for (const stored of incoming) {
+    const historyID = stored.historyID || stored.id;
+    if (historyIDs.has(historyID)) continue;
+    historyIDs.add(historyID);
+    const existing = byHistoryID.get(historyID) || (source === "server"
+      ? local.find((item) => !matched.has(item.id) && canReconcileLegacyRow(current, item, stored))
+      : undefined);
+    if (!existing) {
+      history.push({ ...stored, historyID });
+      continue;
+    }
+    matched.add(existing.id);
+    const preserveLive = existing.status === "streaming" || existing.status === "tool_running" || existing.status === "paused" || existing.status === "error";
+    history.push({
+      ...stored,
+      ...preserveLive && existing,
+      id: existing.id,
+      historyID,
+      finalReply: existing.finalReply || stored.finalReply,
+      requestID: existing.requestID || stored.requestID,
+      runID: existing.runID || stored.runID,
+      attachments: existing.attachments || stored.attachments,
+      completedAt: existing.completedAt || stored.completedAt,
+      status: preserveLive ? existing.status : stored.role === "user" && existing.requestID ? "done" : stored.status,
+    });
+  }
+  const overlay = current.messages.filter((item) => !matched.has(item.id) && !current.historyIDs.has(item.historyID || item.id));
+  const messages = interleaveHistoryAndLive(history, overlay);
+  return { ...current, historyIDs, historyConfirmed: source === "server", messages };
+}
+
+function canReconcileLegacyRow(current: SessionChatState, local: ChatItem, stored: ChatItem) {
+  if (local.role !== stored.role || local.status === "streaming" || local.status === "tool_running") return false;
+  if (local.requestID && current.pendingRequestID === local.requestID) return false;
+  if (local.role === "tool_call" || local.role === "tool") return Boolean(local.toolCallID && local.toolCallID === stored.toolCallID);
+  if (local.role !== "user" || !local.requestID) return false;
+  const localAt = Date.parse(local.createdAt || "");
+  const storedAt = Date.parse(stored.createdAt || "");
+  if (!Number.isFinite(localAt) || !Number.isFinite(storedAt) || Math.abs(localAt - storedAt) > 5000) return false;
+  const localFiles = (local.attachments || []).map(attachmentKey);
+  const storedFiles = (stored.attachments || []).map(attachmentKey);
+  const sameFiles = localFiles.length === storedFiles.length && localFiles.every((file, index) => file === storedFiles[index]);
+  return sameFiles && (local.text.trim() === stored.text.trim() || Boolean(localFiles.length && !local.text.trim()));
+}
+
+function interleaveHistoryAndLive(history: ChatItem[], live: ChatItem[]) {
+  const messages: ChatItem[] = [];
+  let liveIndex = 0;
+  for (const item of history) {
+    const time = Date.parse(item.createdAt || "");
+    while (liveIndex < live.length && Date.parse(live[liveIndex].createdAt || "") < time) {
+      messages.push(live[liveIndex++]);
+    }
+    messages.push(item);
+  }
+  messages.push(...live.slice(liveIndex));
+  return messages;
 }
 
 function mergeMessages(fromMessages: ChatItem[], toMessages: ChatItem[]) {

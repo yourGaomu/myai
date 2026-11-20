@@ -460,7 +460,8 @@ func TestRelayDoesNotDeliverRouteToSocketWithChangedIdentity(t *testing.T) {
 	server.registerClient("changed-identity-route-1", protocol.TypeUserMessage, oldPeer, "local", "pc-local", "client-token-a", "old")
 	server.registerClientConnection(oldPeer, "other", "other-device", "client-token-b", "new")
 
-	if _, target, ok := server.clientPeerForMessage("changed-identity-route-1", "local", "pc-local"); ok || target != nil {
+	message := protocol.Message{Type: protocol.TypePermissionAsk, RequestID: "changed-identity-route-1", UserID: "local", DeviceID: "pc-local"}
+	if _, target, _ := server.clientPeerForMessage(message, nil); target != nil {
 		t.Fatal("route was delivered to a socket whose identity changed")
 	}
 }
@@ -974,6 +975,61 @@ func TestRelayForwardsModelMessages(t *testing.T) {
 	forwardedSwitchToClient := readTestMessage(t, clientConn, protocol.TypeModelSwitchResult)
 	if forwardedSwitchToClient.RequestID != "model-switch-1" {
 		t.Fatalf("expected request id model-switch-1, got %s", forwardedSwitchToClient.RequestID)
+	}
+}
+
+func TestRelayCorrelatesModelDeletionResultAndError(t *testing.T) {
+	server := newTestServer()
+	testServer := httptest.NewServer(server.routes())
+	defer testServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http")
+	agentConn := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agentConn.Close()
+	clientConn := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer clientConn.Close()
+	writeAgentOnline(t, agentConn, "local", "pc-local", "123456")
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	token := pairTestClient(t, testServer, "123456")
+
+	cases := []struct {
+		requestID string
+		modelID   string
+		replyType protocol.MessageType
+		payload   json.RawMessage
+	}{
+		{"delete-unused", "custom-unused", protocol.TypeModelConfigMutationResult, json.RawMessage(`{"deleted_id":"custom-unused","models":[{"id":"default"}]}`)},
+		{"delete-default", "default", protocol.TypeError, json.RawMessage(`{"request_type":"model_config_delete","message":"cannot delete the default model"}`)},
+	}
+	for _, tc := range cases {
+		payload, err := json.Marshal(protocol.ModelConfigDeletePayload{ID: tc.modelID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestMessage(t, clientConn, protocol.Message{
+			Type: protocol.TypeModelConfigDelete, RequestID: tc.requestID, UserID: "local",
+			DeviceID: "pc-local", ClientToken: token, Payload: payload,
+		})
+		forwarded := readTestMessage(t, agentConn, protocol.TypeModelConfigDelete)
+		request, err := protocol.DecodePayload[protocol.ModelConfigDeletePayload](forwarded)
+		if err != nil || forwarded.RequestID != tc.requestID || request.ID != tc.modelID {
+			t.Fatalf("wrong delete request: %#v, %v", forwarded, err)
+		}
+		requestAck := readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+		if requestAck.RequestID != tc.requestID || controlReplyID(requestAck, "received") != string(protocol.TypeModelConfigDelete) {
+			t.Fatal("expected acknowledgment for the model deletion request")
+		}
+		writeTestMessage(t, agentConn, protocol.Message{
+			Type: tc.replyType, RequestID: tc.requestID, UserID: "local", DeviceID: "pc-local", Payload: tc.payload,
+		})
+		reply := readTestMessage(t, clientConn, tc.replyType)
+		if reply.RequestID != tc.requestID || string(reply.Payload) != string(tc.payload) {
+			t.Fatalf("wrong delete reply: %#v", reply)
+		}
+		replyAck := readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+		if replyAck.RequestID != tc.requestID || controlReplyID(replyAck, "received") != string(tc.replyType) {
+			t.Fatal("expected acknowledgment for the agent's model deletion reply")
+		}
 	}
 }
 

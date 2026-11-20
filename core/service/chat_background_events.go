@@ -16,6 +16,7 @@ import (
 // BackgroundTurnEvent belongs to one background turn, independent of a client.
 type BackgroundTurnEvent struct {
 	TurnID, RequestID, SessionID, RunID     string
+	MessageID                               string
 	Sequence                                uint64
 	Kind, Status, Content, Reasoning, Error string
 	Run                                     *domainagentrun.Run
@@ -44,15 +45,23 @@ func (s *ChatService) ListBackgroundQuestions(sessionID string) []domaininteract
 	defer s.backgroundEventsMu.Unlock()
 	var requests []domaininteraction.Request
 	for _, waiter := range s.backgroundPending {
-		if waiter.event.SessionID != sessionID || waiter.event.Question == nil {
+		if waiter.event.Question == nil || (sessionID != "" && waiter.event.SessionID != sessionID) {
 			continue
 		}
 		event := cloneBackgroundEvent(waiter.event)
 		request := *event.Question
-		request.SessionID, request.RequestID = sessionID, event.TurnID
+		request.SessionID, request.RequestID = event.SessionID, event.TurnID
 		requests = append(requests, request)
 	}
-	sort.Slice(requests, func(i, j int) bool { return requests[i].ID < requests[j].ID })
+	sort.Slice(requests, func(i, j int) bool {
+		if requests[i].ID != requests[j].ID {
+			return requests[i].ID < requests[j].ID
+		}
+		if requests[i].SessionID != requests[j].SessionID {
+			return requests[i].SessionID < requests[j].SessionID
+		}
+		return requests[i].RequestID < requests[j].RequestID
+	})
 	return requests
 }
 
@@ -297,9 +306,9 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 	}
 	return stream, func(response ChatResponse, err error) {
 		cancel()
-		status, errorText := "succeeded", ""
+		status, errorText, messageID := "succeeded", "", response.MessageID
 		if err != nil {
-			status, errorText = "failed", err.Error()
+			status, errorText, messageID = "failed", err.Error(), ""
 			if errors.Is(err, context.Canceled) {
 				status = "paused"
 			}
@@ -307,6 +316,9 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 		mu.Lock()
 		run := finishedRun
 		mu.Unlock()
-		emit(BackgroundTurnEvent{Kind: "completed", Status: status, Error: errorText, Content: response.Result.Content, Reasoning: response.Result.Reasoning, Run: run})
+		emit(BackgroundTurnEvent{
+			Kind: "completed", Status: status, Error: errorText, MessageID: messageID,
+			Content: response.Result.Content, Reasoning: response.Result.Reasoning, Run: run,
+		})
 	}
 }

@@ -1,10 +1,12 @@
-import { useCallback, type RefObject } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 
-import type { PermissionState, UserQuestionState } from "../types/app";
+import type { AgentRunSnapshot, PermissionApprovalScope, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
+import type { PermissionState, RelayScope, UserQuestionState } from "../types/app";
 import type { ChatAttachment } from "../types/chat";
-import type { PermissionApprovalScope, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
 import { userMessageEcho } from "../utils/attachments";
+import { buildChatTurns } from "../utils/chatRenderItems";
 import { newRequestID } from "../utils/ids";
+import type { SessionChatState } from "./useChatMessages";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 
@@ -13,214 +15,162 @@ type Args = {
   addEventMessage: (sessionID: string, message: string) => void;
   addUserMessage: (sessionID: string, message: string, requestID: string, attachments: ChatAttachment[]) => void;
   attachedFiles: ChatAttachment[];
-  historySessionIDRef: RefObject<string>;
+  getSessionChat: (sessionID: string) => SessionChatState;
+  getSessionRuns: (sessionID: string) => AgentRunSnapshot[];
   messageInput: string;
   pendingPermission: PermissionState | null;
+  relayScopeRef: RefObject<RelayScope>;
   requestSessionMapRef: RefObject<Record<string, string>>;
+  requestUserQuestionSync: () => boolean;
   resetActiveAssistant: (sessionID: string) => void;
   sendEnvelope: SendEnvelope;
   sendMessageWithFiles: (content: string, requestID: string) => boolean;
   sessionID: string;
+  sessionIDRef: RefObject<string>;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
-  setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setSessionPendingQuestion: (sessionID: string, question: UserQuestionState | null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
   startPausePending: () => void;
   stopPausePending: () => void;
-  clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
 };
 
-// 把发送、授权、暂停和重新生成封装成会话命令，并维护 request_id 到 session_id 的关联。
 export function useChatActions({
-  activeRequestIDRef,
-  addEventMessage,
-  addUserMessage,
-  attachedFiles,
-  clearSessionPendingRequest,
-  historySessionIDRef,
-  messageInput,
-  pendingPermission,
-  requestSessionMapRef,
-  resetActiveAssistant,
-  sendEnvelope,
-  sendMessageWithFiles,
-  sessionID,
-  setSessionLastUsage,
-  setSessionPendingPermission,
-  setSessionPendingQuestion,
-  setSessionPendingRequest,
-  startPausePending,
-  stopPausePending,
+  activeRequestIDRef, addEventMessage, addUserMessage, attachedFiles, getSessionChat, getSessionRuns,
+  messageInput, pendingPermission, relayScopeRef, requestSessionMapRef, requestUserQuestionSync,
+  resetActiveAssistant, sendEnvelope, sendMessageWithFiles, sessionID, sessionIDRef, setSessionLastUsage,
+  setSessionPendingQuestion, setSessionPendingRequest, startPausePending, stopPausePending,
 }: Args) {
+  // An event handler from an old screen or socket must not submit to a new one.
+  const { pairingID, connectionID } = relayScopeRef.current;
+  const isCurrent = useCallback(() => Boolean(
+    pairingID && connectionID &&
+    relayScopeRef.current.pairingID === pairingID &&
+    relayScopeRef.current.connectionID === connectionID &&
+    sessionIDRef.current.trim() === sessionID.trim(),
+  ), [connectionID, pairingID, relayScopeRef, sessionID, sessionIDRef]);
+
+  const isBusy = useCallback((targetSessionID: string) => {
+    const chat = getSessionChat(targetSessionID);
+    return Boolean(chat.pendingRequestID || chat.pendingPermission || chat.pendingQuestions.length ||
+      chat.messages.some((message) => message.role === "user" && message.status === "queued") ||
+      getSessionRuns(targetSessionID).some(({ run }) => run.status === "running"));
+  }, [getSessionChat, getSessionRuns]);
+
+  const startChatRequest = useCallback((targetSessionID: string, requestID: string, send: () => boolean) => {
+    requestSessionMapRef.current[requestID] = targetSessionID;
+    if (!send()) {
+      delete requestSessionMapRef.current[requestID];
+      return false;
+    }
+    activeRequestIDRef.current = requestID;
+    resetActiveAssistant(targetSessionID);
+    setSessionLastUsage(targetSessionID, null);
+    setSessionPendingRequest(targetSessionID, requestID);
+    return true;
+  }, [activeRequestIDRef, requestSessionMapRef, resetActiveAssistant, setSessionLastUsage, setSessionPendingRequest]);
+
   const sendUserMessage = useCallback(() => {
     const content = messageInput.trim();
-    if (!content && attachedFiles.length === 0) {
-      return;
-    }
-
+    if (!content && attachedFiles.length === 0) return;
     const targetSessionID = sessionID.trim();
-    // request_id 先登记到运行时引用，发送成功后再写入本地消息，避免断线时出现“假发送”记录。
+    if (!isCurrent()) return;
+    // A second tap before React re-renders must not replace a pending request.
+    if (getSessionChat(targetSessionID).pendingRequestID) return;
     const requestID = newRequestID();
-    activeRequestIDRef.current = requestID;
-    requestSessionMapRef.current[requestID] = targetSessionID;
-
-    const sent = sendMessageWithFiles(content, requestID);
-    if (!sent) {
-      activeRequestIDRef.current = "";
-      delete requestSessionMapRef.current[requestID];
+    if (!startChatRequest(targetSessionID, requestID, () => sendMessageWithFiles(content, requestID))) {
       addEventMessage(targetSessionID, "消息发送失败：未连接到 Relay 服务，请检查连接状态。");
       return;
     }
-
-    // Relay 已接收后，流式 delta 到达时即可追加到同一 assistant 消息。
-    resetActiveAssistant(targetSessionID);
-    if (targetSessionID) {
-      historySessionIDRef.current = targetSessionID;
-    }
-    setSessionPendingPermission(targetSessionID, null);
-    setSessionLastUsage(targetSessionID, null);
-    setSessionPendingRequest(targetSessionID, requestID);
     addUserMessage(targetSessionID, userMessageEcho(content, attachedFiles), requestID, attachedFiles);
-  }, [
-    activeRequestIDRef,
-    addUserMessage,
-    attachedFiles,
-    historySessionIDRef,
-    messageInput,
-    requestSessionMapRef,
-    resetActiveAssistant,
-    sendMessageWithFiles,
-    sessionID,
-    setSessionLastUsage,
-    setSessionPendingPermission,
-    setSessionPendingRequest,
-  ]);
+  }, [addEventMessage, addUserMessage, attachedFiles, getSessionChat, isCurrent, messageInput, sendMessageWithFiles, sessionID, startChatRequest]);
 
-  const sendPermissionResult = useCallback(
-    (allowed: boolean, scope?: PermissionApprovalScope) => {
-      if (!pendingPermission) {
-        return;
-      }
+  const sendPermissionResult = useCallback((allowed: boolean, scope?: PermissionApprovalScope) => {
+    if (!isCurrent() || !pendingPermission) return;
+    const targetSessionID = sessionID.trim();
+    const current = getSessionChat(targetSessionID).pendingPermission;
+    if (!current || current.approvalID !== pendingPermission.approvalID || current.requestID !== pendingPermission.requestID ||
+        current.sessionID !== pendingPermission.sessionID || current.sessionID !== targetSessionID) return;
+    if (!current.approvalID || !current.requestID) return;
+    // A stale remember callback can race a fresh-consent replay. Recheck the live item.
+    if (allowed && current.requireFreshConsent && scope !== undefined && scope !== "once") return;
+    const payload: PermissionResultPayload = {
+      approval_id: current.approvalID,
+      allowed,
+      ...(allowed ? { scope: scope || "once" } : {}),
+    };
+    sendEnvelope("permission_result", { request_id: current.requestID, session_id: current.sessionID, payload });
+  }, [getSessionChat, isCurrent, pendingPermission, sendEnvelope, sessionID]);
 
-      const permissionSessionID =
-        pendingPermission.sessionID ||
-        requestSessionMapRef.current[pendingPermission.requestID] ||
-        sessionID;
-      if (!pendingPermission.approvalID) {
-        addEventMessage(permissionSessionID, "授权请求缺少审批 ID，请等待电脑端重新发送。");
-        return;
-      }
-      const payload: PermissionResultPayload = {
-        allowed,
-        approval_id: pendingPermission.approvalID,
-        ...(scope ? { scope } : {}),
-      };
-      const sent = sendEnvelope("permission_result", {
-        request_id: pendingPermission.requestID,
-        session_id: permissionSessionID,
-        payload,
-      });
-      if (!sent) {
-        // Keep the prompt visible so the user can retry after the automatic
-        // reconnect instead of losing the only way to resume the request.
-        return;
-      }
-      // The Agent echoes permission_result after validating and consuming this
-      // approval. Keep it visible until that confirmation, including on errors.
-    },
-    [addEventMessage, pendingPermission, requestSessionMapRef, sendEnvelope, sessionID],
-  );
   const allowPermission = useCallback(() => sendPermissionResult(true, "once"), [sendPermissionResult]);
   const allowPermissionSession = useCallback(() => {
-    const scope: PermissionApprovalScope = pendingPermission?.permission ? "session_permission" : "session_tool";
-    sendPermissionResult(true, scope);
+    sendPermissionResult(true, pendingPermission?.permission ? "session_permission" : "session_tool");
   }, [pendingPermission?.permission, sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);
 
-  const answerUserQuestion = useCallback(
-    (question: UserQuestionState, answers: Record<string, string>, cancelled = false) => {
-      if (question.submitted) {
-        return false;
-      }
-      const sent = sendEnvelope("user_question_answer", {
-        request_id: question.requestID,
-        session_id: question.sessionID,
-        payload: { question_id: question.questionID, answers, cancelled },
-      });
-      if (sent) {
-        setSessionPendingQuestion(question.sessionID, { ...question, submitted: true });
-      }
-      return sent;
-    },
-    [sendEnvelope, setSessionPendingQuestion],
-  );
+  const answerUserQuestion = useCallback((question: UserQuestionState, answers: Record<string, string>, cancelled = false) => {
+    if (!isCurrent() || question.sessionID !== sessionID.trim() || !question.requestID) return false;
+    const current = getSessionChat(question.sessionID).pendingQuestions.find((item) =>
+      item.sessionID === question.sessionID && item.requestID === question.requestID && item.questionID === question.questionID,
+    );
+    if (!current || current.submitted) return false;
+    const draftAnswers = cancelled ? current.draftAnswers : { ...answers };
+    const sent = sendEnvelope("user_question_answer", {
+      request_id: current.requestID,
+      session_id: current.sessionID,
+      payload: { question_id: current.questionID, answers, cancelled },
+    });
+    if (sent) {
+      setSessionPendingQuestion(current.sessionID, { ...current, draftAnswers, submitted: true });
+      requestUserQuestionSync();
+    } else if (!cancelled) {
+      setSessionPendingQuestion(current.sessionID, { ...current, draftAnswers });
+    }
+    return sent;
+  }, [getSessionChat, isCurrent, requestUserQuestionSync, sendEnvelope, sessionID, setSessionPendingQuestion]);
 
+  const latestPauseRef = useRef<{ pairingID: string; connectionID: string; sessionID: string; requestID: string } | null>(null);
   const pauseSession = useCallback(() => {
     const targetSessionID = sessionID.trim();
-    if (!targetSessionID) {
-      return;
-    }
-
+    if (!targetSessionID || !isCurrent()) return;
+    const previous = latestPauseRef.current;
+    if (previous?.pairingID === pairingID && previous.connectionID === connectionID && previous.sessionID === targetSessionID &&
+        requestSessionMapRef.current[previous.requestID] === targetSessionID) return;
     const requestID = newRequestID();
+    latestPauseRef.current = { pairingID, connectionID, sessionID: targetSessionID, requestID };
     requestSessionMapRef.current[requestID] = targetSessionID;
     startPausePending();
-    const sent = sendEnvelope("session_pause", {
-      request_id: requestID,
-      session_id: targetSessionID,
-      payload: { session_id: targetSessionID },
-    });
-    if (!sent) {
+    if (!sendEnvelope("session_pause", { request_id: requestID, session_id: targetSessionID, payload: { session_id: targetSessionID } })) {
       delete requestSessionMapRef.current[requestID];
       stopPausePending();
     }
-  }, [requestSessionMapRef, sendEnvelope, sessionID, startPausePending, stopPausePending]);
+  }, [connectionID, isCurrent, pairingID, requestSessionMapRef, sendEnvelope, sessionID, startPausePending, stopPausePending]);
 
-  const regenerateSession = useCallback(() => {
+  const regenerateSession = useCallback((turnID: string) => {
     const targetSessionID = sessionID.trim();
-    if (!targetSessionID) {
-      return;
-    }
-
+    if (!targetSessionID || !turnID || !isCurrent() || isBusy(targetSessionID)) return;
+    const chat = getSessionChat(targetSessionID);
+    if (latestRegeneratableTurnID(buildChatTurns(chat.messages, getSessionRuns(targetSessionID))) !== turnID) return;
     const requestID = newRequestID();
-    activeRequestIDRef.current = requestID;
-    requestSessionMapRef.current[requestID] = targetSessionID;
-    resetActiveAssistant(targetSessionID);
-    historySessionIDRef.current = targetSessionID;
-    setSessionPendingPermission(targetSessionID, null);
-    setSessionLastUsage(targetSessionID, null);
-    setSessionPendingRequest(targetSessionID, requestID);
-
-    const sent = sendEnvelope("session_regenerate", {
+    startChatRequest(targetSessionID, requestID, () => sendEnvelope("session_regenerate", {
       request_id: requestID,
       session_id: targetSessionID,
       payload: { session_id: targetSessionID },
-    });
-    if (!sent) {
-      activeRequestIDRef.current = "";
-      delete requestSessionMapRef.current[requestID];
-      clearSessionPendingRequest(targetSessionID, requestID);
-    }
-  }, [
-    activeRequestIDRef,
-    clearSessionPendingRequest,
-    historySessionIDRef,
-    requestSessionMapRef,
-    resetActiveAssistant,
-    sendEnvelope,
-    sessionID,
-    setSessionLastUsage,
-    setSessionPendingPermission,
-    setSessionPendingRequest,
-  ]);
+    }));
+  }, [getSessionChat, getSessionRuns, isBusy, isCurrent, sendEnvelope, sessionID, startChatRequest]);
 
-  return {
-    answerUserQuestion,
-    allowPermission,
-    allowPermissionSession,
-    denyPermission,
-    pauseSession,
-    regenerateSession,
-    sendPermissionResult,
-    sendUserMessage,
-  };
+  return { answerUserQuestion, allowPermission, allowPermissionSession, denyPermission, pauseSession, regenerateSession, sendPermissionResult, sendUserMessage };
+}
+
+// Regenerate operates on the server's last user input. Stop at the first
+// substantive turn from the bottom, even when that turn has no retry control.
+export function latestRegeneratableTurnID(items: ReturnType<typeof buildChatTurns>) {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item.type === "user_turn") return undefined;
+    if (item.type !== "agent_turn") continue;
+    const hasUser = items.slice(0, index).some((earlier) => earlier.type === "user_turn");
+    if (hasUser && item.canRegenerate && (item.status === "paused" || item.status === "error")) return item.id;
+    return undefined;
+  }
+  return undefined;
 }

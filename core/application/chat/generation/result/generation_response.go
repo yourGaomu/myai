@@ -10,6 +10,7 @@ import (
 type GenerationResponse struct {
 	SessionID string
 	RunID     string
+	MessageID string // History row of the committed final assistant reply, if any.
 	Result    modelport.ChatResult
 	Context   contextmgr.Info
 	Compact   compactionresult.CompactInfo

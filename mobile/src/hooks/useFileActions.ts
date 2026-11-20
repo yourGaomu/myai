@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import * as DocumentPicker from "expo-document-picker";
 
 import { maxAttachedFiles } from "../constants/app";
@@ -6,7 +6,7 @@ import type { FileEntry, FileReadResultPayload, RelayMessage } from "../protocol
 import type { PendingAction, ViewMode } from "../types/app";
 import type { ChatAttachment, UploadedAssetAttachment } from "../types/chat";
 import { attachmentKey, inferMimeType, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
-import { AssetUploadCanceledError } from "../utils/assetUpload";
+import { AssetUploadCanceledError, AssetUploadDisconnectedError, assertAssetUploadScope, type RelayUploadScope } from "../utils/assetUpload";
 import type { UploadMobileAsset } from "./useAssetUpload";
 import { newRequestID } from "../utils/ids";
 import { parentPathOf } from "../utils/paths";
@@ -20,10 +20,13 @@ type Args = {
   changeDiffPath?: string;
   fileParent: string;
   filePreview: FileReadResultPayload | null;
+  pairingID: string;
+  relayScopeRef: RefObject<RelayUploadScope>;
   requestFiles: (path?: string) => boolean;
   selectedChange: string;
   sendEnvelope: SendEnvelope;
   sessionID: string;
+  sessionIDRef: RefObject<string>;
   setAttachedFiles: (updater: (current: ChatAttachment[]) => ChatAttachment[]) => void;
   setFilePreview: (preview: FileReadResultPayload | null) => void;
   setMessageInput: (input: string) => void;
@@ -40,10 +43,13 @@ export function useFileActions({
   changeDiffPath,
   fileParent,
   filePreview,
+  pairingID,
+  relayScopeRef,
   requestFiles,
   selectedChange,
   sendEnvelope,
   sessionID,
+  sessionIDRef,
   setAttachedFiles,
   setFilePreview,
   setMessageInput,
@@ -98,8 +104,12 @@ export function useFileActions({
     requestFiles();
   }, [requestFiles]);
 
+  const isCurrentDraft = useCallback(() => (
+    relayScopeRef.current.pairingID === pairingID && sessionIDRef.current === sessionID
+  ), [pairingID, relayScopeRef, sessionID, sessionIDRef]);
+
   const attachFilePreview = useCallback(() => {
-    if (!filePreview) {
+    if (!filePreview || !isCurrentDraft()) {
       return;
     }
     if (filePreview.binary) {
@@ -122,16 +132,44 @@ export function useFileActions({
       return [...current, attachment];
     });
     setViewMode("chat");
-  }, [addErrorMessage, filePreview, setAttachedFiles, setViewMode]);
+  }, [addErrorMessage, filePreview, isCurrentDraft, setAttachedFiles, setViewMode]);
 
-  const uploadControllerRef = useRef<AbortController | null>(null);
-  useEffect(() => () => uploadControllerRef.current?.abort(), []);
-  const cancelFileUpload = useCallback(() => uploadControllerRef.current?.abort(), []);
+  const uploadRef = useRef<{ controller: AbortController; onError: (message: string) => void } | null>(null);
+  useEffect(() => () => {
+    const upload = uploadRef.current;
+    uploadRef.current = null;
+    upload?.controller.abort();
+  }, []);
+  const cancelFileUpload = useCallback(() => {
+    const upload = uploadRef.current;
+    if (!upload) return;
+    uploadRef.current = null;
+    upload.controller.abort();
+    stopPending("upload");
+  }, [stopPending]);
+  const disconnectFileUpload = useCallback(() => {
+    const upload = uploadRef.current;
+    if (!upload) return;
+    cancelFileUpload();
+    if (relayScopeRef.current.pairingID === pairingID) {
+      upload.onError(new AssetUploadDisconnectedError().message);
+    }
+  }, [cancelFileUpload, pairingID, relayScopeRef]);
 
   const uploadLocalFile = useCallback(async (kind: "all" | "image" = "all") => {
-    if (uploadControllerRef.current) return;
+    if (!isCurrentDraft() || uploadRef.current) return;
+    if (!sessionID) {
+      addErrorMessage("请先加载会话再上传文件。");
+      return;
+    }
+    const scope = { ...relayScopeRef.current };
+    if (!scope.connectionID) {
+      addErrorMessage("当前未连接 Relay，请先连接再上传文件。");
+      return;
+    }
     const controller = new AbortController();
-    uploadControllerRef.current = controller;
+    const upload = { controller, onError: addErrorMessage };
+    uploadRef.current = upload;
     startPending("upload");
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -140,10 +178,13 @@ export function useFileActions({
         base64: false,
         type: kind === "image" ? ["image/*"] : ["image/*", "*/*"],
       });
-      if (controller.signal.aborted || result.canceled || !result.assets?.[0]) return;
+      if (uploadRef.current !== upload || controller.signal.aborted) return;
+      assertAssetUploadScope(scope, relayScopeRef.current);
+      if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      const uploaded = await uploadMobileAsset({ asset, sessionID, signal: controller.signal });
-      if (controller.signal.aborted) return;
+      const uploaded = await uploadMobileAsset({ asset, scope, sessionID, signal: controller.signal });
+      if (uploadRef.current !== upload || controller.signal.aborted) return;
+      assertAssetUploadScope(scope, relayScopeRef.current);
       const attachment: UploadedAssetAttachment = {
         ...uploaded,
         content_type: uploaded.content_type || inferMimeType(asset.name, asset.mimeType),
@@ -151,21 +192,25 @@ export function useFileActions({
         kind: "uploaded_asset",
         local_uri: asset.uri,
       };
+      // The setter belongs to the originating draft. Never move the visible
+      // screen or attach to whichever session happens to be open now.
       setAttachedFiles((current) => {
         if (current.some((file) => attachmentKey(file) === attachmentKey(attachment))) return current;
         if (current.length >= maxAttachedFiles) return [...current.slice(1), attachment];
         return [...current, attachment];
       });
-      setViewMode("chat");
     } catch (error) {
-      if (!(error instanceof AssetUploadCanceledError)) {
-        addErrorMessage(error instanceof Error ? error.message : "文件上传失败，请稍后重试。");
+      if (uploadRef.current === upload && relayScopeRef.current.pairingID === scope.pairingID && !(error instanceof AssetUploadCanceledError)) {
+        const failure = relayScopeRef.current.connectionID === scope.connectionID ? error : new AssetUploadDisconnectedError();
+        addErrorMessage(failure instanceof Error ? failure.message : "文件上传失败，请稍后重试。");
       }
     } finally {
-      uploadControllerRef.current = null;
-      stopPending("upload");
+      if (uploadRef.current === upload) {
+        uploadRef.current = null;
+        stopPending("upload");
+      }
     }
-  }, [addErrorMessage, sessionID, setAttachedFiles, setViewMode, startPending, stopPending, uploadMobileAsset]);
+  }, [addErrorMessage, isCurrentDraft, relayScopeRef, sessionID, setAttachedFiles, startPending, stopPending, uploadMobileAsset]);
 
   const removeAttachedFile = useCallback((key: string) => {
     setAttachedFiles((current) => current.filter((file) => attachmentKey(file) !== key));
@@ -177,23 +222,26 @@ export function useFileActions({
 
   const sendMessageWithFiles = useCallback(
     (content: string, requestID: string) => {
+      if (!isCurrentDraft()) return false;
       const sent = sendEnvelope("user_message", {
         request_id: requestID,
+        session_id: sessionID,
         payload: { content: messageWithAttachedFiles(content, attachedFiles) },
       });
 
-      // 只有 Relay 确认接收后才清空编辑区；断线时保留正文和附件，方便用户修复连接后重试。
+      // 发送入队后只清空原会话的草稿；本地发送失败时保留正文和附件。
       if (sent) {
         setMessageInput("");
         clearAttachedFiles();
       }
       return sent;
     },
-    [attachedFiles, clearAttachedFiles, sendEnvelope, setMessageInput],
+    [attachedFiles, clearAttachedFiles, isCurrentDraft, sendEnvelope, sessionID, setMessageInput],
   );
 
   return {
     cancelFileUpload,
+    disconnectFileUpload,
     attachFilePreview,
     clearAttachedFiles,
     goToParent,

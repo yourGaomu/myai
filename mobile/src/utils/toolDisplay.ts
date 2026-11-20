@@ -21,7 +21,7 @@ type FeatherName = ComponentProps<typeof Feather>["name"];
 export function toolKind(rawName: string): ToolKind {
   const name = rawName.toLowerCase();
   if (name === "wait_agent") return "subagent_wait";
-  if (name === "spawn_agent" || name === "start_async_task" || name.includes("subagent")) return "subagent_spawn";
+  if (name === "spawn_agent" || name === "start_async_task") return "subagent_spawn";
   if (name.includes("knowledge")) return "knowledge";
   if (/(bash|shell|powershell|terminal|command|exec)|(^|_)(cmd|sh)($|_)/.test(name)) return "shell";
   if (/(fetch|http|browse|url|web)/.test(name)) return "web";

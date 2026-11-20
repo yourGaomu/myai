@@ -21,6 +21,7 @@ type Append struct {
 	Type         domainagentrun.EventType
 	Title        string
 	Content      string
+	MessageID    string
 	ToolName     string
 	ToolCallID   string
 	Arguments    string

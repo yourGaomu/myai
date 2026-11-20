@@ -82,7 +82,7 @@ func (s CommandService) append(ctx context.Context, command agentruncommand.Appe
 	}
 	event := domainagentrun.Event{
 		ID: s.IDs.NewID(), RunID: run.ID, SessionID: run.SessionID, Sequence: sequence,
-		Type: command.Type, Title: strings.TrimSpace(command.Title), Content: command.Content,
+		Type: command.Type, Title: strings.TrimSpace(command.Title), Content: command.Content, MessageID: command.MessageID,
 		ToolName: command.ToolName, Arguments: command.Arguments, Status: command.Status,
 		ToolCallID: command.ToolCallID,
 		ErrorCode:  command.ErrorCode, ErrorMessage: command.ErrorMessage, Truncated: command.Truncated,

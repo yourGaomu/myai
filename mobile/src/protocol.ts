@@ -402,6 +402,7 @@ export type AssistantDeltaPayload = {
 };
 
 export type AssistantDonePayload = {
+  message_id?: string;
   content?: string;
   reasoning?: string;
   usage?: TokenUsage;
@@ -450,6 +451,7 @@ export type AgentRun = {
 
 export type AgentRunEvent = {
   id: string;
+  message_id?: string;
   run_id: string;
   session_id: string;
   sequence: number;
@@ -494,6 +496,7 @@ export type BackgroundTurnKind =
   | "resync_required";
 
 export type BackgroundTurnEventPayload = {
+  message_id?: string;
   turn_id?: string;
   request_id?: string;
   session_id?: string;
@@ -550,6 +553,7 @@ export type PermissionAskPayload = {
   name?: string;
   arguments?: string;
   permission?: string;
+  require_fresh_consent?: boolean;
 };
 
 export type PermissionApprovalScope = "once" | "session_tool" | "session_permission";

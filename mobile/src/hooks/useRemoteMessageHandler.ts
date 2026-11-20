@@ -43,12 +43,8 @@ import type {
   PluginMutationResultPayload,
   PermissionAskPayload,
   RelayMessage,
-  SessionChangedPayload,
   SessionContextQueryResultPayload,
   SessionGenerationResultPayload,
-  SessionHistoryDeltaResultPayload,
-  SessionHistoryMetaResultPayload,
-  SessionHistoryResultPayload,
   SessionListResultPayload,
   SessionPlanExecuteUpdatePayload,
   SessionSettingsResultPayload,
@@ -68,10 +64,15 @@ import type {
   UserQuestionResolvedPayload,
   UserMessageQueuedPayload,
 } from "../protocol";
-import type { PendingAction, PermissionState, UserQuestionState } from "../types/app";
-import { shortID } from "../utils/ids";
+import type { PendingAction, PermissionState, QuestionSync, RelayScope, UserQuestionState } from "../types/app";
+import type { SessionChatState } from "./useChatMessages";
 
 type Args = {
+  acceptAgentRunList: (message: RelayMessage) => boolean;
+  acceptAssetList: (message: RelayMessage) => boolean;
+  acceptSessionList: (message: RelayMessage) => boolean;
+  handleRemoteQueryError: (message: RelayMessage) => boolean;
+  handleSessionHistoryMessage: (message: RelayMessage) => boolean;
   handleAssetUploadMessage: (message: RelayMessage) => boolean;
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (sessionID: string, message: string) => void;
@@ -139,16 +140,14 @@ type Args = {
   applyModelConfigTest: (payload?: ModelConfigTestResultPayload) => void;
   applyModelConfigMutation: (payload?: ModelConfigMutationResultPayload) => void;
   applyModelConfigError: (message: string) => void;
+  handleModelDeleteMessage: (message: RelayMessage) => boolean;
   isModelOperationPending: boolean;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
-  applySessionChanged: (payload?: SessionChangedPayload) => void;
-  applySessionHistoryDelta: (
-    payload?: SessionHistoryDeltaResultPayload,
-  ) => void;
-  applySessionHistoryMeta: (payload?: SessionHistoryMetaResultPayload) => void;
-  applySessionHistory: (payload?: SessionHistoryResultPayload) => void;
+  applySessionChanged: (message: RelayMessage) => boolean;
+  applySessionCommandError: (requestID?: string) => boolean;
+  hasPendingNavigation: () => boolean;
   applySessionList: (payload?: SessionListResultPayload) => void;
-  applySessionSettings: (payload?: SessionSettingsResultPayload) => void;
+  applySessionSettings: (payload?: SessionSettingsResultPayload, sessionID?: string) => void;
   applySessionGenerationPreferences: (payload?: SessionGenerationResultPayload) => void;
   applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
@@ -181,16 +180,14 @@ type Args = {
     usage?: TokenUsage | null,
     content?: string,
     reasoning?: string,
+    messageID?: string,
+    runID?: string,
   ) => void;
   currentFilePath: string;
-  getSessionChat: (sessionID: string) => {
-    activeAssistantID: string;
-    pendingRequestID: string;
-    pendingPermission: PermissionState | null;
-    pendingQuestions: UserQuestionState[];
-  };
-  historySessionIDRef: RefObject<string>;
+  getSessionChat: (sessionID: string) => SessionChatState;
   pendingHistorySessionIDRef: RefObject<string>;
+  questionSyncRef: RefObject<QuestionSync | null>;
+  relayScopeRef: RefObject<RelayScope>;
   hasRunForRequest: (sessionID: string, requestID?: string) => boolean;
   isGenerationOperationPending: boolean;
   isKnowledgeOperationPending: boolean;
@@ -205,6 +202,8 @@ type Args = {
   addUnreadSession?: (sessionID: string) => void;
   requestAgentRuns?: (sessionID?: string) => boolean;
   requestSessionHistory?: (sessionID?: string) => boolean;
+  requestSessionHistoryFull: (sessionID?: string) => boolean;
+  requestUserQuestionSync: () => boolean;
   startBackgroundAssistant?: (sessionID: string, turnID: string, title?: string) => void;
   requestChanges: () => boolean;
   requestAssets: (sessionID?: string) => boolean;
@@ -230,15 +229,21 @@ type Args = {
     permission: PermissionState | null,
   ) => void;
   setSessionPendingQuestion: (sessionID: string, question: UserQuestionState | null) => void;
-  removeSessionPendingQuestion: (sessionID: string, questionID: string) => void;
+  removeSessionPendingQuestion: (sessionID: string, questionID: string, requestID?: string) => void;
+  removeSessionPendingPermission: (sessionID: string, requestID: string, approvalID?: string) => void;
+  settleSessionRun: (sessionID: string, requestID: string, status: "done" | "paused" | "error") => void;
   removePendingQuestions: (questionIDs: string[]) => void;
   setSessionID: (sessionID: string) => void;
-  setStatus: (status: string) => void;
   stopPending: (action: PendingAction) => void;
 };
 
 // 所有服务端协议消息都在这里收口：先按 request_id 找到目标 Session，再更新对应领域状态。
 export function useRemoteMessageHandler({
+  acceptAgentRunList,
+  acceptAssetList,
+  acceptSessionList,
+  handleRemoteQueryError,
+  handleSessionHistoryMessage,
   handleAssetUploadMessage,
   activeRequestIDRef,
   addErrorMessage,
@@ -283,12 +288,12 @@ export function useRemoteMessageHandler({
   applyModelConfigTest,
   applyModelConfigMutation,
   applyModelConfigError,
+  handleModelDeleteMessage,
   isModelOperationPending,
   applyModelSwitch,
   applySessionChanged,
-  applySessionHistoryDelta,
-  applySessionHistoryMeta,
-  applySessionHistory,
+  applySessionCommandError,
+  hasPendingNavigation,
   applySessionList,
   applySessionSettings,
   applySessionGenerationPreferences,
@@ -311,8 +316,9 @@ export function useRemoteMessageHandler({
   completeAssistant,
   currentFilePath,
   getSessionChat,
-  historySessionIDRef,
   pendingHistorySessionIDRef,
+  questionSyncRef,
+  relayScopeRef,
   hasRunForRequest,
   isGenerationOperationPending,
   isKnowledgeOperationPending,
@@ -323,6 +329,8 @@ export function useRemoteMessageHandler({
   addUnreadSession,
   requestAgentRuns,
   requestSessionHistory,
+  requestSessionHistoryFull,
+  requestUserQuestionSync,
   startBackgroundAssistant,
   requestChanges,
   requestAssets,
@@ -340,9 +348,10 @@ export function useRemoteMessageHandler({
   setSessionPendingPermission,
   setSessionPendingQuestion,
   removeSessionPendingQuestion,
+  removeSessionPendingPermission,
   removePendingQuestions,
+  settleSessionRun,
   setSessionID,
-  setStatus,
   stopPending,
 }: Args) {
   const turnSequenceMapRef = useRef<Record<string, number>>({});
@@ -354,54 +363,152 @@ export function useRemoteMessageHandler({
   return useCallback(
     (message: RelayMessage) => {
       if (handleAssetUploadMessage(message)) return;
+
+      function forgetRequest(requestID: string) {
+        if (activeRequestIDRef.current === requestID) activeRequestIDRef.current = "";
+        delete requestSessionMapRef.current[requestID];
+      }
+
+      function finishTurnInteractions(sessionID: string, requestID: string) {
+        const chat = getSessionChat(sessionID);
+        for (const permission of chat.pendingPermissions) {
+          if (permission.requestID !== requestID) continue;
+          delete backgroundPermissionsRef.current[permission.approvalID];
+          rememberResolvedUserQuestion(permission.approvalID, resolvedPermissionIDsRef.current);
+        }
+        removeSessionPendingPermission(sessionID, requestID);
+        for (const question of chat.pendingQuestions) {
+          if (question.requestID !== requestID) continue;
+          delete backgroundQuestionsRef.current[question.questionID];
+          rememberResolvedUserQuestion(question.questionID, resolvedUserQuestionIDsRef.current);
+          removeSessionPendingQuestion(sessionID, question.questionID, requestID);
+        }
+      }
+
+      function resolveTurnSession(frame: RelayMessage): string | null {
+        const requestID = frame.request_id;
+        if (!requestID) return null;
+        const requests = requestSessionMapRef.current;
+        const original = Object.prototype.hasOwnProperty.call(requests, requestID) ? requests[requestID] : undefined;
+        const reported = frame.session_id?.trim();
+        if (original && reported && original !== reported) return null;
+        if (original === "" && reported) {
+          if (getSessionChat("").pendingRequestID === requestID) {
+            mergeSessionChats("", reported);
+            mergeSessionRuns("", reported);
+          }
+          requests[requestID] = reported;
+          if (!sessionIDRef.current && !hasPendingNavigation()) {
+            sessionIDRef.current = reported;
+            setSessionID(reported);
+          }
+        }
+        return reported || original || (original === "" ? "" : null);
+      }
+
+      function rememberQuestion(sessionID: string, requestID: string, payload: UserQuestionPayload) {
+        if (!sessionID || !requestID || !payload.question_id || !payload.questions?.length ||
+            resolvedUserQuestionIDsRef.current.has(payload.question_id)) return false;
+        const existing = getSessionChat(sessionID).pendingQuestions.some((question) =>
+          question.questionID === payload.question_id && question.requestID === requestID);
+        if (!existing) {
+          setSessionPendingQuestion(sessionID, {
+            questionID: payload.question_id, requestID, sessionID,
+            title: payload.title || "需要你确认一些信息", questions: payload.questions,
+            sourceTaskID: payload.source_task_id, submitted: false,
+          });
+          if (sessionID !== sessionIDRef.current) addUnreadSession?.(sessionID);
+        }
+        return true;
+      }
+
       // switch 分组与 Go 的 protocol.MessageType 一一对应；新增协议时必须同步补充这里的终态清理。
       switch (message.type) {
         case "user_message_queued": {
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const sessionID = resolveTurnSession(message);
+          const requestID = message.request_id;
           const payload = (message.payload || {}) as UserMessageQueuedPayload;
-          if (targetSessionID && message.request_id) {
-            markUserMessageQueued(targetSessionID, message.request_id);
-            clearSessionPendingRequest(targetSessionID, message.request_id);
-            if (activeRequestIDRef.current === message.request_id) {
-              activeRequestIDRef.current = "";
-            }
-            if (payload.content && targetSessionID !== sessionIDRef.current) {
-              addUnreadSession?.(targetSessionID);
-            }
-          }
+          if (sessionID === null || !requestID) break;
+          markUserMessageQueued(sessionID, requestID);
+          clearSessionPendingRequest(sessionID, requestID);
+          forgetRequest(requestID);
+          if (payload.content && sessionID && sessionID !== sessionIDRef.current) addUnreadSession?.(sessionID);
           break;
         }
         case "heartbeat":
-          setStatus(
-            message.request_id
-              ? `Ack ${shortID(message.request_id)}`
-              : "Connected",
-          );
           break;
-        case "assistant_delta":
-          {
-            const payload = (message.payload || {}) as AssistantDeltaPayload;
-            const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-            appendAssistant(
-              targetSessionID,
-              message.request_id,
-              payload.content || "",
-              payload.reasoning || "",
-            );
-          }
+        case "assistant_delta": {
+          const payload = (message.payload || {}) as AssistantDeltaPayload;
+          const sessionID = resolveTurnSession(message);
+          if (sessionID !== null) appendAssistant(sessionID, message.request_id, payload.content || "", payload.reasoning || "");
           break;
+        }
         case "agent_run_started":
-          applyRunStarted(message.payload as AgentRunStartedPayload | undefined);
+          if (resolveTurnSession(message) !== null) applyRunStarted(message.payload as AgentRunStartedPayload | undefined);
           break;
         case "agent_run_event":
           applyRunEvent(message.payload as AgentRunEventPayload | undefined);
           break;
-        case "agent_run_completed":
-          applyRunCompleted(message.payload as AgentRunCompletedPayload | undefined);
+        case "agent_run_completed": {
+          const payload = message.payload as AgentRunCompletedPayload | undefined;
+          applyRunCompleted(payload);
+          const run = payload?.run;
+          if (run?.request_id && run.request_id === message.request_id && run.session_id === message.session_id &&
+              !run.step_id && run.kind !== "internal" && run.status !== "running" &&
+              (getSessionChat(run.session_id).pendingRequestID === run.request_id || getSessionChat("").pendingRequestID === run.request_id)) {
+            // The live run notification precedes assistant_done. An independent
+            // snapshot also covers final frames lost on a socket that stays open.
+            requestAgentRuns?.(run.session_id);
+          }
           break;
-        case "agent_run_list_result":
-          applyRunList(message.payload as AgentRunListResultPayload | undefined);
+        }
+        case "agent_run_list_result": {
+          if (!acceptAgentRunList(message)) break;
+          const payload = message.payload as AgentRunListResultPayload;
+          applyRunList(payload);
+          const sessionID = payload.session_id;
+          // A background continuation has no pending foreground request. If its
+          // terminal frame was lost, link the existing stream to the committed
+          // reply before the history snapshot can render a second copy.
+          const sessionChat = getSessionChat(sessionID);
+          const localRequests = new Set(sessionChat.messages.filter((item) =>
+            item.role === "assistant" && item.requestID && !sessionChat.finishedRequests.has(item.requestID) &&
+            (item.status === "streaming" || item.status === "tool_running"),
+          ).map((item) => item.requestID));
+          for (const { run, events } of payload.runs || []) {
+            const turnID = run.request_id;
+            if (!turnID || run.session_id !== sessionID || run.kind !== "chat" || run.step_id ||
+                run.status !== "succeeded" || turnID === sessionChat.pendingRequestID || !localRequests.has(turnID)) continue;
+            const answer = events?.find((event) => event.type === "answer" && event.message_id);
+            if (!answer) continue;
+            completeAssistant(sessionID, turnID, "done", undefined, answer.truncated ? undefined : answer.content, undefined, answer.message_id, run.id);
+            finishTurnInteractions(sessionID, turnID);
+            forgetRequest(turnID);
+          }
+          const requestID = sessionChat.pendingRequestID || getSessionChat("").pendingRequestID;
+          if (!requestID) break;
+          const candidates = (payload.runs || []).filter(({ run }) =>
+            run.session_id === sessionID && run.request_id === requestID && !run.step_id && run.kind !== "internal");
+          // Plan steps share the request ID. A terminal step cannot settle the enclosing turn.
+          if (candidates.some(({ run }) => run.status === "running")) break;
+          const finished = candidates.filter(({ run }) =>
+            run.status === "succeeded" || run.status === "paused" || run.status === "canceled" || run.status === "failed")
+            .sort((a, b) => Date.parse(a.run.finished_at || a.run.started_at) - Date.parse(b.run.finished_at || b.run.started_at)).pop();
+          if (!finished || resolveTurnSession({ ...message, request_id: requestID, session_id: sessionID }) === null ||
+              getSessionChat(sessionID).pendingRequestID !== requestID) break;
+          const status = finished.run.status === "succeeded" ? "done" : finished.run.status === "failed" ? "error" : "paused";
+          settleSessionRun(sessionID, requestID, status);
+          const answer = finished.events?.find((event) => event.type === "answer" && event.message_id);
+          if (status === "done" && answer) {
+            completeAssistant(sessionID, requestID, "done", undefined, answer.truncated ? undefined : answer.content, undefined, answer.message_id, finished.run.id);
+          }
+          markUserMessageDelivered(sessionID, requestID);
+          finishTurnInteractions(sessionID, requestID);
+          forgetRequest(requestID);
+          if (finished.run.kind === "plan") stopPending("plan");
+          requestSessionHistoryFull(sessionID);
           break;
+        }
         case "background_turn_event": {
           const payload = (message.payload || {}) as BackgroundTurnEventPayload;
           const turnID = payload.turn_id || message.request_id || "";
@@ -413,16 +520,10 @@ export function useRemoteMessageHandler({
 
           if (payload.kind === "resync_required") {
             for (const [approvalID, identity] of Object.entries(backgroundPermissionsRef.current)) {
-              const pending = getSessionChat(identity.sessionID).pendingPermission;
-              if (pending && pending.approvalID === approvalID && pending.requestID === identity.turnID) {
-                setSessionPendingPermission(identity.sessionID, null);
-              }
-            }
-            for (const [questionID, identity] of Object.entries(backgroundQuestionsRef.current)) {
-              removeSessionPendingQuestion(identity.sessionID, questionID);
+              removeSessionPendingPermission(identity.sessionID, identity.turnID, approvalID);
             }
             backgroundPermissionsRef.current = {};
-            backgroundQuestionsRef.current = {};
+            requestUserQuestionSync();
             const resyncSessionID = targetSessionID || sessionIDRef.current;
             if (resyncSessionID) {
               requestAgentRuns?.(resyncSessionID);
@@ -469,7 +570,8 @@ export function useRemoteMessageHandler({
               backgroundPermissionsRef.current[approvalID] = { sessionID: targetSessionID, turnID };
               setSessionPendingPermission(targetSessionID, {
                 approvalID, requestID: turnID, sessionID: targetSessionID,
-                name: permission.name || "tool", permission: permission.permission || "permission", arguments: permission.arguments || "",
+                name: permission.name || "tool", permission: permission.permission || "", arguments: permission.arguments || "",
+                requireFreshConsent: permission.require_fresh_consent === true,
               });
               break;
             }
@@ -478,21 +580,14 @@ export function useRemoteMessageHandler({
                 rememberResolvedUserQuestion(payload.approval_id, resolvedPermissionIDsRef.current);
                 delete backgroundPermissionsRef.current[payload.approval_id];
               }
-              const pending = getSessionChat(targetSessionID).pendingPermission;
-              if (pending && pending.requestID === turnID && pending.approvalID === payload.approval_id) {
-                setSessionPendingPermission(targetSessionID, null);
-              }
+              if (payload.approval_id) removeSessionPendingPermission(targetSessionID, turnID, payload.approval_id);
               break;
             }
             case "user_question": {
               const question = payload.question;
-              if (!question?.question_id || !question.questions?.length || resolvedUserQuestionIDsRef.current.has(question.question_id)) { break; }
-              backgroundQuestionsRef.current[question.question_id] = { sessionID: targetSessionID, turnID };
-              setSessionPendingQuestion(targetSessionID, {
-                questionID: question.question_id, requestID: turnID, sessionID: targetSessionID,
-                title: question.title || "需要你确认一些信息", questions: question.questions,
-                sourceTaskID: question.source_task_id, submitted: false,
-              });
+              if (question && rememberQuestion(targetSessionID, turnID, question)) {
+                backgroundQuestionsRef.current[question.question_id] = { sessionID: targetSessionID, turnID };
+              }
               break;
             }
             case "user_question_resolved": {
@@ -500,7 +595,7 @@ export function useRemoteMessageHandler({
               if (questionID) {
                 delete backgroundQuestionsRef.current[questionID];
                 rememberResolvedUserQuestion(questionID, resolvedUserQuestionIDsRef.current);
-                removeSessionPendingQuestion(targetSessionID, questionID);
+                removeSessionPendingQuestion(targetSessionID, questionID, turnID);
               }
               break;
             }
@@ -553,11 +648,7 @@ export function useRemoteMessageHandler({
             }
 
             case "completed": {
-              const pendingPermission = getSessionChat(targetSessionID).pendingPermission;
-              if (pendingPermission && pendingPermission.requestID === turnID) { setSessionPendingPermission(targetSessionID, null); }
-              for (const question of getSessionChat(targetSessionID).pendingQuestions) {
-                if (question.requestID === turnID) { removeSessionPendingQuestion(targetSessionID, question.questionID); }
-              }
+              finishTurnInteractions(targetSessionID, turnID);
               if (payload.run) {
                 applyRunCompleted({ run: payload.run });
               } else if (payload.run_id) {
@@ -600,7 +691,9 @@ export function useRemoteMessageHandler({
                   isPaused ? "paused" : "done",
                   null,
                   payload.content,
-                  payload.reasoning,
+                  isPaused ? undefined : payload.reasoning,
+                  payload.message_id,
+                  payload.run?.id || payload.run_id,
                 );
               }
 
@@ -615,84 +708,40 @@ export function useRemoteMessageHandler({
           break;
         }
         case "assistant_done": {
-          const requestSessionID = message.request_id
-            ? requestSessionMapRef.current[message.request_id] || ""
-            : "";
-          const targetSessionID =
-            message.session_id || requestSessionID || sessionIDRef.current;
-          if (message.session_id && requestSessionID !== message.session_id) {
-            mergeSessionChats(requestSessionID, message.session_id);
-            mergeSessionRuns(requestSessionID, message.session_id);
-            if (message.request_id) {
-              requestSessionMapRef.current[message.request_id] =
-                message.session_id;
-            }
-          }
+          const requestID = message.request_id;
+          const targetSessionID = resolveTurnSession(message);
+          if (!requestID || targetSessionID === null) break;
           const payload = (message.payload || {}) as AssistantDonePayload;
           setSessionLastUsage(targetSessionID, payload.usage || null);
-          if (payload.context) {
-            setSessionContext(targetSessionID, payload.context);
-          }
-          if (payload.compact) {
-            setSessionCompact(targetSessionID, payload.compact);
-          }
-          if (payload.retrieval) {
-            applyKnowledgeSearch(payload.retrieval);
-          }
-          if (payload.plan) {
-            applyAssistantPlan(targetSessionID, payload.plan);
-          }
+          if (payload.context) setSessionContext(targetSessionID, payload.context);
+          if (payload.compact) setSessionCompact(targetSessionID, payload.compact);
+          if (payload.plan) applyAssistantPlan(targetSessionID, payload.plan);
+          if (payload.retrieval && targetSessionID === sessionIDRef.current) applyKnowledgeSearch(payload.retrieval);
           completeAssistant(
-            targetSessionID,
-            message.request_id,
-            payload.paused ? "paused" : "done",
-            payload.usage || null,
-            payload.content ||
-              payload.message ||
-              (payload.paused ? "Session task paused." : ""),
-            payload.reasoning || "",
+            targetSessionID, requestID, payload.paused ? "paused" : "done", payload.usage || null,
+            payload.content, payload.paused ? undefined : payload.reasoning, payload.message_id,
           );
-          if (targetSessionID) {
-            if (pendingHistorySessionIDRef.current === targetSessionID) {
-              pendingHistorySessionIDRef.current = "";
-            }
-            if (
-              !sessionIDRef.current ||
-              sessionIDRef.current === targetSessionID ||
-              sessionIDRef.current === requestSessionID
-            ) {
-              setSessionID(targetSessionID);
-              sessionIDRef.current = targetSessionID;
-              historySessionIDRef.current = targetSessionID;
-            }
-          }
-          setStatus(payload.paused ? "Paused" : "Done");
-          setSessionPendingPermission(targetSessionID, null);
-          clearSessionPendingRequest(targetSessionID, message.request_id);
-          if (requestSessionID && requestSessionID !== targetSessionID) {
-            clearSessionPendingRequest(requestSessionID, message.request_id);
-          }
+          if (payload.paused && payload.message) addEventMessage(targetSessionID, payload.message);
+          finishTurnInteractions(targetSessionID, requestID);
+          markUserMessageDelivered(targetSessionID, requestID);
+          clearSessionPendingRequest(targetSessionID, requestID);
+          forgetRequest(requestID);
           requestSessions();
-          requestModels();
-          requestSkills();
-          requestAssets(targetSessionID);
-          requestFiles(currentFilePath);
-          requestChanges();
-          requestHistory();
-          if (
-            !message.request_id ||
-            activeRequestIDRef.current === message.request_id
-          ) {
-            activeRequestIDRef.current = "";
-          }
-          if (message.request_id) {
-            delete requestSessionMapRef.current[message.request_id];
+          if (targetSessionID === sessionIDRef.current) {
+            requestModels();
+            requestSkills();
+            requestAssets(targetSessionID);
+            requestChanges();
+            requestHistory();
+          } else if (targetSessionID) {
+            addUnreadSession?.(targetSessionID);
           }
           break;
         }
         case "tool_call": {
           const payload = (message.payload || {}) as ToolCallPayload;
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const targetSessionID = resolveTurnSession(message);
+          if (targetSessionID === null) break;
           addToolCall(
             targetSessionID,
             payload.name || "tool",
@@ -704,7 +753,8 @@ export function useRemoteMessageHandler({
         }
         case "tool_result": {
           const payload = (message.payload || {}) as ToolResultPayload;
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          const targetSessionID = resolveTurnSession(message);
+          if (targetSessionID === null) break;
           addToolResult(
             targetSessionID,
             payload.name || "tool",
@@ -720,160 +770,99 @@ export function useRemoteMessageHandler({
         }
         case "permission_ask": {
           const payload = (message.payload || {}) as PermissionAskPayload;
-          const targetSessionID = resolveChatSessionID(
-            message,
-            requestSessionMapRef,
-            sessionIDRef,
-          );
-          if (!message.request_id || !payload.approval_id) {
-            addErrorMessage(targetSessionID, "授权请求缺少审批 ID，请等待电脑端重新发送。");
-            break;
-          }
-          if (resolvedPermissionIDsRef.current.has(payload.approval_id)) { break; }
-          setSessionPendingPermission(targetSessionID, {
+          const sessionID = resolveTurnSession(message);
+          if (!sessionID || !message.request_id || !payload.approval_id || resolvedPermissionIDsRef.current.has(payload.approval_id)) break;
+          setSessionPendingPermission(sessionID, {
             approvalID: payload.approval_id,
             requestID: message.request_id,
-            sessionID: targetSessionID,
+            sessionID,
             name: payload.name || "tool",
-            permission: payload.permission || "permission",
+            permission: payload.permission || "",
             arguments: payload.arguments || "",
+            requireFreshConsent: payload.require_fresh_consent === true,
           });
+          if (sessionID !== sessionIDRef.current) addUnreadSession?.(sessionID);
           break;
         }
         case "permission_result": {
           const payload = (message.payload || {}) as { approval_id?: string; allowed?: boolean };
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          const pending = getSessionChat(targetSessionID).pendingPermission;
-          if (payload.approval_id) {
-            rememberResolvedUserQuestion(payload.approval_id, resolvedPermissionIDsRef.current);
-            delete backgroundPermissionsRef.current[payload.approval_id];
-          }
-          if (pending && pending.requestID === message.request_id && pending.approvalID === payload.approval_id) {
-            addEventMessage(targetSessionID, `${payload.allowed ? "Allowed" : "Denied"} ${pending.name}`);
-            setSessionPendingPermission(targetSessionID, null);
-          }
+          const sessionID = resolveTurnSession(message);
+          if (!sessionID || !message.request_id || !payload.approval_id) break;
+          rememberResolvedUserQuestion(payload.approval_id, resolvedPermissionIDsRef.current);
+          delete backgroundPermissionsRef.current[payload.approval_id];
+          const pending = getSessionChat(sessionID).pendingPermissions.find((permission) =>
+            permission.requestID === message.request_id && permission.approvalID === payload.approval_id);
+          if (pending) addEventMessage(sessionID, `${payload.allowed ? "Allowed" : "Denied"} ${pending.name}`);
+          removeSessionPendingPermission(sessionID, message.request_id, payload.approval_id);
           break;
         }
         case "user_question": {
+          const sessionID = resolveTurnSession(message);
           const payload = (message.payload || {}) as UserQuestionPayload;
-          if (!payload.question_id || !payload.questions?.length) {
-            break;
-          }
-          if (resolvedUserQuestionIDsRef.current.has(payload.question_id)) {
-            break;
-          }
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          const existing = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
-          setSessionPendingQuestion(targetSessionID, {
-            questionID: payload.question_id,
-            requestID: message.request_id || "",
-            sessionID: targetSessionID,
-            title: payload.title || "需要你确认一些信息",
-            questions: payload.questions,
-            sourceTaskID: payload.source_task_id,
-            submitted: existing?.questionID === payload.question_id ? existing.submitted : false,
-          });
-          if (targetSessionID && targetSessionID !== sessionIDRef.current) {
-            addUnreadSession?.(targetSessionID);
-          }
+          if (sessionID && message.request_id) rememberQuestion(sessionID, message.request_id, payload);
           break;
         }
         case "user_question_resolved": {
           const payload = (message.payload || {}) as UserQuestionResolvedPayload;
-          if (payload.question_id) {
-            rememberResolvedUserQuestion(payload.question_id, resolvedUserQuestionIDsRef.current);
-          }
-          const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-          const pendingQuestion = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
-          if (pendingQuestion) {
-            removeSessionPendingQuestion(targetSessionID, payload.question_id);
-          }
-          if (payload.status && payload.status !== "answered") {
-            addEventMessage(targetSessionID, `用户询问已结束：${payload.status}`);
+          const sessionID = resolveTurnSession(message);
+          if (!sessionID || !message.request_id || !payload.question_id) break;
+          rememberResolvedUserQuestion(payload.question_id, resolvedUserQuestionIDsRef.current);
+          const pending = getSessionChat(sessionID).pendingQuestions.some((question) =>
+            question.questionID === payload.question_id && question.requestID === message.request_id);
+          removeSessionPendingQuestion(sessionID, payload.question_id, message.request_id);
+          if (pending && payload.status && payload.status !== "answered") {
+            addEventMessage(sessionID, `用户询问已结束：${payload.status}`);
           }
           break;
         }
         case "user_question_list_result": {
+          const sync = questionSyncRef.current;
+          if (!sync || message.request_id !== sync.requestID || relayScopeRef.current.connectionID !== sync.connectionID) break;
+          questionSyncRef.current = null;
           const payload = (message.payload || {}) as UserQuestionListResultPayload;
           const resolvedIDs = payload.resolved_question_ids || [];
           for (const questionID of resolvedIDs) {
             rememberResolvedUserQuestion(questionID, resolvedUserQuestionIDsRef.current);
+            delete backgroundQuestionsRef.current[questionID];
           }
           removePendingQuestions(resolvedIDs);
           for (const item of payload.questions || []) {
             const question = item.question;
-            if (!item.session_id || !question?.question_id || !question.questions?.length) {
-              continue;
-            }
-            if (resolvedUserQuestionIDsRef.current.has(question.question_id)) {
-              continue;
-            }
-            const existing = getSessionChat(item.session_id).pendingQuestions.find((pending) => pending.questionID === question.question_id);
-            setSessionPendingQuestion(item.session_id, {
-              questionID: question.question_id,
-              requestID: item.request_id || "",
-              sessionID: item.session_id,
-              title: question.title || "需要你确认一些信息",
-              questions: question.questions,
-              sourceTaskID: question.source_task_id,
-              submitted: existing?.submitted || false,
-            });
-            if (item.session_id !== sessionIDRef.current) {
-              addUnreadSession?.(item.session_id);
+            if (!item.request_id || !question || !rememberQuestion(item.session_id, item.request_id, question)) continue;
+            const existing = getSessionChat(item.session_id).pendingQuestions.find((pending) =>
+              pending.questionID === question.question_id && pending.requestID === item.request_id);
+            // Only the submission that preceded this query can be retried.
+            if (existing?.submitted && existing === sync.submittedQuestions.get(existing.questionID)) {
+              setSessionPendingQuestion(item.session_id, { ...existing, submitted: false });
             }
           }
           break;
         }
         case "session_list_result": {
-          const payload = message.payload as SessionListResultPayload | undefined;
+          if (!acceptSessionList(message)) break;
+          const payload = message.payload as SessionListResultPayload;
           applySessionList(payload);
-          if (!payload?.include_deleted && !pendingHistorySessionIDRef.current) {
-            stopPending("sessions");
-          }
+          if (!payload.include_deleted && !pendingHistorySessionIDRef.current && !hasPendingNavigation()) stopPending("sessions");
           break;
         }
         case "session_changed":
         case "session_delete_result":
         case "session_restore_result":
-          applySessionChanged(
-            message.payload as SessionChangedPayload | undefined,
-          );
-          if (!pendingHistorySessionIDRef.current) {
-            stopPending("sessions");
+          if (applySessionChanged(message)) {
+            if (!pendingHistorySessionIDRef.current && !hasPendingNavigation()) stopPending("sessions");
+            if (message.type !== "session_changed") requestDeletedSessions();
           }
-          requestDeletedSessions();
           break;
         case "session_history_result":
-          applySessionHistory(
-            message.payload as SessionHistoryResultPayload | undefined,
-          );
-          if (!pendingHistorySessionIDRef.current) {
-            stopPending("sessions");
-          }
+        case "session_history_meta_result":
+        case "session_history_delta_result":
+          handleSessionHistoryMessage(message);
           break;
-        case "session_history_meta_result": {
-          const payload = message.payload as
-            SessionHistoryMetaResultPayload | undefined;
-          applySessionHistoryMeta(payload);
-          if (!pendingHistorySessionIDRef.current) {
-            stopPending("sessions");
-          }
-          break;
-        }
-        case "session_history_delta_result": {
-          const payload = message.payload as
-            SessionHistoryDeltaResultPayload | undefined;
-          applySessionHistoryDelta(payload);
-          if (!pendingHistorySessionIDRef.current) {
-            stopPending("sessions");
-          }
-          break;
-        }
         case "session_mode_set_result":
           // 模式响应已经携带服务端最新 Session。不要立刻请求列表，避免旧列表响应覆盖刚切换的模式。
           stopPending("settings");
           applySessionSettings(
-            message.payload as SessionSettingsResultPayload | undefined,
+            message.payload as SessionSettingsResultPayload | undefined, message.session_id,
           );
           break;
         case "session_permission_set_result":
@@ -883,7 +872,7 @@ export function useRemoteMessageHandler({
           // 设置以服务端返回的 Session 为准，并重新拉取列表，避免本地乐观状态与持久层不一致。
           stopPending("settings");
           applySessionSettings(
-            message.payload as SessionSettingsResultPayload | undefined,
+            message.payload as SessionSettingsResultPayload | undefined, message.session_id,
           );
           requestSessions();
           break;
@@ -922,7 +911,7 @@ export function useRemoteMessageHandler({
           // 只有 execute_result 才表示整个计划结束，可以释放 Plan 按钮和会话运行状态。
           stopPending("plan");
           applySessionSettings(
-            message.payload as SessionSettingsResultPayload | undefined,
+            message.payload as SessionSettingsResultPayload | undefined, message.session_id,
           );
           requestSessions();
           break;
@@ -941,19 +930,8 @@ export function useRemoteMessageHandler({
                 ? "Session paused."
                 : "No running task to pause."),
           );
-          setStatus(payload.paused ? "Paused" : "Idle");
-          if (!payload.paused) {
-            clearSessionPendingRequest(targetSessionID);
-            if (
-              !message.request_id ||
-              activeRequestIDRef.current === message.request_id
-            ) {
-              activeRequestIDRef.current = "";
-            }
-          }
-          if (message.request_id) {
-            delete requestSessionMapRef.current[message.request_id];
-          }
+          if (!payload.paused && targetSessionID) requestAgentRuns?.(targetSessionID);
+          if (message.request_id) forgetRequest(message.request_id);
           break;
         }
         case "model_list_result":
@@ -976,6 +954,7 @@ export function useRemoteMessageHandler({
           applyModelConfigTest(message.payload as ModelConfigTestResultPayload | undefined);
           break;
         case "model_config_mutation_result":
+          if (handleModelDeleteMessage(message)) break;
           stopPending("models");
           applyModelConfigMutation(message.payload as ModelConfigMutationResultPayload | undefined);
           break;
@@ -1013,6 +992,7 @@ export function useRemoteMessageHandler({
           applyMCPReload(message.payload as MCPReloadResultPayload | undefined);
           break;
         case "asset_list_result":
+          if (!acceptAssetList(message)) break;
           stopPending("assets");
           applyAssetList(message.payload as AssetListResultPayload | undefined);
           break;
@@ -1141,86 +1121,68 @@ export function useRemoteMessageHandler({
           );
           break;
         case "error": {
+          if (handleModelDeleteMessage(message)) break;
           const payload = (message.payload || {}) as ErrorPayload;
-          if (payload.request_type === "permission_result" || payload.request_type === "user_question_answer") {
-            const targetSessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
-            addErrorMessage(targetSessionID, payload.message || "审批回复失败，请重试。");
-            if (payload.request_type === "user_question_answer") {
-              const pending = getSessionChat(targetSessionID).pendingQuestions.find((item) => item.questionID === payload.question_id);
-              if (pending) {
-                setSessionPendingQuestion(targetSessionID, { ...pending, submitted: false });
+          const requestID = message.request_id;
+          const type = payload.request_type;
+          if (type === "heartbeat") break;
+          const sessionID = resolveChatSessionID(message, requestSessionMapRef, sessionIDRef);
+          if (type === "permission_result" || type === "user_question_answer") {
+            if (type === "user_question_answer") {
+              const question = getSessionChat(sessionID).pendingQuestions.find((item) =>
+                item.requestID === requestID && item.questionID === payload.question_id);
+              if (question?.submitted) {
+                setSessionPendingQuestion(sessionID, { ...question, submitted: false });
+                requestUserQuestionSync();
               }
+            }
+            addErrorMessage(sessionID, payload.message || "确认失败，请重试。");
+            break;
+          }
+          if (type === "user_question_list") {
+            if (questionSyncRef.current?.requestID === requestID) questionSyncRef.current = null;
+            break;
+          }
+          if (type === "session_list" || type === "agent_run_list" || type === "asset_list") {
+            if (handleRemoteQueryError(message)) addErrorMessage(sessionID, payload.message || "无法同步会话。");
+            break;
+          }
+          if (type === "session_history" || type === "session_history_meta" || type === "session_history_delta") {
+            if (handleSessionHistoryMessage(message)) addErrorMessage(sessionID, payload.message || "无法同步会话历史。");
+            break;
+          }
+          if (type === "session_load" || type === "session_new" || type === "session_delete" || type === "session_restore") {
+            if (applySessionCommandError(requestID)) {
+              if (!pendingHistorySessionIDRef.current && !hasPendingNavigation()) stopPending("sessions");
+              addErrorMessage(sessionID, payload.message || "会话操作失败。");
             }
             break;
           }
-          applyIntentError(payload.message || "自动规划操作失败", message.request_id);
-          if (isModelOperationPending) {
-            stopPending("models");
-            applyModelConfigError(payload.message || "模型操作失败");
+          const text = payload.message || "中继请求失败。";
+          const isTurnError = !type || type === "user_message" || type === "session_regenerate" ||
+            type === "session_plan_execute" || type === "subagent_task_resume";
+          if (isTurnError && requestID) {
+            const owner = resolveTurnSession(message);
+            if (owner !== null && getSessionChat(owner).pendingRequestID === requestID) {
+              markAssistantError(owner, requestID, text);
+              finishTurnInteractions(owner, requestID);
+              clearSessionPendingRequest(owner, requestID);
+              forgetRequest(requestID);
+              if (!type || type === "session_plan_execute") stopPending("plan");
+              if (!type || type === "subagent_task_resume") stopPending("subagents");
+              break;
+            }
           }
-          if (isGenerationOperationPending) {
-            applySessionGenerationError(payload.message || "生成设置保存失败");
-          }
-          if (isKnowledgeOperationPending) {
-            applyKnowledgeError(payload.message || "知识库操作失败");
-          }
-          if (isMemoryOperationPending) {
-            applyAIMemoryError(payload.message || "AI 记忆操作失败");
-          }
-          if (isMCPOperationPending) {
-            applyMCPError(payload.message || "MCP 重载失败");
-          }
-          const targetSessionID = resolveChatSessionID(
-            message,
-            requestSessionMapRef,
-            sessionIDRef,
-          );
-          if (
-            isChatRequestError(
-              getSessionChat(targetSessionID),
-              message.request_id,
-            )
-          ) {
-            markAssistantError(
-              targetSessionID,
-              message.request_id,
-              payload.message || "Remote error",
-            );
-          } else {
-            addErrorMessage(targetSessionID, payload.message || "Remote error");
-          }
-          setSessionPendingPermission(targetSessionID, null);
-          clearSessionPendingRequest(targetSessionID, message.request_id);
-          pendingHistorySessionIDRef.current = "";
-          stopPending("sessions");
-          stopPending("models");
-          stopPending("skills");
-          stopPending("plugins");
-          stopPending("mcp");
-          stopPending("assets");
-          stopPending("files");
-          stopPending("changes");
-          stopPending("history");
-          stopPending("diff");
-          stopPending("revert");
-          stopPending("settings");
-          stopPending("generation");
-          stopPending("context");
-          stopPending("plan");
-          stopPending("pause");
-          stopPending("knowledge");
-          stopPending("memory");
-          stopPending("subagents");
-          stopPending("intent");
-          if (
-            !message.request_id ||
-            activeRequestIDRef.current === message.request_id
-          ) {
-            activeRequestIDRef.current = "";
-          }
-          if (message.request_id) {
-            delete requestSessionMapRef.current[message.request_id];
-          }
+          if (applyIntentError(text, requestID)) break;
+          const action = type && pendingActionForError(type);
+          if (action) stopPending(action);
+          if (action === "models" && isModelOperationPending) applyModelConfigError(text);
+          if (action === "generation" && isGenerationOperationPending) applySessionGenerationError(text);
+          if ((action === "knowledge" || type === "session_rag_set") && isKnowledgeOperationPending) applyKnowledgeError(text);
+          if (action === "memory" && isMemoryOperationPending) applyAIMemoryError(text);
+          if (action === "mcp" && isMCPOperationPending) applyMCPError(text);
+          if (type === "session_pause" && requestID) forgetRequest(requestID);
+          addErrorMessage(sessionID, text);
           break;
         }
         default:
@@ -1228,6 +1190,11 @@ export function useRemoteMessageHandler({
       }
     },
     [
+      acceptAgentRunList,
+      acceptAssetList,
+      acceptSessionList,
+      handleRemoteQueryError,
+      handleSessionHistoryMessage,
       handleAssetUploadMessage,
       activeRequestIDRef,
       addErrorMessage,
@@ -1272,30 +1239,37 @@ export function useRemoteMessageHandler({
       applyModelConfigTest,
       applyModelConfigMutation,
       applyModelConfigError,
+      handleModelDeleteMessage,
       isModelOperationPending,
       applyModelSwitch,
       applySessionChanged,
-      applySessionHistoryDelta,
-      applySessionHistoryMeta,
-      applySessionHistory,
+      applySessionCommandError,
+      hasPendingNavigation,
       applySessionList,
       applySessionSettings,
       applySessionGenerationPreferences,
       applySessionGenerationError,
       applySkillList,
       applyPluginList,
+      applyMCPReload,
+      applyMCPError,
+      isMCPOperationPending,
       applySubagentDefinitionList,
       applySubagentDefinitionMutation,
       applySubagentTaskList,
       applySubagentTaskResult,
+      applySubagentTaskDetailResult,
+      applySubagentTaskEventsResult,
+      applyRealtimeSubagentTaskEvent,
       clearSessionPendingRequest,
       markUserMessageQueued,
       markUserMessageDelivered,
       completeAssistant,
       currentFilePath,
       getSessionChat,
-      historySessionIDRef,
       pendingHistorySessionIDRef,
+      questionSyncRef,
+      relayScopeRef,
       hasRunForRequest,
       isGenerationOperationPending,
       isKnowledgeOperationPending,
@@ -1303,6 +1277,12 @@ export function useRemoteMessageHandler({
       markAssistantError,
       mergeSessionChats,
       mergeSessionRuns,
+      addUnreadSession,
+      requestAgentRuns,
+      requestSessionHistory,
+      requestSessionHistoryFull,
+      requestUserQuestionSync,
+      startBackgroundAssistant,
       requestChanges,
       requestAssets,
       requestFiles,
@@ -1319,9 +1299,10 @@ export function useRemoteMessageHandler({
       setSessionPendingPermission,
       setSessionPendingQuestion,
       removeSessionPendingQuestion,
+      removeSessionPendingPermission,
       removePendingQuestions,
+      settleSessionRun,
       setSessionID,
-      setStatus,
       stopPending,
     ],
   );
@@ -1353,12 +1334,24 @@ function resolveChatSessionID(
   ).trim();
 }
 
-function isChatRequestError(
-  chat: { activeAssistantID: string; pendingRequestID: string },
-  requestID?: string,
-) {
-  if (!requestID) {
-    return false;
-  }
-  return chat.pendingRequestID === requestID;
+function pendingActionForError(type: RelayMessage["type"]): PendingAction | undefined {
+  if (type.startsWith("model_")) return "models";
+  if (type.startsWith("skill_")) return "skills";
+  if (type.startsWith("plugin_")) return "plugins";
+  if (type.startsWith("mcp_")) return "mcp";
+  if (type === "asset_list") return "assets";
+  if (type.startsWith("file_")) return "files";
+  if (type === "changes_list") return "changes";
+  if (type === "history_list") return "history";
+  if (type.endsWith("_diff")) return "diff";
+  if (type.endsWith("_revert")) return "revert";
+  if (type === "session_context_query") return "context";
+  if (type.startsWith("session_generation_") || type === "session_style_set") return "generation";
+  if (type === "session_pause") return "pause";
+  if (type === "session_plan_execute") return "plan";
+  if (type.startsWith("knowledge_")) return "knowledge";
+  if (type.startsWith("ai_memory_")) return "memory";
+  if (type.startsWith("subagent_")) return "subagents";
+  if (type.startsWith("session_")) return "settings";
+  return undefined;
 }

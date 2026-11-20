@@ -114,8 +114,14 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 		t.Fatal(err)
 	}
 	current = committed.Session
-	if err := store.SaveMessage(context.Background(), mapper.AssistantMessageFromSession(current, response, time.Now())); err != nil {
-		t.Fatal(err)
+	if committed.AssistantMessage == nil || committed.AssistantMessage.AssistantReplyRecordID() == "" {
+		t.Fatal("commit did not return the assistant reply written to history")
+	}
+	response.Message = committed.AssistantMessage
+	for _, record := range mapper.AssistantTurn(current.ID, response, time.Now()) {
+		if err := store.SaveMessage(context.Background(), record); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 1. 数据库扁平记录经过 Mongo 映射再恢复，必须与实际发送的消息结构一致。

@@ -3,8 +3,10 @@ package relay
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"myai/core/remote/protocol"
 )
@@ -44,6 +46,136 @@ func TestControlErrorAndConfirmationDoNotRetireChatRoute(t *testing.T) {
 	readTestMessage(t, agent, protocol.TypeHeartbeat)
 	if s.getClient("turn") != nil {
 		t.Fatal("assistant done did not retire chat route")
+	}
+}
+
+func TestForegroundPermissionReplaysOnlyForOriginalPairing(t *testing.T) {
+	s := newTestServer()
+	httpServer := httptest.NewServer(s.routes())
+	defer httpServer.Close()
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	agent := dialTestWebSocket(t, url+"/ws/agent")
+	defer agent.Close()
+	writeAgentOnline(t, agent, "local", "pc-local", "123456")
+	readTestMessage(t, agent, protocol.TypeHeartbeat)
+	token := pairTestClient(t, httpServer, "123456")
+	writeAgentOnline(t, agent, "local", "pc-local", "654321")
+	readTestMessage(t, agent, protocol.TypeHeartbeat)
+	otherToken := pairTestClient(t, httpServer, "654321")
+
+	turn := protocol.Message{Type: protocol.TypeUserMessage, RequestID: "turn", UserID: "local", DeviceID: "pc-local", SessionID: "session", ClientToken: token}
+	ask := protocol.Message{Type: protocol.TypePermissionAsk, RequestID: turn.RequestID, UserID: turn.UserID, DeviceID: turn.DeviceID, SessionID: turn.SessionID,
+		Payload: json.RawMessage(`{"approval_id":"approval","name":"write_file","require_fresh_consent":true}`)}
+	owner := dialTestWebSocket(t, url+"/ws/client")
+	defer owner.Close()
+	writeTestMessage(t, owner, turn)
+	readTestMessage(t, agent, protocol.TypeUserMessage)
+	readTestMessage(t, owner, protocol.TypeHeartbeat)
+
+	heartbeat := protocol.Message{Type: protocol.TypeHeartbeat, RequestID: "heartbeat", UserID: turn.UserID, DeviceID: turn.DeviceID, ClientToken: otherToken}
+	other := dialTestWebSocket(t, url+"/ws/client")
+	defer other.Close()
+	writeTestMessage(t, other, heartbeat)
+	readTestMessage(t, other, protocol.TypeHeartbeat)
+	writeTestMessage(t, agent, ask)
+	original := readTestMessage(t, owner, protocol.TypePermissionAsk)
+	readTestMessage(t, agent, protocol.TypeHeartbeat)
+	writeTestMessage(t, other, heartbeat)
+	readTestMessage(t, other, protocol.TypeHeartbeat) // No live broadcast.
+
+	otherReconnect := dialTestWebSocket(t, url+"/ws/client")
+	defer otherReconnect.Close()
+	writeTestMessage(t, otherReconnect, heartbeat)
+	readTestMessage(t, otherReconnect, protocol.TypeHeartbeat) // No cross-pairing replay.
+	answer := ask
+	answer.Type, answer.ClientToken = protocol.TypePermissionResult, otherToken
+	answer.Payload = json.RawMessage(`{"approval_id":"approval","allowed":true}`)
+	writeTestMessage(t, otherReconnect, answer)
+	readTestMessage(t, otherReconnect, protocol.TypeError)
+
+	ownerReconnect := dialTestWebSocket(t, url+"/ws/client")
+	defer ownerReconnect.Close()
+	heartbeat.ClientToken = token
+	writeTestMessage(t, ownerReconnect, heartbeat)
+	if replayed := readTestMessage(t, ownerReconnect, protocol.TypePermissionAsk); !reflect.DeepEqual(replayed, original) {
+		t.Fatalf("reconnect changed the original permission frame: %#v", replayed)
+	}
+	readTestMessage(t, ownerReconnect, protocol.TypeHeartbeat)
+	writeTestMessage(t, ownerReconnect, heartbeat)
+	readTestMessage(t, ownerReconnect, protocol.TypeHeartbeat) // Replay is once per connection.
+	// A reply racing the reconnect must go to the new socket even while the old
+	// one is still open.
+	confirmation := answer
+	confirmation.ClientToken = ""
+	writeTestMessage(t, agent, confirmation)
+	readTestMessage(t, ownerReconnect, protocol.TypePermissionResult)
+	readTestMessage(t, agent, protocol.TypeHeartbeat)
+}
+
+func TestForegroundPermissionReplayTracksTerminalResponsesWhileClientOffline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		request   protocol.MessageType
+		response  protocol.MessageType
+		payload   string
+		wantAsk   bool
+		wantRoute bool
+	}{
+		{"matching confirmation", protocol.TypeUserMessage, protocol.TypePermissionResult, `{"approval_id":"approval","allowed":false}`, false, true},
+		{"unrelated confirmation", protocol.TypeUserMessage, protocol.TypePermissionResult, `{"approval_id":"other","allowed":true}`, true, true},
+		{"nonterminal control error", protocol.TypeUserMessage, protocol.TypeError, `{"request_type":"permission_result","approval_id":"approval"}`, true, true},
+		{"assistant done", protocol.TypeUserMessage, protocol.TypeAssistantDone, "", false, false},
+		{"terminal turn error", protocol.TypeUserMessage, protocol.TypeError, `{"request_type":"user_message","message":"failed"}`, false, false},
+		{"plan assistant done before final result", protocol.TypeSessionPlanExecute, protocol.TypeAssistantDone, "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer()
+			httpServer := httptest.NewServer(s.routes())
+			defer httpServer.Close()
+			url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+			agent := dialTestWebSocket(t, url+"/ws/agent")
+			defer agent.Close()
+			writeAgentOnline(t, agent, "local", "pc-local", "123456")
+			readTestMessage(t, agent, protocol.TypeHeartbeat)
+			token := pairTestClient(t, httpServer, "123456")
+			client := dialTestWebSocket(t, url+"/ws/client")
+			defer client.Close()
+			writeTestMessage(t, client, protocol.Message{Type: tc.request, RequestID: "turn", UserID: "local", DeviceID: "pc-local", SessionID: "session", ClientToken: token})
+			readTestMessage(t, agent, tc.request)
+			readTestMessage(t, client, protocol.TypeHeartbeat)
+			ask := protocol.Message{Type: protocol.TypePermissionAsk, RequestID: "turn", UserID: "local", DeviceID: "pc-local", SessionID: "session", Payload: json.RawMessage(`{"approval_id":"approval"}`)}
+			writeTestMessage(t, agent, ask)
+			readTestMessage(t, client, protocol.TypePermissionAsk)
+			readTestMessage(t, agent, protocol.TypeHeartbeat)
+			client.Close()
+			waitForClientDisconnect(t, s, "local", "pc-local")
+
+			response := ask
+			response.Type, response.Payload = tc.response, json.RawMessage(tc.payload)
+			writeTestMessage(t, agent, response)
+			readTestMessage(t, agent, protocol.TypeError) // No live client; cleanup still applies.
+			if (s.getClient("turn") != nil) != tc.wantRoute {
+				t.Fatalf("unexpected request route after %s", tc.response)
+			}
+			reconnected := dialTestWebSocket(t, url+"/ws/client")
+			defer reconnected.Close()
+			writeTestMessage(t, reconnected, protocol.Message{Type: protocol.TypeHeartbeat, UserID: "local", DeviceID: "pc-local", ClientToken: token})
+			if tc.wantAsk {
+				readTestMessage(t, reconnected, protocol.TypePermissionAsk)
+			}
+			readTestMessage(t, reconnected, protocol.TypeHeartbeat)
+		})
+	}
+}
+
+func waitForClientDisconnect(t *testing.T, s *Server, userID, deviceID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for len(s.getClientConnections(userID, deviceID)) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("client connection was not unregistered")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

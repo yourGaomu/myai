@@ -1,70 +1,61 @@
-import { useCallback } from "react";
-import { Alert } from "react-native";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { pairWithRelay } from "../services/pairing";
-import type { PendingAction } from "../types/app";
 import { messageFromError } from "../utils/format";
+import { newRequestID } from "../utils/ids";
+import { normalizeRelayUrl, type RelayPairing } from "../utils/relayPairing";
 
 type Args = {
-  addErrorMessage: (message: string) => void;
-  bindCode: string;
-  normalizedRelayURL: string;
-  setBindCode: (bindCode: string) => void;
-  setClientToken: (token: string) => void;
-  setDeviceID: (deviceID: string) => void;
-  setStatus: (status: string) => void;
-  setUserID: (userID: string) => void;
-  startPending: (action: PendingAction) => void;
-  stopPending: (action: PendingAction) => void;
+  relayURLRef: RefObject<string>;
+  onPaired: (pairing: RelayPairing) => void;
 };
 
-// 配对通过 HTTP 换取 client_token；后续 WebSocket 请求都使用该 token 鉴权。
-export function usePairingActions({
-  addErrorMessage,
-  bindCode,
-  normalizedRelayURL,
-  setBindCode,
-  setClientToken,
-  setDeviceID,
-  setStatus,
-  setUserID,
-  startPending,
-  stopPending,
-}: Args) {
-  const pairDevice = useCallback(async () => {
+export function usePairingActions({ relayURLRef, onPaired }: Args) {
+  const [bindCode, setBindCode] = useState("");
+  const [pairingPending, setPairingPending] = useState(false);
+  const [pairingError, setPairingError] = useState("");
+  const pendingRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => {
+    pendingRef.current?.abort();
+    pendingRef.current = null;
+  }, []);
+
+  function cancelPairing() {
+    pendingRef.current?.abort();
+    pendingRef.current = null;
+    setPairingPending(false);
+    setPairingError("");
+  }
+
+  async function pairDevice() {
+    if (pendingRef.current) return;
     const code = bindCode.trim();
-    if (!code) {
-      Alert.alert("Bind code required", "Enter the code printed by the PC Agent.");
+    const relayURL = normalizeRelayUrl(relayURLRef.current);
+    if (!code || !relayURL) {
+      setPairingError("请输入有效的中继地址和配对码。");
       return;
     }
 
-    startPending("pair");
-    setStatus("Pairing");
+    const attempt = new AbortController();
+    pendingRef.current = attempt;
+    setPairingPending(true);
+    setPairingError("");
     try {
-      const data = await pairWithRelay(normalizedRelayURL, code);
-      setUserID(data.user_id || "local");
-      setDeviceID(data.device_id || "pc-local");
-      setClientToken(data.client_token || "");
-      setBindCode("");
-      setStatus(`Paired ${data.user_id}/${data.device_id}`);
+      const result = await pairWithRelay(relayURL, code, attempt.signal);
+      if (pendingRef.current === attempt && normalizeRelayUrl(relayURLRef.current) === relayURL) {
+        onPaired({ ...result, pairingID: newRequestID(), relayURL });
+        setBindCode("");
+      }
     } catch (error) {
-      setStatus("Pair failed");
-      addErrorMessage(messageFromError(error));
+      if (pendingRef.current === attempt) setPairingError(messageFromError(error));
     } finally {
-      stopPending("pair");
+      if (pendingRef.current === attempt) {
+        pendingRef.current = null;
+        setPairingPending(false);
+      }
     }
-  }, [
-    addErrorMessage,
-    bindCode,
-    normalizedRelayURL,
-    setBindCode,
-    setClientToken,
-    setDeviceID,
-    setStatus,
-    setUserID,
-    startPending,
-    stopPending,
-  ]);
+  }
 
-  return { pairDevice };
+  return { bindCode, cancelPairing, pairDevice, pairingError, pairingPending, setBindCode };
 }

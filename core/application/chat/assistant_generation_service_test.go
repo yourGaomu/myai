@@ -23,7 +23,9 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 	compactor := &assistantCompactor{info: CompactInfo{Triggered: true, BeforeTokens: 20, AfterTokens: 10}}
 	runner := &assistantRunner{result: modelport.ChatResult{Content: "answer", Usage: modelport.TokenUsage{TotalTokens: 3, Available: true}}}
 	plan := &agentplan.Plan{ID: "plan-1", SessionID: "session-1", Status: agentplan.StatusDraft}
-	committer := &assistantCommitter{result: CommitResult{Plan: plan}}
+	message := domainmessage.Assistant("answer", "", nil)
+	message.ID = "committed-answer"
+	committer := &assistantCommitter{result: CommitResult{Plan: plan, AssistantMessage: &message}}
 	persistence := &assistantPersistence{}
 
 	response, err := AssistantGenerationService{
@@ -44,7 +46,7 @@ func TestAssistantGenerationServiceGenerateOrchestratesUseCase(t *testing.T) {
 		t.Fatalf("Generate returned error: %v", err)
 	}
 
-	if response.SessionID != "session-1" || response.Result.Content != "answer" {
+	if response.SessionID != "session-1" || response.MessageID != "committed-answer" || response.Result.Content != "answer" {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 	if response.Compact.BeforeTokens != 20 || !response.Compact.Triggered {

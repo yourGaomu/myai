@@ -30,8 +30,8 @@ func TestResponseCommitServiceWritesAssistantMessageAndUsage(t *testing.T) {
 	if result.Plan != nil {
 		t.Fatalf("expected no plan in chat mode, got %#v", result.Plan)
 	}
-	if memory.assistantContent != "hello" {
-		t.Fatalf("expected assistant content to be written, got %q", memory.assistantContent)
+	if memory.assistantContent != "hello" || result.AssistantMessage == nil || result.AssistantMessage.ID != "committed-answer" {
+		t.Fatalf("expected the appended assistant identity and content, got %#v / %q", result.AssistantMessage, memory.assistantContent)
 	}
 	if memory.usage.TotalTokens != 3 || !memory.usage.Available {
 		t.Fatalf("expected usage to be written, got %#v", memory.usage)
@@ -95,8 +95,8 @@ func TestResponseCommitServiceKeepsInternalPlanningOutOfChatHistory(t *testing.T
 	if err != nil || result.Plan == nil {
 		t.Fatalf("expected internal plan capture, result=%#v err=%v", result, err)
 	}
-	if memory.assistantContent != "" || !memory.usageWritten {
-		t.Fatalf("internal planning should skip assistant history but retain usage: %#v", memory)
+	if memory.assistantContent != "" || result.AssistantMessage != nil || !memory.usageWritten {
+		t.Fatalf("internal planning should skip assistant history but retain usage: result=%#v memory=%#v", result, memory)
 	}
 }
 
@@ -126,12 +126,18 @@ type responseMemoryRecorder struct {
 	planErr          error
 }
 
-func (m *responseMemoryRecorder) AppendAssistantMessageTo(sessionID string, message domainmessage.Message) error {
+func (m *responseMemoryRecorder) AppendMessagesTo(_ string, messages ...domainmessage.Message) (*session.Session, []domainmessage.Message, error) {
 	if m.assistantErr != nil {
-		return m.assistantErr
+		return nil, nil, m.assistantErr
 	}
+	message := messages[0]
+	message.ID = "committed-answer"
 	m.assistantContent = message.Text()
-	return nil
+	return &session.Session{Messages: []domainmessage.Message{message}}, []domainmessage.Message{message}, nil
+}
+
+func (m *responseMemoryRecorder) Snapshot(sessionID string) (*session.Session, error) {
+	return &session.Session{ID: sessionID}, nil
 }
 
 func (m *responseMemoryRecorder) AddUsageTo(sessionID string, usage modelport.TokenUsage) error {

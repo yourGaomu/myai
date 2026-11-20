@@ -51,5 +51,5 @@ func init() {
 	clientCmd.Flags().StringVar(&clientSessionID, "session", "", "session id")
 	clientCmd.Flags().StringVar(&clientToken, "token", "", "client token from relay pairing")
 	clientCmd.Flags().StringVar(&clientMessage, "message", "", "message to send")
-	clientCmd.Flags().BoolVar(&clientAllowTools, "allow-tools", false, "allow remote tool requests")
+	clientCmd.Flags().BoolVar(&clientAllowTools, "allow-tools", false, "auto-approve ordinary remote tool requests (not requests needing per-call consent)")
 }

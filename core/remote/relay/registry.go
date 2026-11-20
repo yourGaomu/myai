@@ -67,6 +67,8 @@ type clientEntry struct {
 	ConnectedAt time.Time
 	LastSeenAt  time.Time
 	peer        *peer
+
+	foregroundFinished bool
 }
 
 type clientConnection struct {
@@ -322,12 +324,36 @@ func (s *Server) unregisterClient(requestID string) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	delete(s.clients, requestID)
+	if client := s.clients[requestID]; client != nil {
+		s.removeClientRouteLocked(client)
+	}
+}
+
+// Use the original route instance, not just its request ID, after a write.
+// The ID could have been reused if authorization was invalidated meanwhile.
+func (s *Server) finishClientRoute(client *clientEntry) {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	if s.clients[client.RequestID] == client {
+		s.removeClientRouteLocked(client)
+	}
+}
+
+func (s *Server) removeClientRouteLocked(client *clientEntry) {
+	delete(s.clients, client.RequestID)
+	s.clearForegroundPermissionsLocked(client)
 }
 
 func (s *Server) unregisterClientPeer(p *peer) {
+	s.unregisterClientPeerForRoute(p, nil)
+}
+
+func (s *Server) unregisterClientPeerForRoute(p *peer, owner *clientEntry) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
+	if owner != nil && !owner.ownsConnection(s.connections[p]) {
+		return
+	}
 
 	for _, client := range s.clients {
 		if client.peer == p {
@@ -343,9 +369,9 @@ func (s *Server) unregisterClientPeer(p *peer) {
 func (s *Server) invalidateClientAuthorization(clientID string) {
 	var peers []*peer
 	s.clientLock.Lock()
-	for requestID, client := range s.clients {
+	for _, client := range s.clients {
 		if client.ClientID == clientID {
-			delete(s.clients, requestID)
+			s.removeClientRouteLocked(client)
 		}
 	}
 	for p, connection := range s.connections {
@@ -370,7 +396,7 @@ func (s *Server) getClient(requestID string) *clientEntry {
 
 	client := s.clients[requestID]
 	if client != nil && time.Since(client.LastSeenAt) > clientRouteTTL {
-		delete(s.clients, requestID)
+		s.removeClientRouteLocked(client)
 		return nil
 	}
 	if client == nil {
@@ -393,7 +419,7 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 	client := s.clients[requestID]
 	if client == nil || time.Since(client.LastSeenAt) > clientRouteTTL {
 		if client != nil {
-			delete(s.clients, requestID)
+			s.removeClientRouteLocked(client)
 		}
 		return false
 	}
@@ -405,11 +431,10 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 	return true
 }
 
-// clientPeerForMessage returns the live peer for a request. If the original
-// peer went away, the most recently active connection for the same paired
-// identity takes over the route.
-func (s *Server) clientPeerForMessage(requestID string, userID string, deviceID string) (*clientEntry, *peer, bool) {
-	if requestID == "" {
+// clientPeerForMessage correlates an agent response with the original request.
+// On retry, require the same route even if the request ID has since been reused.
+func (s *Server) clientPeerForMessage(message protocol.Message, expected *clientEntry) (*clientEntry, *peer, bool) {
+	if message.RequestID == "" {
 		return nil, nil, false
 	}
 
@@ -417,28 +442,30 @@ func (s *Server) clientPeerForMessage(requestID string, userID string, deviceID 
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	client := s.clients[requestID]
+	client := s.clients[message.RequestID]
+	if expected != nil && client != expected {
+		return nil, nil, false
+	}
 	if client == nil || now.Sub(client.LastSeenAt) > clientRouteTTL {
 		if client != nil {
-			delete(s.clients, requestID)
+			s.removeClientRouteLocked(client)
 		}
 		return nil, nil, false
 	}
-	if userID != "" && client.UserID != userID || deviceID != "" && client.DeviceID != deviceID {
+	if message.UserID != "" && client.UserID != message.UserID || message.DeviceID != "" && client.DeviceID != message.DeviceID {
 		return nil, nil, false
 	}
 
+	terminal := isTerminalClientResponse(client.RequestType, message)
+	s.trackForegroundPermissionLocked(client, message, terminal, now)
 	target := client.peer
-	if target != nil {
-		connection := s.connections[target]
-		if connection == nil || connection.UserID != client.UserID || connection.DeviceID != client.DeviceID || connection.ClientID != client.ClientID {
-			target = nil
-		}
+	if target != nil && !client.ownsConnection(s.connections[target]) {
+		target = nil
 	}
 	if target == nil {
 		var latest time.Time
 		for candidate, connection := range s.connections {
-			if connection.UserID != client.UserID || connection.DeviceID != client.DeviceID || connection.ClientID != client.ClientID {
+			if !client.ownsConnection(connection) {
 				continue
 			}
 			if target == nil || connection.LastSeenAt.After(latest) {
@@ -448,36 +475,47 @@ func (s *Server) clientPeerForMessage(requestID string, userID string, deviceID 
 		}
 		client.peer = target
 	}
-	if target == nil {
-		return nil, nil, false
+	if target != nil {
+		client.LastSeenAt = now
 	}
-	client.LastSeenAt = now
-	// Return a value copy so the caller can safely use the route after the
-	// registry lock is released.
-	entry := *client
-	return &entry, target, true
+	return client, target, terminal
+}
+
+func (client *clientEntry) ownsConnection(connection *clientConnection) bool {
+	return connection != nil && connection.ClientID == client.ClientID && connection.UserID == client.UserID && connection.DeviceID == client.DeviceID
 }
 
 func (s *Server) registerClientConnection(p *peer, userID string, deviceID string, clientToken string, remoteAddr string) {
 	if p == nil || userID == "" || deviceID == "" || clientToken == "" {
 		return
 	}
+	// Serialize identity changes with writes that validate the socket owner.
+	p.writeMu.Lock()
 	s.clientLock.Lock()
 	if s.connections == nil {
 		s.connections = make(map[*peer]*clientConnection)
 	}
 	newConnection := s.connections[p] == nil
-	s.connections[p] = &clientConnection{
+	identity := &clientConnection{
 		UserID: userID, DeviceID: deviceID, ClientID: clientTokenHash(clientToken), RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
 	}
+	s.connections[p] = identity
+	var foreground []*foregroundPermission
+	if newConnection {
+		foreground = s.reattachForegroundPermissionsLocked(p, identity)
+	}
 	s.clientLock.Unlock()
-	if newConnection { s.replayInteractions(p, userID, deviceID) }
+	p.writeMu.Unlock()
+	if newConnection {
+		s.replayInteractions(p, userID, deviceID)
+		s.replayForegroundPermissions(p, foreground)
+	}
 }
 
 func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {
-	for requestID, client := range s.clients {
+	for _, client := range s.clients {
 		if now.Sub(client.LastSeenAt) > clientRouteTTL {
-			delete(s.clients, requestID)
+			s.removeClientRouteLocked(client)
 		}
 	}
 }

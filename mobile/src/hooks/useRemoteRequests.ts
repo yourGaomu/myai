@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
-import type { RelayMessage, SessionHistoryMessage, SessionHistoryMetaPayload } from "../protocol";
-import type { PendingAction } from "../types/app";
-import { loadCachedSessionHistory } from "../storage/sessionHistoryCache";
+import type { AgentRunListResultPayload, AssetListResultPayload, ErrorPayload, RelayMessage, SessionListResultPayload } from "../protocol";
+import type { PendingAction, RelayScope } from "../types/app";
+import type { ChatItem } from "../types/chat";
 import { newRequestID } from "../utils/ids";
+import { useSessionHistorySync } from "./useSessionHistorySync";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 const remoteStateTimeoutMs = 8000;
-const timeoutActions: PendingAction[] = ["sessions", "models", "skills", "plugins", "assets"];
+const timeoutActions: PendingAction[] = ["models", "skills", "plugins"];
+const queryTimeoutMs = 15000;
+
+type ReadRequest = RelayScope & { requestID: string; timeout: ReturnType<typeof setTimeout> };
 
 type Args = {
   clearAssets: () => void;
@@ -20,9 +24,11 @@ type Args = {
   clearWorkspaceChanges: () => void;
   clientToken: string;
   currentFilePath: string;
-  currentSessionID: string;
+  historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
-  replaceHistoryMessages: (sessionID: string, messages: SessionHistoryMessage[]) => void;
+  relayScopeRef: RefObject<RelayScope>;
+  sessionIDRef: RefObject<string>;
+  mergeSessionHistory: (sessionID: string, messages: ChatItem[], source: "cache" | "server") => void;
   requestSubagentTasks: (sessionID: string) => boolean;
   sendEnvelope: SendEnvelope;
   startPending: (action: PendingAction) => void;
@@ -41,33 +47,107 @@ export function useRemoteRequests({
   clearWorkspaceChanges,
   clientToken,
   currentFilePath,
-  currentSessionID,
+  historySessionIDRef,
   pendingHistorySessionIDRef,
-  replaceHistoryMessages,
+  relayScopeRef,
+  sessionIDRef,
+  mergeSessionHistory,
   requestSubagentTasks,
   sendEnvelope,
   startPending,
   stopPending,
 }: Args) {
   const remoteStateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readRequestsRef = useRef(new Map<string, ReadRequest>());
+  const { requestHistoryWithCache, requestSessionHistoryFull, handleSessionHistoryMessage, resetHistorySync } = useSessionHistorySync({
+    historySessionIDRef, pendingHistorySessionIDRef, relayScopeRef, sessionIDRef,
+    mergeSessionHistory, sendEnvelope, startPending, stopPending,
+  });
 
-  useEffect(() => {
-    return () => {
-      if (remoteStateTimeoutRef.current) {
-        clearTimeout(remoteStateTimeoutRef.current);
-      }
-    };
+  const clearReadRequests = useCallback(() => {
+    for (const request of readRequestsRef.current.values()) clearTimeout(request.timeout);
+    readRequestsRef.current.clear();
+    if (remoteStateTimeoutRef.current) clearTimeout(remoteStateTimeoutRef.current);
+    remoteStateTimeoutRef.current = null;
   }, []);
+  useEffect(() => clearReadRequests, [clearReadRequests]);
+
+  const resetRemoteQueries = useCallback(() => {
+    clearReadRequests();
+    resetHistorySync();
+    stopPending("sessions");
+    stopPending("assets");
+  }, [clearReadRequests, resetHistorySync, stopPending]);
 
   const stopRemoteStateLoadingLater = useCallback(() => {
-    if (remoteStateTimeoutRef.current) {
-      clearTimeout(remoteStateTimeoutRef.current);
-    }
+    if (remoteStateTimeoutRef.current) clearTimeout(remoteStateTimeoutRef.current);
     remoteStateTimeoutRef.current = setTimeout(() => {
       timeoutActions.forEach(stopPending);
       remoteStateTimeoutRef.current = null;
     }, remoteStateTimeoutMs);
   }, [stopPending]);
+
+  const sendRead = useCallback((key: string, type: "session_list" | "agent_run_list" | "asset_list", overrides: Partial<RelayMessage>) => {
+    const scope = relayScopeRef.current;
+    if (!scope.connectionID) return false;
+    const requests = readRequestsRef.current;
+    clearTimeout(requests.get(key)?.timeout);
+    const requestID = newRequestID();
+    const request: ReadRequest = {
+      ...scope,
+      requestID,
+      timeout: setTimeout(() => {
+        if (requests.get(key)?.requestID !== requestID) return;
+        requests.delete(key);
+        if (key === "session_list" && !pendingHistorySessionIDRef.current) stopPending("sessions");
+        if (key === "asset_list") stopPending("assets");
+      }, queryTimeoutMs),
+    };
+    requests.set(key, request);
+    if (sendEnvelope(type, { ...overrides, request_id: requestID })) return true;
+    clearTimeout(request.timeout);
+    requests.delete(key);
+    return false;
+  }, [pendingHistorySessionIDRef, relayScopeRef, sendEnvelope, stopPending]);
+
+  const acceptRead = useCallback((key: string, requestID?: string) => {
+    const request = readRequestsRef.current.get(key);
+    const scope = relayScopeRef.current;
+    if (!request || requestID !== request.requestID || scope.pairingID !== request.pairingID ||
+        !scope.connectionID || scope.connectionID !== request.connectionID) return false;
+    clearTimeout(request.timeout);
+    readRequestsRef.current.delete(key);
+    return true;
+  }, [relayScopeRef]);
+
+  const acceptSessionList = useCallback((message: RelayMessage) => {
+    const payload = message.payload as SessionListResultPayload | undefined;
+    return Boolean(payload && acceptRead(payload.include_deleted ? "deleted_sessions" : "session_list", message.request_id));
+  }, [acceptRead]);
+
+  const acceptAgentRunList = useCallback((message: RelayMessage) => {
+    const sessionID = (message.payload as AgentRunListResultPayload | undefined)?.session_id?.trim();
+    return Boolean(sessionID && (!message.session_id || message.session_id === sessionID) &&
+      acceptRead(`runs:${sessionID}`, message.request_id));
+  }, [acceptRead]);
+
+  const acceptAssetList = useCallback((message: RelayMessage) => {
+    const sessionID = (message.payload as AssetListResultPayload | undefined)?.session_id?.trim();
+    return Boolean(sessionID && sessionID === sessionIDRef.current &&
+      (!message.session_id || message.session_id === sessionID) && acceptRead("asset_list", message.request_id));
+  }, [acceptRead, sessionIDRef]);
+
+  const handleRemoteQueryError = useCallback((message: RelayMessage) => {
+    const type = (message.payload as ErrorPayload | undefined)?.request_type;
+    if (type !== "session_list" && type !== "agent_run_list" && type !== "asset_list") return false;
+    for (const [key, request] of readRequestsRef.current) {
+      if (request.requestID !== message.request_id || !acceptRead(key, message.request_id)) continue;
+      if (key === "session_list" && !pendingHistorySessionIDRef.current) stopPending("sessions");
+      if (key === "asset_list") stopPending("assets");
+      return true;
+    }
+    return false;
+  }, [acceptRead, pendingHistorySessionIDRef, stopPending]);
 
   const requestSessions = useCallback(() => {
     if (!clientToken) {
@@ -76,22 +156,15 @@ export function useRemoteRequests({
       return false;
     }
     startPending("sessions");
-    if (!sendEnvelope("session_list", { request_id: newRequestID() })) {
-      stopPending("sessions");
-      return false;
-    }
-    return true;
-  }, [clearSessions, clientToken, sendEnvelope, startPending, stopPending]);
+    const sent = sendRead("session_list", "session_list", { session_id: "" });
+    if (!sent && !pendingHistorySessionIDRef.current) stopPending("sessions");
+    return sent;
+  }, [clearSessions, clientToken, pendingHistorySessionIDRef, sendRead, startPending, stopPending]);
 
-  const requestDeletedSessions = useCallback(() => {
-    if (!clientToken) {
-      return false;
-    }
-    return sendEnvelope("session_list", {
-      request_id: newRequestID(),
-      payload: { include_deleted: true },
-    });
-  }, [clientToken, sendEnvelope]);
+  const requestDeletedSessions = useCallback(() => Boolean(clientToken && sendRead("deleted_sessions", "session_list", {
+    session_id: "",
+    payload: { include_deleted: true },
+  })), [clientToken, sendRead]);
 
   const requestModels = useCallback(() => {
     if (!clientToken) {
@@ -176,136 +249,26 @@ export function useRemoteRequests({
     return true;
   }, [clientToken, sendEnvelope, startPending, stopPending]);
 
-  const requestAgentRuns = useCallback(
-    (nextSessionID = currentSessionID) => {
-      const targetSessionID = nextSessionID.trim();
-      if (!clientToken || !targetSessionID) {
-        return false;
-      }
-      return sendEnvelope("agent_run_list", {
-        request_id: newRequestID(),
-        session_id: targetSessionID,
-        payload: { session_id: targetSessionID, limit: 50 },
-      });
-    },
-    [clientToken, currentSessionID, sendEnvelope],
-  );
+  const requestAgentRuns = useCallback((nextSessionID = sessionIDRef.current) => {
+    const sessionID = nextSessionID.trim();
+    return Boolean(clientToken && sessionID && sendRead(`runs:${sessionID}`, "agent_run_list", {
+      session_id: sessionID,
+      payload: { session_id: sessionID, limit: 50 },
+    }));
+  }, [clientToken, sendRead, sessionIDRef]);
 
-  const requestSessionHistoryFull = useCallback(
-    (nextSessionID = currentSessionID) => {
-      const targetSessionID = nextSessionID.trim();
-      if (!clientToken || !targetSessionID) {
-        pendingHistorySessionIDRef.current = "";
-        stopPending("sessions");
-        return false;
-      }
-
-      startPending("sessions");
-      pendingHistorySessionIDRef.current = targetSessionID;
-      if (!sendEnvelope("session_history", {
-        request_id: newRequestID(),
-        session_id: targetSessionID,
-        payload: { session_id: targetSessionID },
-      })) {
-        pendingHistorySessionIDRef.current = "";
-        stopPending("sessions");
-        return false;
-      }
-      return true;
-    },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, sendEnvelope, startPending, stopPending],
-  );
-
-  const requestSessionHistoryDelta = useCallback(
-    (nextSessionID = currentSessionID) => {
-      const targetSessionID = nextSessionID.trim();
-      if (!clientToken || !targetSessionID) {
-        pendingHistorySessionIDRef.current = "";
-        stopPending("sessions");
-        return false;
-      }
-
-      startPending("sessions");
-      pendingHistorySessionIDRef.current = targetSessionID;
-      // 先显示手机缓存，再发送 meta 判断是否需要增量或全量同步，减少长会话等待时间。
-      void loadCachedSessionHistory(targetSessionID)
-        .then(({ meta }) => {
-          if (!sendEnvelope("session_history_delta", {
-            request_id: newRequestID(),
-            session_id: targetSessionID,
-            payload: {
-              after_message_id: meta.local_last_message_id || "",
-              limit: 100,
-              session_id: targetSessionID,
-            },
-          })) {
-            pendingHistorySessionIDRef.current = "";
-            stopPending("sessions");
-          }
-        })
-        .catch(() => {
-          requestSessionHistoryFull(targetSessionID);
-        });
-      return true;
-    },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, requestSessionHistoryFull, sendEnvelope, startPending, stopPending],
-  );
-
-  const sendHistoryMeta = useCallback(
-    (sessionID: string, meta: SessionHistoryMetaPayload) => {
-      const payload: SessionHistoryMetaPayload = {
-        ...meta,
-        session_id: sessionID,
-      };
-      if (!payload.local_last_message_created_at) {
-        delete payload.local_last_message_created_at;
-      }
-      return sendEnvelope("session_history_meta", {
-        request_id: newRequestID(),
-        session_id: sessionID,
-        payload,
-      });
-    },
-    [sendEnvelope],
-  );
-
-  const requestSessionHistory = useCallback(
-    (nextSessionID = currentSessionID) => {
-      const targetSessionID = nextSessionID.trim();
-      if (!clientToken || !targetSessionID) {
-        pendingHistorySessionIDRef.current = "";
-        stopPending("sessions");
-        return false;
-      }
-
-      startPending("sessions");
-      pendingHistorySessionIDRef.current = targetSessionID;
-      requestAgentRuns(targetSessionID);
-      // 1.0 主会话历史只包含工具调用；同步补取对应任务索引，历史子代理卡片才可恢复。
-      requestSubagentTasks(targetSessionID);
-      void loadCachedSessionHistory(targetSessionID)
-        .then(({ messages, meta }) => {
-          if (messages.length > 0) {
-            replaceHistoryMessages(targetSessionID, messages);
-            if (!sendHistoryMeta(targetSessionID, meta)) {
-              pendingHistorySessionIDRef.current = "";
-              stopPending("sessions");
-            }
-            return;
-          }
-          requestSessionHistoryFull(targetSessionID);
-        })
-        .catch(() => {
-          requestSessionHistoryFull(targetSessionID);
-        });
-      return true;
-    },
-    [clientToken, currentSessionID, pendingHistorySessionIDRef, replaceHistoryMessages, requestAgentRuns, requestSessionHistoryFull, requestSubagentTasks, sendHistoryMeta, startPending, stopPending],
-  );
+  const requestSessionHistory = useCallback((nextSessionID = sessionIDRef.current) => {
+    const sessionID = nextSessionID.trim();
+    if (!clientToken || !requestHistoryWithCache(sessionID)) return false;
+    requestAgentRuns(sessionID);
+    requestSubagentTasks(sessionID);
+    return true;
+  }, [clientToken, requestAgentRuns, requestHistoryWithCache, requestSubagentTasks, sessionIDRef]);
 
   const requestAssets = useCallback(
-    (nextSessionID = currentSessionID) => {
+    (nextSessionID = sessionIDRef.current) => {
       const targetSessionID = nextSessionID.trim();
+      if (targetSessionID !== sessionIDRef.current) return false;
       if (!clientToken || !targetSessionID) {
         clearAssets();
         stopPending("assets");
@@ -313,8 +276,7 @@ export function useRemoteRequests({
       }
 
       startPending("assets");
-      if (!sendEnvelope("asset_list", {
-        request_id: newRequestID(),
+      if (!sendRead("asset_list", "asset_list", {
         session_id: targetSessionID,
         payload: { session_id: targetSessionID, limit: 100 },
       })) {
@@ -323,7 +285,7 @@ export function useRemoteRequests({
       }
       return true;
     },
-    [clearAssets, clientToken, currentSessionID, sendEnvelope, startPending, stopPending],
+    [clearAssets, clientToken, sendRead, sessionIDRef, startPending, stopPending],
   );
 
   const requestFiles = useCallback(
@@ -392,6 +354,12 @@ export function useRemoteRequests({
   }, [requestAssets, requestModels, requestPlugins, requestSessions, requestSkills, stopRemoteStateLoadingLater]);
 
   return {
+    acceptAgentRunList,
+    acceptAssetList,
+    acceptSessionList,
+    handleRemoteQueryError,
+    handleSessionHistoryMessage,
+    resetRemoteQueries,
     reloadSkills,
     refreshRemoteState,
     requestAssets,
@@ -405,7 +373,6 @@ export function useRemoteRequests({
     reloadMCP,
     requestSkills,
     requestDeletedSessions,
-    requestSessionHistoryDelta,
     requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,

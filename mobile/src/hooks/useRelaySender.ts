@@ -2,65 +2,70 @@ import { useCallback, type RefObject } from "react";
 
 import type { RelayMessage } from "../protocol";
 import { newRequestID } from "../utils/ids";
-import type { RelaySocketHandle } from "./useRemoteRuntimeRefs";
+import type { RelayPairing } from "../utils/relayPairing";
+import type { RelaySendHandle } from "../utils/relayWebSocket";
 
 type Args = {
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (message: string) => void;
-  clientToken: string;
-  deviceID: string;
-  sessionID: string;
-  userID: string;
-  socketRef: RefObject<RelaySocketHandle | null>;
+  currentPairingRef: RefObject<RelayPairing | null>;
+  onEnqueueFailure: (message: RelayMessage) => void;
+  sessionIDRef: RefObject<string>;
+  socketRef: RefObject<RelaySendHandle | null>;
 };
 
-// 统一构造跨端消息信封，确保所有请求都携带 user/device/session/token 路由信息。
 export function useRelaySender({
-  activeRequestIDRef,
-  addErrorMessage,
-  clientToken,
-  deviceID,
-  sessionID,
-  socketRef,
-  userID,
+  activeRequestIDRef, addErrorMessage, currentPairingRef, onEnqueueFailure, sessionIDRef, socketRef,
 }: Args) {
   return useCallback(
     (type: RelayMessage["type"], overrides: Partial<RelayMessage> = {}) => {
       const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        addErrorMessage("当前未连接 Relay，请先在设置中完成配对并连接。");
+      if (!socket || currentPairingRef.current !== socket.pairing) {
+        addErrorMessage("中继尚未就绪，请等待连接或检查配对。");
         return false;
       }
-
-      // overrides 用于为一次请求指定 request_id 或目标 session，其余字段使用当前连接状态兜底。
+      const { userID, deviceID, clientToken } = socket.pairing;
       const envelope: RelayMessage = {
         type,
-        request_id:
-          overrides.request_id === undefined ? activeRequestIDRef.current || newRequestID() : overrides.request_id,
-        user_id: userID.trim(),
-        device_id: deviceID.trim(),
-        session_id: overrides.session_id || sessionID.trim(),
+        request_id: overrides.request_id ?? (activeRequestIDRef.current || newRequestID()),
+        user_id: userID,
+        device_id: deviceID,
+        session_id: overrides.session_id ?? sessionIDRef.current,
         client_token: clientToken,
-        payload: overrides.payload || {},
+        payload: overrides.payload ?? {},
+      };
+      const rejectEnqueue = (definitelyUnsent: boolean) => {
+        if (currentPairingRef.current !== socket.pairing) return;
+        const isTurn = type === "user_message" || type === "session_regenerate" ||
+          type === "session_plan_execute" || type === "subagent_task_resume";
+        // A definitive native rejection can arrive after the disconnect event.
+        // Only the owning turn may settle from that earlier socket's result.
+        if (socketRef.current !== socket && (!definitelyUnsent || !isTurn)) return;
+        const control = envelope.payload as { approval_id?: string; question_id?: string };
+        onEnqueueFailure({
+          type: "error",
+          request_id: envelope.request_id,
+          session_id: envelope.session_id,
+          user_id: userID,
+          device_id: deviceID,
+          payload: {
+            message: "消息未能进入中继连接，请在连接恢复后重试。",
+            request_type: type,
+            approval_id: control.approval_id,
+            question_id: control.question_id,
+            transport_error: true,
+          },
+        });
       };
       try {
-        socket.send(JSON.stringify(envelope));
+        const enqueue = socket.send(JSON.stringify(envelope));
+        if (enqueue) void enqueue.then((sent) => { if (!sent) rejectEnqueue(true); }, () => rejectEnqueue(false));
         return true;
-      } catch (error) {
-        // A socket can transition away from OPEN between the state check and
-        // send(). Treat that race as a normal delivery failure so callers can
-        // clear their pending state and the connection hook can reconnect.
-        console.warn("Relay message send failed", error);
-        addErrorMessage("Relay 连接已断开，请等待自动重连后重试。");
-        try {
-          socket.close();
-        } catch {
-          // The socket may already be closing; the close handler will schedule
-          // reconnection when it observes the final state.
-        }
+      } catch {
+        addErrorMessage("中继连接已断开，请等待自动重连后重试。");
         return false;
       }
     },
-    [activeRequestIDRef, addErrorMessage, clientToken, deviceID, sessionID, socketRef, userID],
+    [activeRequestIDRef, addErrorMessage, currentPairingRef, onEnqueueFailure, sessionIDRef, socketRef],
   );
 }

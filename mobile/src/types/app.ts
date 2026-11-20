@@ -5,6 +5,7 @@ export type PermissionState = {
   name: string;
   permission: string;
   arguments: string;
+  requireFreshConsent?: boolean;
 };
 
 export type UserQuestionState = {
@@ -15,6 +16,15 @@ export type UserQuestionState = {
   questions: import("../protocol").UserQuestionItemPayload[];
   sourceTaskID?: string;
   submitted?: boolean;
+  draftAnswers?: Record<string, string>;
+};
+
+export type RelayScope = { pairingID: string; connectionID: string };
+
+export type QuestionSync = {
+  requestID: string;
+  connectionID: string;
+  submittedQuestions: ReadonlyMap<string, UserQuestionState>;
 };
 
 export type SessionPermissionMode = "readonly" | "ask" | "read_write" | "execute" | "full";

@@ -162,7 +162,9 @@ func mergeMessageRecords(stored []repository.MessageRecord, memory []repository.
 				matchedIndex = index
 				break
 			}
-			if messageRecordEquivalent(existing, candidate) {
+			// Only a legacy row without a transcript identity can use the old
+			// payload fallback. A new, unsaved reply can repeat an older reply.
+			if candidate.MessageID == "" && existing.MessageID == "" && messageRecordEquivalent(existing, candidate) {
 				matchedIndex = index
 				break
 			}

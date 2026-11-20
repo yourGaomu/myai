@@ -287,8 +287,11 @@ func TestExecutionServiceHookAskRequiresConfirmationInFullMode(t *testing.T) {
 	}).Execute(context.Background(), ExecutionCommand{
 		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
 		Calls: []domainmessage.ToolCall{{ID: "call-1", Name: "write_file"}},
-		Callbacks: ExecutionCallbacks{OnToolAsk: func(PermissionRequest) bool {
+		Callbacks: ExecutionCallbacks{OnToolAsk: func(request PermissionRequest) bool {
 			asked = true
+			if !request.RequireFreshConsent {
+				t.Error("Hook confirmation must apply to this call only")
+			}
 			return false
 		}},
 	})

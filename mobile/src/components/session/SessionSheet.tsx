@@ -9,6 +9,7 @@ import { formatTokenCount } from "../../utils/tokenUsage";
 import { fontFamily, font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
+import { ShimmerProgressBar } from "../common/MotionEffects";
 import { Segmented } from "../common/Segmented";
 
 type Props = {
@@ -161,9 +162,12 @@ export function SessionSheet(props: Props) {
             <Text style={styles.link}>压缩上下文</Text>
           </Pressable>
         </View>
-        <View style={styles.bar}>
-          <View style={[styles.barFill, { width: `${Math.round(ratio * 100)}%` }]} />
-        </View>
+        <ShimmerProgressBar
+          active={ratio >= 0.8}
+          height={6}
+          progress={Math.round(ratio * 100)}
+          tone={ratio >= 0.8 ? "warn" : "brand"}
+        />
       </View>
     </BottomSheet>
   );

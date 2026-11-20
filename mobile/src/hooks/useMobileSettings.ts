@@ -1,84 +1,56 @@
-import { useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { defaultRelayURL, mobileSettingsKey } from "../constants/app";
+import type { RelayScope } from "../types/app";
+import { restoreRelaySettings, type RelayPairing } from "../utils/relayPairing";
 
-const legacyDefaultRelayURL = "http://127.0.0.1:18080";
-
-type MobileSettings = {
-  clientToken: string;
-  deviceID: string;
-  relayURL: string;
-  userID: string;
-};
-
-type UseMobileSettingsOptions = {
-  onTokenRestored?: () => void;
-};
-
-// Relay 地址、设备标识和配对 token 持久化在手机；首次加载完成前不反向覆盖存储。
-export function useMobileSettings({ onTokenRestored }: UseMobileSettingsOptions = {}) {
+// Pairing and issuer are stored together. The editable address never changes an
+// existing connection or its saved settings until a new pairing succeeds.
+export function useMobileSettings() {
   const [relayURL, setRelayURL] = useState(defaultRelayURL);
-  const [userID, setUserID] = useState("local");
-  const [deviceID, setDeviceID] = useState("pc-local");
-  const [clientToken, setClientToken] = useState("");
+  const [pairing, setPairing] = useState<RelayPairing | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const currentPairingRef = useRef<RelayPairing | null>(null);
+  const relayScopeRef = useRef<RelayScope>({ pairingID: "", connectionID: "" });
+  const relayURLRef = useRef(defaultRelayURL);
+  const persistedWrites = useRef(Promise.resolve());
+
+  const persist = useCallback((settings: RelayPairing | { relayURL: string }) => {
+    persistedWrites.current = persistedWrites.current
+      .then(() => AsyncStorage.setItem(mobileSettingsKey, JSON.stringify(settings)))
+      .catch(() => undefined);
+  }, []);
+
+  const editRelayURL = useCallback((url: string) => {
+    relayURLRef.current = url;
+    setRelayURL(url);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
-    AsyncStorage.getItem(mobileSettingsKey)
+    void AsyncStorage.getItem(mobileSettingsKey)
       .then((raw) => {
-        if (!raw || !mounted) {
-          return;
-        }
-        const settings = JSON.parse(raw) as Partial<MobileSettings>;
-        if (settings.relayURL) {
-          setRelayURL(settings.relayURL === legacyDefaultRelayURL ? defaultRelayURL : settings.relayURL);
-        }
-        if (settings.userID) {
-          setUserID(settings.userID);
-        }
-        if (settings.deviceID) {
-          setDeviceID(settings.deviceID);
-        }
-        if (settings.clientToken) {
-          setClientToken(settings.clientToken);
-          onTokenRestored?.();
-        }
+        if (!mounted || !raw) return;
+        const restored = restoreRelaySettings(JSON.parse(raw));
+        editRelayURL(restored.relayURL || defaultRelayURL);
+        currentPairingRef.current = restored.pairing;
+        relayScopeRef.current = { pairingID: restored.pairing?.pairingID || "", connectionID: "" };
+        setPairing(restored.pairing);
+        if (restored.pairing) persist(restored.pairing);
       })
       .catch(() => undefined)
-      .finally(() => {
-        if (mounted) {
-          setSettingsLoaded(true);
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [onTokenRestored]);
+      .finally(() => { if (mounted) setSettingsLoaded(true); });
+    return () => { mounted = false; };
+  }, [editRelayURL, persist]);
 
-  useEffect(() => {
-    if (!settingsLoaded) {
-      return;
-    }
-    const settings: MobileSettings = {
-      relayURL,
-      userID,
-      deviceID,
-      clientToken,
-    };
-    AsyncStorage.setItem(mobileSettingsKey, JSON.stringify(settings)).catch(() => undefined);
-  }, [clientToken, deviceID, relayURL, settingsLoaded, userID]);
+  const commitPairing = useCallback((next: RelayPairing) => {
+    currentPairingRef.current = next;
+    relayScopeRef.current = { pairingID: next.pairingID, connectionID: "" };
+    setPairing(next);
+    editRelayURL(next.relayURL);
+    persist(next);
+  }, [editRelayURL, persist]);
 
-  return {
-    clientToken,
-    deviceID,
-    relayURL,
-    setClientToken,
-    setDeviceID,
-    setRelayURL,
-    setUserID,
-    settingsLoaded,
-    userID,
-  };
+  return { commitPairing, currentPairingRef, editRelayURL, pairing, relayURL, relayURLRef, relayScopeRef, settingsLoaded };
 }

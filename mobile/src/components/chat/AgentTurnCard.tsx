@@ -11,6 +11,7 @@ import { font, radius, weight } from "../../constants/theme";
 import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { RunningEdgeRail } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
 import { MarkdownText } from "./MarkdownText";
@@ -24,6 +25,7 @@ type Props = {
   onOpenChangePath?: (path: string) => void;
   onOpenChanges?: () => void;
   onRegenerate?: () => void;
+  sessionID: string;
   subagentTasks?: SubagentTask[];
   turn: AgentTurnItem;
   workspaceChanges?: ChangeEntry[];
@@ -36,6 +38,7 @@ export function AgentTurnCard({
   onOpenChangePath,
   onOpenChanges,
   onRegenerate,
+  sessionID,
   subagentTasks,
   turn,
   workspaceChanges,
@@ -108,7 +111,8 @@ export function AgentTurnCard({
   };
 
   return (
-    <View style={[styles.turn, useWallpaperBackdrop && styles.turnWallpaperBackdrop]}>
+    <View style={[styles.turn, running && styles.turnRunning, useWallpaperBackdrop && styles.turnWallpaperBackdrop]}>
+      <RunningEdgeRail active={running} />
       <View style={styles.meta}>
         <View style={styles.avatar}>
           <CharacterAvatar circular size={24} slot={running ? "working" : "idle"} variant="avatar" />
@@ -136,7 +140,11 @@ export function AgentTurnCard({
               {clock ? <Text style={styles.procLabel}>· {clock}</Text> : null}
             </>
           ) : (
-            <Text style={[styles.procLabel, turn.status === "error" && styles.procLabelError]}>{doneLabel}</Text>
+            <View style={[styles.donePill, turn.status === "error" && styles.donePillError]}>
+              <Text style={[styles.procLabel, styles.donePillText, turn.status === "error" && styles.procLabelError]}>
+                {doneLabel}
+              </Text>
+            </View>
           )}
           {!running && steps.length > 0 ? (
             <Feather color={palette.ink3} name={open ? "chevron-down" : "chevron-right"} size={15} />
@@ -145,7 +153,15 @@ export function AgentTurnCard({
       ) : null}
 
       {open && steps.length > 0 ? (
-        <TurnTimeline buttonFeedback={buttonFeedback} onInspectSubagent={onInspectSubagent} steps={steps} subagentTasks={subagentTasks} />
+        <TurnTimeline
+          buttonFeedback={buttonFeedback}
+          onInspectSubagent={onInspectSubagent}
+          runID={turn.runID}
+          sessionID={sessionID}
+          steps={steps}
+          subagentTasks={subagentTasks}
+          turnRunning={running}
+        />
       ) : null}
 
       {turn.text ? <MarkdownText text={turn.text} /> : null}
@@ -254,7 +270,8 @@ function useRunningClock(running: boolean, startedAt?: string) {
 
 const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
   StyleSheet.create({
-    turn: { alignSelf: "stretch", gap: 10, width: "100%" },
+    turn: { alignSelf: "stretch", gap: 10, position: "relative", width: "100%" },
+    turnRunning: { paddingLeft: 10 },
     turnWallpaperBackdrop: {
       backgroundColor: palette.floatingGlass,
       borderColor: palette.floatingGlassBorder,
@@ -280,6 +297,22 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     },
     pressed: { backgroundColor: palette.pressed },
     shimmer: { alignSelf: "center", minWidth: 0 },
+    donePill: {
+      backgroundColor: palette.surface2,
+      borderColor: palette.hairline,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: 9,
+      paddingVertical: 3,
+    },
+    donePillError: {
+      backgroundColor: palette.errWash,
+      borderColor: palette.errBorder,
+    },
+    donePillText: {
+      fontSize: font.caption,
+      fontWeight: weight.medium,
+    },
     procLabel: { color: palette.ink2, fontSize: font.label + 0.5 },
     procLabelError: { color: palette.err },
     attachments: { gap: 8 },

@@ -7,6 +7,7 @@ import (
 
 	generationcommand "myai/core/application/chat/generation/command"
 	domainmessage "myai/core/domain/message"
+	modelport "myai/core/port/model"
 	repository "myai/core/port/repository"
 	"myai/core/session"
 )
@@ -96,6 +97,41 @@ func TestMapperKeepsLiveMessageIdentityStableAcrossReadsAndPersistence(t *testin
 		if len(records) != 1 || records[0].ID != message.ID || records[0].Sequence != message.Sequence || !records[0].CreatedAt.Equal(createdAt) {
 			t.Fatalf("%s records lost stable identity: %#v", name, records)
 		}
+	}
+}
+
+func TestAssistantTurnUsesCommittedRowsAndRawReasoning(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message domainmessage.Message
+		wantID  string
+	}{
+		{name: "reasoning only", message: domainmessage.Assistant("", "raw reasoning", nil), wantID: "committed"},
+		{name: "multipart", message: domainmessage.Assistant("text", "raw reasoning", []domainmessage.ToolCall{{ID: "call"}}), wantID: "committed:000000"},
+		{name: "tool only", message: domainmessage.ToolCallMessage([]domainmessage.ToolCall{{ID: "call"}})},
+		{name: "blank", message: domainmessage.Assistant("", "", nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := &session.Session{ID: "session"}
+			tc.message.ID = "committed"
+			current.AppendMessage(tc.message)
+			message := current.Messages[0]
+			result := modelport.ChatResult{Message: &message, Content: message.Text(), Reasoning: "intermediate reasoning\nraw reasoning"}
+			mapper := Mapper{}
+			prepared := mapper.AssistantTurn(current.ID, result, time.Now())
+			live := mapper.MemoryMessages(current)
+			if len(prepared) != len(live) || len(prepared) == 0 {
+				t.Fatalf("durable rows differ from live rows: durable=%+v live=%+v", prepared, live)
+			}
+			for index := range prepared {
+				if prepared[index] != live[index] {
+					t.Fatalf("durable row differs from live row: durable=%+v live=%+v", prepared[index], live[index])
+				}
+			}
+			if got := message.AssistantReplyRecordID(); got != tc.wantID || got != "" && (got != prepared[0].ID || prepared[0].Role != repository.RoleAssistant) {
+				t.Fatalf("reply ID = %q, want %q for rows %+v", got, tc.wantID, prepared)
+			}
+		})
 	}
 }
 

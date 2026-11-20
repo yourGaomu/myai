@@ -1,385 +1,280 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
-import { Platform } from "react-native";
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { AppState } from "react-native";
 
-import type { RelayMessage } from "../protocol";
 import {
   drainRelayForegroundServiceMessages,
   getRelayForegroundServiceState,
   hasRelayForegroundService,
   sendRelayForegroundServiceMessage,
   startRelayForegroundService,
+  stopLegacyRelayForegroundService,
   subscribeRelayForegroundService,
   type RelayForegroundServiceState,
 } from "../native/relayForegroundService";
+import type { RelayMessage } from "../protocol";
 import type { PendingAction } from "../types/app";
-import { messageFromError } from "../utils/format";
-import { websocketURL } from "../utils/relay";
-import type { RelaySocketHandle } from "./useRemoteRuntimeRefs";
+import type { RelayPairing } from "../utils/relayPairing";
+import { startRelayWebSocket, type RelaySendHandle } from "../utils/relayWebSocket";
 
-const connectTimeoutMs = 10000;
-const heartbeatIntervalMs = 25000;
+export type ConnectionScope = { pairingID: string; connectionID: string };
 
 type Args = {
-  addErrorMessage: (message: string) => void;
-  clientToken: string;
-  deviceID: string;
-  normalizedRelayURL: string;
+  pairing: RelayPairing;
+  currentPairingRef: RefObject<RelayPairing | null>;
+  relayScopeRef: RefObject<ConnectionScope>;
+  socketRef: RefObject<RelaySendHandle | null>;
   onConnected: () => void;
   onDisconnected: () => void;
   onMessage: (message: RelayMessage) => void;
   setConnected: (connected: boolean) => void;
   setStatus: (status: string) => void;
-  socketRef: RefObject<RelaySocketHandle | null>;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
-  userID: string;
 };
 
-function isNativeRelayAvailable() {
-  return Platform.OS === "android" && hasRelayForegroundService();
-}
-
-// 管理手机到 Relay 的连接。Android 使用原生 Foreground Service 托管 WebSocket，
-// 其他平台继续使用 JS WebSocket，保证 Expo Go 和 iOS 的开发体验不变。
 export function useRelayConnection({
-  addErrorMessage,
-  clientToken,
-  deviceID,
-  normalizedRelayURL,
-  onConnected,
-  onDisconnected,
-  onMessage,
-  setConnected,
-  setStatus,
-  socketRef,
-  startPending,
-  stopPending,
-  userID,
+  pairing, currentPairingRef, relayScopeRef, socketRef,
+  onConnected, onDisconnected, onMessage, setConnected, setStatus, startPending, stopPending,
 }: Args) {
-  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nativeConnectedRef = useRef(false);
-  const nativeConnectingRef = useRef(false);
-  const onConnectedRef = useRef(onConnected);
-  const onDisconnectedRef = useRef(onDisconnected);
-  const onMessageRef = useRef(onMessage);
-  const addErrorMessageRef = useRef(addErrorMessage);
-  const clientTokenRef = useRef(clientToken);
+  const callbacks = useRef({ onConnected, onDisconnected, onMessage });
+  const connectRef = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    callbacks.current = { onConnected, onDisconnected, onMessage };
+  }, [onConnected, onDisconnected, onMessage]);
 
   useEffect(() => {
-    onConnectedRef.current = onConnected;
-    onDisconnectedRef.current = onDisconnected;
-    onMessageRef.current = onMessage;
-    addErrorMessageRef.current = addErrorMessage;
-    clientTokenRef.current = clientToken;
-  }, [addErrorMessage, clientToken, onConnected, onDisconnected, onMessage]);
+    const native = hasRelayForegroundService();
+    let mounted = true;
+    let active = AppState.currentState === "active";
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryAttempt = 0;
+    let closeWebSocket: (() => void) | undefined;
+    let authRejected = false;
+    let nativeStartTimer: ReturnType<typeof setTimeout> | undefined;
+    let nativeStatus: RelayForegroundServiceState["state"] | undefined;
+    let nativeRevision = -1;
+    let drainInProgress = false;
+    let drainRequested = false;
+    let legacyServiceRetired: Promise<boolean> | undefined;
 
-  const consumeNativeMessages = useCallback(async () => {
-    const messages = await drainRelayForegroundServiceMessages();
-    for (const rawMessage of messages) {
-      try {
-        onMessageRef.current(JSON.parse(rawMessage) as RelayMessage);
-      } catch (error) {
-        addErrorMessageRef.current(`Relay 返回的数据无法解析：${messageFromError(error)}`);
-      }
-    }
-  }, []);
-
-  const handleNativeState = useCallback(
-    (nextState: RelayForegroundServiceState) => {
-      const state = nextState.state;
-      if (state === "connected") {
-        nativeConnectingRef.current = false;
-        nativeConnectedRef.current = true;
-        stopPending("connect");
-        setConnected(true);
-        setStatus(nextState.status || "Connected");
-        void consumeNativeMessages();
-        if (clientTokenRef.current) {
-          onConnectedRef.current();
-        }
-        return;
-      }
-
-      nativeConnectedRef.current = false;
-      setConnected(false);
-      if (state === "connecting") {
-        setStatus(nextState.status || "Connecting");
-        return;
-      } else if (state === "reconnecting") {
-        stopPending("connect");
-        setStatus(nextState.status || "Reconnecting");
-      } else if (state === "error") {
-        nativeConnectingRef.current = false;
-        stopPending("connect");
-        setStatus(nextState.status || "WebSocket error");
-      } else if (state === "stopped") {
-        nativeConnectingRef.current = false;
-        stopPending("connect");
-        setStatus("Disconnected");
-      }
-      onDisconnectedRef.current();
-      void consumeNativeMessages();
-    },
-    [consumeNativeMessages, setConnected, setStatus, stopPending],
-  );
-
-  // 原生服务即使在 JS 被系统挂起也会继续收包；消息先留在原生队列，回到前台
-  // 或收到可用事件后再一次性归并到 React 状态仓库。
-  useEffect(() => {
-    if (!isNativeRelayAvailable()) {
-      return undefined;
+    function isCurrent() {
+      return mounted && currentPairingRef.current === pairing;
     }
 
-    const unsubscribe = subscribeRelayForegroundService({
-      onMessageAvailable: () => {
-        void consumeNativeMessages();
-      },
-      onState: handleNativeState,
-    });
-    void getRelayForegroundServiceState().then(handleNativeState);
-    void consumeNativeMessages();
-    return unsubscribe;
-  }, [consumeNativeMessages, handleNativeState]);
-
-  useEffect(() => {
-    return () => {
-      nativeConnectingRef.current = false;
-      if (heartbeatTimerRef.current) {
-        clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = null;
-      }
-      // Native service is intentionally not stopped here: its purpose is to keep
-      // the Relay connection alive while the Activity/JS runtime is backgrounded.
-      if (isNativeRelayAvailable()) {
-        socketRef.current = null;
-        return;
-      }
-      const socket = socketRef.current;
-      if (socket) {
-        socket.close();
-        socketRef.current = null;
-      }
-    };
-  }, [socketRef]);
-
-  return useCallback(() => {
-    if (!clientToken) {
-      addErrorMessage("请先在设置中完成手机配对，再连接 Relay。");
-      stopPending("connect");
-      return;
+    function clearRetry() {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
     }
 
-    if (isNativeRelayAvailable()) {
-      if (nativeConnectingRef.current || nativeConnectedRef.current) {
-        return;
-      }
-      nativeConnectingRef.current = true;
-
-      let nativeSocket = socketRef.current;
-      if (!nativeSocket) {
-        nativeSocket = {
-          get readyState() {
-            return nativeConnectedRef.current ? WebSocket.OPEN : WebSocket.CONNECTING;
-          },
-          send(data: string) {
-            if (!nativeConnectedRef.current) {
-              throw new Error("Relay native socket is not connected");
-            }
-            const handleSendFailure = () => {
-              nativeConnectingRef.current = false;
-              nativeConnectedRef.current = false;
-              setConnected(false);
-              setStatus("Relay send failed");
-              onDisconnectedRef.current();
-            };
-            void sendRelayForegroundServiceMessage(data).then((sent) => {
-              if (!sent) handleSendFailure();
-            }, handleSendFailure);
-          },
-          // Closing the JS adapter must not stop the process-wide foreground service.
-          close() {
-            nativeConnectingRef.current = false;
-            nativeConnectedRef.current = false;
-          },
-        };
-        socketRef.current = nativeSocket;
-      }
-
-      startPending("connect");
-      setStatus("Connecting");
-      void startRelayForegroundService({
-        websocketURL: websocketURL(normalizedRelayURL),
-        userID: userID.trim(),
-        deviceID: deviceID.trim(),
-        clientToken: clientToken.trim(),
-      })
-        .then((started) => {
-          nativeConnectingRef.current = false;
-          if (!started) {
-            socketRef.current = null;
-            nativeConnectedRef.current = false;
-            stopPending("connect");
-            setConnected(false);
-            setStatus("Foreground service unavailable");
-            addErrorMessage("无法启动 Android 后台连接服务，请重新构建包含原生 Service 的 APK。");
-            onDisconnectedRef.current();
-            return;
-          }
-          return getRelayForegroundServiceState().then(handleNativeState);
-        })
-        .catch((error) => {
-          nativeConnectingRef.current = false;
-          socketRef.current = null;
-          nativeConnectedRef.current = false;
-          stopPending("connect");
-          setConnected(false);
-          setStatus("WebSocket error");
-          addErrorMessage(`Relay 连接失败：${messageFromError(error)}`);
-          onDisconnectedRef.current();
-        });
-      return;
+    function clearStartTimer() {
+      clearTimeout(nativeStartTimer);
+      nativeStartTimer = undefined;
     }
 
-    const previousSocket = socketRef.current;
-    if (previousSocket) {
-      if (previousSocket.readyState === WebSocket.OPEN) {
-        // Socket 已经处于连接就绪状态，切勿粗暴断开重建
-        return;
-      }
-      if (previousSocket.readyState === WebSocket.CONNECTING) {
-        // 正在连接建立中，等待握手完成即可
-        return;
-      }
-    }
-
-    if (heartbeatTimerRef.current) {
-      clearInterval(heartbeatTimerRef.current);
-      heartbeatTimerRef.current = null;
-    }
-    if (previousSocket) {
-      previousSocket.close();
-    }
-
-    startPending("connect");
-    let socket: WebSocket;
-    try {
-      socket = new WebSocket(websocketURL(normalizedRelayURL));
-    } catch (error) {
+    function disconnect(notify: boolean) {
+      const previous = socketRef.current;
       socketRef.current = null;
-      stopPending("connect");
-      setConnected(false);
-      setStatus("WebSocket error");
-      addErrorMessage(`Relay 连接失败：${messageFromError(error)}`);
-      onDisconnectedRef.current();
-      return;
+      if (relayScopeRef.current.pairingID === pairing.pairingID) {
+        relayScopeRef.current = { pairingID: pairing.pairingID, connectionID: "" };
+      }
+      if (previous && notify) {
+        setConnected(false);
+        callbacks.current.onDisconnected();
+      }
     }
 
-    const timeoutID = setTimeout(() => {
-      if (socketRef.current !== socket || socket.readyState === WebSocket.OPEN) {
-        return;
-      }
-      if (heartbeatTimerRef.current) {
-        clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = null;
-      }
-      socket.close();
-      socketRef.current = null;
-      stopPending("connect");
-      setConnected(false);
-      setStatus("Connection timeout");
-      addErrorMessage("Relay 连接超时，请检查地址、端口和服务器是否已启动。");
-      onDisconnectedRef.current();
-    }, connectTimeoutMs);
+    function showOffline(
+      state: "connecting" | "authenticating" | "reconnecting" | "stopped" | "auth_rejected" | "error",
+      status: string,
+    ) {
+      disconnect(true);
+      setStatus(status);
+      if (state === "connecting" || state === "authenticating") startPending("connect");
+      else stopPending("connect");
+    }
 
-    const clearConnectTimeout = () => clearTimeout(timeoutID);
-
-    socketRef.current = socket;
-    setStatus("Connecting");
-
-    socket.onopen = () => {
-      clearConnectTimeout();
-      if (socketRef.current !== socket) {
-        return;
-      }
-      stopPending("connect");
+    function install(handle: RelaySendHandle) {
+      if (!isCurrent() || socketRef.current?.connectionID === handle.connectionID) return;
+      if (socketRef.current) disconnect(true);
+      socketRef.current = handle;
+      relayScopeRef.current = { pairingID: pairing.pairingID, connectionID: handle.connectionID };
+      retryAttempt = 0;
+      clearRetry();
       setConnected(true);
       setStatus("Connected");
+      stopPending("connect");
+      callbacks.current.onConnected();
+    }
+
+    function dispatch(message: RelayMessage) {
+      if (isCurrent() && socketRef.current && message && typeof message.type === "string" &&
+        (!message.user_id || message.user_id === pairing.userID) &&
+        (!message.device_id || message.device_id === pairing.deviceID)) {
+        callbacks.current.onMessage(message);
+      }
+    }
+
+    function scheduleRetry() {
+      if (!isCurrent() || !active || retryTimer !== undefined || authRejected) return;
+      const delay = Math.min(30_000, 500 * 2 ** retryAttempt);
+      retryAttempt = Math.min(retryAttempt + 1, 6);
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        connect(false);
+      }, delay);
+    }
+
+    async function drainNative() {
+      drainRequested = true;
+      if (drainInProgress || !isCurrent() || !socketRef.current) return;
+      drainInProgress = true;
       try {
-        socket.send(JSON.stringify({
-          type: "heartbeat",
-          user_id: userID.trim(),
-          device_id: deviceID.trim(),
-          client_token: clientToken.trim(),
-          payload: { time: new Date().toISOString() },
-        } satisfies RelayMessage));
-      } catch (error) {
-        console.warn("Relay initial heartbeat failed", error);
-        socket.close();
+        while (drainRequested && isCurrent() && socketRef.current) {
+          drainRequested = false;
+          const handle: RelaySendHandle = socketRef.current;
+          const messages = await drainRelayForegroundServiceMessages(pairing.pairingID, handle.connectionID);
+          for (const raw of messages) {
+            if (!isCurrent() || socketRef.current !== handle) break;
+            let message: RelayMessage;
+            try { message = JSON.parse(raw) as RelayMessage; } catch { continue; }
+            dispatch(message);
+          }
+        }
+      } catch {
+        // Another wakeup or foreground transition can drain the current socket.
+      } finally {
+        drainInProgress = false;
+      }
+    }
+
+    function applyNativeState(state: RelayForegroundServiceState | null) {
+      if (!isCurrent() || !state || !Number.isSafeInteger(state.revision) || state.revision <= nativeRevision) return;
+      nativeRevision = state.revision;
+      if (state.pairingID !== pairing.pairingID) {
+        if (nativeStatus) showOffline("stopped", "Disconnected");
+        nativeStatus = undefined;
         return;
       }
-      heartbeatTimerRef.current = setInterval(() => {
-        if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
-          return;
-        }
+      nativeStatus = state.state;
+      clearStartTimer();
+      authRejected = state.state === "auth_rejected";
+      if (state.state === "connected" && state.connectionID) {
+        const connectionID = state.connectionID;
+        install({
+          pairing,
+          connectionID,
+          send: (data) => sendRelayForegroundServiceMessage(pairing.pairingID, connectionID, data),
+        });
+        void drainNative();
+      } else if (state.state !== "connected") {
+        const status = state.status || "Disconnected";
+        showOffline(state.state, state.error && state.error !== status ? `${status} · ${state.error}` : status);
+      }
+    }
+
+    async function syncNative() {
+      try {
+        applyNativeState(await getRelayForegroundServiceState());
+      } catch {
+        // The current generation can still start and subscribe to state events.
+      }
+    }
+
+    function connect(retry: boolean) {
+      if (!isCurrent() || !active || (authRejected && !retry)) return;
+      clearRetry();
+      if (socketRef.current || closeWebSocket || nativeStartTimer !== undefined) return;
+      if (native) {
+        if (nativeStatus === "connecting" || nativeStatus === "authenticating") return;
+        if ((nativeStatus === "reconnecting" || nativeStatus === "error") && !retry) return;
+        authRejected = false;
+        showOffline("connecting", "Connecting");
+        nativeStartTimer = setTimeout(() => {
+          nativeStartTimer = undefined;
+          if (isCurrent()) {
+            showOffline("reconnecting", "Reconnecting · Android 后台服务暂未就绪");
+            void syncNative().then(() => connect(false));
+          }
+        }, 12_000);
+        void startRelayForegroundService(pairing, retry).then((started) => {
+          if (!started && isCurrent() && nativeStartTimer !== undefined) onStartFailure();
+          else void syncNative();
+        }, onStartFailure);
+        return;
+      }
+
+      authRejected = false;
+      showOffline("connecting", "Connecting");
+      // An old native module cannot provide a scoped handle. Retire its
+      // foreground connection before using React Native's WebSocket fallback.
+      legacyServiceRetired ??= stopLegacyRelayForegroundService();
+      const attempt = legacyServiceRetired;
+      void attempt.then(() => {
+        if (!isCurrent() || !active || closeWebSocket) return;
         try {
-          socket.send(JSON.stringify({
-            type: "heartbeat",
-            user_id: userID.trim(),
-            device_id: deviceID.trim(),
-            client_token: clientToken.trim(),
-            payload: { time: new Date().toISOString() },
-          } satisfies RelayMessage));
-        } catch (error) {
-          console.warn("Relay heartbeat failed", error);
-          socket.close();
+          closeWebSocket = startRelayWebSocket(pairing, {
+            onAuthenticating: () => { if (isCurrent()) setStatus("Authenticating"); },
+            onAuthenticated: install,
+            onMessage: dispatch,
+            onLost: ({ state, status }) => {
+              closeWebSocket = undefined;
+              if (!isCurrent()) return;
+              authRejected = state === "auth_rejected";
+              showOffline(state, status);
+              scheduleRetry();
+            },
+          });
+        } catch {
+          onStartFailure();
         }
-      }, heartbeatIntervalMs);
-      onConnectedRef.current();
-    };
-    socket.onclose = () => {
-      clearConnectTimeout();
-      if (socketRef.current !== socket) {
-        return;
+      }, () => {
+        legacyServiceRetired = undefined;
+        onStartFailure();
+      });
+    }
+
+    function onStartFailure() {
+      if (!isCurrent()) return;
+      clearStartTimer();
+      showOffline("reconnecting", "Reconnecting · 无法启动中继连接");
+      scheduleRetry();
+    }
+
+    function onForeground() {
+      if (!isCurrent()) return;
+      if (native) {
+        void syncNative().then(() => {
+          connect(false);
+          void drainNative();
+        });
+      } else {
+        connect(false);
       }
-      if (heartbeatTimerRef.current) {
-        clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = null;
-      }
-      socketRef.current = null;
-      stopPending("connect");
-      setConnected(false);
-      setStatus("Disconnected");
-      onDisconnectedRef.current();
+    }
+
+    const unsubscribe = native
+      ? subscribeRelayForegroundService({ onState: applyNativeState, onMessageAvailable: () => { void drainNative(); } })
+      : undefined;
+    const appState = AppState.addEventListener("change", (state) => {
+      const wasActive = active;
+      active = state === "active";
+      if (active && !wasActive) onForeground();
+      else if (!active) clearRetry();
+    });
+    connectRef.current = () => connect(true);
+    if (native || active) onForeground();
+    return () => {
+      mounted = false;
+      connectRef.current = null;
+      unsubscribe?.();
+      appState.remove();
+      clearRetry();
+      clearStartTimer();
+      closeWebSocket?.();
+      disconnect(false);
+      // Android keeps the scoped background connection across JS remounts.
     };
-    socket.onerror = () => {
-      clearConnectTimeout();
-      if (socketRef.current !== socket) {
-        return;
-      }
-      stopPending("connect");
-      setConnected(false);
-      setStatus("WebSocket error");
-      addErrorMessageRef.current("Relay 连接异常，请检查网络和服务器日志。");
-      onDisconnectedRef.current();
-    };
-    socket.onmessage = (event) => {
-      try {
-        onMessageRef.current(JSON.parse(event.data) as RelayMessage);
-      } catch (error) {
-        addErrorMessageRef.current(`Relay 返回的数据无法解析：${messageFromError(error)}`);
-      }
-    };
-  }, [
-    addErrorMessage,
-    clientToken,
-    deviceID,
-    handleNativeState,
-    normalizedRelayURL,
-    setConnected,
-    setStatus,
-    socketRef,
-    startPending,
-    stopPending,
-    userID,
-  ]);
+  }, [pairing, currentPairingRef, relayScopeRef, socketRef, setConnected, setStatus, startPending, stopPending]);
+
+  return useCallback(() => connectRef.current?.(), []);
 }

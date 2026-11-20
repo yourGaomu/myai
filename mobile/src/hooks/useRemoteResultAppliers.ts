@@ -22,10 +22,8 @@ import type {
   ModelSummary,
   ModelSwitchResultPayload,
   Plan,
+  RelayMessage,
   SessionChangedPayload,
-  SessionHistoryDeltaResultPayload,
-  SessionHistoryMetaResultPayload,
-  SessionHistoryResultPayload,
   SessionGenerationResultPayload,
   SessionListResultPayload,
   SessionSettingsResultPayload,
@@ -34,36 +32,30 @@ import type {
   SessionSummary,
   TokenUsage,
 } from "../protocol";
-import type { PermissionState, ViewMode } from "../types/app";
-import type { ChatItem } from "../types/chat";
-import { appendCachedSessionHistory, replaceCachedSessionHistory } from "../storage/sessionHistoryCache";
-import { historyMessageToChatItem } from "../utils/chatHistory";
+import type { RelayScope, ViewMode } from "../types/app";
+import type { SessionNavigationState } from "./useSessionModelActions";
 import { shortID } from "../utils/ids";
 import { findSessionUsage, mergeSessionList, upsertSession } from "../utils/session";
 
 type Args = {
   addEventMessage: (sessionID: string, message: string) => void;
-  appendMessages: (sessionID: string, messages: ChatItem[]) => void;
   filePath: string;
   hasPendingRequest: (sessionID: string) => boolean;
-  hasSessionMessages: (sessionID: string) => boolean;
   historyDiff: HistoryDiffResultPayload | null;
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
-  replaceMessages: (sessionID: string, messages: ChatItem[]) => void;
+  relayScopeRef: RefObject<RelayScope>;
+  sessionNavigationRef: RefObject<SessionNavigationState>;
   requestAssets: (sessionID?: string) => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
   requestHistory: () => boolean;
-  requestSessionHistoryDelta: (sessionID?: string) => boolean;
-  requestSessionHistoryFull: (sessionID?: string) => boolean;
   requestSessionHistory: (sessionID?: string) => boolean;
   requestSubagentTasks: (sessionID?: string) => boolean;
-  resetActiveAssistant: (sessionID: string) => void;
   selectedChange: string;
   sessionIDRef: RefObject<string>;
   setChangeDiff: (diff: ChangeDiffResultPayload | null) => void;
-  setAssets: (assets: AssetSummary[]) => void;
+  setAssets: (sessionID: string, assets: AssetSummary[]) => void;
   setChanges: (changes: ChangeEntry[]) => void;
   setChangesClean: (clean: boolean) => void;
   setChangesMessage: (message: string) => void;
@@ -86,8 +78,7 @@ type Args = {
   setSessionContext: (sessionID: string, context: ContextInfo) => void;
   setSessionGenerationPreferences: (payload?: SessionGenerationResultPayload) => void;
   setSessionID: (sessionID: string) => void;
-  setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
-  setDeletedSessions: (sessions: SessionSummary[]) => void;
+  setDeletedSessions: (updater: SessionSummary[] | ((current: SessionSummary[]) => SessionSummary[])) => void;
   setSessions: (updater: SessionSummary[] | ((current: SessionSummary[]) => SessionSummary[])) => void;
   setViewMode: (mode: ViewMode) => void;
 };
@@ -95,23 +86,19 @@ type Args = {
 // 将协议 DTO 归并到各页面状态；这里是远程数据到本地视图模型的统一映射入口。
 export function useRemoteResultAppliers({
   addEventMessage,
-  appendMessages,
   filePath,
   hasPendingRequest,
-  hasSessionMessages,
   historyDiff,
   historySessionIDRef,
   pendingHistorySessionIDRef,
-  replaceMessages,
+  relayScopeRef,
+  sessionNavigationRef,
   requestAssets,
   requestChanges,
   requestFiles,
   requestHistory,
-  requestSessionHistoryDelta,
-  requestSessionHistoryFull,
   requestSessionHistory,
   requestSubagentTasks,
-  resetActiveAssistant,
   selectedChange,
   sessionIDRef,
   setChangeDiff,
@@ -138,7 +125,6 @@ export function useRemoteResultAppliers({
   setSessionContext,
   setSessionGenerationPreferences,
   setSessionID,
-  setSessionPendingPermission,
   setDeletedSessions,
   setSessions,
   setViewMode,
@@ -151,14 +137,8 @@ export function useRemoteResultAppliers({
   historyDiffRef.current = historyDiff;
   const hasPendingRequestRef = useRef(hasPendingRequest);
   hasPendingRequestRef.current = hasPendingRequest;
-  const hasSessionMessagesRef = useRef(hasSessionMessages);
-  hasSessionMessagesRef.current = hasSessionMessages;
   const addEventMessageRef = useRef(addEventMessage);
   addEventMessageRef.current = addEventMessage;
-  const appendMessagesRef = useRef(appendMessages);
-  appendMessagesRef.current = appendMessages;
-  const replaceMessagesRef = useRef(replaceMessages);
-  replaceMessagesRef.current = replaceMessages;
   const requestAssetsRef = useRef(requestAssets);
   requestAssetsRef.current = requestAssets;
   const requestChangesRef = useRef(requestChanges);
@@ -167,204 +147,145 @@ export function useRemoteResultAppliers({
   requestFilesRef.current = requestFiles;
   const requestHistoryRef = useRef(requestHistory);
   requestHistoryRef.current = requestHistory;
-  const requestSessionHistoryDeltaRef = useRef(requestSessionHistoryDelta);
-  requestSessionHistoryDeltaRef.current = requestSessionHistoryDelta;
-  const requestSessionHistoryFullRef = useRef(requestSessionHistoryFull);
-  requestSessionHistoryFullRef.current = requestSessionHistoryFull;
   const requestSessionHistoryRef = useRef(requestSessionHistory);
   requestSessionHistoryRef.current = requestSessionHistory;
   const requestSubagentTasksRef = useRef(requestSubagentTasks);
   requestSubagentTasksRef.current = requestSubagentTasks;
-  const resetActiveAssistantRef = useRef(resetActiveAssistant);
-  resetActiveAssistantRef.current = resetActiveAssistant;
 
   return useMemo(() => {
     const applyAssistantPlan = (targetSessionID: string, plan?: Plan) => {
-      const normalizedSessionID = targetSessionID.trim();
-      if (!normalizedSessionID || !plan) {
-        return;
+      const sessionID = targetSessionID.trim();
+      if (!sessionID || !plan || (plan.session_id && plan.session_id !== sessionID)) return;
+      setSessions((current) => current.map((item) => {
+        if (item.id !== sessionID) return item;
+        const previous = item.current_plan;
+        if (previous?.id === plan.id && (previous.revision ?? 0) > (plan.revision ?? 0)) return item;
+        return { ...item, current_plan: plan };
+      }));
+    };
+
+    const selectSession = (sessionID: string) => {
+      if (sessionIDRef.current !== sessionID) {
+        sessionIDRef.current = sessionID;
+        historySessionIDRef.current = "";
+        pendingHistorySessionIDRef.current = "";
+        setSessionID(sessionID);
       }
-      setSessions((current) => current.map((item) =>
-        item.id === normalizedSessionID ? { ...item, current_plan: plan } : item,
+    };
+
+    const ensureHistory = (sessionID: string) => {
+      if (historySessionIDRef.current !== sessionID && pendingHistorySessionIDRef.current !== sessionID) {
+        requestSessionHistoryRef.current(sessionID);
+      }
+    };
+
+    const hasPendingNavigation = () => {
+      const connectionID = relayScopeRef.current.connectionID;
+      const navigation = sessionNavigationRef.current;
+      return Boolean(connectionID && (
+        navigation.current?.connectionID === connectionID ||
+        [...navigation.mutations.values()].some((mutation) => mutation.connectionID === connectionID)
       ));
-      if (
-        sessionIDRef.current === normalizedSessionID &&
-        ["draft", "approved", "failed", "canceled"].includes(plan.status)
-      ) {
-        setViewMode("plan");
-      }
     };
 
     const applySessionList = (payload?: SessionListResultPayload) => {
-      const nextSessions = payload?.sessions || [];
-      if (payload?.include_deleted) {
+      if (!payload) return;
+      const nextSessions = payload.sessions || [];
+      if (payload.include_deleted) {
         setDeletedSessions(nextSessions);
         return;
       }
-
       setSessions((current) => mergeSessionList(current, nextSessions));
       const localSessionID = sessionIDRef.current.trim();
-      const hasLocalSessionInList = Boolean(
-        localSessionID && nextSessions.some((item) => item.id === localSessionID),
-      );
-      const currentSessionID = (
-        (hasLocalSessionInList ? localSessionID : payload?.current_session_id || localSessionID) || ""
-      ).trim();
-      if (!currentSessionID) {
-        return;
-      }
-
-      if (sessionIDRef.current !== currentSessionID) {
-        setSessionID(currentSessionID);
-        sessionIDRef.current = currentSessionID;
+      // A list can initialize a blank workspace, but not navigate an existing one.
+      const currentSessionID = localSessionID || (!hasPendingNavigation() ? payload.current_session_id?.trim() : "");
+      if (!currentSessionID) return;
+      if (!localSessionID) {
+        selectSession(currentSessionID);
         requestAssetsRef.current(currentSessionID);
       }
-      setSessionLastUsage(currentSessionID, findSessionUsage(nextSessions, currentSessionID));
-      // 1.0 本地聊天缓存可能使历史请求提前结束，任务索引仍需按会话恢复。
-      requestSubagentTasksRef.current(currentSessionID);
-      if (hasSessionMessagesRef.current(currentSessionID)) {
-        historySessionIDRef.current = currentSessionID;
-        return;
-      }
-      if (
-        historySessionIDRef.current !== currentSessionID &&
-        pendingHistorySessionIDRef.current !== currentSessionID &&
-        !hasPendingRequestRef.current(currentSessionID)
-      ) {
-        requestSessionHistoryRef.current(currentSessionID);
-      }
+      const usage = findSessionUsage(nextSessions, currentSessionID);
+      if (usage) setSessionLastUsage(currentSessionID, usage);
+      if (!hasPendingRequestRef.current(currentSessionID)) ensureHistory(currentSessionID);
     };
 
-    const applySessionChanged = (payload?: SessionChangedPayload) => {
-      const nextSessions = payload?.sessions || [];
-      setSessions((current) => mergeSessionList(current, nextSessions));
-      const targetSessionID = (payload?.current_session_id || payload?.session?.id || "").trim();
-      if (!targetSessionID) {
-        return;
-      }
-      setSessionID(targetSessionID);
-      sessionIDRef.current = targetSessionID;
-      const usage = payload?.current_session_id
-        ? findSessionUsage(nextSessions, targetSessionID)
-        : payload?.session?.last_usage || null;
-      setSessionLastUsage(targetSessionID, usage);
-      setSessionPendingPermission(targetSessionID, null);
-      requestSubagentTasksRef.current(targetSessionID);
-      if (
-        historySessionIDRef.current !== targetSessionID &&
-        pendingHistorySessionIDRef.current !== targetSessionID
-      ) {
-        requestSessionHistoryRef.current(targetSessionID);
-      }
-      requestAssetsRef.current(targetSessionID);
-    };
-
-    const applySessionSettings = (payload?: SessionSettingsResultPayload) => {
-      if (!payload) {
-        return;
-      }
-
-      const nextSessionID = payload.session?.id || payload.current_session_id || sessionIDRef.current;
-      if (payload.sessions) {
-        setSessions((current) => mergeSessionList(current, payload.sessions || []));
-      } else if (payload.session?.id) {
-        setSessions((current) => upsertSession(current, payload.session as SessionSummary));
-      }
-
-      if (nextSessionID) {
-        setSessionID(nextSessionID);
-        sessionIDRef.current = nextSessionID;
-        setSessionLastUsage(nextSessionID, payload.session?.last_usage || findSessionUsage(payload.sessions || [], nextSessionID));
-        requestSubagentTasksRef.current(nextSessionID);
-        if (payload.context) {
-          setSessionContext(nextSessionID, payload.context);
+    const applySessionChanged = (message: RelayMessage) => {
+      const payload = message.payload as SessionChangedPayload | undefined;
+      const requestID = message.request_id;
+      const connectionID = relayScopeRef.current.connectionID;
+      if (!requestID || !connectionID || !payload) return false;
+      const navigation = sessionNavigationRef.current;
+      const nextSessions = payload.sessions || [];
+      const targetSessionID = (payload.current_session_id || payload.session?.id || "").trim();
+      if (message.type === "session_changed") {
+        const intent = navigation.current;
+        if (intent?.requestID !== requestID || intent.connectionID !== connectionID) return false;
+        if (!targetSessionID || (intent.targetSessionID && targetSessionID !== intent.targetSessionID)) return false;
+        navigation.current = null;
+        setSessions((current) => payload.sessions
+          ? mergeSessionList(current, nextSessions)
+          : payload.session?.id ? upsertSession(current, payload.session) : current);
+        selectSession(targetSessionID);
+      } else {
+        const mutation = navigation.mutations.get(requestID);
+        if (!mutation || mutation.connectionID !== connectionID || message.type !== mutation.type + "_result") return false;
+        navigation.mutations.delete(requestID);
+        const affectedID = mutation.targetSessionID;
+        if (mutation.type === "session_restore") {
+          const restored = nextSessions.find((session) => session.id === affectedID);
+          if (restored) setSessions((current) => upsertSession(current, restored));
+          setDeletedSessions((current) => current.filter((session) => session.id !== affectedID));
+          return true;
         }
+        const fallback = nextSessions.find((session) => session.id === targetSessionID) || payload.session;
+        setSessions((current) => {
+          const active = current.filter((session) => session.id !== affectedID);
+          return fallback?.id && fallback.id !== affectedID ? upsertSession(active, fallback) : active;
+        });
+        // Only a delete of the still-selected session can pick its fallback.
+        if (sessionIDRef.current !== affectedID || mutation.navigationVersion !== navigation.version ||
+            (navigation.current?.connectionID === connectionID && !navigation.current.targetSessionID) ||
+            !targetSessionID || targetSessionID === affectedID) return true;
+        selectSession(targetSessionID);
       }
+      const selectedSession = payload.session?.id === targetSessionID ? payload.session : undefined;
+      const modelID = selectedSession?.model || nextSessions.find((session) => session.id === targetSessionID)?.model;
+      if (modelID) setCurrentModelID(modelID);
+      const usage = selectedSession?.last_usage || findSessionUsage(nextSessions, targetSessionID);
+      if (usage) setSessionLastUsage(targetSessionID, usage);
+      ensureHistory(targetSessionID);
+      requestAssetsRef.current(targetSessionID);
+      return true;
+    };
 
-      if (payload.message) {
-        addEventMessageRef.current(nextSessionID || sessionIDRef.current, payload.message);
+    const applySessionCommandError = (requestID?: string) => {
+      const connectionID = relayScopeRef.current.connectionID;
+      if (!connectionID || !requestID) return false;
+      const navigation = sessionNavigationRef.current;
+      if (navigation.current?.requestID === requestID && navigation.current.connectionID === connectionID) {
+        navigation.current = null;
+        return true;
       }
+      if (navigation.mutations.get(requestID)?.connectionID !== connectionID) return false;
+      navigation.mutations.delete(requestID);
+      return true;
+    };
+
+    const applySessionSettings = (payload?: SessionSettingsResultPayload, envelopeSessionID?: string) => {
+      if (!payload) return;
+      const sessionID = (payload.session?.id || envelopeSessionID || "").trim();
+      if (!sessionID) return;
+      const session = payload.session?.id === sessionID ? payload.session : payload.sessions?.find((item) => item.id === sessionID);
+      if (session) {
+        setSessions((current) => upsertSession(current, session));
+        if (session.last_usage) setSessionLastUsage(sessionID, session.last_usage);
+      }
+      if (payload.context) setSessionContext(sessionID, payload.context);
+      if (payload.message) addEventMessageRef.current(sessionID, payload.message);
     };
 
     const applySessionGenerationPreferences = (payload?: SessionGenerationResultPayload) => {
       setSessionGenerationPreferences(payload);
-    };
-
-    const applySessionHistory = (payload?: SessionHistoryResultPayload) => {
-      if (!payload) {
-        return;
-      }
-      const responseSessionID = (payload.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
-      if (!responseSessionID || hasPendingRequestRef.current(responseSessionID)) {
-        return;
-      }
-
-      const messages = payload.messages || [];
-      void replaceCachedSessionHistory(responseSessionID, messages);
-      replaceMessagesRef.current(responseSessionID, messages.map(historyMessageToChatItem));
-      resetActiveAssistantRef.current(responseSessionID);
-
-      if (pendingHistorySessionIDRef.current === responseSessionID) {
-        pendingHistorySessionIDRef.current = "";
-      }
-      if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
-        historySessionIDRef.current = responseSessionID;
-        setSessionID(responseSessionID);
-        sessionIDRef.current = responseSessionID;
-        requestAssetsRef.current(responseSessionID);
-      }
-    };
-
-    const applySessionHistoryMeta = (payload?: SessionHistoryMetaResultPayload) => {
-      const responseSessionID = (payload?.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
-      if (!responseSessionID) {
-        return;
-      }
-      const hasLocalMessages = hasSessionMessagesRef.current(responseSessionID);
-      const remoteHasMessages = (payload?.message_count ?? 0) > 0;
-      if (payload?.up_to_date && (hasLocalMessages || !remoteHasMessages)) {
-        if (pendingHistorySessionIDRef.current === responseSessionID) {
-          pendingHistorySessionIDRef.current = "";
-        }
-        if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
-          historySessionIDRef.current = responseSessionID;
-          setSessionID(responseSessionID);
-          sessionIDRef.current = responseSessionID;
-          requestAssetsRef.current(responseSessionID);
-        }
-        return;
-      }
-      if (payload?.can_delta && hasLocalMessages) {
-        requestSessionHistoryDeltaRef.current(responseSessionID);
-        return;
-      }
-      requestSessionHistoryFullRef.current(responseSessionID);
-    };
-
-    const applySessionHistoryDelta = (payload?: SessionHistoryDeltaResultPayload) => {
-      const responseSessionID = (payload?.session_id || pendingHistorySessionIDRef.current || sessionIDRef.current || "").trim();
-      if (!responseSessionID) {
-        return;
-      }
-      if (payload?.full_sync_required) {
-        requestSessionHistoryFullRef.current(responseSessionID);
-        return;
-      }
-
-      const messages = payload?.messages || [];
-      if (pendingHistorySessionIDRef.current === responseSessionID) {
-        pendingHistorySessionIDRef.current = "";
-      }
-      if (!sessionIDRef.current || sessionIDRef.current === responseSessionID) {
-        historySessionIDRef.current = responseSessionID;
-        setSessionID(responseSessionID);
-        sessionIDRef.current = responseSessionID;
-        requestAssetsRef.current(responseSessionID);
-      }
-      if (messages.length > 0) {
-        void appendCachedSessionHistory(responseSessionID, messages);
-        appendMessagesRef.current(responseSessionID, messages.map(historyMessageToChatItem));
-      }
     };
 
     const applyModelList = (payload?: ModelListResultPayload) => {
@@ -382,7 +303,6 @@ export function useRemoteResultAppliers({
         setCurrentModelID(payload.current_model_id);
       }
       if (payload?.session?.id) {
-        setSessionID(payload.session.id);
         setSessions((current) => upsertSession(current, payload.session as SessionSummary));
         setSessionLastUsage(payload.session.id, payload.session.last_usage || null);
       }
@@ -422,11 +342,7 @@ export function useRemoteResultAppliers({
     };
 
     const applyAssetList = (payload?: AssetListResultPayload) => {
-      if (!payload) {
-        setAssets([]);
-        return;
-      }
-      setAssets(payload.assets || []);
+      if (payload?.session_id === sessionIDRef.current) setAssets(payload.session_id, payload.assets || []);
     };
 
     const applyFileList = (payload?: FileListResultPayload) => {
@@ -531,9 +447,8 @@ export function useRemoteResultAppliers({
       applyModelSwitch,
       applySkillList,
       applySessionChanged,
-      applySessionHistory,
-      applySessionHistoryDelta,
-      applySessionHistoryMeta,
+      applySessionCommandError,
+      hasPendingNavigation,
       applySessionList,
       applySessionSettings,
       applySessionGenerationPreferences,
@@ -541,6 +456,8 @@ export function useRemoteResultAppliers({
   }, [
     historySessionIDRef,
     pendingHistorySessionIDRef,
+    relayScopeRef,
+    sessionNavigationRef,
     sessionIDRef,
     setChangeDiff,
     setAssets,
@@ -566,7 +483,6 @@ export function useRemoteResultAppliers({
     setSessionContext,
     setSessionGenerationPreferences,
     setSessionID,
-    setSessionPendingPermission,
     setDeletedSessions,
     setSessions,
     setViewMode,

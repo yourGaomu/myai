@@ -136,8 +136,11 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, requestID s
 			if err != nil {
 				return fmt.Errorf("decode permission ask failed: %w", err)
 			}
+			result := c.permissionResult(payload)
 			decision := "denied"
-			if c.config.AllowTools {
+			if payload.RequireFreshConsent {
+				decision = "denied: this call needs interactive approval"
+			} else if result.Allowed {
 				decision = "allowed"
 			}
 			fmt.Printf("\npermission required: %s needs %s (%s)\n", payload.Name, payload.Permission, decision)
@@ -148,7 +151,7 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, requestID s
 				c.config.UserID,
 				c.config.DeviceID,
 				message.SessionID,
-				protocol.PermissionResultPayload{ApprovalID: payload.ApprovalID, Allowed: c.config.AllowTools},
+				result,
 			)
 			if err != nil {
 				return err
@@ -166,6 +169,13 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, requestID s
 		default:
 			fmt.Printf("\nmessage: type=%s request=%s\n", message.Type, message.RequestID)
 		}
+	}
+}
+
+func (c *Client) permissionResult(ask protocol.PermissionAskPayload) protocol.PermissionResultPayload {
+	return protocol.PermissionResultPayload{
+		ApprovalID: ask.ApprovalID,
+		Allowed:    c.config.AllowTools && !ask.RequireFreshConsent,
 	}
 }
 

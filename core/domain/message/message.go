@@ -70,6 +70,33 @@ type Message struct {
 	SourceTaskID string
 }
 
+// HistoryRecordID returns the row ID for one part of a flattened message.
+// Loaded messages retain their original row IDs, including legacy ones.
+func (m Message) HistoryRecordID(partIndex, partCount int) string {
+	if partIndex < len(m.RecordIDs) && m.RecordIDs[partIndex] != "" {
+		return m.RecordIDs[partIndex]
+	}
+	if m.ID == "" || partCount <= 1 {
+		return m.ID
+	}
+	return fmt.Sprintf("%s:%06d", m.ID, partIndex)
+}
+
+// AssistantReplyRecordID returns the row ID for a visible assistant reply,
+// including reasoning-only replies. Tool-only and blank messages have no reply ID.
+func (m Message) AssistantReplyRecordID() string {
+	if m.Role != RoleAssistant || m.IsSynthetic() || (strings.TrimSpace(m.Text()) == "" && strings.TrimSpace(m.Reasoning) == "") {
+		return ""
+	}
+	count := 1 // The reply row precedes any tool calls in the same message.
+	for _, part := range m.Parts {
+		if part.Type == PartToolCall && part.ToolCall != nil {
+			count++
+		}
+	}
+	return m.HistoryRecordID(0, count)
+}
+
 // StableID provides a deterministic identity for legacy messages that were
 // created before Session started assigning message metadata. It is only a
 // compatibility fallback; newly appended messages use a generated UUID.

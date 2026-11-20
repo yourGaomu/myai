@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { SubagentTask } from "../../../protocol";
 import type { ButtonFeedback } from "../../../types/ui";
 import type { AgentTurnTimelineStep, ToolCallStep } from "../../../utils/chatRenderItems";
+import { findSubagentForLaunch } from "../../../utils/subagentLaunch";
 import { toolKind } from "../../../utils/toolDisplay";
 import { font, radius } from "../../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
@@ -14,31 +15,26 @@ import { ToolStepRow } from "./ToolStepRow";
 type Props = {
   buttonFeedback: ButtonFeedback;
   onInspectSubagent?: (taskID: string) => void;
+  runID?: string;
+  sessionID: string;
   steps: AgentTurnTimelineStep[];
   subagentTasks?: SubagentTask[];
+  turnRunning: boolean;
 };
 
 const collapseAfter = 8;
 const collapsedVisible = 6;
 
 type GroupedToolChunk =
-  | { id: string; tool: ToolCallStep; type: "single" }
+  | { id: string; task?: SubagentTask; tool: ToolCallStep; type: "single" }
   | {
       id: string;
       items: Array<{ target: string; task?: SubagentTask; tool: ToolCallStep }>;
       type: "subagent_batch";
     };
 
-function findTaskForTool(tool: ToolCallStep, subagentTasks?: SubagentTask[]): SubagentTask | undefined {
-  if (!subagentTasks?.length) return undefined;
-  const callID = tool.toolCallID || tool.id;
-  return subagentTasks.find(
-    (t) => t.parent_tool_call_id && (t.parent_tool_call_id === callID || t.parent_tool_call_id === tool.id),
-  );
-}
-
 // 过程时间线：思考文字和工具调用按发生顺序排在一条竖线上；连续≥2个子代理调用自动聚合为并行卡片。
-export function TurnTimeline({ buttonFeedback, onInspectSubagent, steps, subagentTasks }: Props) {
+export function TurnTimeline({ buttonFeedback, onInspectSubagent, runID, sessionID, steps, subagentTasks, turnRunning }: Props) {
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -55,8 +51,11 @@ export function TurnTimeline({ buttonFeedback, onInspectSubagent, steps, subagen
             buttonFeedback={buttonFeedback}
             key={step.id}
             onInspectSubagent={onInspectSubagent}
+            runID={runID}
+            sessionID={sessionID}
             subagentTasks={subagentTasks}
             tools={step.tools}
+            turnRunning={turnRunning}
           />
         ),
       )}
@@ -64,16 +63,14 @@ export function TurnTimeline({ buttonFeedback, onInspectSubagent, steps, subagen
   );
 }
 
-function ToolGroup({
-  buttonFeedback,
-  onInspectSubagent,
-  subagentTasks,
-  tools,
-}: {
+function ToolGroup({ buttonFeedback, onInspectSubagent, runID, sessionID, subagentTasks, tools, turnRunning }: {
   buttonFeedback: ButtonFeedback;
   onInspectSubagent?: (taskID: string) => void;
+  runID?: string;
+  sessionID: string;
   subagentTasks?: SubagentTask[];
   tools: ToolCallStep[];
+  turnRunning: boolean;
 }) {
   const styles = useThemedStyles(makeStyles);
   const [expanded, setExpanded] = useState(false);
@@ -93,6 +90,7 @@ function ToolGroup({
       } else {
         out.push({
           id: buffer[0].tool.id,
+          task: buffer[0].task,
           tool: buffer[0].tool,
           type: "single",
         });
@@ -104,7 +102,7 @@ function ToolGroup({
       if (toolKind(tool.name) === "subagent_spawn") {
         buffer.push({
           target: subagentTargetLabel(tool),
-          task: findTaskForTool(tool, subagentTasks),
+          task: findSubagentForLaunch(tool, subagentTasks, sessionID, tool.runID || runID),
           tool,
         });
       } else {
@@ -114,7 +112,7 @@ function ToolGroup({
     }
     flush();
     return out;
-  }, [subagentTasks, tools]);
+  }, [runID, sessionID, subagentTasks, tools]);
 
   const collapsible = chunks.length > collapseAfter && !expanded;
   const visible = collapsible ? chunks.slice(0, collapsedVisible) : chunks;
@@ -126,15 +124,17 @@ function ToolGroup({
           <SubagentParallelGroup
             entries={chunk.items}
             key={chunk.id || `batch-${index}`}
-            onInspectSubagent={onInspectSubagent}
-          />
-        ) : (
-          <ToolStepRow
-            buttonFeedback={buttonFeedback}
-            key={chunk.tool.id || `${chunk.tool.name}-${index}`}
-            onInspectSubagent={onInspectSubagent}
-            subagentTasks={subagentTasks}
-            tool={chunk.tool}
+              onInspectSubagent={onInspectSubagent}
+              turnRunning={turnRunning}
+            />
+          ) : (
+            <ToolStepRow
+              buttonFeedback={buttonFeedback}
+              key={chunk.tool.id || `${chunk.tool.name}-${index}`}
+              onInspectSubagent={onInspectSubagent}
+              task={chunk.task}
+              tool={chunk.tool}
+              turnRunning={turnRunning}
           />
         ),
       )}

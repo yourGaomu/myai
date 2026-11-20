@@ -53,6 +53,9 @@ func TestPlanRecoveryCompletedPlanSurvivesDelayedMessageQueueAndReload(t *testin
 	if err != nil {
 		t.Fatalf("execute two-step plan through composition: %v", err)
 	}
+	if response.MessageID != "" {
+		t.Fatalf("multi-step execution returned one reply ID: %q", response.MessageID)
+	}
 	assertPlanRecoveryDone(t, response.Plan)
 	h.assertCalls(t, 5, 1, 1)
 
@@ -111,6 +114,9 @@ func TestPlanRecoveryPlanOnlyDraftReloadsWithoutChangingAgentMode(t *testing.T) 
 		t.Fatal(err)
 	}
 	answer := assertPlanRecoveryAssistant(t, live.Messages, planRecoveryDraft)
+	if response.MessageID != answer.ID {
+		t.Fatalf("single draft reply ID = %q, want %q", response.MessageID, answer.ID)
+	}
 	if live.AgentMode != session.AgentModeChat || response.Plan.Status != agentplan.StatusDraft {
 		t.Fatalf("planning changed the durable mode or executed the draft: mode=%q plan=%+v", live.AgentMode, response.Plan)
 	}
@@ -139,6 +145,9 @@ func TestPlanRecoveryPlanOnlyDraftReloadsWithoutChangingAgentMode(t *testing.T) 
 		t.Fatalf("explicitly confirm the reloaded draft: %v", err)
 	}
 	assertPlanRecoveryDone(t, executed.Plan)
+	if executed.MessageID != "" {
+		t.Fatalf("explicit chat confirmation attached a step ID to the plan aggregate: %q", executed.MessageID)
+	}
 	fresh.assertCalls(t, 5, 1, 1)
 	fresh.flush(t, ctx)
 	confirmed := fresh.reload(t, ctx)
@@ -299,6 +308,107 @@ func TestPlanRecoveryPlanCASFailureStillPersistsAnswerAndRunEvent(t *testing.T) 
 	}
 	fresh.assertCalls(t, 1, 0, 0)
 	t.Logf("ErrConflict preserves response, AgentRun answer event, and cold-loaded assistant identity %s/%d", answer.ID, answer.Sequence)
+}
+
+type replyIdentityModel struct{}
+
+type replyIdentityInlineExecutor struct{}
+
+func (replyIdentityInlineExecutor) Submit(task func()) error {
+	task()
+	return nil
+}
+
+func (replyIdentityModel) Generate(_ context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
+	const reply = "same answer"
+	if request.Stream.OnAnswer != nil {
+		request.Stream.OnAnswer(reply)
+	}
+	return modelport.ChatResult{Content: reply}, nil
+}
+
+func TestAssistantReplyIDSurvivesDelayedPersistenceAndRegeneration(t *testing.T) {
+	h := newPlanRecoveryHarness(t)
+	ctx := planRecoveryContext(t)
+	configuration := h.configuration(t)
+	configuration.Models = &planRecoveryRegistry{model: replyIdentityModel{}}
+	h.chat = NewService(configuration)
+
+	send := func(input string) chatservice.ChatResponse {
+		t.Helper()
+		response, err := h.chat.SendMessageStreamForSession(ctx, h.sessionID, input, modelport.ChatStreamHandler{})
+		if err != nil || response.MessageID == "" || response.Result.Content != "same answer" {
+			t.Fatalf("send %q did not return a committed reply: response=%+v error=%v", input, response, err)
+		}
+		return response
+	}
+	assertHistory := func(chat *chatservice.ChatService, want ...string) {
+		t.Helper()
+		messages, err := chat.ListSessionMessages(ctx, h.sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, message := range messages {
+			if message.Role == repository.RoleAssistant {
+				ids = append(ids, message.ID)
+			}
+		}
+		if !reflect.DeepEqual(ids, want) {
+			t.Fatalf("assistant history IDs = %v, want %v", ids, want)
+		}
+	}
+	first := send("First question?")
+	h.flush(t, ctx)
+	second := send("Second question?")
+	if second.MessageID == first.MessageID {
+		t.Fatal("two replies with the same body share an ID")
+	}
+	assertHistory(h.chat, first.MessageID, second.MessageID)
+	meta, err := h.chat.SessionHistoryMeta(ctx, h.sessionID)
+	if err != nil || meta.LastMessageID != second.MessageID {
+		t.Fatalf("pending reply absent from history metadata: %+v error=%v", meta, err)
+	}
+	delta, fullSync, err := h.chat.ListSessionMessagesAfter(ctx, h.sessionID, first.MessageID, 10)
+	if err != nil || fullSync || len(delta) != 2 || delta[1].ID != second.MessageID {
+		t.Fatalf("pending reply absent from history delta: %+v fullSync=%t error=%v", delta, fullSync, err)
+	}
+	for _, record := range h.store.messageRecords(h.sessionID) {
+		if record.ID == second.MessageID {
+			t.Fatal("second reply should still be pending database persistence")
+		}
+	}
+	h.flush(t, ctx)
+	assertHistory(h.reload(t, ctx).chat, first.MessageID, second.MessageID)
+
+	// Regeneration waits for the transcript replacement before sampling. Use
+	// the caller-runs executor so this phase can perform its synchronous write.
+	configuration.PersistenceQueue = nil
+	configuration.Async = replyIdentityInlineExecutor{}
+	h.chat = NewService(configuration)
+	regenerated, err := h.chat.RegenerateLastMessageStreamForSession(ctx, h.sessionID, modelport.ChatStreamHandler{})
+	if err != nil || regenerated.MessageID == "" || regenerated.MessageID == first.MessageID || regenerated.MessageID == second.MessageID {
+		t.Fatalf("regeneration did not get a new committed reply ID: response=%+v error=%v", regenerated, err)
+	}
+	assertHistory(h.chat, first.MessageID, regenerated.MessageID)
+	h.flush(t, ctx)
+	assertHistory(h.reload(t, ctx).chat, first.MessageID, regenerated.MessageID)
+
+	for _, response := range []chatservice.ChatResponse{first, second, regenerated} {
+		events, err := h.runs.ListEvents(ctx, []string{response.RunID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var answers []string
+		for _, event := range events {
+			if event.Type == domainagentrun.EventTypeAnswer {
+				answers = append(answers, event.MessageID)
+			}
+		}
+		if !reflect.DeepEqual(answers, []string{response.MessageID}) {
+			t.Fatalf("answer event IDs = %v, want %s for run %s", answers, response.MessageID, response.RunID)
+		}
+	}
 }
 
 type planRecoveryHarness struct {

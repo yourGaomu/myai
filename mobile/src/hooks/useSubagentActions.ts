@@ -9,8 +9,8 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 type Args = {
   activeRequestIDRef: RefObject<string>;
   clientToken: string;
-  clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
-  historySessionIDRef: RefObject<string>;
+  isSessionBusy: (sessionID: string) => boolean;
+  sessionIDRef: RefObject<string>;
   onError: (message: string) => void;
   onResumeStarted: () => void;
   requestSessionMapRef: RefObject<Record<string, string>>;
@@ -18,7 +18,6 @@ type Args = {
   sendEnvelope: SendEnvelope;
   sessionID: string;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
-  setSessionPendingPermission: (sessionID: string, permission: null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
@@ -27,8 +26,8 @@ type Args = {
 export function useSubagentActions({
   activeRequestIDRef,
   clientToken,
-  clearSessionPendingRequest,
-  historySessionIDRef,
+  isSessionBusy,
+  sessionIDRef,
   onError,
   onResumeStarted,
   requestSessionMapRef,
@@ -36,7 +35,6 @@ export function useSubagentActions({
   sendEnvelope,
   sessionID,
   setSessionLastUsage,
-  setSessionPendingPermission,
   setSessionPendingRequest,
   startPending,
   stopPending,
@@ -83,46 +81,29 @@ export function useSubagentActions({
       onError(!clientToken ? "请先完成配对" : "缺少会话或任务，无法继续主任务");
       return false;
     }
+    if (sessionIDRef.current !== targetSessionID || isSessionBusy(targetSessionID)) return false;
+
     const requestID = newRequestID();
-    activeRequestIDRef.current = requestID;
-    requestSessionMapRef.current[requestID] = targetSessionID;
-    resetActiveAssistant(targetSessionID);
-    historySessionIDRef.current = targetSessionID;
-    setSessionPendingPermission(targetSessionID, null);
-    setSessionLastUsage(targetSessionID, null);
-    setSessionPendingRequest(targetSessionID, requestID);
-    startPending("subagents");
-    const sent = sendEnvelope("subagent_task_resume", {
+    if (!sendEnvelope("subagent_task_resume", {
       request_id: requestID,
       session_id: targetSessionID,
       payload: { task_id: taskID },
-    });
-    if (!sent) {
-      activeRequestIDRef.current = "";
-      delete requestSessionMapRef.current[requestID];
-      clearSessionPendingRequest(targetSessionID, requestID);
-      stopPending("subagents");
+    })) {
       onError("继续请求未发送，请检查 Relay 连接");
       return false;
     }
+
+    activeRequestIDRef.current = requestID;
+    requestSessionMapRef.current[requestID] = targetSessionID;
+    resetActiveAssistant(targetSessionID);
+    setSessionLastUsage(targetSessionID, null);
+    setSessionPendingRequest(targetSessionID, requestID);
+    startPending("subagents");
     onResumeStarted();
     return true;
   }, [
-    activeRequestIDRef,
-    clientToken,
-    clearSessionPendingRequest,
-    historySessionIDRef,
-    onError,
-    onResumeStarted,
-    requestSessionMapRef,
-    resetActiveAssistant,
-    sendEnvelope,
-    sessionID,
-    setSessionLastUsage,
-    setSessionPendingPermission,
-    setSessionPendingRequest,
-    startPending,
-    stopPending,
+    activeRequestIDRef, clientToken, isSessionBusy, onError, onResumeStarted, requestSessionMapRef,
+    resetActiveAssistant, sendEnvelope, sessionID, sessionIDRef, setSessionLastUsage, setSessionPendingRequest, startPending,
   ]);
 
   // 1.0 查询子任务详情（只读，不改变当前主会话，信封携带直接父会话 ID）

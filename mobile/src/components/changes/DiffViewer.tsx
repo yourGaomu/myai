@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import { parseDiffRows, type DiffCell, type DiffLineKind, type DiffRow } from "../../utils/diff";
 import { fontFamily, font, radius, weight } from "../../constants/theme";
@@ -28,6 +29,8 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
   const [wrap, setWrap] = useState(true);
   const [viewport, setViewport] = useState(0);
   const [activeChunkIndex, setActiveChunkIndex] = useState(0);
+  const [flashedChunkID, setFlashedChunkID] = useState("");
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const verticalScrollRef = useRef<ScrollView>(null);
   const chunkOffsetsRef = useRef<Record<string, number>>({});
@@ -39,7 +42,11 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
 
   useEffect(() => {
     setActiveChunkIndex(0);
+    setFlashedChunkID("");
     chunkOffsetsRef.current = {};
+    return () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    };
   }, [diff]);
 
   if (!diff.trim() || rows.length === 0) {
@@ -48,9 +55,16 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
 
   const jumpToChunk = (nextIndex: number) => {
     if (chunkIDs.length === 0) return;
+    if (Platform.OS !== "web") {
+      void Haptics.selectionAsync().catch(() => {});
+    }
     const wrapped = (nextIndex + chunkIDs.length) % chunkIDs.length;
+    const targetID = chunkIDs[wrapped];
     setActiveChunkIndex(wrapped);
-    const y = chunkOffsetsRef.current[chunkIDs[wrapped]];
+    setFlashedChunkID(targetID);
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setFlashedChunkID(""), 650);
+    const y = chunkOffsetsRef.current[targetID];
     if (typeof y === "number") {
       verticalScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
     }
@@ -59,6 +73,7 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
   const body = (
     <View style={[styles.body, !wrap && viewport ? { minWidth: viewport } : null]}>
       {lines.map((line) => {
+        const isFlashed = Boolean(flashedChunkID && line.id === flashedChunkID);
         const recordLayout = line.isChunkStart
           ? (y: number) => {
               chunkOffsetsRef.current[line.id] = y;
@@ -70,6 +85,7 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
             <View
               key={line.id}
               onLayout={recordLayout ? (e) => recordLayout(e.nativeEvent.layout.y) : undefined}
+              style={isFlashed ? styles.flashedChunk : undefined}
             >
               <Text numberOfLines={1} style={styles.hunk}>
                 {line.text}
@@ -82,6 +98,7 @@ export function DiffViewer({ diff, emptyText, standaloneScroll = false }: Props)
           <View
             key={line.id}
             onLayout={recordLayout ? (e) => recordLayout(e.nativeEvent.layout.y) : undefined}
+            style={isFlashed ? styles.flashedChunk : undefined}
           >
             <Line kind={line.kind} newNo={line.newNo} oldNo={line.oldNo} styles={styles} text={line.text} wrap={wrap} />
           </View>
@@ -269,6 +286,11 @@ const makeStyles = ({ palette }: AppTheme) =>
     toggleText: { color: palette.ink3, fontSize: font.caption },
     verticalScroll: { flex: 1 },
     body: { paddingBottom: 16 },
+    flashedChunk: {
+      backgroundColor: palette.brandWashStrong,
+      borderLeftColor: palette.brand,
+      borderLeftWidth: 3,
+    },
     hunk: { color: palette.ink3, fontFamily: fontFamily.mono, fontSize: font.caption - 0.5, paddingHorizontal: 16, paddingVertical: 6 },
     line: { alignItems: "flex-start", flexDirection: "row", paddingRight: 16 },
     lineAdd: { backgroundColor: palette.diffAddBg },

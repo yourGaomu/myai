@@ -12,6 +12,7 @@ import { fontFamily, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { ConfirmModal } from "../common/ConfirmModal";
 import { useListStyles } from "../common/listStyles";
+import { SkeletonRows } from "../common/MotionEffects";
 import { Segmented } from "../common/Segmented";
 
 type Props = {
@@ -153,14 +154,7 @@ export function ChangesPanel(props: Props) {
 }
 
 function Loading() {
-  const { palette } = useAppTheme();
-  const list = useListStyles();
-  return (
-    <View style={list.loading}>
-      <ActivityIndicator color={palette.ink2} size="small" />
-      <Text style={list.loadingText}>正在加载…</Text>
-    </View>
-  );
+  return <SkeletonRows count={4} />;
 }
 
 const makeStyles = ({ palette }: AppTheme) =>

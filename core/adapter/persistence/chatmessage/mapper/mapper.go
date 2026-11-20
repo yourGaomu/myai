@@ -1,7 +1,6 @@
 package mapper
 
 import (
-	"fmt"
 	"time"
 
 	uuidadapter "myai/core/adapter/id/uuid"
@@ -25,7 +24,7 @@ type Mapper struct {
 func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, createdAt time.Time) repository.MessageRecord {
 	id := m.newID()
 	if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, command.Input, command.SyntheticReason); ok {
-		id = messageRecordID(message, 0, 1)
+		id = message.HistoryRecordID(0, 1)
 	}
 	return repository.MessageRecord{
 		ID:              id,
@@ -46,7 +45,7 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 	if ragMessage := domainmessage.RAGContext(command.RAGContext); ragMessage.IsSynthetic() {
 		id := m.newID()
 		if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, ragMessage.Text(), ragMessage.SyntheticReason); ok {
-			id = messageRecordID(message, 0, 1)
+			id = message.HistoryRecordID(0, 1)
 		}
 		records = append(records, repository.MessageRecord{
 			ID: id, SessionID: command.SessionID, Role: repository.RoleUser,
@@ -56,7 +55,7 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 	if runtimeMessage := domainmessage.RuntimeInstruction(command.RuntimeInstruction); runtimeMessage.IsSynthetic() {
 		id := m.newID()
 		if message, ok := latestSnapshotMessage(command.SessionSnapshot, runtimeMessage.Role, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
-			id = messageRecordID(message, 0, 1)
+			id = message.HistoryRecordID(0, 1)
 		}
 		records = append(records, repository.MessageRecord{
 			ID:              id,
@@ -93,25 +92,21 @@ func (m Mapper) AssistantMessage(sessionID string, result modelport.ChatResult, 
 	}
 }
 
-func (m Mapper) AssistantMessageFromSession(current *session.Session, result modelport.ChatResult, createdAt time.Time) repository.MessageRecord {
-	sessionID := ""
-	if current != nil {
-		sessionID = current.ID
+// AssistantTurn maps the exact message accepted by the transcript boundary.
+// Callers without a committed message retain the standalone legacy write.
+func (m Mapper) AssistantTurn(sessionID string, result modelport.ChatResult, createdAt time.Time) []repository.MessageRecord {
+	if result.Message == nil || result.Message.Role != domainmessage.RoleAssistant || result.Message.ID == "" {
+		return []repository.MessageRecord{m.AssistantMessage(sessionID, result, createdAt)}
 	}
-	record := m.AssistantMessage(sessionID, result, createdAt)
-	if message, ok := latestSnapshotMessage(current, domainmessage.RoleAssistant, result.Content, ""); ok {
-		record.ID = messageRecordID(message, 0, 1)
-		record.MessageID = message.ID
-		// 1. 数据库存原始单条推理；result.Reasoning 可能是多轮展示用的汇总。
-		record.Reasoning = message.Reasoning
-		if message.Sequence > 0 {
-			record.Sequence = message.Sequence
-		}
-		if !message.CreatedAt.IsZero() {
-			record.CreatedAt = message.CreatedAt
-		}
+	records := m.recordsForMessages(sessionID, []domainmessage.Message{*result.Message}, createdAt)
+	if reply := &records[0]; reply.Role == repository.RoleAssistant {
+		reply.PromptTokens = result.Usage.PromptTokens
+		reply.CompletionTokens = result.Usage.CompletionTokens
+		reply.TotalTokens = result.Usage.TotalTokens
+		reply.ReasoningTokens = result.Usage.ReasoningTokens
+		reply.PromptCachedTokens = result.Usage.PromptCachedTokens
 	}
-	return record
+	return records
 }
 
 func (m Mapper) Session(current *session.Session, title string) repository.SessionRecord {
@@ -212,7 +207,7 @@ func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Me
 		mapped := m.messageRecords(sessionID, message)
 		for partIndex := range mapped {
 			mapped[partIndex].MessageID = message.ID
-			if id := messageRecordID(message, partIndex, len(mapped)); id != "" {
+			if id := message.HistoryRecordID(partIndex, len(mapped)); id != "" {
 				mapped[partIndex].ID = id
 			}
 			createdAt := fallbackCreatedAt.Add(time.Duration(len(records)) * time.Nanosecond)
@@ -245,19 +240,6 @@ func latestSnapshotMessage(snapshot *session.Session, role domainmessage.Role, c
 		}
 	}
 	return domainmessage.Message{}, false
-}
-
-func messageRecordID(message domainmessage.Message, partIndex, partCount int) string {
-	if partIndex < len(message.RecordIDs) && message.RecordIDs[partIndex] != "" {
-		return message.RecordIDs[partIndex]
-	}
-	if message.ID == "" {
-		return ""
-	}
-	if partCount <= 1 {
-		return message.ID
-	}
-	return fmt.Sprintf("%s:%06d", message.ID, partIndex)
 }
 
 func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) []repository.MessageRecord {

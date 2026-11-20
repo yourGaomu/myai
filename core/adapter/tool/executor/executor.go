@@ -135,11 +135,12 @@ func permissionAskFromStream(stream modelport.ChatStreamHandler) toolcommand.Per
 	}
 	return func(request toolcommand.PermissionRequest) bool {
 		return stream.OnToolAsk(modelport.ToolPermissionRequest{
-			ToolCallID: request.ToolCallID,
-			Name:       request.Name,
-			Arguments:  request.Arguments,
-			Permission: request.Permission,
-			Mode:       string(request.Mode),
+			ToolCallID:          request.ToolCallID,
+			Name:                request.Name,
+			Arguments:           request.Arguments,
+			Permission:          request.Permission,
+			Mode:                string(request.Mode),
+			RequireFreshConsent: request.RequireFreshConsent,
 		})
 	}
 }

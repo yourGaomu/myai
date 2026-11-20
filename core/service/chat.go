@@ -102,6 +102,7 @@ type CompactInfo = compactionresult.CompactInfo
 type ChatResponse struct {
 	SessionID string
 	RunID     string
+	MessageID string
 	Result    llm.ChatResult
 	Context   ContextInfo
 	Compact   CompactInfo
@@ -1011,6 +1012,7 @@ func (s *ChatService) generateAssistantForSession(ctx context.Context, current *
 	return ChatResponse{
 		SessionID: response.SessionID,
 		RunID:     response.RunID,
+		MessageID: response.MessageID,
 		Result:    response.Result,
 		Context:   response.Context,
 		Compact:   response.Compact,

@@ -23,6 +23,7 @@ type Tasks struct {
 
 type Resume struct {
 	Task      domainsubagent.Task
+	MessageID string
 	Content   string
 	Reasoning string
 	Usage     modelport.TokenUsage

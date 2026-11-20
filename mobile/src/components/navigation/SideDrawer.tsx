@@ -9,6 +9,7 @@ import type { ButtonFeedback } from "../../types/ui";
 import { groupSessionsByDate } from "../../utils/session";
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { PulseDot } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
 import { useDrawerStyles } from "./sideDrawerStyles";
 
@@ -115,7 +116,7 @@ export function SideDrawer(props: Props) {
             <View style={styles.profileText}>
               <Text numberOfLines={1} style={styles.name}>{displayName}</Text>
               <View style={styles.statusRow}>
-                <View style={[styles.statusDot, !props.connected && styles.statusDotOff]} />
+                <PulseDot color={props.connected ? palette.ok : palette.err} pulse={props.connected} size={7} />
                 <Text numberOfLines={1} style={styles.statusText}>{device} · {props.connected ? "在线" : "离线"}</Text>
               </View>
             </View>
@@ -190,6 +191,7 @@ function NavRow({ active, badge, icon, label, onPress }: { active?: boolean; bad
   const styles = useDrawerStyles();
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.nav, active && styles.navActive, pressed && styles.pressed]}>
+      {active ? <View style={styles.navActiveBar} /> : null}
       <Feather color={active ? palette.brandLight : palette.ink2} name={icon} size={19} />
       <Text numberOfLines={1} style={styles.navText}>{label}</Text>
       {badge ? (

@@ -84,8 +84,10 @@ func (w Writer) SaveAssistantMessage(ctx context.Context, current *session.Sessi
 	var errs []error
 	mapper := chatmessagemapper.Mapper{IDs: w.IDs}
 	if w.Messages != nil {
-		if err := w.Messages.SaveMessage(ctx, mapper.AssistantMessageFromSession(current, result, createdAt)); err != nil {
-			errs = append(errs, err)
+		for _, record := range mapper.AssistantTurn(current.ID, result, createdAt) {
+			if err := w.Messages.SaveMessage(ctx, record); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	if w.Sessions != nil {

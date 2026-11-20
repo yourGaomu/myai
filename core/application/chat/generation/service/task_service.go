@@ -133,12 +133,13 @@ func (s TaskService) Generate(ctx context.Context, command generationcommand.Gen
 	})
 	response.RunID = runID
 	if resultErr == nil || response.Result.Content != "" {
-		// Persist the final answer in the run log so disconnected consumers can
-		// recover it even before asynchronous chat-message persistence catches up.
-		if runID != "" && s.Runs != nil && response.Result.Content != "" {
+		// Persist the final answer for disconnected consumers. Reasoning-only
+		// replies also get an answer marker when there is a committed row.
+		if runID != "" && s.Runs != nil && (response.Result.Content != "" || response.MessageID != "") {
 			content, truncated := boundedText(response.Result.Content, maxReasoningEventBytes)
 			event, err := s.Runs.Append(context.WithoutCancel(ctx), agentruncommand.Append{
-				RunID: runID, Type: domainagentrun.EventTypeAnswer, Title: "Assistant answer", Content: content, Truncated: truncated,
+				RunID: runID, Type: domainagentrun.EventTypeAnswer, Title: "Assistant answer",
+				Content: content, MessageID: response.MessageID, Truncated: truncated,
 			})
 			if err != nil {
 				s.reportRunError(err)

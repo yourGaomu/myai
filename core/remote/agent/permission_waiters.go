@@ -3,9 +3,10 @@ package agent
 import "sync"
 
 type permissionRuleTarget struct {
-	sessionID  string
-	toolName   string
-	permission string
+	sessionID           string
+	toolName            string
+	permission          string
+	requireFreshConsent bool
 }
 
 type permissionWaiterRegistry struct {
@@ -98,16 +99,13 @@ func (r *permissionWaiterRegistry) rememberBackground(key string, target permiss
 	r.mu.Unlock()
 }
 
-func (r *permissionWaiterRegistry) consumeBackground(key string) (permissionRuleTarget, bool) {
+func (r *permissionWaiterRegistry) backgroundTarget(key string) (permissionRuleTarget, bool) {
 	if r == nil || key == "" {
 		return permissionRuleTarget{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	target, ok := r.bgTargets[key]
-	if ok {
-		delete(r.bgTargets, key)
-	}
 	return target, ok
 }
 

@@ -57,7 +57,7 @@ func TestSharedAssetEventUsesSameIDAsPersistedBatch(t *testing.T) {
 		Stream: modelport.ChatStreamHandler{
 			OnAsset: func(asset domaintool.SharedAsset) { streamed = asset },
 			OnToolAsk: func(request modelport.ToolPermissionRequest) bool {
-				approved = request.Name == "share_file" && request.Permission == tooldef.PermissionExecute && request.ToolCallID == "image-call"
+				approved = request.Name == "share_file" && request.Permission == tooldef.PermissionExecute && request.ToolCallID == "image-call" && request.RequireFreshConsent
 				return approved
 			},
 		},

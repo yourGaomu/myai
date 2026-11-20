@@ -1,15 +1,15 @@
 package port
 
 import (
-	domainmessage "myai/core/domain/message"
 	"time"
 
 	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
+	sessionport "myai/core/port/session"
 )
 
 type ResponseMemoryStore interface {
-	AppendAssistantMessageTo(sessionID string, message domainmessage.Message) error
+	sessionport.TranscriptStore
 	AddUsageTo(sessionID string, usage modelport.TokenUsage) error
 	SetCurrentPlanForSession(sessionID string, currentPlan *agentplan.Plan) error
 }

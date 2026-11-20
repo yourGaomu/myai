@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ComponentProps } from "react";
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import type { AssetSummary, ChangeEntry, FileEntry, FileReadResultPayload } from "../../protocol";
@@ -10,6 +10,7 @@ import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { useListStyles } from "../common/listStyles";
+import { FadeSlideView, SkeletonRows } from "../common/MotionEffects";
 import { Segmented } from "../common/Segmented";
 import { FilePreview } from "./FilePreview";
 
@@ -116,7 +117,7 @@ export function FilesPanel(props: Props) {
               ))}
             </Text>
           </View>
-          <View style={list.bleed}>
+          <FadeSlideView direction="up" keyProp={`${tab}-${filePath}`} style={list.bleed}>
             {fileParent ? (
               <Row disabled={pendingFiles} icon="corner-left-up" onPress={props.onGoToParent} sub="上一级" title=".." />
             ) : null}
@@ -174,7 +175,7 @@ export function FilesPanel(props: Props) {
                 );
               })
             )}
-          </View>
+          </FadeSlideView>
         </>
       ) : (
         <>
@@ -266,15 +267,8 @@ function Row({
   );
 }
 
-function Loading({ text }: { text: string }) {
-  const { palette } = useAppTheme();
-  const list = useListStyles();
-  return (
-    <View style={list.loading}>
-      <ActivityIndicator color={palette.ink2} size="small" />
-      <Text style={list.loadingText}>{text}</Text>
-    </View>
-  );
+function Loading({ text: _text }: { text: string }) {
+  return <SkeletonRows count={4} />;
 }
 
 const makeStyles = ({ palette }: AppTheme) =>

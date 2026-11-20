@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import type { SubagentTask } from "../../../protocol";
 import type { ButtonFeedback } from "../../../types/ui";
 import type { ToolCallStep } from "../../../utils/chatRenderItems";
+import { subagentLaunchLabel, subagentLaunchState } from "../../../utils/subagentLaunch";
 import { parseSharedAssets } from "../../../utils/toolAssets";
 import { parseToolArgs, toolCommand, toolIcon, toolKind, toolTarget, toolVerb } from "../../../utils/toolDisplay";
 import { fontFamily, font, radius, weight } from "../../../constants/theme";
@@ -16,29 +17,25 @@ import { SubagentSummary } from "./SubagentSummary";
 type Props = {
   buttonFeedback: ButtonFeedback;
   onInspectSubagent?: (taskID: string) => void;
-  subagentTasks?: SubagentTask[];
+  task?: SubagentTask;
   tool: ToolCallStep;
+  turnRunning: boolean;
 };
 
 // 时间线里的一次工具调用：图标 + 动词 + 对象，点开看请求参数和返回内容。
-export function ToolStepRow({ buttonFeedback, onInspectSubagent, subagentTasks, tool }: Props) {
+export function ToolStepRow({ buttonFeedback, onInspectSubagent, task, tool, turnRunning }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
-  const failed = Boolean(tool.error || tool.status === "error");
-  const running = tool.status === "running";
-  const [open, setOpen] = useState(failed);
   const kind = toolKind(tool.name);
+  const launch = kind === "subagent_spawn" ? subagentLaunchState(tool, task, turnRunning) : undefined;
+  const failed = launch ? launch === "failed" : Boolean(tool.error || tool.status === "error");
+  const running = launch ? launch === "starting" : tool.status === "running";
+  const [open, setOpen] = useState(failed);
   const target = useMemo(() => toolTarget(tool.name, tool.arguments), [tool.arguments, tool.name]);
   const request = useMemo(() => requestText(tool), [tool]);
   const sharedAssets = parseSharedAssets(tool.name, tool.result || "");
   const output = tool.error || tool.result || "";
-
-  // 按 parent_tool_call_id 精确配对子代理任务
-  const task = useMemo(() => {
-    const callID = tool.toolCallID || tool.id;
-    return subagentTasks?.find((t) => t.parent_tool_call_id && (t.parent_tool_call_id === callID || t.parent_tool_call_id === tool.id));
-  }, [subagentTasks, tool.id, tool.toolCallID]);
-
+  const label = launch ? subagentLaunchLabel[launch] : toolVerb(kind, failed ? "error" : running ? "running" : "done");
   const verbStyle = failed ? styles.verbError : running ? styles.verbRunning : styles.verbDone;
 
   return (
@@ -57,7 +54,7 @@ export function ToolStepRow({ buttonFeedback, onInspectSubagent, subagentTasks, 
           )}
         </View>
         <Text numberOfLines={1} style={styles.label}>
-          <Text style={verbStyle}>{toolVerb(kind, failed ? "error" : running ? "running" : "done")}</Text>
+          <Text style={verbStyle}>{label}</Text>
           <Text style={kind === "other" ? null : styles.mono}> {target}</Text>
         </Text>
         {!running && tool.duration ? <Text style={styles.meta}>{tool.duration}</Text> : null}
@@ -81,7 +78,7 @@ export function ToolStepRow({ buttonFeedback, onInspectSubagent, subagentTasks, 
           </Text>
           <View style={styles.divider} />
           <Text style={[styles.detailLabel, failed && styles.detailLabelError]}>
-            {failed ? `执行异常${tool.errorCode ? ` · ${tool.errorCode}` : ""}` : running ? "执行中" : "返回"}
+            {failed ? `执行异常${tool.errorCode ? ` · ${tool.errorCode}` : ""}` : running ? "执行中" : launch && tool.result === undefined ? "启动状态" : "返回"}
             {tool.truncated ? " · 已截断" : ""}
           </Text>
           {sharedAssets.length > 0 && !failed ? (

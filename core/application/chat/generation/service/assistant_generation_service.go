@@ -95,17 +95,25 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	if commitResult.Session != nil {
 		command.Session = commitResult.Session
 	}
-	if s.Persistence != nil && !command.Internal {
+	var messageID string
+	if committed := commitResult.AssistantMessage; committed != nil && !command.Internal {
+		// Persist the exact message assigned by the transcript store. The
+		// result's display reasoning can include several earlier samples.
+		persistedResult := result
+		persistedResult.Message = committed
 		if durable, ok := s.Persistence.(generationport.DurablePersistence); ok {
-			if persistErr := durable.AcceptAssistant(ctx, command.Session, result); persistErr != nil {
+			if persistErr := durable.AcceptAssistant(ctx, command.Session, persistedResult); persistErr != nil {
 				err = errors.Join(err, fmt.Errorf("accept assistant persistence: %w", persistErr))
 			}
-		} else {
-			s.Persistence.PersistAssistant(command.Session, result)
+		} else if s.Persistence != nil {
+			s.Persistence.PersistAssistant(command.Session, persistedResult)
+		}
+		if err == nil {
+			messageID = committed.AssistantReplyRecordID()
 		}
 	}
 	return generationresult.GenerationResponse{
-		SessionID: command.Session.ID, Result: result, Context: s.contextInfo(command.Session),
+		SessionID: command.Session.ID, MessageID: messageID, Result: result, Context: s.contextInfo(command.Session),
 		Compact: compactInfo, Plan: commitResult.Plan,
 	}, err
 }

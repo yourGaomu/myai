@@ -960,7 +960,7 @@ func TestResumeClaimsUnreadTaskAndContinuesParent(t *testing.T) {
 	if continuation.request.Task.ID != task.ID || continuation.request.Task.Unread {
 		t.Fatalf("unexpected continuation request: %#v", continuation.request)
 	}
-	if result.Content != "parent continued" || result.Task.Unread {
+	if result.Content != "parent continued" || result.MessageID != "parent-answer" || result.Task.Unread {
 		t.Fatalf("unexpected resume result: %#v", result)
 	}
 	persisted, err := repository.GetTask(context.Background(), task.ID)
@@ -1154,7 +1154,7 @@ func (continuation *fakeParentContinuation) Continue(_ context.Context, request 
 	if continuation.err != nil {
 		return subagentport.ParentContinuationResult{}, continuation.err
 	}
-	return subagentport.ParentContinuationResult{Content: "parent continued"}, nil
+	return subagentport.ParentContinuationResult{Content: "parent continued", MessageID: "parent-answer"}, nil
 }
 
 type fakeWorkspaceManager struct{ conflict bool }

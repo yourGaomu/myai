@@ -8,14 +8,13 @@ type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessag
 
 type Args = {
   activeRequestIDRef: RefObject<string>;
-  clearSessionPendingRequest: (sessionID: string, requestID?: string) => void;
-  historySessionIDRef: RefObject<string>;
+  isSessionBusy: (sessionID: string) => boolean;
+  sessionIDRef: RefObject<string>;
   requestSessionMapRef: RefObject<Record<string, string>>;
   resetActiveAssistant: (sessionID: string) => void;
   sendEnvelope: SendEnvelope;
   sessionID: string;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
-  setSessionPendingPermission: (sessionID: string, permission: null) => void;
   setSessionPendingRequest: (sessionID: string, requestID: string) => void;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
@@ -24,14 +23,13 @@ type Args = {
 // 封装会话级命令。每个动作只负责发送协议和维护 pending，最终 Session 状态由服务端响应回填。
 export function useSessionSettingsActions({
   activeRequestIDRef,
-  clearSessionPendingRequest,
-  historySessionIDRef,
+  isSessionBusy,
+  sessionIDRef,
   requestSessionMapRef,
   resetActiveAssistant,
   sendEnvelope,
   sessionID,
   setSessionLastUsage,
-  setSessionPendingPermission,
   setSessionPendingRequest,
   startPending,
   stopPending,
@@ -176,43 +174,24 @@ export function useSessionSettingsActions({
 
   const executePlan = useCallback(() => {
     const targetSessionID = sessionID.trim();
-    if (!targetSessionID) {
-      return;
-    }
+    if (!targetSessionID || sessionIDRef.current !== targetSessionID || isSessionBusy(targetSessionID)) return;
 
-    // Plan 执行会持续返回 delta 和步骤更新，先建立 request -> session 映射才能正确归并流式事件。
     const requestID = newRequestID();
-    activeRequestIDRef.current = requestID;
-    requestSessionMapRef.current[requestID] = targetSessionID;
-    resetActiveAssistant(targetSessionID);
-    historySessionIDRef.current = targetSessionID;
-    setSessionPendingPermission(targetSessionID, null);
-    setSessionLastUsage(targetSessionID, null);
-    setSessionPendingRequest(targetSessionID, requestID);
-    startPending("plan");
     if (!sendEnvelope("session_plan_execute", {
       request_id: requestID,
       session_id: targetSessionID,
       payload: { session_id: targetSessionID },
-    })) {
-      activeRequestIDRef.current = "";
-      delete requestSessionMapRef.current[requestID];
-      clearSessionPendingRequest(targetSessionID, requestID);
-      stopPending("plan");
-    }
+    })) return;
+
+    activeRequestIDRef.current = requestID;
+    requestSessionMapRef.current[requestID] = targetSessionID;
+    resetActiveAssistant(targetSessionID);
+    setSessionLastUsage(targetSessionID, null);
+    setSessionPendingRequest(targetSessionID, requestID);
+    startPending("plan");
   }, [
-    activeRequestIDRef,
-    clearSessionPendingRequest,
-    historySessionIDRef,
-    requestSessionMapRef,
-    resetActiveAssistant,
-    sendEnvelope,
-    sessionID,
-    setSessionLastUsage,
-    setSessionPendingPermission,
-    setSessionPendingRequest,
-    startPending,
-    stopPending,
+    activeRequestIDRef, isSessionBusy, requestSessionMapRef, resetActiveAssistant, sendEnvelope,
+    sessionID, sessionIDRef, setSessionLastUsage, setSessionPendingRequest, startPending,
   ]);
 
   return {

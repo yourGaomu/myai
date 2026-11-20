@@ -13,4 +13,6 @@ type ToolPermissionRequest struct {
 	Arguments  string
 	Permission tooldef.Permission
 	Mode       string
+	// RequireFreshConsent is set by the execution policy, not by the model or approver.
+	RequireFreshConsent bool
 }

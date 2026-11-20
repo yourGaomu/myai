@@ -30,6 +30,7 @@ type EventDocument struct {
 	Type         string    `bson:"type"`
 	Title        string    `bson:"title,omitempty"`
 	Content      string    `bson:"content,omitempty"`
+	MessageID    string    `bson:"message_id,omitempty"`
 	ToolName     string    `bson:"tool_name,omitempty"`
 	ToolCallID   string    `bson:"tool_call_id,omitempty"`
 	Arguments    string    `bson:"arguments,omitempty"`

@@ -12,7 +12,7 @@ import type {
   RAGSettings,
   SessionSummary,
 } from "../../protocol";
-import type { KnowledgeBaseChanges } from "../../types/knowledge";
+import type { DocumentImportStatus, KnowledgeBaseChanges } from "../../types/knowledge";
 import type { ButtonFeedback } from "../../types/ui";
 import { ButtonContent } from "../common/ButtonContent";
 import { ResponsiveFormModal } from "../common/ResponsiveFormModal";
@@ -23,6 +23,7 @@ export type KnowledgePanelProps = {
   activeSession?: SessionSummary;
   buttonFeedback: ButtonFeedback;
   categories: KnowledgeCategory[];
+  documentImportStatus: DocumentImportStatus | null;
   documents: KnowledgeDocument[];
   jobs: KnowledgeIndexingJob[];
   knowledgeBases: KnowledgeBase[];
@@ -32,8 +33,10 @@ export type KnowledgePanelProps = {
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
   onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
   onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onDismissDocumentImport: () => void;
   onInsertReference?: (snippet: string) => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
+  onReconcileDocumentImport: () => boolean;
   onRefresh: () => void;
   onRefreshDocuments: () => void;
   onRetryDocument: (knowledgeBaseID: string, jobID: string) => void;
@@ -41,7 +44,7 @@ export type KnowledgePanelProps = {
   onSelectKnowledgeBase: (knowledgeBaseID: string) => void;
   onSetRAG: (settings: RAGSettings) => boolean;
   onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
-  onUploadDocument: () => void;
+  onUploadDocument: (knowledgeBaseID: string, knowledgeBaseName?: string) => void;
   onCancelUpload: () => void;
   uploadingDocument: boolean;
   pendingKnowledge: boolean;
@@ -56,6 +59,7 @@ export function KnowledgePanel({
   activeSession,
   buttonFeedback,
   categories,
+  documentImportStatus,
   documents,
   jobs,
   knowledgeBases,
@@ -65,8 +69,10 @@ export function KnowledgePanel({
   onDeleteCategory,
   onDeleteDocument,
   onDeleteKnowledgeBase,
+  onDismissDocumentImport,
   onInsertReference,
   onMoveCategory,
+  onReconcileDocumentImport,
   onRefresh,
   onRefreshDocuments,
   onRetryDocument,
@@ -105,6 +111,8 @@ export function KnowledgePanel({
     [knowledgeBases],
   );
   const selectedBase = sortedBases.find((base) => base.id === selectedID);
+  const unresolvedImport = documentImportStatus && documentImportStatus.phase !== "complete";
+  const uploadDisabled = !uploadingDocument && Boolean(pendingKnowledge || unresolvedImport);
   const managedCategory = categories.find((category) => category.id === managedCategoryID);
   const availableMoveParents = managedCategory
     ? categories.filter(
@@ -267,29 +275,60 @@ export function KnowledgePanel({
           <View style={styles.docPanelHeader}>
             <Text style={styles.docPanelTitle}>已索引文档</Text>
             <Pressable
-              disabled={pendingKnowledge && !uploadingDocument}
+              disabled={uploadDisabled}
               onPress={() => {
                 if (uploadingDocument) {
                   onCancelUpload();
                 } else if (selectedBase) {
-                  onUploadDocument();
+                  onUploadDocument(selectedBase.id, selectedBase.name);
                 } else if (sortedBases.length > 0) {
-                  selectBase(sortedBases[0].id);
-                  onUploadDocument();
+                  const first = sortedBases[0];
+                  selectBase(first.id);
+                  onUploadDocument(first.id, first.name);
                 } else {
                   setShowCatalogManagement(true);
                 }
               }}
               style={({ pressed }) =>
-                buttonFeedback(
-                  [styles.uploadDocBtn, pendingKnowledge && !uploadingDocument && styles.disabledButton],
-                  pressed,
-                )
+                buttonFeedback([styles.uploadDocBtn, uploadDisabled && styles.disabledButton], pressed)
               }
             >
               <Text style={styles.uploadDocBtnText}>{uploadingDocument ? "取消上传" : "上传文档"}</Text>
             </Pressable>
           </View>
+
+          {documentImportStatus ? (
+            <>
+              <Text accessibilityLiveRegion="polite" style={styles.statusMessage}>
+                {`${documentImportStatus.knowledgeBaseName} / ${documentImportStatus.fileName}\n${documentImportStatus.phase === "checking" ? "正在刷新原知识库的文档列表…" : documentImportStatus.message}`}
+              </Text>
+              {documentImportStatus.phase === "unknown" || documentImportStatus.phase === "review" ? (
+                <View style={styles.docPanelHeader}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (sortedBases.some((base) => base.id === documentImportStatus.knowledgeBaseID)) {
+                        setSelectedID(documentImportStatus.knowledgeBaseID);
+                        setDetailTab(null);
+                        onSelectKnowledgeBase(documentImportStatus.knowledgeBaseID);
+                      }
+                      onReconcileDocumentImport();
+                    }}
+                    style={({ pressed }) => buttonFeedback(styles.uploadDocBtn, pressed)}
+                  >
+                    <Text style={styles.uploadDocBtnText}>检查原知识库</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={onDismissDocumentImport}
+                    style={({ pressed }) => buttonFeedback(styles.uploadDocBtn, pressed)}
+                  >
+                    <Text style={styles.uploadDocBtnText}>已核对，解除提示</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </>
+          ) : null}
 
           {documents.length === 0 ? (
             <View style={styles.emptyDocBox}>
@@ -303,6 +342,7 @@ export function KnowledgePanel({
             documents.map((doc, idx) => {
               const isReady = doc.status === "ready";
               const isFailed = doc.status === "failed";
+              const failedJob = isFailed && jobs.find((job) => job.document_id === doc.id && job.status === "failed");
               const sizeLabel = doc.content_type || "通用文档";
 
               return (
@@ -353,6 +393,17 @@ export function KnowledgePanel({
                         {isReady ? "已解析" : isFailed ? "失败" : "解析中"}
                       </Text>
                     </View>
+                    {failedJob && selectedBase ? (
+                      <Pressable
+                        accessibilityLabel="重试索引"
+                        disabled={pendingKnowledge}
+                        hitSlop={4}
+                        onPress={() => onRetryDocument(selectedBase.id, failedJob.id)}
+                        style={({ pressed }) => buttonFeedback([styles.rowAction, pendingKnowledge && styles.disabledButton], pressed)}
+                      >
+                        <Text style={styles.rowActionText}>重试</Text>
+                      </Pressable>
+                    ) : null}
                     <Pressable
                       hitSlop={6}
                       onPress={() => {

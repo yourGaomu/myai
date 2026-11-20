@@ -1,25 +1,31 @@
-import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import type { UserQuestionState } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { FadeSlideView } from "../common/MotionEffects";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
   onAnswer: (answers: Record<string, string>, cancelled?: boolean) => boolean;
+  onChangeDraft?: (answers: Record<string, string>) => void;
   question: UserQuestionState;
 };
 
 // 对话流内联提问卡片：支持单题/多题分页指示、预设单选、自定义补充说明与跳过取消。
-export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props) {
+export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, question }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(() => question.draftAnswers || {});
+  const answers = onChangeDraft ? question.draftAnswers || localAnswers : localAnswers;
   const [activeIndex, setActiveIndex] = useState(0);
+  const autoAdvance = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(autoAdvance.current), []);
 
   const items = question.questions;
   const total = items.length;
@@ -36,7 +42,13 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
   );
 
   const setAnswer = (id: string, value: string) => {
-    setAnswers((current) => ({ ...current, [id]: value }));
+    const next = { ...answers, [id]: value };
+    if (onChangeDraft) onChangeDraft(next);
+    else setLocalAnswers(next);
+  };
+  const selectQuestion = (index: number) => {
+    clearTimeout(autoAdvance.current);
+    setActiveIndex(index);
   };
 
   return (
@@ -60,7 +72,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
             return (
               <Pressable
                 key={item.id}
-                onPress={() => setActiveIndex(idx)}
+                onPress={() => selectQuestion(idx)}
                 style={[styles.stepTab, selected && styles.stepTabActive, done && !selected && styles.stepTabDone]}
               >
                 <Text style={[styles.stepTabText, selected && styles.stepTabTextActive]}>
@@ -74,7 +86,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
 
       {currentItem ? (
         <ScrollView nestedScrollEnabled style={styles.questions}>
-          <View style={styles.item}>
+          <FadeSlideView direction="right" keyProp={currentItem.id} style={styles.item}>
             <Text style={styles.prompt}>
               {total > 1 ? `${safeIndex + 1}. ` : ""}
               {currentItem.prompt}
@@ -88,9 +100,13 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                   accessibilityState={{ selected }}
                   disabled={question.submitted}
                   onPress={() => {
+                    if (Platform.OS !== "web") {
+                      void Haptics.selectionAsync().catch(() => {});
+                    }
                     setAnswer(currentItem.id, option);
                     if (total > 1 && safeIndex < total - 1) {
-                      setTimeout(() => setActiveIndex(safeIndex + 1), 160);
+                      clearTimeout(autoAdvance.current);
+                      autoAdvance.current = setTimeout(() => setActiveIndex(safeIndex + 1), 160);
                     }
                   }}
                   style={({ pressed }) => buttonFeedback([styles.option, selected && styles.optionSelected], pressed)}
@@ -110,7 +126,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
                 value={answers[currentItem.id] || ""}
               />
             ) : null}
-          </View>
+          </FadeSlideView>
         </ScrollView>
       ) : null}
 
@@ -129,7 +145,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, question }: Props
           </Pressable>
           {total > 1 && safeIndex < total - 1 ? (
             <Pressable
-              onPress={() => setActiveIndex(safeIndex + 1)}
+              onPress={() => selectQuestion(safeIndex + 1)}
               style={({ pressed }) => buttonFeedback([styles.nextButton, styles.flex], pressed)}
             >
               <Text style={styles.nextButtonText}>下一题 ({answeredCount}/{total})</Text>

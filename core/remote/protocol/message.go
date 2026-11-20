@@ -367,6 +367,7 @@ type AssistantDeltaPayload struct {
 }
 
 type AssistantDonePayload struct {
+	MessageID string                               `json:"message_id,omitempty"`
 	Content   string                               `json:"content"`
 	Reasoning string                               `json:"reasoning,omitempty"`
 	Usage     TokenUsage                           `json:"usage,omitempty"`
@@ -407,6 +408,7 @@ type AgentRunEvent struct {
 	Type         string    `json:"type"`
 	Title        string    `json:"title,omitempty"`
 	Content      string    `json:"content,omitempty"`
+	MessageID    string    `json:"message_id,omitempty"`
 	ToolName     string    `json:"tool_name,omitempty"`
 	Arguments    string    `json:"arguments,omitempty"`
 	Status       string    `json:"status,omitempty"`
@@ -441,6 +443,7 @@ type BackgroundTurnEventPayload struct {
 	Sequence   uint64                `json:"sequence"`
 	Kind       string                `json:"kind"`
 	Status     string                `json:"status,omitempty"`
+	MessageID  string                `json:"message_id,omitempty"`
 	Content    string                `json:"content,omitempty"`
 	Reasoning  string                `json:"reasoning,omitempty"`
 	Error      string                `json:"error,omitempty"`
@@ -494,10 +497,11 @@ type ToolResultPayload struct {
 }
 
 type PermissionAskPayload struct {
-	ApprovalID string `json:"approval_id"`
-	Name       string `json:"name"`
-	Arguments  string `json:"arguments"`
-	Permission string `json:"permission"`
+	ApprovalID          string `json:"approval_id"`
+	Name                string `json:"name"`
+	Arguments           string `json:"arguments"`
+	Permission          string `json:"permission"`
+	RequireFreshConsent bool   `json:"require_fresh_consent,omitempty"`
 }
 
 type PermissionResultPayload struct {

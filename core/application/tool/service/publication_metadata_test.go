@@ -33,7 +33,13 @@ func TestExplicitPublicationMetadataRequiresConsentInFullMode(t *testing.T) {
 		t.Fatal("publication metadata bypassed mandatory consent")
 	}
 	asked := 0
-	command.Ask = func(toolcommand.PermissionRequest) bool { asked++; return true }
+	command.Ask = func(request toolcommand.PermissionRequest) bool {
+		asked++
+		if !request.RequireFreshConsent {
+			t.Error("explicit publication metadata must request per-call consent")
+		}
+		return true
+	}
 	if !(PermissionService{}).Allow(command).Allowed || asked != 1 {
 		t.Fatal("publication did not use explicit consent")
 	}

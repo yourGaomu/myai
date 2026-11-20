@@ -2,9 +2,12 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
+import { LinearGradient } from "expo-linear-gradient";
+
 import type { Plan } from "../../protocol";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
+import { ShimmerProgressBar } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
 
 type Props = {
@@ -79,9 +82,12 @@ export function InlinePlanCard({ onExecutePlan, onOpenDetail, pendingExecute = f
       {plan.goal ? <Text style={styles.goal}>{plan.goal}</Text> : null}
 
       {steps.length > 0 ? (
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: isCompleted ? palette.ok : palette.brand }]} />
-        </View>
+        <ShimmerProgressBar
+          active={isRunning}
+          height={5}
+          progress={pct}
+          tone={isCompleted ? "ok" : "brand"}
+        />
       ) : null}
 
       {expanded && steps.length > 0 ? (
@@ -148,6 +154,12 @@ export function InlinePlanCard({ onExecutePlan, onOpenDetail, pendingExecute = f
             onPress={onExecutePlan}
             style={({ pressed }) => [styles.btn, styles.primaryBtn, pressed && styles.pressed, pendingExecute && styles.disabled]}
           >
+            <LinearGradient
+              colors={[palette.brandLight, palette.brand]}
+              end={{ x: 1, y: 0 }}
+              start={{ x: 0, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
             {pendingExecute ? (
               <ActivityIndicator color={palette.inkInverse} size="small" />
             ) : (
@@ -296,6 +308,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       gap: 6,
       justifyContent: "center",
       minHeight: 38,
+      overflow: "hidden",
       paddingHorizontal: 12,
     },
     secondaryBtn: {

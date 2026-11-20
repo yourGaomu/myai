@@ -35,6 +35,10 @@ func (p *rejectingAssistantAcceptance) AcceptAssistant(_ context.Context, curren
 	if err != nil || len(stored.Messages) == 0 || stored.Messages[len(stored.Messages)-1].Text() != result.Content {
 		p.t.Fatalf("assistant was not committed before acceptance: session=%+v error=%v", stored, err)
 	}
+	last := stored.Messages[len(stored.Messages)-1]
+	if result.Message == nil || result.Message.ID == "" || result.Message.ID != last.ID || result.Message.Reasoning != last.Reasoning {
+		p.t.Fatalf("acceptance did not receive the committed message: message=%+v last=%+v", result.Message, last)
+	}
 	return p.err
 }
 
@@ -52,11 +56,61 @@ func TestDurableAssistantRejectionReturnsCompletedAnswerAndError(t *testing.T) {
 		AgentRunner:       AgentLoopService{Sessions: memory, Contexts: pendingContextProvider{}},
 		ResponseCommitter: ResponseCommitService{Memory: memory}, Persistence: persistence,
 	}).Generate(context.Background(), generationcommand.AssistantGeneration{Session: current})
-	if !errors.Is(err, wantErr) || response.SessionID != "session" || response.Result.Content != "completed answer" {
-		t.Fatalf("completed answer or persistence error lost: response=%+v error=%v", response, err)
+	if !errors.Is(err, wantErr) || response.SessionID != "session" || response.Result.Content != "completed answer" || response.MessageID != "" {
+		t.Fatalf("completed answer or persistence error lost, or failed reply received an ID: response=%+v error=%v", response, err)
 	}
 	if model.calls != 1 || persistence.calls != 1 || persistence.legacy != 0 {
 		t.Fatalf("unexpected retries or void fallback: model=%d accept=%d legacy=%d", model.calls, persistence.calls, persistence.legacy)
+	}
+}
+
+type acceptanceModelFunc func(context.Context, modelport.GenerateRequest) (modelport.ChatResult, error)
+
+func (f acceptanceModelFunc) Generate(ctx context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
+	return f(ctx, request)
+}
+
+func TestAssistantGenerationOmitsReplyIDForBlankAndInternalAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		content  string
+		internal bool
+	}{
+		{name: "blank"},
+		{name: "internal", content: "plan draft", internal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			memory := memoryadapter.NewStore("model")
+			if err := memory.PutSession("session", "model", []domainmessage.Message{domainmessage.Text(domainmessage.RoleUser, "hello")}); err != nil {
+				t.Fatal(err)
+			}
+			current, err := memory.Snapshot("session")
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := acceptanceModelFunc(func(context.Context, modelport.GenerateRequest) (modelport.ChatResult, error) {
+				return modelport.ChatResult{Content: tc.content, Usage: modelport.TokenUsage{TotalTokens: 3}}, nil
+			})
+			persistence := &rejectingAssistantAcceptance{memory: memory, t: t}
+			response, err := (AssistantGenerationService{
+				Models: acceptanceModels{model: model}, AgentRunner: AgentLoopService{Sessions: memory, Contexts: pendingContextProvider{}},
+				ResponseCommitter: ResponseCommitService{Memory: memory}, Persistence: persistence,
+			}).Generate(context.Background(), generationcommand.AssistantGeneration{Session: current, Internal: tc.internal})
+			if err != nil || response.MessageID != "" || response.Result.Content != tc.content {
+				t.Fatalf("unexpected reply identity: response=%+v error=%v", response, err)
+			}
+			stored, err := memory.Snapshot("session")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantWrites := 1
+			if tc.internal {
+				wantWrites = 0
+			}
+			if persistence.calls != wantWrites || len(stored.Messages)-len(current.Messages) != wantWrites || stored.Usage.TotalTokens != 3 {
+				t.Fatalf("changed history or usage for a reply without an ID: writes=%d messages=%d usage=%+v", persistence.calls, len(stored.Messages), stored.Usage)
+			}
+		})
 	}
 }
 

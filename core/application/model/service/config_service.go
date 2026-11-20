@@ -122,7 +122,11 @@ func (s ConfigService) UpdateConfig(ctx context.Context, command modelcommand.Up
 	if err := s.Repository.SaveConfig(ctx, config); err != nil {
 		return modelresult.ConfigMutation{}, err
 	}
-	s.Registry.SetModelInfo(config.ID, model, modelInfo(config))
+	info := modelInfo(config)
+	// Bootstrap can select a default that was never flagged in persistence.
+	// Editing its credentials or metadata must preserve the runtime marker.
+	info.IsDefault = s.isDefaultModel(config)
+	s.Registry.SetModelInfo(config.ID, model, info)
 	return modelresult.ConfigMutation{Config: config, Message: fmt.Sprintf("Model %s updated.", config.ID)}, nil
 }
 
@@ -138,7 +142,7 @@ func (s ConfigService) SetEnabled(ctx context.Context, command modelcommand.SetE
 		return modelresult.ConfigMutation{Config: config, Message: fmt.Sprintf("Model %s is already %s.", config.ID, enabledLabel(config.Enabled))}, nil
 	}
 	if !command.Enabled {
-		if config.IsDefault {
+		if s.isDefaultModel(config) {
 			return modelresult.ConfigMutation{}, errors.New("cannot disable the default model; select another default model first")
 		}
 		inUse, err := s.isModelInUse(ctx, config.ID)
@@ -207,19 +211,45 @@ func (s ConfigService) DeleteConfig(ctx context.Context, command modelcommand.De
 		return modelresult.ConfigMutation{}, errors.New("model config dependencies are nil")
 	}
 	modelID := strings.TrimSpace(command.ID)
+	if modelID == "" {
+		return modelresult.ConfigMutation{}, errors.New("model id is empty")
+	}
 	config, err := s.Repository.GetConfig(ctx, modelID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return modelresult.ConfigMutation{}, fmt.Errorf("model not found: %s: %w", modelID, err)
+	}
 	if err != nil {
 		return modelresult.ConfigMutation{}, err
 	}
-	if config.IsDefault {
+	if s.isDefaultModel(config) {
 		return modelresult.ConfigMutation{}, errors.New("cannot delete the default model; select another default model first")
 	}
-	inUse, err := s.isModelInUse(ctx, modelID)
+	if s.Usage == nil {
+		return modelresult.ConfigMutation{}, errors.New("cannot verify session model usage; check the agent configuration")
+	}
+	inUse, err := s.Usage.IsModelInUse(ctx, modelID)
 	if err != nil {
-		return modelresult.ConfigMutation{}, err
+		return modelresult.ConfigMutation{}, fmt.Errorf("cannot verify session model usage: %w", err)
 	}
 	if inUse {
-		return modelresult.ConfigMutation{}, fmt.Errorf("cannot delete model %s because it is used by a session", modelID)
+		return modelresult.ConfigMutation{}, fmt.Errorf("cannot delete model %s because it is used by a session; switch each session that uses it to another enabled model first", modelID)
+	}
+	if config.Enabled {
+		configs, err := s.Repository.ListConfigs(ctx)
+		if err != nil {
+			return modelresult.ConfigMutation{}, fmt.Errorf("cannot verify enabled models: %w", err)
+		}
+		hasOtherEnabled := false
+		for _, other := range configs {
+			otherID := strings.TrimSpace(other.ID)
+			if other.Enabled && otherID != "" && otherID != modelID {
+				hasOtherEnabled = true
+				break
+			}
+		}
+		if !hasOtherEnabled {
+			return modelresult.ConfigMutation{}, errors.New("cannot delete the last enabled model; enable or add another model first")
+		}
 	}
 	if err := s.Repository.DeleteConfig(ctx, modelID); err != nil {
 		return modelresult.ConfigMutation{}, err
@@ -381,6 +411,22 @@ func (s ConfigService) createModel(config domainmodel.Config) (modelport.ChatMod
 		Provider: config.Provider, Protocol: config.Protocol, AuthType: config.AuthType,
 		APIKey: config.APIKey, BaseURL: config.BaseURL, ModelName: config.ModelName,
 	})
+}
+
+func (s ConfigService) isDefaultModel(config domainmodel.Config) bool {
+	if config.IsDefault {
+		return true
+	}
+	if metadata, ok := s.Registry.(modelport.MetadataProvider); ok {
+		info, found := metadata.GetModelInfo(config.ID)
+		return found && info.IsDefault
+	}
+	for _, info := range s.Registry.ListModels() {
+		if info.ID == config.ID && info.IsDefault {
+			return true
+		}
+	}
+	return false
 }
 
 func (s ConfigService) isModelInUse(ctx context.Context, modelID string) (bool, error) {

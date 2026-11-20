@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Updates from "expo-updates";
 
@@ -37,6 +37,7 @@ import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
 import { shortID } from "../../utils/ids";
+import type { ModelDeleteFeedback } from "../../utils/modelDelete";
 import { websocketURL } from "../../utils/relay";
 import { modelDisplayName, normalizePermission, permissionLabel } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
@@ -71,17 +72,21 @@ type Props = {
   intentTraceMessage: string;
   intentTraceError: boolean;
   currentModelID: string;
+  modelDeleteFeedback: ModelDeleteFeedback | null;
   modelMessage: string;
   modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
   normalizedRelayURL: string;
+  connectionStatus: string;
+  pairedRelayURL: string;
+  pairingError: string;
+  pairingPending: boolean;
   onBindCodeChange: (value: string) => void;
   onClose: () => void;
   onCompactSession: () => void;
   onConnect: () => void;
   onDeleteSession: (sessionID: string) => void;
-  onDeviceIDChange: (value: string) => void;
   onExecutePlan: () => void;
   onLoadSession: (sessionID: string) => void;
   onNewSession: () => void;
@@ -134,7 +139,6 @@ type Props = {
   onInspectSubagentTask?: (taskID: string) => void;
   onRefreshSubagents: () => void;
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
-  onUserIDChange: (value: string) => void;
   pendingActions: Record<PendingAction, boolean>;
   plugins: PluginInfo[];
   pluginMessage: string;
@@ -237,17 +241,21 @@ export function SettingsPanel({
   intentTraceMessage,
   intentTraceError,
   currentModelID,
+  modelDeleteFeedback,
   modelMessage,
   modelMessageError,
   deviceID,
   models,
   normalizedRelayURL,
+  connectionStatus,
+  pairedRelayURL,
+  pairingError,
+  pairingPending,
   onBindCodeChange,
   onClose,
   onCompactSession,
   onConnect,
   onDeleteSession,
-  onDeviceIDChange,
   onExecutePlan,
   onLoadSession,
   onNewSession,
@@ -297,7 +305,6 @@ export function SettingsPanel({
   onInspectSubagentTask,
   onRefreshSubagents,
   onUpdateSubagentDefinition,
-  onUserIDChange,
   pendingActions,
   reloadMCP,
   mcpReloading,
@@ -616,30 +623,39 @@ export function SettingsPanel({
     setModelFormOpen(true);
   };
 
+  const modelDeletePending = modelDeleteFeedback?.status === "pending";
+  const modelMutationBusy = pendingActions.models || modelDeletePending;
+  const selectedModelID = activeSession?.model || currentModelID;
+  const selectedModel = activeModel?.id === selectedModelID ? activeModel : models.find((model) => model.id === selectedModelID);
+
   const confirmDeleteModel = (model: ModelSummary) => {
-    const runDelete = () => onDeleteModelConfig(model.id);
-    if (typeof window !== "undefined" && window.confirm) {
-      if (window.confirm(`删除模型 ${modelDisplayName(model)}？`)) {
-        runDelete();
-      }
+    const modelID = model.id;
+    const title = "删除模型配置？";
+    const message = `模型：${modelDisplayName(model)}\n配置 ID：${modelID}\n删除后无法恢复此配置。`;
+    const runDelete = () => onDeleteModelConfig(modelID);
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(`${title}\n\n${message}`)) runDelete();
       return;
     }
-    Alert.alert("删除模型？", modelDisplayName(model), [
+    Alert.alert(title, message, [
       { text: "取消", style: "cancel" },
       { text: "删除", style: "destructive", onPress: runDelete },
     ]);
   };
 
+  const editingRelayAddress = normalizedRelayURL !== pairedRelayURL;
+  const canPair = Boolean(normalizedRelayURL && bindCode.trim()) && !pairingPending;
   const relaySection = (
     <View style={styles.sectionStack}>
       <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="WS" />
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
-        <Text style={styles.settingTitle}>中继服务</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>{websocketURL(normalizedRelayURL)}</Text>
+          <Text style={styles.settingTitle}>当前中继</Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>{websocketURL(pairedRelayURL)}</Text>
+          {!connected ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{connectionStatus}</Text> : null}
         </View>
         <Pressable
-          disabled={pendingActions.connect}
+          disabled={pendingActions.connect || connected}
           onPress={onConnect}
           style={({ pressed }) =>
             buttonFeedback(
@@ -661,17 +677,21 @@ export function SettingsPanel({
       </View>
 
       <TextInput
+        accessibilityLabel="中继配对地址"
         autoCapitalize="none"
         autoCorrect={false}
+        keyboardType="url"
         onChangeText={onRelayURLChange}
-        placeholder="https://relay.mikasa.wiki"
+        placeholder="https://relay.example.com"
         placeholderTextColor={palette.ink4}
         style={styles.input}
         value={relayURL}
       />
-      <Text style={styles.settingMeta}>
-        配对并连接后，即可在对话「+」菜单中上传手机本地文件或图片，单个文件最大 50 MiB。
-      </Text>
+      {editingRelayAddress ? (
+        <Text style={styles.settingMeta}>
+          {normalizedRelayURL ? "改用此地址需要重新配对。" : "请输入有效的中继地址。"}
+        </Text>
+      ) : null}
       <View style={styles.row}>
         <TextInput
           keyboardType="number-pad"
@@ -683,29 +703,15 @@ export function SettingsPanel({
           value={bindCode}
         />
         <Pressable
-          disabled={pendingActions.pair}
+          disabled={!canPair}
           onPress={onPair}
-          style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.pair && styles.disabledButton], pressed)}
+          style={({ pressed }) => buttonFeedback([styles.secondaryButton, !canPair && styles.disabledButton], pressed)}
         >
-          <ButtonContent color={palette.ink1} loading={pendingActions.pair} text={pendingActions.pair ? "配对中" : "配对"} />
+          <ButtonContent color={palette.ink1} loading={pairingPending} text={pairingPending ? "配对中" : "重新配对"} />
         </Pressable>
       </View>
-      <View style={styles.row}>
-        <TextInput
-          onChangeText={onUserIDChange}
-          placeholder="用户标识"
-          placeholderTextColor={palette.ink4}
-          style={[styles.input, styles.flex]}
-          value={userID}
-        />
-        <TextInput
-          onChangeText={onDeviceIDChange}
-          placeholder="设备标识"
-          placeholderTextColor={palette.ink4}
-          style={[styles.input, styles.flex]}
-          value={deviceID}
-        />
-      </View>
+      {pairingError ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{pairingError}</Text> : null}
+      <Text style={styles.settingMeta}>已配对设备 · {userID} / {deviceID}</Text>
     </View>
   );
 
@@ -716,7 +722,7 @@ export function SettingsPanel({
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>模型</Text>
           <Text numberOfLines={2} style={styles.settingMeta}>
-            {activeModel ? modelDisplayName(activeModel) : currentModelID || activeSession?.model || "还没有加载模型"}
+            {selectedModel ? modelDisplayName(selectedModel) : selectedModelID || "还没有加载模型"}
           </Text>
         </View>
         <Pressable
@@ -727,7 +733,7 @@ export function SettingsPanel({
           <ButtonContent color={palette.ink1} loading={pendingActions.models} text={pendingActions.models ? "加载中" : "刷新"} />
         </Pressable>
         <Pressable
-          disabled={pendingActions.models}
+          disabled={modelMutationBusy}
           onPress={() => {
             const nextOpen = !modelFormOpen;
             setModelFormError("");
@@ -740,11 +746,23 @@ export function SettingsPanel({
             }
             setModelFormOpen(nextOpen);
           }}
-          style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, modelMutationBusy && styles.disabledButton], pressed)}
         >
           <ButtonContent color={palette.ink1} text={modelFormOpen ? "取消添加" : "添加第三方模型"} />
         </Pressable>
       </View>
+
+      {modelDeleteFeedback ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={modelDeletePending ? styles.settingMeta : modelDeleteFeedback.status === "error" ? styles.generationMessage : styles.generationSuccess}
+        >
+          {modelDeleteFeedback.modelID} · {modelDeleteFeedback.message}
+        </Text>
+      ) : null}
+      {modelMessage ? (
+        <Text accessibilityLiveRegion="polite" style={modelMessageError ? styles.generationMessage : styles.generationSuccess}>{modelMessage}</Text>
+      ) : null}
 
       {modelFormOpen ? (
         <View style={styles.controlBlock}>
@@ -848,7 +866,7 @@ export function SettingsPanel({
           </View>
           <View style={styles.row}>
             <Pressable
-              disabled={pendingActions.models}
+              disabled={modelMutationBusy}
               onPress={() => {
                 const config = buildModelConfig(Boolean(editingModelID));
                 if (!config) {
@@ -862,12 +880,12 @@ export function SettingsPanel({
                   onAddModelConfig(config);
                 }
               }}
-              style={({ pressed }) => buttonFeedback([styles.secondaryButton, pendingActions.models && styles.disabledButton], pressed)}
+              style={({ pressed }) => buttonFeedback([styles.secondaryButton, modelMutationBusy && styles.disabledButton], pressed)}
             >
               <ButtonContent color={palette.ink1} loading={pendingActions.models} text={editingModelID ? "保存修改" : "保存模型"} />
             </Pressable>
             <Pressable
-              disabled={pendingActions.models}
+              disabled={modelMutationBusy}
               onPress={() => {
                 const config = buildModelConfig(Boolean(editingModelID));
                 if (!config) {
@@ -876,7 +894,7 @@ export function SettingsPanel({
                 onClearModelMessage();
                 onTestModelConfig(config);
               }}
-              style={({ pressed }) => buttonFeedback([styles.settingAction, pendingActions.models && styles.disabledButton], pressed)}
+              style={({ pressed }) => buttonFeedback([styles.settingAction, modelMutationBusy && styles.disabledButton], pressed)}
             >
               <ButtonContent color={palette.ink1} loading={pendingActions.models} text="测试连接" />
             </Pressable>
@@ -888,16 +906,18 @@ export function SettingsPanel({
       {models.length > 0 ? (
         <View style={styles.modelGrid}>
           {models.map((model) => {
-            const selected = model.id === currentModelID;
+            const selected = model.id === selectedModelID;
             const disabled = model.enabled === false;
+            const deleting = modelDeletePending && modelDeleteFeedback.modelID === model.id;
             return (
               <View key={model.id} style={[styles.modelChip, selected && styles.modelChipActive, disabled && styles.disabledButton]}>
                 <Pressable
-                  disabled={disabled || selected || pendingActions.models}
+                  disabled={disabled || selected || modelMutationBusy}
                   onPress={() => onSwitchModel(model.id)}
                   style={({ pressed }) => buttonFeedback([styles.modelInfoButton], pressed)}
                 >
                   <Text style={styles.modelTitle}>{modelDisplayName(model)}{model.is_default ? " · 默认" : ""}</Text>
+                  <Text style={styles.modelMeta}>配置 ID：{model.id}</Text>
                   <Text style={styles.modelMeta}>{model.provider || "服务商"} / {model.model_name || model.id}</Text>
                   <Text numberOfLines={1} style={styles.modelMeta}>
                     {(model.protocol || "openai-chat-completions")} · {(model.auth_type || "bearer")} · {model.has_api_key ? "已配置密钥" : "无密钥"}
@@ -906,17 +926,22 @@ export function SettingsPanel({
                   {model.base_url ? <Text numberOfLines={1} style={styles.modelMeta}>{model.base_url}</Text> : null}
                 </Pressable>
                 <View style={styles.modelActions}>
-                  <Pressable disabled={pendingActions.models} onPress={() => onSetDefaultModel(model.id)} style={({ pressed }) => buttonFeedback([styles.modelAction, model.is_default && styles.modelActionActive, pendingActions.models && styles.disabledButton], pressed)}>
+                  <Pressable disabled={modelMutationBusy} onPress={() => onSetDefaultModel(model.id)} style={({ pressed }) => buttonFeedback([styles.modelAction, model.is_default && styles.modelActionActive, modelMutationBusy && styles.disabledButton], pressed)}>
                     <Text style={styles.modelActionText}>{model.is_default ? "默认" : "设为默认"}</Text>
                   </Pressable>
-                  <Pressable disabled={pendingActions.models} onPress={() => onSetModelEnabled(model.id, disabled)} style={({ pressed }) => buttonFeedback([styles.modelAction, pendingActions.models && styles.disabledButton], pressed)}>
+                  <Pressable disabled={modelMutationBusy} onPress={() => onSetModelEnabled(model.id, disabled)} style={({ pressed }) => buttonFeedback([styles.modelAction, modelMutationBusy && styles.disabledButton], pressed)}>
                     <Text style={styles.modelActionText}>{disabled ? "启用" : "禁用"}</Text>
                   </Pressable>
-                  <Pressable disabled={pendingActions.models} onPress={() => openModelEditor(model)} style={({ pressed }) => buttonFeedback([styles.modelAction, pendingActions.models && styles.disabledButton], pressed)}>
+                  <Pressable disabled={modelMutationBusy} onPress={() => openModelEditor(model)} style={({ pressed }) => buttonFeedback([styles.modelAction, modelMutationBusy && styles.disabledButton], pressed)}>
                     <Text style={styles.modelActionText}>编辑</Text>
                   </Pressable>
-                  <Pressable disabled={pendingActions.models} onPress={() => confirmDeleteModel(model)} style={({ pressed }) => buttonFeedback([styles.modelActionDanger, pendingActions.models && styles.disabledButton], pressed)}>
-                    <Text style={styles.modelActionText}>删除</Text>
+                  <Pressable
+                    accessibilityLabel={`删除模型配置 ${model.id}`}
+                    disabled={modelMutationBusy}
+                    onPress={() => confirmDeleteModel(model)}
+                    style={({ pressed }) => buttonFeedback([styles.modelActionDanger, modelMutationBusy && styles.disabledButton], pressed)}
+                  >
+                    <Text style={styles.modelActionText}>{deleting ? "删除中…" : "删除"}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -926,7 +951,6 @@ export function SettingsPanel({
       ) : (
         <EmptyBox text={clientToken ? "还没有加载模型，点击刷新试试" : "先完成配对，再加载模型"} />
       )}
-      {modelMessage ? <Text style={modelMessageError ? styles.generationMessage : styles.generationSuccess}>{modelMessage}</Text> : null}
     </View>
   );
 

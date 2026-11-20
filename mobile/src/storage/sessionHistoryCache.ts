@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
+import { importSessionHistorySQLite } from "./sessionHistorySQLite";
 import type {
   SessionHistoryMessage,
   SessionHistoryMetaPayload,
@@ -264,7 +265,7 @@ function loadSQLite(): Promise<SQLiteModule> {
     return Promise.reject(new Error("SQLite is disabled on web"));
   }
   if (!sqlitePromise) {
-    sqlitePromise = (import("expo-sqlite") as unknown as Promise<SQLiteModule>).catch((err) => {
+    sqlitePromise = (importSessionHistorySQLite() as unknown as Promise<SQLiteModule>).catch((err) => {
       sqlitePromise = null;
       throw err;
     });

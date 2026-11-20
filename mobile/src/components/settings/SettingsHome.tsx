@@ -1,10 +1,13 @@
 import type { ComponentProps } from "react";
 import { Fragment } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
+import { PulseDot } from "../common/MotionEffects";
 
 export type SettingsSection =
   | "appearance"
@@ -53,21 +56,39 @@ export const settingsSectionTitles: Record<SettingsSection, string> = {
   subagent: "子代理",
 };
 
-// 设置首页：设备卡片 + 分组列表，点一行进入对应详情。
+function tapHaptic() {
+  if (Platform.OS !== "web") {
+    void Haptics.selectionAsync().catch(() => {});
+  }
+}
+
+// 设置首页：流光设备名片 + 分组列表，点一行进入对应详情。
 export function SettingsHome({ connected, deviceID, groups, onOpenSection, relayHost, versionLabel }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
 
   return (
     <View>
-      <Pressable onPress={() => onOpenSection("connection")} style={({ pressed }) => [styles.device, pressed && styles.pressed]}>
+      <Pressable
+        onPress={() => {
+          tapHaptic();
+          onOpenSection("connection");
+        }}
+        style={({ pressed }) => [styles.device, pressed && styles.devicePressed]}
+      >
         <View style={styles.deviceIcon}>
-          <Feather color={palette.brandLight} name="monitor" size={22} />
+          <LinearGradient
+            colors={[palette.brandLight, palette.brandDark]}
+            end={{ x: 1, y: 1 }}
+            start={{ x: 0, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <Feather color={palette.inkInverse} name="monitor" size={21} />
         </View>
         <View style={styles.flex}>
           <Text numberOfLines={1} style={styles.deviceName}>{deviceID.trim() || "电脑"}</Text>
           <View style={styles.deviceStatus}>
-            <View style={[styles.dot, !connected && styles.dotOff]} />
+            <PulseDot color={connected ? palette.ok : palette.err} pulse={connected} size={7} />
             <Text numberOfLines={1} style={styles.deviceMeta}>{connected ? "在线" : "离线"} · {relayHost || "未设置中继"}</Text>
           </View>
         </View>
@@ -82,11 +103,16 @@ export function SettingsHome({ connected, deviceID, groups, onOpenSection, relay
               <Pressable
                 accessibilityRole="button"
                 key={row.key}
-                onPress={() => onOpenSection(row.key)}
+                onPress={() => {
+                  tapHaptic();
+                  onOpenSection(row.key);
+                }}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}
               >
                 {index > 0 ? <View style={styles.divider} /> : null}
-                <Feather color={palette.ink2} name={row.icon} size={19} />
+                <View style={styles.rowIconBox}>
+                  <Feather color={palette.brandLight} name={row.icon} size={16} />
+                </View>
                 <Text numberOfLines={1} style={styles.rowLabel}>{row.label}</Text>
                 {row.value ? <Text numberOfLines={1} style={styles.rowValue}>{row.value}</Text> : null}
                 <Feather color={palette.ink4} name="chevron-right" size={16} />
@@ -105,21 +131,28 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
   StyleSheet.create({
     flex: { flex: 1, minWidth: 0 },
     pressed: { backgroundColor: palette.pressed },
+    devicePressed: { backgroundColor: palette.pressed, transform: [{ scale: 0.985 }] },
     device: {
       alignItems: "center",
       backgroundColor: palette.surface1,
-      borderColor: palette.hairline,
+      borderColor: palette.brandDeep,
       borderRadius: radius.lg + 2,
       borderWidth: 1,
       flexDirection: "row",
       gap: 12,
       padding: 14,
     },
-    deviceIcon: { alignItems: "center", backgroundColor: palette.brandWash, borderRadius: radius.md, height: 44, justifyContent: "center", width: 44 },
+    deviceIcon: {
+      alignItems: "center",
+      backgroundColor: palette.brandWash,
+      borderRadius: radius.md,
+      height: 44,
+      justifyContent: "center",
+      overflow: "hidden",
+      width: 44,
+    },
     deviceName: { color: palette.ink1, fontSize: font.bodyLg, fontWeight: weight.semibold },
-    deviceStatus: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 2 },
-    dot: { backgroundColor: palette.ok, borderRadius: radius.pill, height: 7, width: 7 },
-    dotOff: { backgroundColor: palette.err },
+    deviceStatus: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 3 },
     deviceMeta: { color: palette.ink2, flexShrink: 1, fontSize: font.caption },
     groupLabel: { color: palette.ink3, fontSize: font.label - 0.5, fontWeight: weight.medium, paddingBottom: 7, paddingLeft: 16, paddingTop: 22 },
     group: {
@@ -129,8 +162,18 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
       borderWidth: 1,
       overflow: "hidden",
     },
-    row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 50, paddingHorizontal: 14 },
-    divider: { backgroundColor: palette.hairline, height: 1, left: 45, position: "absolute", right: 0, top: 0 },
+    row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 13 },
+    rowIconBox: {
+      alignItems: "center",
+      backgroundColor: palette.well,
+      borderColor: palette.hairline,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      height: 30,
+      justifyContent: "center",
+      width: 30,
+    },
+    divider: { backgroundColor: palette.hairline, height: 1, left: 55, position: "absolute", right: 0, top: 0 },
     rowLabel: { color: palette.ink1, flex: 1, fontSize: font.body },
     rowValue: { color: palette.ink3, fontSize: font.label + 0.5, maxWidth: "46%" },
     version: { color: palette.ink4, fontSize: font.caption, paddingBottom: 8, paddingTop: 22, textAlign: "center" },

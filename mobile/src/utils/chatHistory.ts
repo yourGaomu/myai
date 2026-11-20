@@ -9,6 +9,7 @@ export function historyMessageToChatItem(
   const role = chatRoleFromHistory(message.role);
   return {
     id: message.id || newRequestID(),
+    historyID: message.id || undefined,
     attachments: role === "user" ? parseAttachedFiles(message.content || "") : undefined,
     createdAt: message.created_at,
     role,

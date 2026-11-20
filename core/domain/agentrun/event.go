@@ -30,6 +30,7 @@ type Event struct {
 	Type         EventType
 	Title        string
 	Content      string
+	MessageID    string // Committed assistant history row for an answer event.
 	ToolName     string
 	ToolCallID   string
 	Arguments    string
