@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,22 +17,29 @@ import (
 	"myai/core/llm"
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	tooldef "myai/core/tool/tool"
 )
 
 type backgroundControlFacade struct {
 	ChatFacade
-	mu                sync.Mutex
-	permissionPending bool
-	questionPending   bool
+	mu                 sync.Mutex
+	permissionPending  bool
+	permissionAllowed  bool
+	onPermissionResult func()
+	questionPending    bool
 }
 
-func (f *backgroundControlFacade) ResolveBackgroundPermission(_ context.Context, sessionID, turnID, approvalID string, _ bool) error {
+func (f *backgroundControlFacade) ResolveBackgroundPermission(_ context.Context, sessionID, turnID, approvalID string, allowed bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.permissionPending || sessionID != "session" || turnID != "turn" || approvalID != "approval" {
 		return errors.New("no matching approval")
 	}
 	f.permissionPending = false
+	f.permissionAllowed = allowed
+	if f.onPermissionResult != nil {
+		f.onPermissionResult()
+	}
 	return nil
 }
 func (f *backgroundControlFacade) ResolveBackgroundQuestion(_ context.Context, sessionID, turnID, questionID string, answer domaininteraction.Answer) error {
@@ -100,14 +108,89 @@ func TestBackgroundReplyFacadeValidatesIdentityAndOnlyFirstAnswerWins(t *testing
 	}
 }
 
+func TestBackgroundPermissionHonorsConsentAndRememberedScope(t *testing.T) {
+	for _, scope := range []string{"session_tool", "session_permission"} {
+		t.Run(scope, func(t *testing.T) {
+			ctx := context.Background()
+			facade := &backgroundControlFacade{}
+			a := &Agent{chatService: facade, runtimes: newSessionRuntimeManager(), permissionWaiters: newPermissionWaiterRegistry()}
+			request := llm.ToolPermissionRequest{Name: "fixture", Permission: tooldef.PermissionExecute}
+			event := service.BackgroundTurnEvent{Kind: "permission_ask", SessionID: "session", TurnID: "turn", ApprovalID: "approval", Permission: &request}
+			runtime := a.runtimes.get(event.SessionID)
+			key := bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID)
+			// The service's permission_resolved event may be handled before
+			// ResolveBackgroundPermission returns to the reply handler.
+			facade.onPermissionResult = func() {
+				resolved := event
+				resolved.Kind, resolved.Permission = "permission_resolved", nil
+				a.handleBackgroundPermissionEvent(ctx, resolved)
+			}
+			start := func(fresh, wantReuse bool) {
+				t.Helper()
+				request.RequireFreshConsent = fresh
+				facade.permissionPending = true
+				facade.permissionAllowed = false
+				if got := a.handleBackgroundPermissionEvent(ctx, event); got != wantReuse || facade.permissionPending == wantReuse || facade.permissionAllowed != wantReuse {
+					t.Fatalf("fresh=%v: reused=%v, pending=%v, allowed=%v; want reuse=%v", fresh, got, facade.permissionPending, facade.permissionAllowed, wantReuse)
+				}
+			}
+			reply := func(allowed bool) {
+				t.Helper()
+				if err := replyToTestPermission(t, a, event.TurnID, event.SessionID, event.ApprovalID, scope, allowed); err != nil {
+					t.Fatal(err)
+				}
+				if facade.permissionPending || facade.permissionAllowed != allowed {
+					t.Fatalf("reply did not resolve background permission with allowed=%v", allowed)
+				}
+				if _, ok := a.permissionWaiters.backgroundTarget(key); ok {
+					t.Fatal("resolved background target was not retired")
+				}
+			}
+
+			start(false, false)
+			reply(true)
+			start(false, true)
+			start(true, false)
+			reply(false)
+			runtime.clearPermissionRules()
+
+			start(true, false)
+			reply(true)
+			if runtime.isPermissionAllowed(request.Name, string(request.Permission)) {
+				t.Fatal("background per-call approval created a remembered rule")
+			}
+		})
+	}
+}
+
 func TestBackgroundPayloadUsesPublicDTOsAndPreservesApproval(t *testing.T) {
-	event := service.BackgroundTurnEvent{TurnID: "turn", SessionID: "session", ApprovalID: "approval", Permission: &llm.ToolPermissionRequest{Name: "write", Arguments: `{"path":"file"}`}, Question: &domaininteraction.Request{ID: "question", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Proceed?"}}}}
+	event := service.BackgroundTurnEvent{TurnID: "turn", SessionID: "session", ApprovalID: "approval", Permission: &llm.ToolPermissionRequest{Name: "write", Arguments: `{"path":"file"}`, RequireFreshConsent: true}, Question: &domaininteraction.Request{ID: "question", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Proceed?"}}}}
 	payload := backgroundTurnPayload(event)
-	if payload.Permission == nil || payload.Permission.ApprovalID != "approval" || payload.Permission.Name != "write" {
-		t.Fatal("permission identity lost")
+	if payload.Permission == nil || payload.Permission.ApprovalID != "approval" || payload.Permission.Name != "write" || !payload.Permission.RequireFreshConsent {
+		t.Fatal("permission identity or per-call requirement lost")
 	}
 	if payload.Question == nil || payload.Question.QuestionID != "question" || payload.TurnID != "turn" {
 		t.Fatal("question identity lost")
+	}
+
+	for _, fresh := range []bool{true, false} {
+		payload.Permission.RequireFreshConsent = fresh
+		data, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire struct {
+			Permission struct {
+				RequireFreshConsent *bool `json:"require_fresh_consent"`
+			} `json:"permission"`
+		}
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatal(err)
+		}
+		flag := wire.Permission.RequireFreshConsent
+		if fresh && (flag == nil || !*flag) || !fresh && flag != nil {
+			t.Fatalf("require_fresh_consent JSON does not match fresh=%v: %s", fresh, data)
+		}
 	}
 }
 

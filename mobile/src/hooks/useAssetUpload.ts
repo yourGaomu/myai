@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { DocumentPickerAsset } from "expo-document-picker";
 import { File, FileMode } from "expo-file-system";
 import { Platform } from "react-native";
@@ -6,38 +6,45 @@ import { Platform } from "react-native";
 import type { RelayMessage, UploadedAssetPayload } from "../protocol";
 import { inferMimeType } from "../utils/attachments";
 import {
+  AssetUploadCanceledError,
   assetUploadMaxFileBytes,
+  assertAssetUploadScope,
   createAssetUploadClient,
   type AssetUploadSource,
+  type RelayUploadScope,
 } from "../utils/assetUpload";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
 export type UploadMobileAsset = (options: {
   asset: DocumentPickerAsset;
+  scope: RelayUploadScope;
   sessionID: string;
   signal?: AbortSignal;
 }) => Promise<UploadedAssetPayload>;
 
-export function useAssetUpload({ sendEnvelope, isConnected }: { sendEnvelope: SendEnvelope; isConnected: () => boolean }) {
+export function useAssetUpload({ sendEnvelope, relayScopeRef }: {
+  sendEnvelope: SendEnvelope;
+  relayScopeRef: RefObject<RelayUploadScope>;
+}) {
   const senderRef = useRef(sendEnvelope);
-  const connectedRef = useRef(isConnected);
   senderRef.current = sendEnvelope;
-  connectedRef.current = isConnected;
   const clientRef = useRef<ReturnType<typeof createAssetUploadClient> | null>(null);
   if (!clientRef.current) {
     clientRef.current = createAssetUploadClient({
       sendEnvelope: (type, overrides) => senderRef.current(type, overrides),
-      isConnected: () => connectedRef.current(),
+      getScope: () => relayScopeRef.current,
     });
   }
   const client = clientRef.current;
   useEffect(() => () => client.disconnect(), [client]);
 
-  const uploadMobileAsset: UploadMobileAsset = useCallback(async ({ asset, sessionID, signal }) => {
-    if (asset.size !== undefined && (!Number.isSafeInteger(asset.size) || asset.size <= 0)) {
+  const uploadMobileAsset: UploadMobileAsset = useCallback(async ({ asset, scope, sessionID, signal }) => {
+    if (signal?.aborted) throw new AssetUploadCanceledError();
+    assertAssetUploadScope(scope, relayScopeRef.current);
+    if (asset.size != null && (!Number.isSafeInteger(asset.size) || asset.size <= 0)) {
       throw new Error("文件为空或大小无效，请选择非空文件。");
     }
-    if (asset.size !== undefined && asset.size > assetUploadMaxFileBytes) {
+    if (asset.size != null && asset.size > assetUploadMaxFileBytes) {
       throw new Error("文件超过 50 MiB 上限，请选择较小的文件。");
     }
     const metadata = {
@@ -77,8 +84,8 @@ export function useAssetUpload({ sendEnvelope, isConnected }: { sendEnvelope: Se
         throw new Error("无法读取所选文件，请重新选择后上传。");
       }
     }
-    return client.upload({ source, sessionID, signal });
-  }, [client]);
+    return client.upload({ source, scope, sessionID, signal });
+  }, [client, relayScopeRef]);
 
   return {
     uploadMobileAsset,

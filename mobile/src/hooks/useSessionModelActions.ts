@@ -1,9 +1,10 @@
 import { Alert, Platform } from "react-native";
-import { useCallback, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import type { GenerationSettings, RelayMessage, SessionSummary, TokenUsage } from "../protocol";
-import type { PendingAction, PermissionState } from "../types/app";
+import type { GenerationSettings, ModelSummary, RelayMessage, SessionSummary, TokenUsage } from "../protocol";
+import type { PendingAction, RelayScope } from "../types/app";
 import { newRequestID } from "../utils/ids";
+import { createModelDeleteTracker, type ModelDeleteFeedback } from "../utils/modelDelete";
 import { findSessionUsage } from "../utils/session";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
@@ -20,87 +21,135 @@ export type ModelConfigDraft = {
   defaults: GenerationSettings;
 };
 
+type NavigationIntent = {
+  connectionID: string;
+  requestID: string;
+  targetSessionID: string;
+};
+
+type SessionMutation = NavigationIntent & {
+  type: "session_delete" | "session_restore";
+  navigationVersion: number;
+};
+
+export type SessionNavigationState = {
+  current: NavigationIntent | null;
+  version: number;
+  mutations: Map<string, SessionMutation>;
+};
+
 type Args = {
-  activeRequestIDRef: RefObject<string>;
   currentModelID: string;
   historySessionIDRef: RefObject<string>;
   pendingHistorySessionIDRef: RefObject<string>;
+  relayScopeRef: RefObject<RelayScope>;
   requestAssets: (sessionID?: string) => boolean;
   requestSessionHistory: (sessionID?: string) => boolean;
-  resetActiveAssistant: (sessionID: string) => void;
   sendEnvelope: SendEnvelope;
   sessionIDRef: RefObject<string>;
   sessions: SessionSummary[];
+  setModels: (models: ModelSummary[]) => void;
   setSessionLastUsage: (sessionID: string, usage: TokenUsage | null) => void;
-  setSessionPendingPermission: (sessionID: string, permission: PermissionState | null) => void;
   setSessionID: (sessionID: string) => void;
   startPending: (action: PendingAction) => void;
   stopPending: (action: PendingAction) => void;
 };
 
-// 会话和模型命令只发送请求，不直接改最终状态；结果统一由远程响应回填。
+// Session selection is local to this client. Remember only the latest explicit
+// navigation; a result from another request must not change it.
 export function useSessionModelActions({
-  activeRequestIDRef,
   currentModelID,
   historySessionIDRef,
   pendingHistorySessionIDRef,
+  relayScopeRef,
   requestAssets,
   requestSessionHistory,
-  resetActiveAssistant,
   sendEnvelope,
   sessionIDRef,
   sessions,
+  setModels,
   setSessionLastUsage,
-  setSessionPendingPermission,
   setSessionID,
   startPending,
   stopPending,
 }: Args) {
-  const newSession = useCallback(() => {
-    startPending("sessions");
-    if (!sendEnvelope("session_new", { request_id: newRequestID() })) {
-      stopPending("sessions");
+  const [modelDeleteFeedback, setModelDeleteFeedback] = useState<ModelDeleteFeedback | null>(null);
+  const modelDelete = useMemo(() => createModelDeleteTracker({
+    getScope: () => relayScopeRef.current,
+    onFeedback: setModelDeleteFeedback,
+    onDeleted: setModels,
+  }), [relayScopeRef, setModels]);
+  useEffect(() => modelDelete.clear, [modelDelete]);
+
+  const sessionNavigationRef = useRef<SessionNavigationState>({ current: null, version: 0, mutations: new Map() });
+  const beginNavigation = useCallback((targetSessionID: string) => {
+    const intent = {
+      connectionID: relayScopeRef.current.connectionID,
+      requestID: newRequestID(),
+      targetSessionID,
+    };
+    sessionNavigationRef.current.current = intent;
+    sessionNavigationRef.current.version += 1;
+    return intent;
+  }, [relayScopeRef]);
+
+  const sendSessionMutation = useCallback((type: SessionMutation["type"], targetSessionID: string) => {
+    const connectionID = relayScopeRef.current.connectionID;
+    const navigation = sessionNavigationRef.current;
+    for (const [id, mutation] of navigation.mutations) {
+      if (mutation.connectionID !== connectionID) navigation.mutations.delete(id);
     }
-  }, [sendEnvelope, startPending, stopPending]);
+    const requestID = newRequestID();
+    navigation.mutations.set(requestID, { connectionID, requestID, targetSessionID, type, navigationVersion: navigation.version });
+    startPending("sessions");
+    if (!sendEnvelope(type, { request_id: requestID, session_id: targetSessionID, payload: { session_id: targetSessionID } })) {
+      navigation.mutations.delete(requestID);
+      if (!pendingHistorySessionIDRef.current && !navigation.current) stopPending("sessions");
+    }
+  }, [pendingHistorySessionIDRef, relayScopeRef, sendEnvelope, startPending, stopPending]);
+
+  const newSession = useCallback(() => {
+    const intent = beginNavigation("");
+    startPending("sessions");
+    if (!sendEnvelope("session_new", { request_id: intent.requestID })) {
+      sessionNavigationRef.current.current = null;
+      if (!pendingHistorySessionIDRef.current) stopPending("sessions");
+    }
+  }, [beginNavigation, pendingHistorySessionIDRef, sendEnvelope, startPending, stopPending]);
 
   const loadSession = useCallback(
     (nextSessionID: string) => {
       const targetSessionID = nextSessionID.trim();
-      if (!targetSessionID) {
-        return;
-      }
-      setSessionID(targetSessionID);
+      if (!targetSessionID) return;
+
+      const intent = beginNavigation(targetSessionID);
       sessionIDRef.current = targetSessionID;
+      setSessionID(targetSessionID);
       historySessionIDRef.current = "";
-      resetActiveAssistant(targetSessionID);
-      activeRequestIDRef.current = "";
-      setSessionPendingPermission(targetSessionID, null);
-      setSessionLastUsage(targetSessionID, findSessionUsage(sessions, targetSessionID));
+      pendingHistorySessionIDRef.current = "";
+      const usage = findSessionUsage(sessions, targetSessionID);
+      if (usage) setSessionLastUsage(targetSessionID, usage);
       startPending("sessions");
       const loadSent = sendEnvelope("session_load", {
-        request_id: newRequestID(),
+        request_id: intent.requestID,
         session_id: targetSessionID,
         payload: { session_id: targetSessionID },
       });
+      if (!loadSent) sessionNavigationRef.current.current = null;
       const historySent = requestSessionHistory(targetSessionID);
       requestAssets(targetSessionID);
-      if (!loadSent && !historySent) {
-        pendingHistorySessionIDRef.current = "";
-        stopPending("sessions");
-      }
+      if (!loadSent && !historySent) stopPending("sessions");
     },
     [
-      activeRequestIDRef,
+      beginNavigation,
       historySessionIDRef,
       pendingHistorySessionIDRef,
       requestAssets,
       requestSessionHistory,
-      resetActiveAssistant,
       sendEnvelope,
       sessionIDRef,
       sessions,
       setSessionLastUsage,
-      setSessionPendingPermission,
       setSessionID,
       startPending,
       stopPending,
@@ -114,16 +163,7 @@ export function useSessionModelActions({
         return;
       }
 
-      const runDelete = () => {
-        startPending("sessions");
-        if (!sendEnvelope("session_delete", {
-          request_id: newRequestID(),
-          session_id: nextSessionID,
-          payload: { session_id: nextSessionID },
-        })) {
-          stopPending("sessions");
-        }
-      };
+      const runDelete = () => sendSessionMutation("session_delete", nextSessionID);
 
       if (Platform.OS === "web") {
         if (typeof window !== "undefined" && window.confirm("Delete session? This session will move to the recycle bin and can be restored later.")) {
@@ -141,31 +181,21 @@ export function useSessionModelActions({
         },
       ]);
     },
-    [sendEnvelope, startPending, stopPending],
+    [sendSessionMutation],
   );
 
   const restoreSession = useCallback(
     (targetSessionID: string) => {
       const nextSessionID = targetSessionID.trim();
-      if (!nextSessionID) {
-        return;
-      }
-
-      startPending("sessions");
-      if (!sendEnvelope("session_restore", {
-        request_id: newRequestID(),
-        session_id: nextSessionID,
-        payload: { session_id: nextSessionID },
-      })) {
-        stopPending("sessions");
-      }
+      if (nextSessionID) sendSessionMutation("session_restore", nextSessionID);
     },
-    [sendEnvelope, startPending, stopPending],
+    [sendSessionMutation],
   );
 
   const switchModel = useCallback(
     (modelID: string) => {
-      if (!modelID || modelID === currentModelID) {
+      const activeModelID = sessions.find((session) => session.id === sessionIDRef.current)?.model || currentModelID;
+      if (!modelID || modelID === activeModelID) {
         return;
       }
 
@@ -177,7 +207,7 @@ export function useSessionModelActions({
         stopPending("models");
       }
     },
-    [currentModelID, sendEnvelope, startPending, stopPending],
+    [currentModelID, sendEnvelope, sessionIDRef, sessions, startPending, stopPending],
   );
 
   const addModelConfig = useCallback((config: ModelConfigDraft) => {
@@ -228,22 +258,20 @@ export function useSessionModelActions({
   }, [sendEnvelope, startPending, stopPending]);
 
   const deleteModelConfig = useCallback((modelID: string) => {
-    startPending("models");
-    if (!sendEnvelope("model_config_delete", {
-      request_id: newRequestID(),
-      payload: { id: modelID },
-    })) {
-      stopPending("models");
-    }
-  }, [sendEnvelope, startPending, stopPending]);
+    modelDelete.start(modelID, sendEnvelope);
+  }, [modelDelete, sendEnvelope]);
 
   return {
     addModelConfig,
     deleteModelConfig,
     deleteSession,
+    disconnectModelDelete: modelDelete.disconnect,
+    handleModelDeleteMessage: modelDelete.handleMessage,
+    modelDeleteFeedback,
     loadSession,
     newSession,
     restoreSession,
+    sessionNavigationRef,
     switchModel,
     setDefaultModel,
     setModelEnabled,

@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 
 import type { SubagentTask } from "../../../protocol";
 import type { ToolCallStep } from "../../../utils/chatRenderItems";
+import { subagentLaunchLabel, subagentLaunchState } from "../../../utils/subagentLaunch";
 import { toolTarget } from "../../../utils/toolDisplay";
 import { font, radius, weight } from "../../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
@@ -19,58 +20,32 @@ type SubagentEntry = {
 type Props = {
   entries: SubagentEntry[];
   onInspectSubagent?: (taskID: string) => void;
+  turnRunning: boolean;
 };
 
-function formatSeconds(ms: number) {
-  if (!Number.isFinite(ms) || ms <= 0) return "";
-  const s = ms / 1000;
-  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
-}
-
-function entryElapsedMs(entry: SubagentEntry): number {
-  const startRaw = entry.tool.createdAt || entry.task?.created_at;
-  const endRaw = entry.tool.completedAt || entry.task?.updated_at;
-  const start = startRaw ? Date.parse(startRaw) : Number.NaN;
-  const end = endRaw ? Date.parse(endRaw) : Number.NaN;
-  if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
-    return end - start;
+function entryStatus(entry: SubagentEntry, turnRunning: boolean) {
+  const launch = subagentLaunchState(entry.tool, entry.task, turnRunning);
+  const status = entry.task?.status;
+  if (launch === "starting") return { label: subagentLaunchLabel.starting, tone: "active" } as const;
+  if (launch === "failed" || launch === "canceled") return { label: subagentLaunchLabel[launch], tone: "error" } as const;
+  if (status && launch !== "skipped") {
+    const tone = status === "succeeded" ? "done"
+      : status === "failed" || status === "canceled" ? "error"
+      : status.startsWith("waiting_") ? "waiting" : "active";
+    return { label: subagentStatusLabel(status), tone } as const;
   }
-  return 0;
+  return { label: subagentLaunchLabel[launch], tone: "neutral" } as const;
 }
 
 // 将并发触发的多条子代理调用聚合成一张紧凑的可折叠并行总览卡（点击任一行直达实时详情）。
-export function SubagentParallelGroup({ entries, onInspectSubagent }: Props) {
+export function SubagentParallelGroup({ entries, onInspectSubagent, turnRunning }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
-
-  const summary = useMemo(() => {
-    let doneCount = 0;
-    let runningCount = 0;
-    let failedCount = 0;
-    let minStart = Number.POSITIVE_INFINITY;
-    let maxEnd = 0;
-
-    for (const item of entries) {
-      const status = item.task?.status || (item.tool.status === "running" ? "running" : item.tool.status === "error" ? "failed" : "succeeded");
-      if (status === "running" || status === "queued" || status === "waiting_subagents" || status === "waiting_permission") {
-        runningCount += 1;
-      } else if (status === "failed" || status === "canceled") {
-        failedCount += 1;
-      } else {
-        doneCount += 1;
-      }
-      const start = Date.parse(item.tool.createdAt || item.task?.created_at || "");
-      const end = Date.parse(item.tool.completedAt || item.task?.updated_at || "");
-      if (Number.isFinite(start)) minStart = Math.min(minStart, start);
-      if (Number.isFinite(end)) maxEnd = Math.max(maxEnd, end);
-    }
-
-    const totalMs = Number.isFinite(minStart) && maxEnd > minStart ? maxEnd - minStart : 0;
-    return { doneCount, failedCount, runningCount, totalMs };
-  }, [entries]);
-
-  const anyRunning = summary.runningCount > 0;
-  const [expanded, setExpanded] = useState(anyRunning || summary.failedCount > 0);
+  const statuses = useMemo(() => entries.map((entry) => entryStatus(entry, turnRunning)), [entries, turnRunning]);
+  const doneCount = statuses.filter((status) => status.tone === "done").length;
+  const anyRunning = statuses.some((status) => status.tone === "active" || status.tone === "waiting");
+  const failures = statuses.filter((status) => status.tone === "error").length;
+  const [expanded, setExpanded] = useState(anyRunning || doneCount < entries.length);
 
   useEffect(() => {
     if (anyRunning) {
@@ -78,10 +53,9 @@ export function SubagentParallelGroup({ entries, onInspectSubagent }: Props) {
     }
   }, [anyRunning]);
 
-  const headline = anyRunning
-    ? `子代理并行检索 · ${summary.doneCount}/${entries.length} 完成`
-    : `子代理并行检索 · ${entries.length} 个任务${summary.failedCount > 0 ? `（${summary.failedCount} 异常）` : "完成"}`;
-  const durationLabel = anyRunning ? "执行中" : formatSeconds(summary.totalMs);
+  const headline = anyRunning || doneCount < entries.length
+    ? `子代理并行检索 · ${doneCount}/${entries.length} 完成${failures ? ` · ${failures} 项异常` : ""}`
+    : `子代理并行检索 · ${entries.length} 个任务完成`;
 
   return (
     <View style={[styles.card, anyRunning && styles.cardActive]}>
@@ -97,24 +71,19 @@ export function SubagentParallelGroup({ entries, onInspectSubagent }: Props) {
             {entries.map((item) => item.task?.agent_nickname || item.target || "子代理").slice(0, 3).join(" / ")}
           </Text>
         </View>
-        {durationLabel ? <Text style={styles.duration}>{durationLabel}</Text> : null}
+        {anyRunning ? <Text style={styles.duration}>执行中</Text> : null}
         <Feather color={palette.ink4} name={expanded ? "chevron-down" : "chevron-right"} size={14} />
       </Pressable>
 
       {expanded ? (
         <View style={styles.rows}>
           {entries.map((entry, idx) => {
-            const st = entry.task?.status || (entry.tool.status === "running" ? "running" : entry.tool.status === "error" ? "failed" : "succeeded");
-            const dotColor =
-              st === "failed" || st === "canceled"
-                ? palette.err
-                : st === "running" || st === "queued"
-                  ? palette.brandLight
-                  : st === "waiting_permission" || st === "waiting_subagents"
-                    ? palette.warn
-                    : palette.ok;
+            const status = statuses[idx];
+            const dotColor = status.tone === "error" ? palette.err
+              : status.tone === "done" ? palette.ok
+              : status.tone === "waiting" ? palette.warn
+              : status.tone === "active" ? palette.brandLight : palette.ink4;
             const title = entry.task?.agent_nickname || entry.task?.title || entry.target || `子任务 #${idx + 1}`;
-            const elapsed = formatSeconds(entryElapsedMs(entry)) || subagentStatusLabel(st);
             const taskID = entry.task?.id;
 
             return (
@@ -129,7 +98,7 @@ export function SubagentParallelGroup({ entries, onInspectSubagent }: Props) {
                 <Text numberOfLines={1} style={styles.rowTitle}>
                   {title}
                 </Text>
-                <Text style={styles.rowMeta}>{elapsed}</Text>
+                <Text style={styles.rowMeta}>{status.label}</Text>
                 {taskID && onInspectSubagent ? <Feather color={palette.ink4} name="chevron-right" size={13} /> : null}
               </Pressable>
             );

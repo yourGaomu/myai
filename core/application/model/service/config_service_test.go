@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	modelusage "myai/core/adapter/modelusage/session"
 	modelcommand "myai/core/application/model/command"
 	domainmodel "myai/core/domain/model"
 	modelport "myai/core/port/model"
@@ -160,6 +161,171 @@ func TestConfigServiceAddConfigDoesNotSaveWhenFactoryFails(t *testing.T) {
 	}
 	if repo.saved.ID != "" {
 		t.Fatalf("expected config not to be saved, got %#v", repo.saved)
+	}
+}
+
+type deleteConfigRepository struct {
+	fakeConfigRepository
+	configs   map[string]domainmodel.Config
+	deleted   []string
+	listErr   error
+	deleteErr error
+}
+
+func (r *deleteConfigRepository) GetConfig(_ context.Context, id string) (domainmodel.Config, error) {
+	config, ok := r.configs[id]
+	if !ok {
+		return domainmodel.Config{}, repository.ErrNotFound
+	}
+	return config, nil
+}
+
+func (r *deleteConfigRepository) ListConfigs(_ context.Context) ([]domainmodel.Config, error) {
+	configs := make([]domainmodel.Config, 0, len(r.configs))
+	for _, config := range r.configs {
+		configs = append(configs, config)
+	}
+	return configs, r.listErr
+}
+
+func (r *deleteConfigRepository) DeleteConfig(_ context.Context, id string) error {
+	r.deleted = append(r.deleted, id)
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
+	delete(r.configs, id)
+	return nil
+}
+
+type deleteConfigSessions struct {
+	sessions []repository.SessionRecord
+	err      error
+}
+
+func (s deleteConfigSessions) ListSessions(context.Context) ([]repository.SessionRecord, error) {
+	return s.sessions, s.err
+}
+
+func TestConfigServiceDeleteProtectsModels(t *testing.T) {
+	readErr := errors.New("test read failed")
+	for _, tc := range []struct {
+		name           string
+		storedDefault  bool
+		runtimeOnly    bool
+		lastEnabled    bool
+		targetDisabled bool
+		missingUsage   bool
+		usage          deleteConfigSessions
+		listErr        error
+		want           string
+		cause          error
+	}{
+		{name: "persisted default", storedDefault: true, want: "select another default model first"},
+		{name: "bootstrap default", runtimeOnly: true, want: "select another default model first"},
+		{name: "noncurrent session using disabled model", targetDisabled: true, usage: deleteConfigSessions{sessions: []repository.SessionRecord{
+			{ID: "current", Model: "copy"}, {ID: "older", Model: "target"},
+		}}, want: "switch each session that uses it"},
+		{name: "last enabled model", lastEnabled: true, want: "enable or add another model first"},
+		{name: "usage unavailable", missingUsage: true, want: "check the agent configuration"},
+		{name: "session list error", usage: deleteConfigSessions{err: readErr}, want: "cannot verify session model usage", cause: readErr},
+		{name: "config list error", listErr: readErr, want: "cannot verify enabled models", cause: readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, other := validModelConfig("target"), validModelConfig("copy")
+			target.Enabled, target.IsDefault = !tc.targetDisabled, tc.storedDefault
+			other.Enabled = !tc.lastEnabled
+			repo := &deleteConfigRepository{configs: map[string]domainmodel.Config{target.ID: target, other.ID: other}, listErr: tc.listErr}
+			registry := &fakeModelRegistry{}
+			info := modelInfo(target)
+			// Leave the registry unflagged in the persisted-default case.
+			info.IsDefault = tc.runtimeOnly
+			registry.SetModelInfo(target.ID, fakeChatModel{}, info)
+			service := ConfigService{Repository: repo, Registry: registry}
+			if !tc.missingUsage {
+				service.Usage = modelusage.Checker{Sessions: tc.usage}
+			}
+
+			result, err := service.DeleteConfig(context.Background(), modelcommand.DeleteConfig{ID: target.ID})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || (tc.cause != nil && !errors.Is(err, tc.cause)) {
+				t.Fatalf("expected %q, got result %#v, error %v", tc.want, result, err)
+			}
+			if result.DeletedID != "" || len(repo.deleted) != 0 || !registry.HasModel(target.ID) {
+				t.Fatal("blocked deletion mutated the repository or registry")
+			}
+		})
+	}
+}
+
+func TestConfigServiceDeleteUsesExactConfigID(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		name := "enabled"
+		if !enabled {
+			name = "disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			target, other := validModelConfig("target"), validModelConfig("copy")
+			target.Enabled = enabled
+			target.Name, other.Name = "Shared display name", "Shared display name"
+			target.ModelName, other.ModelName = "same-upstream-model", "same-upstream-model"
+			repo := &deleteConfigRepository{configs: map[string]domainmodel.Config{target.ID: target, other.ID: other}}
+			registry := &fakeModelRegistry{}
+			registry.SetModelInfo(target.ID, fakeChatModel{}, modelInfo(target))
+			registry.SetModelInfo(other.ID, fakeChatModel{}, modelInfo(other))
+			service := ConfigService{Repository: repo, Registry: registry, Usage: modelusage.Checker{Sessions: deleteConfigSessions{
+				sessions: []repository.SessionRecord{
+					{ID: "other-active", Model: other.ID}, {ID: "in-trash", Deleted: true, Model: target.ID},
+				},
+			}}}
+
+			for _, id := range []string{target.Name, target.ModelName, "TARGET"} {
+				if _, err := service.DeleteConfig(context.Background(), modelcommand.DeleteConfig{ID: id}); !errors.Is(err, repository.ErrNotFound) {
+					t.Fatalf("expected unknown ID for %q, got %v", id, err)
+				}
+			}
+			result, err := service.DeleteConfig(context.Background(), modelcommand.DeleteConfig{ID: " target "})
+			if err != nil || result.DeletedID != target.ID || len(repo.deleted) != 1 || repo.deleted[0] != target.ID {
+				t.Fatalf("expected deletion of only %q, got %#v, %v, calls %v", target.ID, result, err, repo.deleted)
+			}
+			if _, found := registry.infos[target.ID]; found || !registry.HasModel(other.ID) || len(repo.configs) != 1 || repo.configs[other.ID].ID != other.ID {
+				t.Fatal("repository or registry targeted the wrong config")
+			}
+		})
+	}
+}
+
+func TestConfigServiceDeleteKeepsRegistryOnRepositoryError(t *testing.T) {
+	target, other := validModelConfig("target"), validModelConfig("copy")
+	deleteErr := errors.New("test delete failed")
+	repo := &deleteConfigRepository{configs: map[string]domainmodel.Config{target.ID: target, other.ID: other}, deleteErr: deleteErr}
+	registry := &fakeModelRegistry{}
+	registry.SetModelInfo(target.ID, fakeChatModel{}, modelInfo(target))
+	service := ConfigService{Repository: repo, Registry: registry, Usage: modelusage.Checker{Sessions: deleteConfigSessions{}}}
+	if _, err := service.DeleteConfig(context.Background(), modelcommand.DeleteConfig{ID: target.ID}); !errors.Is(err, deleteErr) {
+		t.Fatalf("expected database error, got %v", err)
+	}
+	if len(repo.deleted) != 1 || !registry.HasModel(target.ID) {
+		t.Fatal("deletion failure removed runtime model")
+	}
+}
+
+func TestConfigServiceUpdatePreservesBootstrapDefaultProtection(t *testing.T) {
+	config := validModelConfig("fallback")
+	config.Name = "Fallback fixture"
+	repo := &fakeConfigRepository{saved: config}
+	registry := &fakeModelRegistry{}
+	factory := &fakeModelFactory{model: fakeChatModel{}}
+	if _, err := (BootstrapService{Repository: repo, Registry: registry, Factory: factory}).Bootstrap(context.Background(), modelcommand.Bootstrap{}); err != nil {
+		t.Fatal(err)
+	}
+	service := ConfigService{Repository: repo, Registry: registry, Factory: factory}
+	if _, err := service.UpdateConfig(context.Background(), modelcommand.UpdateConfig{ID: config.ID, BaseURL: config.BaseURL}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.saved.IsDefault || !registry.infos[config.ID].IsDefault {
+		t.Fatal("editing should preserve the implicit runtime default marker")
+	}
+	if _, err := service.DeleteConfig(context.Background(), modelcommand.DeleteConfig{ID: config.ID}); err == nil || !strings.Contains(err.Error(), "select another default model first") {
+		t.Fatalf("expected default protection after editing, got %v", err)
 	}
 }
 

@@ -84,6 +84,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 	}
 
 	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
+		MessageID: response.MessageID,
 		Content:   response.Result.Content,
 		Reasoning: response.Result.Reasoning,
 		Usage:     tokenUsagePayload(response.Result.Usage),
@@ -106,11 +107,13 @@ func (a *Agent) handleRegenerateMessage(ctx context.Context, conn *websocket.Con
 	}
 
 	return a.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content: response.Result.Content,
-		Usage:   tokenUsagePayload(response.Result.Usage),
-		Context: contextInfoPayload(response.Context),
-		Compact: compactInfoPayload(response.Compact),
-		Plan:    planPayload(response.Plan),
+		MessageID: response.MessageID,
+		Content:   response.Result.Content,
+		Reasoning: response.Result.Reasoning,
+		Usage:     tokenUsagePayload(response.Result.Usage),
+		Context:   contextInfoPayload(response.Context),
+		Compact:   compactInfoPayload(response.Compact),
+		Plan:      planPayload(response.Plan),
 	})
 }
 
@@ -148,13 +151,15 @@ func (a *Agent) handleSessionPlanExecute(ctx context.Context, conn *websocket.Co
 func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, run func(llm.ChatStreamHandler) (service.ChatResponse, error)) (service.ChatResponse, error) {
 	// 把模型回调映射为远程协议事件，手机可分别渲染 reasoning、正文、工具和权限状态。
 	sendErrCh := make(chan error, 1)
-	send := func(messageType protocol.MessageType, payload any) {
-		if err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload); err != nil {
+	send := func(messageType protocol.MessageType, payload any) error {
+		err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload)
+		if err != nil {
 			select {
 			case sendErrCh <- err:
 			default:
 			}
 		}
+		return err
 	}
 
 	response, err := run(llm.ChatStreamHandler{
@@ -201,8 +206,9 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 			send(protocol.TypeSkillReloadResult, payload)
 		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
-			message.SessionID = sessionID
-			return a.askToolPermission(ctx, conn, message, request, sendErrCh)
+			return a.askToolPermission(ctx, message.RequestID, sessionID, request, func(payload protocol.PermissionAskPayload) error {
+				return send(protocol.TypePermissionAsk, payload)
+			})
 		},
 		OnUserQuestion: func(questionCtx context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
 			questionMessage := message

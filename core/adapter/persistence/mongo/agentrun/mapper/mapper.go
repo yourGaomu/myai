@@ -27,7 +27,7 @@ func RunDomainFromDocument(document po.RunDocument) domainagentrun.Run {
 func EventDocumentFromDomain(event domainagentrun.Event) po.EventDocument {
 	return po.EventDocument{
 		ID: event.ID, RunID: event.RunID, SessionID: event.SessionID, Sequence: event.Sequence,
-		Type: string(event.Type), Title: event.Title, Content: event.Content, ToolName: event.ToolName,
+		Type: string(event.Type), Title: event.Title, Content: event.Content, MessageID: event.MessageID, ToolName: event.ToolName,
 		ToolCallID: event.ToolCallID,
 		Arguments:  event.Arguments, Status: event.Status, ErrorCode: event.ErrorCode,
 		ErrorMessage: event.ErrorMessage, Truncated: event.Truncated, CurrentStep: event.CurrentStep,
@@ -39,7 +39,7 @@ func EventDomainFromDocument(document po.EventDocument) domainagentrun.Event {
 	return domainagentrun.Event{
 		ID: document.ID, RunID: document.RunID, SessionID: document.SessionID,
 		Sequence: document.Sequence, Type: domainagentrun.EventType(document.Type), Title: document.Title,
-		Content: document.Content, ToolName: document.ToolName, Arguments: document.Arguments,
+		Content: document.Content, MessageID: document.MessageID, ToolName: document.ToolName, Arguments: document.Arguments,
 		ToolCallID: document.ToolCallID,
 		Status:     document.Status, ErrorCode: document.ErrorCode, ErrorMessage: document.ErrorMessage,
 		Truncated: document.Truncated, CurrentStep: document.CurrentStep, TotalSteps: document.TotalSteps,

@@ -42,9 +42,10 @@ import type {
 } from "../protocol";
 import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, UserQuestionState, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
-import type { KnowledgeBaseChanges } from "../types/knowledge";
+import type { DocumentImportStatus, KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
+import type { ModelDeleteFeedback } from "../utils/modelDelete";
 import type { SettingsSection } from "../components/settings/SettingsHome";
 import type { MotionSlot } from "../utils/motionRegistry";
 
@@ -81,7 +82,12 @@ export type SettingsContentProps = {
   intentTraceError: boolean;
   bindCode: string;
   connected: boolean;
+  connectionStatus: string;
+  pairedRelayURL: string;
+  pairingError: string;
+  pairingPending: boolean;
   currentModelID: string;
+  modelDeleteFeedback: ModelDeleteFeedback | null;
   modelMessage: string;
   modelMessageError: boolean;
   deviceID: string;
@@ -90,7 +96,6 @@ export type SettingsContentProps = {
   onBindCodeChange: (value: string) => void;
   onCloseSettings: () => void;
   onConnect: () => void;
-  onDeviceIDChange: (value: string) => void;
   onDeleteSession: (sessionID: string) => void;
   onLoadSession: (sessionID: string) => void;
   onNewSession: () => void;
@@ -145,7 +150,6 @@ export type SettingsContentProps = {
   onInspectSubagentTask?: (taskID: string) => void;
   onRefreshSubagents: () => void;
   onUpdateSubagentDefinition: (definition: SubagentDefinition) => boolean;
-  onUserIDChange: (value: string) => void;
   relayURL: string;
   sessionID: string;
   sessions: SessionSummary[];
@@ -181,6 +185,7 @@ export type ChatContentProps = {
   deviceID: string;
   greetingName: string;
   onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
   onExecutePlan?: () => void;
   onNearHeaderChange?: (near: boolean) => void;
   onOpenChangePath?: (path: string) => void;
@@ -190,7 +195,7 @@ export type ChatContentProps = {
   onScrolledChange: (scrolled: boolean) => void;
   messages: ChatItem[];
   runs: AgentRunSnapshot[];
-  onRegenerate: () => void;
+  onRegenerate: (turnID: string) => void;
   pendingHistorySessionID: string;
   pendingPlan?: boolean;
   pendingQuestions?: UserQuestionState[];
@@ -247,6 +252,7 @@ export type SessionsContentProps = {
 export type KnowledgeContentProps = {
   activeSession?: SessionSummary;
   categories: KnowledgeCategory[];
+  documentImportStatus: DocumentImportStatus | null;
   documents: KnowledgeDocument[];
   jobs: KnowledgeIndexingJob[];
   knowledgeBases: KnowledgeBase[];
@@ -256,8 +262,10 @@ export type KnowledgeContentProps = {
   onDeleteCategory: (categoryID: string, recursive?: boolean) => boolean;
   onDeleteDocument: (knowledgeBaseID: string, documentID: string) => void;
   onDeleteKnowledgeBase: (knowledgeBaseID: string) => boolean;
+  onDismissDocumentImport: () => void;
   onInsertReference?: (snippet: string) => void;
   onMoveCategory: (categoryID: string, parentID?: string) => boolean;
+  onReconcileDocumentImport: () => boolean;
   onRefresh: () => void;
   onRefreshDocuments: () => void;
   onRetryDocument: (knowledgeBaseID: string, jobID: string) => void;
@@ -265,7 +273,7 @@ export type KnowledgeContentProps = {
   onSelectKnowledgeBase: (knowledgeBaseID: string) => void;
   onSetRAG: (settings: RAGSettings) => boolean;
   onUpdateKnowledgeBase: (base: KnowledgeBase, changes: KnowledgeBaseChanges) => boolean;
-  onUploadDocument: () => void;
+  onUploadDocument: (knowledgeBaseID: string, knowledgeBaseName?: string) => void;
   onCancelUpload: () => void;
   uploadingDocument: boolean;
   profiles: KnowledgeIndexProfile[];
@@ -294,6 +302,7 @@ export type PermissionContentProps = {
   onDenyPermission: () => void;
   pendingPermission: PermissionState | null;
   onAnswerUserQuestion: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
   pendingQuestions: UserQuestionState[];
 };
 

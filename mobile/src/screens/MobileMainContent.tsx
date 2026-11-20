@@ -37,6 +37,10 @@ export function MobileMainContent({
           clientToken={common.clientToken}
           compact={settings.compact}
           connected={settings.connected}
+          connectionStatus={settings.connectionStatus}
+          pairedRelayURL={settings.pairedRelayURL}
+          pairingError={settings.pairingError}
+          pairingPending={settings.pairingPending}
           context={settings.context}
           generation={settings.generation}
           generationStatus={settings.generationStatus}
@@ -56,6 +60,7 @@ export function MobileMainContent({
           intentTraceMessage={settings.intentTraceMessage}
           intentTraceError={settings.intentTraceError}
           currentModelID={settings.currentModelID}
+          modelDeleteFeedback={settings.modelDeleteFeedback}
           modelMessage={settings.modelMessage}
           modelMessageError={settings.modelMessageError}
           deviceID={settings.deviceID}
@@ -65,7 +70,6 @@ export function MobileMainContent({
           onClose={settings.onCloseSettings}
           onConnect={settings.onConnect}
           onDeleteSession={settings.onDeleteSession}
-          onDeviceIDChange={settings.onDeviceIDChange}
           onLoadSession={settings.onLoadSession}
           onNewSession={settings.onNewSession}
           onPair={settings.onPair}
@@ -119,7 +123,6 @@ export function MobileMainContent({
           onInspectSubagentTask={settings.onInspectSubagentTask}
           onRefreshSubagents={settings.onRefreshSubagents}
           onUpdateSubagentDefinition={settings.onUpdateSubagentDefinition}
-          onUserIDChange={settings.onUserIDChange}
           pendingActions={common.pendingActions}
           relayURL={settings.relayURL}
           sessionID={settings.sessionID}
@@ -152,6 +155,7 @@ export function MobileMainContent({
           deviceID={chat.deviceID}
           greetingName={chat.greetingName}
           onAnswerUserQuestion={chat.onAnswerUserQuestion}
+          onChangeUserQuestionDraft={chat.onChangeUserQuestionDraft}
           onExecutePlan={chat.onExecutePlan}
           onNearHeaderChange={chat.onNearHeaderChange}
           onOpenChangePath={chat.onOpenChangePath}
@@ -211,6 +215,7 @@ export function MobileMainContent({
           knowledge={{
             activeSession: knowledge.activeSession,
             categories: knowledge.categories,
+            documentImportStatus: knowledge.documentImportStatus,
             documents: knowledge.documents,
             jobs: knowledge.jobs,
             knowledgeBases: knowledge.knowledgeBases,
@@ -220,7 +225,9 @@ export function MobileMainContent({
             onDeleteCategory: knowledge.onDeleteCategory,
             onDeleteDocument: knowledge.onDeleteDocument,
             onDeleteKnowledgeBase: knowledge.onDeleteKnowledgeBase,
+            onDismissDocumentImport: knowledge.onDismissDocumentImport,
             onMoveCategory: knowledge.onMoveCategory,
+            onReconcileDocumentImport: knowledge.onReconcileDocumentImport,
             onRefresh: knowledge.onRefresh,
             onRefreshDocuments: knowledge.onRefreshDocuments,
             onRetryDocument: knowledge.onRetryDocument,
@@ -314,9 +321,10 @@ export function MobileMainContent({
       {/* AskUserQuestion 已内嵌渲染在对话流内部；若用户在其他二级页，允许通过提问卡片就地响应 */}
           {permission.pendingQuestions.map((question) => (
             <UserQuestionPrompt
-              key={question.questionID}
+              key={JSON.stringify([question.sessionID, question.requestID, question.questionID])}
               buttonFeedback={common.buttonFeedback}
               onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
+              onChangeDraft={permission.onChangeUserQuestionDraft ? (answers) => permission.onChangeUserQuestionDraft?.(question, answers) : undefined}
               question={question}
             />
           ))}

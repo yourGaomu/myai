@@ -564,7 +564,7 @@ func (service *Service) Resume(ctx context.Context, command subagentcommand.Resu
 		return subagentresult.Resume{Task: claimed}, persistErr
 	}
 	return subagentresult.Resume{
-		Task: current, Content: continuation.Content, Reasoning: continuation.Reasoning, Usage: continuation.Usage,
+		Task: current, MessageID: continuation.MessageID, Content: continuation.Content, Reasoning: continuation.Reasoning, Usage: continuation.Usage,
 	}, nil
 }
 

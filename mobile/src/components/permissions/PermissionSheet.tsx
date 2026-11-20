@@ -93,7 +93,9 @@ export function PermissionSheet({
         </Pressable>
       </View>
 
-      {onAllowSession ? (
+      {permission?.requireFreshConsent ? (
+        <Text style={styles.sub}>此操作需要单独确认。</Text>
+      ) : onAllowSession ? (
         <Pressable
           accessibilityRole="button"
           onPress={onAllowSession}

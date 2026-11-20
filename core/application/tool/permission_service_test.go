@@ -63,8 +63,8 @@ func TestPermissionServiceAsksInAskMode(t *testing.T) {
 	if !decision.Allowed {
 		t.Fatalf("expected ask approval: %#v", decision)
 	}
-	if request.Name != "write_file" || request.Permission != tooldef.PermissionWrite || request.Mode != session.PermissionModeAsk {
-		t.Fatalf("unexpected permission request: %#v", request)
+	if request.Name != "write_file" || request.Permission != tooldef.PermissionWrite || request.Mode != session.PermissionModeAsk || request.RequireFreshConsent {
+		t.Fatalf("ordinary Ask-mode request should allow remembered approval: %#v", request)
 	}
 }
 

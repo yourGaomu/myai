@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppState, BackHandler, Platform, type AppStateStatus, type ScrollView } from "react-native";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { BackHandler, Platform, type ScrollView } from "react-native";
 
 import { ActionBar } from "../components/layout/ActionBar";
 import { AppHeader, describeConnection } from "../components/layout/AppHeader";
@@ -12,14 +12,16 @@ import { settingsSectionTitles, type SettingsSection } from "../components/setti
 import { PairingScreen } from "../components/startup/PairingScreen";
 import { BottomDock } from "../components/layout/BottomDock";
 import { SideDrawer } from "../components/navigation/SideDrawer";
-import type { ChangeEntry } from "../protocol";
+import type { ChangeEntry, RelayMessage } from "../protocol";
+import type { QuestionSync } from "../types/app";
+import type { RelayPairing } from "../utils/relayPairing";
 import { useAssetState } from "../hooks/useAssetState";
 import { useAssetUpload } from "../hooks/useAssetUpload";
 import { useAgentRunState } from "../hooks/useAgentRunState";
 import { useChangeHistoryActions } from "../hooks/useChangeHistoryActions";
 import { useChangeHistoryState } from "../hooks/useChangeHistoryState";
 import { useChatActions } from "../hooks/useChatActions";
-import { useChatMessages } from "../hooks/useChatMessages";
+import { getSubmittedQuestions, useChatMessages } from "../hooks/useChatMessages";
 import { useFileActions } from "../hooks/useFileActions";
 import { useFileState } from "../hooks/useFileState";
 import { useMobileDerivedState } from "../hooks/useMobileDerivedState";
@@ -36,10 +38,8 @@ import { usePairingActions } from "../hooks/usePairingActions";
 import { usePendingActions } from "../hooks/usePendingActions";
 import { usePluginActions } from "../hooks/usePluginActions";
 import { usePluginState } from "../hooks/usePluginState";
-import { useRelayConnection } from "../hooks/useRelayConnection";
-import {
-  stopRelayForegroundService,
-} from "../native/relayForegroundService";
+import { useRelayConnection, type ConnectionScope } from "../hooks/useRelayConnection";
+import { stopLegacyRelayForegroundService, stopRelayForegroundService } from "../native/relayForegroundService";
 import { useRemoteResultAppliers } from "../hooks/useRemoteResultAppliers";
 import { useRemoteMessageHandler } from "../hooks/useRemoteMessageHandler";
 import { useRemoteRuntimeRefs } from "../hooks/useRemoteRuntimeRefs";
@@ -60,7 +60,6 @@ import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
 import { agentActivity } from "../utils/agentActivity";
-import { historyMessageToChatItem } from "../utils/chatHistory";
 import { newRequestID } from "../utils/ids";
 import { formatBytes } from "../utils/format";
 import { activityToMotionSlot } from "../utils/motionRegistry";
@@ -68,13 +67,88 @@ import { modelDisplayName, permissionLabel } from "../utils/session";
 import { baseName, dirName, toolTarget } from "../utils/toolDisplay";
 
 export function MobileAppScreen() {
+  const { commitPairing, currentPairingRef, editRelayURL, pairing, relayURL, relayURLRef, relayScopeRef, settingsLoaded } = useMobileSettings();
+  const normalizedRelayURL = useNormalizedRelayUrl(relayURL);
+  const onPaired = useCallback((next: RelayPairing) => {
+    const previous = currentPairingRef.current;
+    // Invalidate the old handle synchronously, before React remounts the workspace.
+    commitPairing(next);
+    if (previous) void stopRelayForegroundService(previous.pairingID).catch(() => undefined);
+  }, [commitPairing, currentPairingRef]);
+  const { bindCode, cancelPairing, pairDevice, pairingError, pairingPending, setBindCode } = usePairingActions({
+    relayURLRef,
+    onPaired,
+  });
+  const handleRelayURLChange = (value: string) => {
+    if (value !== relayURLRef.current) cancelPairing();
+    editRelayURL(value);
+  };
+  const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
 
-  // 页面本身只充当 composition root：状态、协议和业务动作分别由专用 Hook 管理。
+  useEffect(() => {
+    if (settingsLoaded && !pairing) {
+      void stopRelayForegroundService("").catch(() => undefined);
+      void stopLegacyRelayForegroundService().catch(() => undefined);
+    }
+  }, [settingsLoaded, pairing]);
+
+  if (!settingsLoaded) return null;
+  if (!pairing) {
+    return (
+      <PairingScreen
+        bindCode={bindCode}
+        bottomInset={bottomSafePadding}
+        errorMessage={pairingError}
+        normalizedRelayURL={normalizedRelayURL}
+        onBindCodeChange={setBindCode}
+        onPair={() => { void pairDevice(); }}
+        onRelayURLChange={handleRelayURLChange}
+        pending={pairingPending}
+        relayURL={relayURL}
+        topInset={topSafePadding}
+      />
+    );
+  }
+  return (
+    <PairedWorkspace
+      key={pairing.pairingID}
+      pairing={pairing}
+      currentPairingRef={currentPairingRef}
+      relayScopeRef={relayScopeRef}
+      bindCode={bindCode}
+      onBindCodeChange={setBindCode}
+      onPair={() => { void pairDevice(); }}
+      pairingError={pairingError}
+      pairingPending={pairingPending}
+      relayURL={relayURL}
+      normalizedRelayURL={normalizedRelayURL}
+      onRelayURLChange={handleRelayURLChange}
+    />
+  );
+}
+
+type PairedWorkspaceProps = {
+  pairing: RelayPairing;
+  currentPairingRef: RefObject<RelayPairing | null>;
+  relayScopeRef: RefObject<ConnectionScope>;
+  bindCode: string;
+  onBindCodeChange: (value: string) => void;
+  onPair: () => void;
+  pairingError: string;
+  pairingPending: boolean;
+  relayURL: string;
+  normalizedRelayURL: string;
+  onRelayURLChange: (value: string) => void;
+};
+
+function PairedWorkspace({
+  pairing, currentPairingRef, relayScopeRef, bindCode, onBindCodeChange, onPair, pairingError, pairingPending,
+  relayURL, normalizedRelayURL, onRelayURLChange,
+}: PairedWorkspaceProps) {
+  const { clientToken, deviceID, pairingID, userID } = pairing;
   const {
-    bindCode,
     connected,
     sessionID,
-    setBindCode,
     setConnected,
     setSessionID,
     setStatus,
@@ -82,18 +156,6 @@ export function MobileAppScreen() {
     status,
     viewMode,
   } = useMobileUiState();
-  const handleTokenRestored = useCallback(() => setStatus("Paired"), [setStatus]);
-  const {
-    clientToken,
-    deviceID,
-    relayURL,
-    setClientToken,
-    setDeviceID,
-    setRelayURL,
-    setUserID,
-    settingsLoaded,
-    userID,
-  } = useMobileSettings({ onTokenRestored: handleTokenRestored });
   const {
     clearModels,
     clearSessions,
@@ -145,7 +207,7 @@ export function MobileAppScreen() {
     assets,
     clearAssets,
     setAssets,
-  } = useAssetState();
+  } = useAssetState(sessionID);
   const {
     applyCatalog: applyKnowledgeCatalog,
     applyDocuments: applyKnowledgeDocuments,
@@ -220,31 +282,33 @@ export function MobileAppScreen() {
     setFilePath,
     setFilePreview,
     setMessageInput,
-  } = useFileState();
+  } = useFileState({ pairingID, sessionID });
   const {
     addMessage,
     addToolCall,
     addToolResult,
-    appendMessages,
     appendAssistant,
     clearSessionPendingRequest,
     removeSessionPendingQuestion,
+    removeSessionPendingPermission,
     completeAssistant,
     getSessionChat,
+    getSessionChats,
     hasPendingRequest,
     markAssistantError,
     markUserMessageQueued,
     markUserMessageDelivered,
     mergeSessionChats,
-    replaceMessages,
+    mergeSessionHistory,
     resetActiveAssistant,
     removePendingQuestions,
     sessionChatsVersion,
-    sessionChats,
     setSessionLastUsage,
     setSessionPendingPermission,
     setSessionPendingQuestion,
     setSessionPendingRequest,
+    setSessionQuestionDraft,
+    settleSessionRun,
     startBackgroundAssistant,
   } = useChatMessages();
   const [unreadSessionIDs, setUnreadSessionIDs] = useState<Record<string, boolean>>({});
@@ -283,11 +347,6 @@ export function MobileAppScreen() {
   const { pendingActions, startPending, stopPending } = usePendingActions();
 
   const chatScrollRef = useRef<ScrollView | null>(null);
-  const appActiveRef = useRef(AppState.currentState === "active");
-  const reconnectOnForegroundRef = useRef(false);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptRef = useRef(0);
-  const connectRef = useRef<() => void>(() => undefined);
   // 远程运行时引用不触发重渲染，用来关联 WebSocket 请求、当前 Session 和流式回答。
   const {
     activeRequestIDRef,
@@ -298,7 +357,6 @@ export function MobileAppScreen() {
     socketRef,
   } = useRemoteRuntimeRefs(sessionID);
 
-  const normalizedRelayURL = useNormalizedRelayUrl(relayURL);
   const {
     activeModel,
     activeSession,
@@ -321,44 +379,53 @@ export function MobileAppScreen() {
   });
   const currentChat = getSessionChat(sessionID);
   const currentRuns = getSessionRuns(sessionID);
+  const isSessionBusy = useCallback((targetSessionID: string) => {
+    const chat = getSessionChat(targetSessionID);
+    return Boolean(chat.pendingRequestID || chat.pendingPermission || chat.pendingQuestions.length ||
+      getSessionRuns(targetSessionID).some(({ run }) => run.status === "running"));
+  }, [getSessionChat, getSessionRuns]);
   void sessionChatsVersion;
   void agentRunsVersion;
   const currentPauseBusy = Boolean(pendingActions.pause);
   const { bottomSafePadding, topSafePadding } = useMobileLayoutMetrics();
-  const questionSyncKeyRef = useRef("");
+  const questionSyncRef = useRef<QuestionSync | null>(null);
+  const onEnqueueFailureRef = useRef<(message: RelayMessage) => void>(() => undefined);
+  const onEnqueueFailure = useCallback((message: RelayMessage) => onEnqueueFailureRef.current(message), []);
 
-  // 从这里开始组装传输能力：Sender 只发送，Requests/Actions 表达命令，Handler 消费响应。
+  // The sender, heartbeat and inbound callbacks share the authenticated connection.
   const addRelayErrorMessage = useCallback(
-    (message: string) => addMessage(sessionID, "error", message),
-    [addMessage, sessionID],
+    (message: string) => addMessage(sessionIDRef.current, "error", message),
+    [addMessage, sessionIDRef],
   );
   const sendEnvelope = useRelaySender({
     activeRequestIDRef,
     addErrorMessage: addRelayErrorMessage,
-    clientToken,
-    deviceID,
-    sessionID,
+    currentPairingRef,
+    onEnqueueFailure,
+    sessionIDRef,
     socketRef,
-    userID,
   });
   const { uploadMobileAsset, handleAssetUploadMessage, disconnectAssetUploads, reconnectAssetUploads } = useAssetUpload({
     sendEnvelope,
-    isConnected: () => socketRef.current?.readyState === WebSocket.OPEN,
+    relayScopeRef,
   });
 
-  useEffect(() => {
-    if (!connected || !clientToken) {
-      questionSyncKeyRef.current = "";
-      return;
-    }
-    const syncKey = `${clientToken}:${deviceID}`;
-    if (questionSyncKeyRef.current === syncKey) {
-      return;
-    }
-    questionSyncKeyRef.current = syncKey;
-    const knownQuestionIDs = Object.values(sessionChats).flatMap((chat) => chat.pendingQuestions.map((question) => question.questionID));
-    sendEnvelope("user_question_list", { request_id: newRequestID(), payload: { known_question_ids: knownQuestionIDs } });
-  }, [clientToken, connected, deviceID, sendEnvelope, sessionChats]);
+  const requestUserQuestionSync = useCallback(() => {
+    const { connectionID } = relayScopeRef.current;
+    if (!connectionID) return false;
+    const requestID = newRequestID();
+    const chats = getSessionChats();
+    const knownQuestionIDs = Object.values(chats).flatMap((chat) => chat.pendingQuestions.map((question) => question.questionID));
+    const sync: QuestionSync = { requestID, connectionID, submittedQuestions: getSubmittedQuestions(chats) };
+    questionSyncRef.current = sync;
+    const sent = sendEnvelope("user_question_list", {
+      request_id: requestID,
+      session_id: "",
+      payload: { known_question_ids: knownQuestionIDs },
+    });
+    if (!sent && questionSyncRef.current === sync) questionSyncRef.current = null;
+    return sent;
+  }, [getSessionChats, sendEnvelope]);
 
   const activeKnowledgeBase = knowledgeBases.find((base) => base.id === selectedKnowledgeBaseID);
   const {
@@ -380,8 +447,8 @@ export function MobileAppScreen() {
   } = useSubagentActions({
     activeRequestIDRef,
     clientToken,
-    clearSessionPendingRequest,
-    historySessionIDRef,
+    isSessionBusy,
+    sessionIDRef,
     onError: setSubagentMessage,
     onResumeStarted: () => setViewMode("chat"),
     requestSessionMapRef,
@@ -389,7 +456,6 @@ export function MobileAppScreen() {
     sendEnvelope,
     sessionID,
     setSessionLastUsage,
-    setSessionPendingPermission,
     setSessionPendingRequest,
     startPending,
     stopPending,
@@ -474,18 +540,13 @@ export function MobileAppScreen() {
     stopPending,
   });
 
-  const replaceHistoryMessages = useCallback(
-    (targetSessionID: string, messages: Parameters<typeof historyMessageToChatItem>[0][]) => {
-      replaceMessages(targetSessionID, messages.map(historyMessageToChatItem));
-    },
-    [replaceMessages],
-  );
-  const hasSessionMessages = useCallback(
-    (targetSessionID: string) => getSessionChat(targetSessionID).messages.length > 0,
-    [getSessionChat],
-  );
-
   const {
+    acceptAgentRunList,
+    acceptAssetList,
+    acceptSessionList,
+    handleRemoteQueryError,
+    handleSessionHistoryMessage,
+    resetRemoteQueries,
     refreshRemoteState,
     requestAssets,
     requestChanges,
@@ -498,7 +559,6 @@ export function MobileAppScreen() {
     reloadSkills,
     requestDeletedSessions,
     requestSkills,
-    requestSessionHistoryDelta,
     requestSessionHistoryFull,
     requestSessionHistory,
     requestSessions,
@@ -514,27 +574,44 @@ export function MobileAppScreen() {
     clearWorkspaceChanges,
     clientToken,
     currentFilePath: filePath,
-    currentSessionID: sessionID,
+    historySessionIDRef,
+    mergeSessionHistory,
     pendingHistorySessionIDRef,
-    replaceHistoryMessages,
+    relayScopeRef,
     requestSubagentTasks,
     sendEnvelope,
+    sessionIDRef,
     startPending,
     stopPending,
   });
-  const { addModelConfig, deleteModelConfig, deleteSession, loadSession, newSession, restoreSession, setDefaultModel, setModelEnabled, switchModel, testModelConfig, updateModelConfig } = useSessionModelActions({
-    activeRequestIDRef,
+  const {
+    addModelConfig,
+    deleteModelConfig,
+    deleteSession,
+    disconnectModelDelete,
+    handleModelDeleteMessage,
+    loadSession,
+    modelDeleteFeedback,
+    newSession,
+    restoreSession,
+    sessionNavigationRef,
+    setDefaultModel,
+    setModelEnabled,
+    switchModel,
+    testModelConfig,
+    updateModelConfig,
+  } = useSessionModelActions({
     currentModelID,
     historySessionIDRef,
     pendingHistorySessionIDRef,
+    relayScopeRef,
     requestAssets,
     requestSessionHistory,
-    resetActiveAssistant,
     sendEnvelope,
     sessionIDRef,
     sessions,
+    setModels,
     setSessionLastUsage,
-    setSessionPendingPermission,
     setSessionID,
     startPending,
     stopPending,
@@ -554,13 +631,22 @@ export function MobileAppScreen() {
     setRAGSettings,
     updateKnowledgeBase,
     cancelDocumentUpload,
+    disconnectKnowledgeUploads,
+    dismissDocumentImport,
+    documentImportStatus,
+    handleKnowledgeUploadMessage,
+    reconcileDocumentImport,
+    reconnectKnowledgeUploads,
     uploadingDocument,
     uploadDocument,
   } = useKnowledgeActions({
     uploadMobileAsset,
     activeKnowledgeBase,
+    applyDocuments: applyKnowledgeDocuments,
     clientToken,
-    onError: (message) => addMessage(sessionID, "error", message),
+    onError: addRelayErrorMessage,
+    pairingID,
+    relayScopeRef,
     sendEnvelope,
     sessionID,
     startPending,
@@ -597,14 +683,13 @@ export function MobileAppScreen() {
     setStyleInstruction,
   } = useSessionSettingsActions({
     activeRequestIDRef,
-    clearSessionPendingRequest,
-    historySessionIDRef,
+    isSessionBusy,
+    sessionIDRef,
     requestSessionMapRef,
     resetActiveAssistant,
     sendEnvelope,
     sessionID,
     setSessionLastUsage,
-    setSessionPendingPermission,
     setSessionPendingRequest,
     startPending,
     stopPending,
@@ -618,18 +703,22 @@ export function MobileAppScreen() {
     removeAttachedFile,
     sendMessageWithFiles,
     cancelFileUpload,
+    disconnectFileUpload,
     uploadLocalFile,
   } = useFileActions({
     uploadMobileAsset,
-    addErrorMessage: (message) => addMessage(sessionID, "error", message),
+    addErrorMessage: addRelayErrorMessage,
     attachedFiles,
     changeDiffPath: changeDiff?.path,
     fileParent,
     filePreview,
+    pairingID,
+    relayScopeRef,
     requestFiles,
     selectedChange,
     sendEnvelope,
     sessionID,
+    sessionIDRef,
     setAttachedFiles,
     setFilePreview,
     setMessageInput,
@@ -656,18 +745,6 @@ export function MobileAppScreen() {
     stopPending,
   });
 
-  const { pairDevice } = usePairingActions({
-    addErrorMessage: (message) => addMessage(sessionID, "error", message),
-    bindCode,
-    normalizedRelayURL,
-    setBindCode,
-    setClientToken,
-    setDeviceID,
-    setStatus,
-    setUserID,
-    startPending,
-    stopPending,
-  });
   const {
     answerUserQuestion,
     allowPermission,
@@ -681,17 +758,19 @@ export function MobileAppScreen() {
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
     addUserMessage: (targetSessionID, message, requestID, attachments) => addMessage(targetSessionID, "user", message, requestID, attachments),
     attachedFiles,
-    historySessionIDRef,
+    getSessionChat,
+    getSessionRuns,
     messageInput,
     pendingPermission: currentChat.pendingPermission,
+    relayScopeRef,
     requestSessionMapRef,
+    requestUserQuestionSync,
     resetActiveAssistant,
     sendEnvelope,
     sendMessageWithFiles,
     sessionID,
-    clearSessionPendingRequest,
+    sessionIDRef,
     setSessionLastUsage,
-    setSessionPendingPermission,
     setSessionPendingQuestion,
     setSessionPendingRequest,
     startPausePending: () => startPending("pause"),
@@ -716,33 +795,28 @@ export function MobileAppScreen() {
     applyModelSwitch,
     applySkillList,
     applySessionChanged,
-    applySessionHistoryDelta,
-    applySessionHistoryMeta,
-    applySessionHistory,
+    applySessionCommandError,
+    hasPendingNavigation,
     applySessionList,
     applySessionSettings,
     applySessionGenerationPreferences,
   } = useRemoteResultAppliers({
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
-    appendMessages,
     filePath,
     hasPendingRequest,
-    hasSessionMessages,
     historyDiff,
     historySessionIDRef,
     pendingHistorySessionIDRef,
-    replaceMessages,
+    relayScopeRef,
     requestAssets,
     requestChanges,
     requestFiles,
     requestHistory,
-    requestSessionHistoryDelta,
-    requestSessionHistoryFull,
     requestSessionHistory,
     requestSubagentTasks,
-    resetActiveAssistant,
     selectedChange,
     sessionIDRef,
+    sessionNavigationRef,
     setChangeDiff,
     setAssets,
     setChanges,
@@ -767,13 +841,17 @@ export function MobileAppScreen() {
     setSessionContext,
     setSessionGenerationPreferences,
     setSessionID,
-    setSessionPendingPermission,
     setDeletedSessions,
     setSessions,
     setViewMode,
   });
 
   const handleRemoteMessage = useRemoteMessageHandler({
+    acceptAgentRunList,
+    acceptAssetList,
+    acceptSessionList,
+    handleRemoteQueryError,
+    handleSessionHistoryMessage,
     handleAssetUploadMessage,
     activeRequestIDRef,
     addErrorMessage: (targetSessionID, message) => addMessage(targetSessionID, "error", message),
@@ -818,6 +896,7 @@ export function MobileAppScreen() {
     applyModelConfigTest,
     applyModelConfigMutation,
     applyModelConfigError,
+    handleModelDeleteMessage,
     isModelOperationPending: pendingActions.models,
     applyModelSwitch,
     applySkillList,
@@ -833,9 +912,8 @@ export function MobileAppScreen() {
     applySubagentTaskDetailResult,
     applySubagentTaskEventsResult,
     applySessionChanged,
-    applySessionHistoryDelta,
-    applySessionHistoryMeta,
-    applySessionHistory,
+    applySessionCommandError,
+    hasPendingNavigation,
     applySessionList,
     applySessionSettings,
     applySessionGenerationPreferences,
@@ -846,8 +924,9 @@ export function MobileAppScreen() {
     completeAssistant,
     currentFilePath: filePath,
     getSessionChat,
-    historySessionIDRef,
     pendingHistorySessionIDRef,
+    questionSyncRef,
+    relayScopeRef,
     hasRunForRequest,
     isKnowledgeOperationPending: pendingActions.knowledge || (viewMode === "knowledge" && pendingActions.settings),
     isGenerationOperationPending: pendingActions.generation,
@@ -860,6 +939,8 @@ export function MobileAppScreen() {
     },
     requestAgentRuns,
     requestSessionHistory,
+    requestSessionHistoryFull,
+    requestUserQuestionSync,
     startBackgroundAssistant,
     requestChanges,
     requestAssets,
@@ -877,17 +958,19 @@ export function MobileAppScreen() {
     setSessionPendingPermission,
     setSessionPendingQuestion,
     removeSessionPendingQuestion,
+    removeSessionPendingPermission,
     removePendingQuestions,
+    settleSessionRun,
     setSessionID,
-    setStatus,
     stopPending,
   });
 
   const refreshAllRemoteState = useCallback(() => {
     refreshRemoteState();
-    if (sessionID) {
-      requestAgentRuns(sessionID);
-      requestSessionHistory(sessionID);
+    const selected = sessionIDRef.current;
+    if (selected) requestSessionHistory(selected);
+    for (const [id, chat] of Object.entries(getSessionChats())) {
+      if (id && id !== selected && chat.pendingRequestID) requestAgentRuns(id);
     }
     requestIntentConfig();
     requestCatalog();
@@ -900,147 +983,46 @@ export function MobileAppScreen() {
     if (inspectedTaskID) {
       refreshInspection();
     }
-  }, [inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, sessionID]);
-
-  const scheduleReconnect = useCallback(() => {
-    if (!clientToken) {
-      return;
-    }
-    // Android's native Foreground Service owns the socket and its reconnect loop.
-    // Do not create a second JS connection when its state changes in the background.
-    if (Platform.OS === "android") {
-      setStatus("Reconnecting");
-      return;
-    }
-    if (!appActiveRef.current) {
-      reconnectOnForegroundRef.current = true;
-      return;
-    }
-    if (reconnectTimerRef.current) {
-      return;
-    }
-
-    const attempt = reconnectAttemptRef.current;
-    reconnectAttemptRef.current = Math.min(attempt + 1, 6);
-    const delay = Math.min(30000, 500 * 2 ** attempt);
-    setStatus(attempt === 0 ? "Reconnecting" : `Reconnecting (${attempt + 1})`);
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if ((!appActiveRef.current && Platform.OS !== "android") || !clientToken) {
-        reconnectOnForegroundRef.current = Boolean(clientToken);
-        return;
-      }
-      connectRef.current();
-    }, delay);
-  }, [clientToken, setStatus]);
+  }, [getSessionChats, inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, sessionIDRef]);
 
   const handleConnected = useCallback(() => {
     reconnectAssetUploads();
-    reconnectAttemptRef.current = 0;
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
+    reconnectKnowledgeUploads();
+    requestUserQuestionSync();
     refreshAllRemoteState();
-  }, [reconnectAssetUploads, refreshAllRemoteState]);
+  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestUserQuestionSync]);
 
   const handleDisconnected = useCallback(() => {
+    questionSyncRef.current = null;
+    resetRemoteQueries();
+    disconnectModelDelete();
+    disconnectFileUpload();
+    disconnectKnowledgeUploads();
     disconnectAssetUploads();
-    scheduleReconnect();
-  }, [disconnectAssetUploads, scheduleReconnect]);
+    stopPending("pause");
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetRemoteQueries, stopPending]);
+
+  const dispatchRelayMessage = useCallback((message: RelayMessage) => {
+    if (handleKnowledgeUploadMessage(message)) return;
+    handleRemoteMessage(message);
+  }, [handleKnowledgeUploadMessage, handleRemoteMessage]);
+  useLayoutEffect(() => {
+    onEnqueueFailureRef.current = dispatchRelayMessage;
+  }, [dispatchRelayMessage]);
 
   const connect = useRelayConnection({
-    addErrorMessage: (message) => addMessage(sessionID, "error", message),
-    clientToken,
-    deviceID,
-    normalizedRelayURL,
+    pairing,
+    currentPairingRef,
+    relayScopeRef,
     onConnected: handleConnected,
     onDisconnected: handleDisconnected,
-    onMessage: handleRemoteMessage,
+    onMessage: dispatchRelayMessage,
     setConnected,
     setStatus,
     socketRef,
     startPending,
     stopPending,
-    userID,
   });
-
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
-
-  useEffect(() => {
-    if (!settingsLoaded || !clientToken || AppState.currentState !== "active") {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (!socketRef.current) {
-        connectRef.current();
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [clientToken, deviceID, normalizedRelayURL, settingsLoaded, userID]);
-
-  useEffect(() => {
-    appActiveRef.current = AppState.currentState === "active";
-    let previousState: AppStateStatus = AppState.currentState;
-
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      const enteringBackground = nextState === "background" || nextState === "inactive";
-      const returningToForeground =
-        (previousState === "background" || previousState === "inactive") && nextState === "active";
-
-      appActiveRef.current = nextState === "active";
-
-      if (enteringBackground) {
-        // Android/iOS may suspend or close the socket while the app is backgrounded.
-        // Keep the retry intent even if the close event races with this lifecycle event.
-        reconnectOnForegroundRef.current = reconnectOnForegroundRef.current || Boolean(clientToken);
-      }
-
-      if (returningToForeground && reconnectOnForegroundRef.current && clientToken) {
-        reconnectOnForegroundRef.current = false;
-        // 如果当前已有正在连接或已经处于 OPEN 状态的 Socket，无需重复发起重连
-        const currentSocket = socketRef.current;
-        if (currentSocket && (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)) {
-          return;
-        }
-        if (reconnectTimerRef.current) {
-          clearTimeout(reconnectTimerRef.current);
-        }
-        setStatus("Restoring connection");
-        // Let the OS restore network interfaces before opening the replacement socket.
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectTimerRef.current = null;
-          connectRef.current();
-        }, 300);
-      }
-
-      previousState = nextState;
-    });
-
-    return () => {
-      subscription.remove();
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-    };
-  }, [clientToken]);
-
-  useEffect(() => {
-    if (!settingsLoaded) {
-      return;
-    }
-    if (clientToken && normalizedRelayURL && userID.trim() && deviceID.trim()) {
-      return;
-    }
-    void stopRelayForegroundService().catch((error) => {
-      console.warn("Relay foreground service stop failed", error);
-    });
-  }, [clientToken, deviceID, normalizedRelayURL, settingsLoaded, userID]);
 
   const handleLoadSession = useCallback(
     (targetSessionID: string) => {
@@ -1107,7 +1089,7 @@ export function MobileAppScreen() {
   );
 
   const pendingPermission = currentChat.pendingPermission;
-  const permissionSheetVisible = Boolean(pendingPermission) && minimizedPermissionID !== pendingPermission?.requestID;
+  const permissionSheetVisible = Boolean(pendingPermission) && minimizedPermissionID !== pendingPermission?.approvalID;
   const sessionRunning = currentRuns.some(({ run }) => run.status === "running");
   const runningSubagentCount = useMemo(
     () =>
@@ -1176,7 +1158,6 @@ export function MobileAppScreen() {
       return;
     }
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!settingsLoaded || !clientToken) return false;
       if (viewMode === "files" && filePreviewOpen) {
         setFilePreviewOpen(false);
         return true;
@@ -1196,7 +1177,7 @@ export function MobileAppScreen() {
       return false;
     });
     return () => subscription.remove();
-  }, [clientToken, filePreviewOpen, openChanges, openChat, settingsLoaded, settingsSection, viewMode]);
+  }, [filePreviewOpen, openChanges, openChat, settingsSection, viewMode]);
 
   const openSessionSheet = useCallback(() => {
     sessionFromPermissionRef.current = false;
@@ -1239,24 +1220,6 @@ export function MobileAppScreen() {
         (m.role === "tool_call" && m.status === "tool_running"),
     ),
   );
-
-  // 未配对：全屏配对页。配对成功写入 client_token 后，上面的自动连接副作用会接着发起连接。
-  if (settingsLoaded && !clientToken) {
-    return (
-      <PairingScreen
-        bindCode={bindCode}
-        bottomInset={bottomSafePadding}
-        failed={/pair failed/i.test(status)}
-        normalizedRelayURL={normalizedRelayURL}
-        onBindCodeChange={setBindCode}
-        onPair={pairDevice}
-        onRelayURLChange={setRelayURL}
-        pending={pendingActions.pair}
-        relayURL={relayURL}
-        topInset={topSafePadding}
-      />
-    );
-  }
 
   const refreshButton = (onPress: () => void, busy: boolean) => (
     <HeaderIconButton accessibilityLabel="刷新" disabled={busy} icon="refresh-cw" muted onPress={onPress} size={19} />
@@ -1310,7 +1273,7 @@ export function MobileAppScreen() {
       right = refreshButton(() => requestDeletedSessions(), pendingActions.sessions);
     } else if (viewMode === "knowledge") {
       title = "知识库与记忆";
-      right = refreshButton(() => { requestCatalog(); requestProfiles(); }, pendingActions.knowledge);
+      right = refreshButton(() => { requestCatalog(); requestProfiles(); requestDocuments(selectedKnowledgeBaseID); }, pendingActions.knowledge);
     } else if (viewMode === "plan") {
       title = "计划";
     } else if (settingsSection) {
@@ -1442,6 +1405,7 @@ export function MobileAppScreen() {
           deviceID,
           greetingName: userID.trim() && userID.trim() !== "local" ? userID.trim() : "",
           onAnswerUserQuestion: answerUserQuestion,
+          onChangeUserQuestionDraft: setSessionQuestionDraft,
           onExecutePlan: executePlan,
           onNearHeaderChange: setChatNearHeader,
           onOpenChangePath: openChangeByPath,
@@ -1487,6 +1451,7 @@ export function MobileAppScreen() {
           aiMemories,
           aiMemoryMessage,
           categories: knowledgeCategories,
+          documentImportStatus,
           documents: documentsByBase[selectedKnowledgeBaseID] || [],
           jobs: jobsByBase[selectedKnowledgeBaseID] || [],
           knowledgeBases,
@@ -1496,8 +1461,10 @@ export function MobileAppScreen() {
           onDeleteCategory: deleteCategory,
           onDeleteDocument: deleteDocument,
           onDeleteKnowledgeBase: deleteKnowledgeBase,
+          onDismissDocumentImport: dismissDocumentImport,
           onInsertReference: insertReference,
           onMoveCategory: moveCategory,
+          onReconcileDocumentImport: reconcileDocumentImport,
           onRefresh: () => { requestCatalog(); requestProfiles(); },
           onRefreshDocuments: () => requestDocuments(selectedKnowledgeBaseID),
           onRetryDocument: retryDocument,
@@ -1528,6 +1495,7 @@ export function MobileAppScreen() {
           onDenyPermission: denyPermission,
           pendingPermission: currentChat.pendingPermission,
           onAnswerUserQuestion: answerUserQuestion,
+          onChangeUserQuestionDraft: setSessionQuestionDraft,
           pendingQuestions: currentChat.pendingQuestions,
         }}
         plan={{
@@ -1552,6 +1520,10 @@ export function MobileAppScreen() {
           bindCode,
           compact: sessionCompacts[sessionID],
           connected,
+          connectionStatus: status === "Not paired" ? "等待连接" : status,
+          pairedRelayURL: pairing.relayURL,
+          pairingError,
+          pairingPending,
           context: sessionContexts[sessionID],
           generation: generationPreferences,
           generationStatus,
@@ -1571,19 +1543,19 @@ export function MobileAppScreen() {
           intentTraceMessage,
           intentTraceError,
           currentModelID,
+          modelDeleteFeedback,
           modelMessage,
           modelMessageError,
           deviceID,
           models,
           normalizedRelayURL,
-          onBindCodeChange: setBindCode,
+          onBindCodeChange,
           onCloseSettings: openChat,
           onConnect: connect,
           onDeleteSession: deleteSession,
-          onDeviceIDChange: setDeviceID,
           onLoadSession: selectSession,
           onNewSession: newSession,
-          onPair: pairDevice,
+          onPair,
           onCompactSession: compactSession,
           onExecutePlan: executePlan,
           onOpenPlan: openPlan,
@@ -1617,7 +1589,7 @@ export function MobileAppScreen() {
           mcpReloading: pendingActions.mcp,
           mcpMessage,
           onSetPluginEnabled: setPluginEnabled,
-          onRelayURLChange: setRelayURL,
+          onRelayURLChange,
           onSetAgentMode: setAgentMode,
           onSetContextWindowK: setContextWindowK,
           onSetGenerationSettings: setGenerationSettings,
@@ -1637,7 +1609,6 @@ export function MobileAppScreen() {
           onInspectSubagentTask: openInspection,
           onRefreshSubagents: () => { requestSubagentDefinitions(); requestSubagentTasks(); },
           onUpdateSubagentDefinition: updateSubagentDefinition,
-          onUserIDChange: setUserID,
           relayURL,
           sessionID,
           sessions,
@@ -1728,7 +1699,7 @@ export function MobileAppScreen() {
           setMinimizedPermissionID("");
           allowPermission();
         }}
-        onAllowSession={() => {
+        onAllowSession={pendingPermission?.requireFreshConsent ? undefined : () => {
           setMinimizedPermissionID("");
           allowPermissionSession();
         }}
@@ -1736,9 +1707,9 @@ export function MobileAppScreen() {
           setMinimizedPermissionID("");
           denyPermission();
         }}
-        onMinimize={() => setMinimizedPermissionID(pendingPermission?.requestID || "")}
+        onMinimize={() => setMinimizedPermissionID(pendingPermission?.approvalID || "")}
         onOpenPolicy={() => {
-          setMinimizedPermissionID(pendingPermission?.requestID || "");
+          setMinimizedPermissionID(pendingPermission?.approvalID || "");
           sessionFromPermissionRef.current = true;
           setSessionSheetVisible(true);
         }}

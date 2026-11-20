@@ -34,10 +34,11 @@ func backgroundTurnPayload(event service.BackgroundTurnEvent) protocol.Backgroun
 	payload := protocol.BackgroundTurnEventPayload{
 		TurnID: event.TurnID, RequestID: event.RequestID, SessionID: event.SessionID, RunID: event.RunID, Sequence: event.Sequence,
 		Kind: event.Kind, Status: event.Status, Content: event.Content, Reasoning: event.Reasoning, Error: event.Error,
-		ApprovalID: event.ApprovalID,
+		MessageID: event.MessageID, ApprovalID: event.ApprovalID,
 	}
 	if event.Permission != nil {
-		payload.Permission = &protocol.PermissionAskPayload{ApprovalID: event.ApprovalID, Name: event.Permission.Name, Arguments: event.Permission.Arguments, Permission: string(event.Permission.Permission)}
+		permission := permissionAskPayload(event.ApprovalID, *event.Permission)
+		payload.Permission = &permission
 	}
 	if event.Question != nil {
 		question := userQuestionPayload(*event.Question)
@@ -54,6 +55,31 @@ func backgroundTurnPayload(event service.BackgroundTurnEvent) protocol.Backgroun
 	return payload
 }
 
+// handleBackgroundPermissionEvent reports whether a remembered grant resolved
+// this ask without a prompt. Otherwise it tracks the server-side reply target.
+func (a *Agent) handleBackgroundPermissionEvent(ctx context.Context, event service.BackgroundTurnEvent) bool {
+	switch event.Kind {
+	case "permission_ask":
+		if event.Permission == nil {
+			return false
+		}
+		target := newPermissionRuleTarget(event.SessionID, *event.Permission)
+		if a.canReusePermission(target) {
+			if control, ok := a.chatService.(BackgroundPermissionControl); ok {
+				if control.ResolveBackgroundPermission(ctx, event.SessionID, event.TurnID, event.ApprovalID, true) == nil {
+					return true
+				}
+			}
+		}
+		a.permissionWaiters.rememberBackground(bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID), target)
+	case "permission_resolved":
+		if event.ApprovalID != "" {
+			a.permissionWaiters.forgetBackground(bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID))
+		}
+	}
+	return false
+}
+
 func (a *Agent) forwardBackgroundTurns(ctx context.Context, conn *websocket.Conn, events <-chan service.BackgroundTurnEvent) {
 	for {
 		select {
@@ -68,26 +94,8 @@ func (a *Agent) forwardBackgroundTurns(ctx context.Context, conn *websocket.Conn
 				}
 				return
 			}
-			if event.Kind == "permission_ask" && event.Permission != nil {
-				if a.isSessionPermissionAllowed(event.SessionID, event.Permission.Name, string(event.Permission.Permission)) {
-					if control, ok := a.chatService.(BackgroundPermissionControl); ok {
-						if control.ResolveBackgroundPermission(ctx, event.SessionID, event.TurnID, event.ApprovalID, true) == nil {
-							continue
-						}
-					}
-				}
-				if a.permissionWaiters != nil {
-					a.permissionWaiters.rememberBackground(
-						bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID),
-						permissionRuleTarget{
-							sessionID:  event.SessionID,
-							toolName:   event.Permission.Name,
-							permission: string(event.Permission.Permission),
-						},
-					)
-				}
-			} else if event.Kind == "permission_resolved" && event.ApprovalID != "" && a.permissionWaiters != nil {
-				a.permissionWaiters.forgetBackground(bgPermissionKey(event.SessionID, event.TurnID, event.ApprovalID))
+			if a.handleBackgroundPermissionEvent(ctx, event) {
+				continue
 			}
 			if err := a.writeRemoteMessage(conn, protocol.TypeBackgroundTurnEvent, event.TurnID, event.SessionID, backgroundTurnPayload(event)); err != nil {
 				log.Printf("forward background turn failed: %v", err)

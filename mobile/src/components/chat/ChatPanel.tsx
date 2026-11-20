@@ -15,7 +15,8 @@ import type { AgentRunSnapshot, ChangeEntry, Plan, SubagentTask } from "../../pr
 import type { UserQuestionState } from "../../types/app";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
-import { buildChatTurns, groupToolActivity, type ChatRenderItem } from "../../utils/chatRenderItems";
+import { latestRegeneratableTurnID } from "../../hooks/useChatActions";
+import { buildChatTurns, type ChatRenderItem } from "../../utils/chatRenderItems";
 import type { MotionSlot } from "../../utils/motionRegistry";
 import { radius, space, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
@@ -27,6 +28,8 @@ import { ChatEmptyState } from "./ChatEmptyState";
 import { InlinePlanCard } from "./InlinePlanCard";
 import { MessageBubble } from "./MessageBubble";
 import { ToolActivityGroup } from "./ToolActivityGroup";
+
+const ignoreRegenerate = () => undefined;
 
 type Props = {
   activeAssistantID: string;
@@ -41,6 +44,7 @@ type Props = {
   loadingHistory: boolean;
   messages: ChatItem[];
   onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
   onExecutePlan?: () => void;
   onInspectSubagent?: (taskID: string) => void;
   onNearHeaderChange?: (near: boolean) => void;
@@ -48,7 +52,7 @@ type Props = {
   onOpenChanges?: () => void;
   onOpenPlan?: () => void;
   onPickSuggestion: (text: string) => void;
-  onRegenerate: () => void;
+  onRegenerate: (turnID: string) => void;
   onScrolledChange?: (scrolled: boolean) => void;
   pendingPlan?: boolean;
   pendingQuestions?: UserQuestionState[];
@@ -73,6 +77,7 @@ export function ChatPanel({
   loadingHistory,
   messages,
   onAnswerUserQuestion,
+  onChangeUserQuestionDraft,
   onExecutePlan,
   onInspectSubagent,
   onNearHeaderChange,
@@ -109,6 +114,11 @@ export function ChatPanel({
   const hasRunningStream =
     Boolean(pendingRequestID) ||
     runs.some(({ run }) => run.status === "running");
+  const regeneratableTurnID = connected && sessionID && !loadingHistory && !pendingPlan &&
+    !hasRunningStream && pendingQuestions.length === 0 &&
+    !messages.some((message) => message.role === "user" && message.status === "queued")
+    ? latestRegeneratableTurnID(renderItems)
+    : undefined;
 
   const scrollToTail = useCallback(
     (animated = true, force = false) => {
@@ -227,7 +237,8 @@ export function ChatPanel({
                       onInspectSubagent={onInspectSubagent}
                       onOpenChangePath={onOpenChangePath}
                       onOpenChanges={onOpenChanges}
-                      onRegenerate={onRegenerate}
+                      onRegenerate={item.id === regeneratableTurnID ? () => onRegenerate(item.id) : undefined}
+                      sessionID={sessionID}
                       subagentTasks={subagentTasks}
                       turn={item}
                       workspaceChanges={workspaceChanges}
@@ -238,7 +249,7 @@ export function ChatPanel({
               if (item.type === "user_turn") {
                 return (
                   <View key={item.id}>
-                    <MessageBubble buttonFeedback={buttonFeedback} message={item.message} onRegenerate={onRegenerate} />
+                    <MessageBubble buttonFeedback={buttonFeedback} message={item.message} onRegenerate={ignoreRegenerate} />
                   </View>
                 );
               }
@@ -255,7 +266,7 @@ export function ChatPanel({
                     buttonFeedback={buttonFeedback}
                     hideReasoning={item.message.role === "assistant" && isCoveredByRun(item.message, runs)}
                     message={item.message}
-                    onRegenerate={onRegenerate}
+                    onRegenerate={ignoreRegenerate}
                   />
                 </View>
               );
@@ -273,8 +284,9 @@ export function ChatPanel({
             {pendingQuestions.map((question) => (
               <UserQuestionPrompt
                 buttonFeedback={buttonFeedback}
-                key={question.questionID}
+                key={JSON.stringify([question.sessionID, question.requestID, question.questionID])}
                 onAnswer={(answers, cancelled) => onAnswerUserQuestion?.(question, answers, cancelled) ?? false}
+                onChangeDraft={onChangeUserQuestionDraft ? (answers) => onChangeUserQuestionDraft(question, answers) : undefined}
                 question={question}
               />
             ))}

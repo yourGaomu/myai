@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 
 	"myai/core/llm"
 	"myai/core/remote/protocol"
@@ -30,16 +29,36 @@ func (a *Agent) resolvePermissionSessionID(primary, secondary string) string {
 	return ""
 }
 
-func (a *Agent) isSessionPermissionAllowed(sessionID, toolName, permission string) bool {
-	if a == nil || a.runtimes == nil {
+func newPermissionRuleTarget(sessionID string, request llm.ToolPermissionRequest) permissionRuleTarget {
+	return permissionRuleTarget{
+		sessionID:           sessionID,
+		toolName:            request.Name,
+		permission:          string(request.Permission),
+		requireFreshConsent: request.RequireFreshConsent,
+	}
+}
+
+func permissionAskPayload(approvalID string, request llm.ToolPermissionRequest) protocol.PermissionAskPayload {
+	return protocol.PermissionAskPayload{
+		ApprovalID:          approvalID,
+		Name:                request.Name,
+		Arguments:           request.Arguments,
+		Permission:          string(request.Permission),
+		RequireFreshConsent: request.RequireFreshConsent,
+	}
+}
+
+func (a *Agent) canReusePermission(target permissionRuleTarget) bool {
+	if target.requireFreshConsent || a == nil || a.runtimes == nil {
 		return false
 	}
-	sid := a.resolvePermissionSessionID(sessionID, "")
-	return a.runtimes.get(sid).isPermissionAllowed(toolName, permission)
+	sid := a.resolvePermissionSessionID(target.sessionID, "")
+	return a.runtimes.get(sid).isPermissionAllowed(target.toolName, target.permission)
 }
 
 func (a *Agent) recordSessionPermissionRule(target permissionRuleTarget, fallbackSessionID, scope string) {
-	if a == nil || a.runtimes == nil {
+	// The pending request, not the reply, decides whether the grant can be reused.
+	if target.requireFreshConsent || a == nil || a.runtimes == nil {
 		return
 	}
 	if scope != "session_tool" && scope != "session_permission" {
@@ -71,47 +90,37 @@ func (a *Agent) handlePermissionResultContext(ctx context.Context, message proto
 		}
 	}
 	if control, ok := a.chatService.(BackgroundPermissionControl); ok {
+		key := bgPermissionKey(message.SessionID, message.RequestID, payload.ApprovalID)
+		// Snapshot the target before resolution can publish permission_resolved
+		// and retire it. Record a rule only after the service accepts the reply.
+		target, found := a.permissionWaiters.backgroundTarget(key)
 		if err := control.ResolveBackgroundPermission(ctx, message.SessionID, message.RequestID, payload.ApprovalID, payload.Allowed); err != nil {
 			return err
 		}
-		if a.permissionWaiters != nil {
-			key := bgPermissionKey(a.resolvePermissionSessionID(message.SessionID, ""), message.RequestID, payload.ApprovalID)
-			if target, found := a.permissionWaiters.consumeBackground(key); found && payload.Allowed {
-				a.recordSessionPermissionRule(target, message.SessionID, payload.Scope)
-			}
+		a.permissionWaiters.forgetBackground(key)
+		if found && payload.Allowed {
+			a.recordSessionPermissionRule(target, message.SessionID, payload.Scope)
 		}
 		return nil
 	}
 	return fmt.Errorf("permission approval is unknown, expired or already answered")
 }
 
-func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, message protocol.Message, request llm.ToolPermissionRequest, sendErrCh chan<- error) bool {
-	if a.isSessionPermissionAllowed(message.SessionID, request.Name, string(request.Permission)) {
+func (a *Agent) askToolPermission(ctx context.Context, requestID, sessionID string, request llm.ToolPermissionRequest, send func(protocol.PermissionAskPayload) error) bool {
+	target := newPermissionRuleTarget(sessionID, request)
+	if a.canReusePermission(target) {
 		return true
 	}
-	if message.RequestID == "" {
+	if requestID == "" || a.permissionWaiters == nil || send == nil {
 		return false
 	}
 
 	approvalID := uuid.NewString()
-	key := message.RequestID + ":" + approvalID
-	ch := a.permissionWaiters.registerWithTarget(key, permissionRuleTarget{
-		sessionID:  message.SessionID,
-		toolName:   request.Name,
-		permission: string(request.Permission),
-	})
+	key := requestID + ":" + approvalID
+	ch := a.permissionWaiters.registerWithTarget(key, target)
 	defer a.permissionWaiters.unregister(key, ch)
 
-	if err := a.writeRemoteMessage(conn, protocol.TypePermissionAsk, message.RequestID, message.SessionID, protocol.PermissionAskPayload{
-		ApprovalID: approvalID,
-		Name:       request.Name,
-		Arguments:  request.Arguments,
-		Permission: string(request.Permission),
-	}); err != nil {
-		select {
-		case sendErrCh <- err:
-		default:
-		}
+	if err := send(permissionAskPayload(approvalID, request)); err != nil {
 		return false
 	}
 
@@ -122,7 +131,7 @@ func (a *Agent) askToolPermission(ctx context.Context, conn *websocket.Conn, mes
 	case allowed := <-ch:
 		return allowed
 	case <-timer.C:
-		log.Printf("tool permission timed out: request=%s tool=%s", message.RequestID, request.Name)
+		log.Printf("tool permission timed out: request=%s tool=%s", requestID, request.Name)
 		return false
 	case <-ctx.Done():
 		return false

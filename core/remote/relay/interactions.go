@@ -10,6 +10,109 @@ import (
 
 const pendingInteractionLimit = 1024
 
+const (
+	// Match the Agent's foreground approval wait. Limit additional retention
+	// independently of background interaction replay and the request route TTL.
+	foregroundPermissionTTL      = time.Minute
+	foregroundPermissionLimit    = 128
+	foregroundPermissionFrameMax = 64 * 1024
+)
+
+type foregroundPermissionKey struct {
+	route      *clientEntry
+	approvalID string
+}
+
+type foregroundPermission struct {
+	key       foregroundPermissionKey
+	message   protocol.Message
+	expiresAt time.Time
+}
+
+// trackForegroundPermissionLocked runs during request correlation, including
+// when the paired client is offline. Foreground asks never enter the event
+// broadcast cache. The route owns the original token hash for its lifetime.
+func (s *Server) trackForegroundPermissionLocked(route *clientEntry, message protocol.Message, terminal bool, now time.Time) {
+	if !isForegroundChatRequest(route.RequestType) {
+		return
+	}
+	if terminal || message.Type == protocol.TypeAssistantDone {
+		route.foregroundFinished = true
+		s.clearForegroundPermissionsLocked(route)
+		return
+	}
+	if route.foregroundFinished || route.UserID != message.UserID || route.DeviceID != message.DeviceID {
+		return
+	}
+	switch message.Type {
+	case protocol.TypePermissionResult:
+		// The Agent echoes a successful result after consuming the approval.
+		// Rejected control replies can leave the approval pending.
+		delete(s.foregroundPermissions, foregroundPermissionKey{route, controlReplyID(message, "approval_id")})
+	case protocol.TypePermissionAsk:
+		if len(message.Payload)+len(message.RequestID)+len(message.SessionID)+len(message.UserID)+len(message.DeviceID)+len(message.ClientToken) > foregroundPermissionFrameMax {
+			return
+		}
+		approvalID := controlReplyID(message, "approval_id")
+		if approvalID == "" {
+			return
+		}
+		key := foregroundPermissionKey{route, approvalID}
+		for candidate, pending := range s.foregroundPermissions {
+			if !now.Before(pending.expiresAt) {
+				delete(s.foregroundPermissions, candidate)
+			}
+		}
+		if len(s.foregroundPermissions) < foregroundPermissionLimit && s.foregroundPermissions[key] == nil {
+			s.foregroundPermissions[key] = &foregroundPermission{key: key, message: message, expiresAt: now.Add(foregroundPermissionTTL)}
+		}
+	}
+}
+
+func isForegroundChatRequest(kind protocol.MessageType) bool {
+	switch kind {
+	case protocol.TypeUserMessage, protocol.TypeSessionRegenerate, protocol.TypeSessionPlanExecute, protocol.TypeSubagentTaskResume:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) clearForegroundPermissionsLocked(route *clientEntry) {
+	for key := range s.foregroundPermissions {
+		if key.route == route {
+			delete(s.foregroundPermissions, key)
+		}
+	}
+}
+
+func (s *Server) reattachForegroundPermissionsLocked(p *peer, identity *clientConnection) []*foregroundPermission {
+	var messages []*foregroundPermission
+	now := time.Now()
+	for key, pending := range s.foregroundPermissions {
+		if !now.Before(pending.expiresAt) || now.Sub(key.route.LastSeenAt) > clientRouteTTL {
+			delete(s.foregroundPermissions, key)
+			continue
+		}
+		if key.route.ownsConnection(identity) {
+			// Route control replies and chat output to the socket that is about
+			// to receive the prompt, even if the old socket has not closed yet.
+			key.route.peer = p
+			key.route.LastSeenAt = now
+			messages = append(messages, pending)
+		}
+	}
+	return messages
+}
+
+func (s *Server) replayForegroundPermissions(p *peer, pending []*foregroundPermission) {
+	for _, permission := range pending {
+		if err := s.writeRoutedClient(p, permission.key.route, permission.message, permission); err != nil {
+			return
+		}
+	}
+}
+
 type interactionKey struct {
 	UserID, DeviceID, SessionID, TurnID, Kind, ID string
 }

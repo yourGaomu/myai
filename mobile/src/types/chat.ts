@@ -22,7 +22,10 @@ export type ChatItem = {
   attachments?: ChatAttachment[];
   completedAt?: string;
   id: string;
+  historyID?: string;
+  finalReply?: boolean;
   requestID?: string;
+  runID?: string;
   createdAt?: string;
   role: "user" | "assistant" | "event" | "error" | "tool_call" | "tool";
   status?: ChatMessageStatus;

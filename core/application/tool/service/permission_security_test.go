@@ -64,6 +64,7 @@ func TestProtectedPathsAndPublicationRequireConsentInAllModes(t *testing.T) {
 		{"write_file", "plugins/demo/plugin.json", tooldef.PermissionWrite},
 		{"read_file", "config/demo.yaml", tooldef.PermissionRead},
 		{"read_file", ".env.test", tooldef.PermissionRead},
+		{"write_file", "../outside.txt", tooldef.PermissionWrite},
 		{"share_file", "docs/report.txt", tooldef.PermissionExecute},
 		{"install_skill", "docs/demo", tooldef.PermissionWrite},
 	}
@@ -75,7 +76,13 @@ func TestProtectedPathsAndPublicationRequireConsentInAllModes(t *testing.T) {
 				t.Fatalf("%s %q bypassed consent in %s", c.name, c.path, mode)
 			}
 			asked := false
-			cmd.Ask = func(toolcommand.PermissionRequest) bool { asked = true; return false }
+			cmd.Ask = func(request toolcommand.PermissionRequest) bool {
+				asked = true
+				if !request.RequireFreshConsent {
+					t.Errorf("%s %q must request per-call consent", c.name, c.path)
+				}
+				return false
+			}
 			if decision := (PermissionService{}).Allow(cmd); decision.Allowed || !asked {
 				t.Fatalf("%s %q ignored refusal", c.name, c.path)
 			}

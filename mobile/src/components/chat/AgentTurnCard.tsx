@@ -25,6 +25,7 @@ type Props = {
   onOpenChangePath?: (path: string) => void;
   onOpenChanges?: () => void;
   onRegenerate?: () => void;
+  sessionID: string;
   subagentTasks?: SubagentTask[];
   turn: AgentTurnItem;
   workspaceChanges?: ChangeEntry[];
@@ -37,6 +38,7 @@ export function AgentTurnCard({
   onOpenChangePath,
   onOpenChanges,
   onRegenerate,
+  sessionID,
   subagentTasks,
   turn,
   workspaceChanges,
@@ -151,7 +153,15 @@ export function AgentTurnCard({
       ) : null}
 
       {open && steps.length > 0 ? (
-        <TurnTimeline buttonFeedback={buttonFeedback} onInspectSubagent={onInspectSubagent} steps={steps} subagentTasks={subagentTasks} />
+        <TurnTimeline
+          buttonFeedback={buttonFeedback}
+          onInspectSubagent={onInspectSubagent}
+          runID={turn.runID}
+          sessionID={sessionID}
+          steps={steps}
+          subagentTasks={subagentTasks}
+          turnRunning={running}
+        />
       ) : null}
 
       {turn.text ? <MarkdownText text={turn.text} /> : null}

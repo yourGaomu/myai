@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -49,28 +50,51 @@ func (s *Server) authorizeClient(userID string, deviceID string, clientName stri
 	return token, authorization, nil
 }
 
+type clientAuthError string
+
+const (
+	clientAuthRejected    clientAuthError = "client_auth_rejected"
+	clientAuthUnavailable clientAuthError = "client_auth_unavailable"
+)
+
+func (clientAuthError) Error() string { return "client token is invalid or expired" }
+
 func (s *Server) validateClientToken(userID string, deviceID string, token string) bool {
+	return s.checkClientToken(userID, deviceID, token) == nil
+}
+
+func (s *Server) checkClientToken(userID string, deviceID string, token string) error {
 	if userID == "" || deviceID == "" || token == "" {
-		return false
+		return clientAuthRejected
+	}
+	if s.authStore == nil {
+		return clientAuthUnavailable
 	}
 
 	ctx, cancel := authContext()
 	defer cancel()
-	authorization, err := s.authStore.Get(ctx, clientTokenHash(token))
+	id := clientTokenHash(token)
+	authorization, err := s.authStore.Get(ctx, id)
 	if err != nil {
-		return false
+		return classifyClientAuthStoreError(err)
 	}
-	if authorization.UserID != userID || authorization.DeviceID != deviceID {
-		return false
-	}
-	if !authorization.ActiveAt(time.Now()) {
-		return false
+	now := time.Now()
+	if authorization.ID != id || authorization.UserID != userID || authorization.DeviceID != deviceID || !authorization.ActiveAt(now) {
+		return clientAuthRejected
 	}
 
-	if err := s.authStore.Touch(ctx, authorization.ID, time.Now()); err != nil {
-		return false
+	return classifyClientAuthStoreError(s.authStore.Touch(ctx, id, now))
+}
+
+func classifyClientAuthStoreError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, authorizationport.ErrNotFound):
+		return clientAuthRejected
+	default:
+		return clientAuthUnavailable
 	}
-	return true
 }
 
 func (s *Server) listClientAuthorizations(userID string, deviceID string, token string) ([]AuthorizationInfo, error) {
@@ -119,14 +143,50 @@ func (s *Server) writeAuthorizedClient(p *peer, message protocol.Message) error 
 	if connection == nil {
 		return fmt.Errorf("client connection is no longer registered")
 	}
-	ctx, cancel := authContext()
-	defer cancel()
-	authorization, err := s.authStore.Get(ctx, identity.ClientID)
-	if err != nil || !authorization.ActiveAt(time.Now()) || authorization.UserID != identity.UserID || authorization.DeviceID != identity.DeviceID {
-		s.invalidateClientAuthorization(identity.ClientID)
-		return fmt.Errorf("client authorization is unavailable, revoked or expired")
+	if err := s.checkClientDelivery(identity.UserID, identity.DeviceID, identity.ClientID); err != nil {
+		return err
 	}
 	return p.writeJSON(message)
+}
+
+func (s *Server) checkClientDelivery(userID, deviceID, clientID string) error {
+	if s.authStore != nil {
+		ctx, cancel := authContext()
+		defer cancel()
+		authorization, err := s.authStore.Get(ctx, clientID)
+		if err == nil && authorization.ID == clientID && authorization.ActiveAt(time.Now()) && authorization.UserID == userID && authorization.DeviceID == deviceID {
+			return nil
+		}
+	}
+	s.invalidateClientAuthorization(clientID)
+	return errors.New("client authorization is unavailable, revoked or expired")
+}
+
+// Recheck route ownership and pending state after the store lookup and after
+// acquiring the socket's write lock. If a terminal response races with replay,
+// its write to this socket follows a replay already in progress.
+func (s *Server) writeRoutedClient(p *peer, route *clientEntry, message protocol.Message, pending *foregroundPermission) error {
+	if err := s.checkClientDelivery(route.UserID, route.DeviceID, route.ClientID); err != nil {
+		return err
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+
+	s.clientLock.RLock()
+	ownsRoute := s.clients[route.RequestID] == route && route.ownsConnection(s.connections[p])
+	if pending != nil {
+		now := time.Now()
+		ownsRoute = ownsRoute && route.peer == p && now.Sub(route.LastSeenAt) <= clientRouteTTL &&
+			s.foregroundPermissions[pending.key] == pending && now.Before(pending.expiresAt)
+	}
+	s.clientLock.RUnlock()
+	if !ownsRoute {
+		if pending != nil {
+			return nil // A resolved or expired ask is skipped on replay.
+		}
+		return errors.New("client request no longer belongs to this connection")
+	}
+	return p.conn.WriteJSON(message)
 }
 
 func normalizeClientName(name string) string {

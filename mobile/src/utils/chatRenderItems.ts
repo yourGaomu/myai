@@ -5,6 +5,7 @@ import { parseSharedAsset } from "./toolAssets";
 export type ToolCallStep = {
   id: string;
   toolCallID?: string;
+  runID?: string;
   name: string;
   arguments?: string;
   result?: string;
@@ -35,6 +36,7 @@ export type AgentTurnItem = {
   id: string;
   primaryMessageID: string;
   requestID?: string;
+  runID?: string;
   model?: string;
   status: "running" | "completed" | "error" | "paused";
   reasoning?: string;
@@ -112,33 +114,15 @@ function formatTurnDuration(seconds: number): string {
   return mins > 0 ? `${hours}小时 ${mins}分钟` : `${hours}小时`;
 }
 
-function findMatchingRun(
-  turn: AgentTurnItem,
-  runs: AgentRunSnapshot[],
-  precedingUserAt?: string,
-  nextUserAt?: string,
-): AgentRunSnapshot | undefined {
-  if (!runs || runs.length === 0) {
-    return undefined;
-  }
-  if (turn.requestID) {
-    const byReq = runs.find((r) => r.run.request_id === turn.requestID);
-    if (byReq) {
-      return byReq;
+// Ambiguous request ids (for example, Plan steps) cannot identify a Run.
+function indexUniqueRuns(runs: AgentRunSnapshot[], keys: (run: AgentRunSnapshot) => Array<string | undefined>) {
+  const index = new Map<string, AgentRunSnapshot | null>();
+  for (const snapshot of runs) {
+    for (const key of new Set(keys(snapshot))) {
+      if (key) index.set(key, index.has(key) ? null : snapshot);
     }
   }
-  const userStart = precedingUserAt ? Date.parse(precedingUserAt) : Number.NaN;
-  const userEnd = nextUserAt ? Date.parse(nextUserAt) : Number.POSITIVE_INFINITY;
-  if (Number.isFinite(userStart)) {
-    const byWindow = runs.find(({ run }) => {
-      const runStart = Date.parse(run.started_at);
-      return Number.isFinite(runStart) && runStart >= userStart - 2000 && runStart < userEnd;
-    });
-    if (byWindow) {
-      return byWindow;
-    }
-  }
-  return undefined;
+  return index;
 }
 
 function pushThoughtStep(timeline: AgentTurnTimelineStep[], id: string, rawText?: string) {
@@ -173,33 +157,46 @@ function pushToolStep(timeline: AgentTurnTimelineStep[], tool: ToolCallStep) {
   });
 }
 
-function findMatchingPendingToolStep(
-  tools: ToolCallStep[],
-  toolName: string,
-  toolCallID?: string,
-  toolArguments?: string,
-): ToolCallStep | undefined {
-  if (toolCallID) {
-    const byCallID = tools.find(
-      (t) => t.result === undefined && t.toolCallID && t.toolCallID === toolCallID,
-    );
-    if (byCallID) {
-      return byCallID;
-    }
+function findToolStep(tools: ToolCallStep[], toolName: string, toolCallID?: string, toolArguments?: string) {
+  if (toolCallID) return tools.find((tool) => tool.toolCallID === toolCallID);
+  // Only unkeyed legacy rows may be matched by name/arguments.
+  const pending = tools.filter((tool) => !tool.toolCallID && tool.status === "running" && tool.name === toolName);
+  const args = toolArguments?.trim();
+  return (args ? pending.find((tool) => tool.arguments?.trim() === args) : undefined) || pending[0];
+}
+
+function updateToolDuration(tool: ToolCallStep) {
+  if (!tool.createdAt || !tool.completedAt) return;
+  const seconds = (Date.parse(tool.completedAt) - Date.parse(tool.createdAt)) / 1000;
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    tool.duration = seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
   }
-  const normalizedArgs = (toolArguments || "").trim();
-  if (normalizedArgs) {
-    const byNameAndArgs = tools.find(
-      (t) =>
-        t.result === undefined &&
-        t.name === toolName &&
-        (t.arguments || "").trim() === normalizedArgs,
-    );
-    if (byNameAndArgs) {
-      return byNameAndArgs;
-    }
+}
+
+function addToolStep(timeline: AgentTurnTimelineStep[], tools: ToolCallStep[], step: ToolCallStep) {
+  const existing = step.toolCallID
+    ? tools.find((tool) => tool.toolCallID === step.toolCallID)
+    : step.status !== "running" ? findToolStep(tools, step.name, undefined, step.arguments) : undefined;
+  if (!existing) {
+    tools.push(step);
+    pushToolStep(timeline, step);
+    return;
   }
-  return tools.find((t) => t.result === undefined && t.name === toolName);
+  existing.runID ||= step.runID;
+  existing.arguments ||= step.arguments;
+  if (step.status === "running") {
+    // A result can precede its call. Take the start time without resetting the result.
+    existing.createdAt = step.createdAt || existing.createdAt;
+  } else if (existing.status === "running") {
+    existing.status = step.status;
+    existing.result = step.result;
+    existing.error = step.error;
+    existing.errorCode = step.errorCode;
+    existing.truncated = step.truncated;
+    existing.toolStatus = step.toolStatus;
+    existing.completedAt = step.completedAt;
+  }
+  updateToolDuration(existing);
 }
 
 function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
@@ -210,67 +207,30 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
   const tools: ToolCallStep[] = [];
   const sorted = [...snapshot.events].sort((a, b) => a.sequence - b.sequence);
 
-  for (const ev of sorted) {
-    if (ev.type === "reasoning") {
-      pushThoughtStep(timeline, `run-thought-${ev.id}`, ev.content);
-    } else if (ev.type === "answer") {
-      // 兼容 Run answer 事件：属于回答快照，不在工具时间线中重复作为工具展示
+  for (const event of sorted) {
+    if (event.type === "reasoning") {
+      pushThoughtStep(timeline, `run-thought-${event.id}`, event.content);
       continue;
-    } else if (ev.type === "tool_call") {
-      const step: ToolCallStep = {
-        id: ev.id,
-        toolCallID: ev.tool_call_id || ev.id,
-        name: ev.tool_name || ev.title || "tool",
-        arguments: ev.arguments,
-        status: "running",
-        toolStatus: ev.status,
-        createdAt: ev.created_at,
-      };
-      tools.push(step);
-      pushToolStep(timeline, step);
-    } else if (ev.type === "tool_result") {
-      const toolName = ev.tool_name || ev.title || "tool";
-      const failed =
-        Boolean(ev.error_message || ev.error_code) ||
-        Boolean(ev.status && ev.status !== "success" && ev.status !== "succeeded" && ev.status !== "skipped");
-      // 1.0 优先依据 tool_call_id 精确配对工具开始与结束事件
-      const existing = findMatchingPendingToolStep(tools, toolName, ev.tool_call_id, ev.arguments);
-      if (existing) {
-        existing.result = ev.content || ev.error_message || "";
-        existing.error = failed ? ev.error_message || ev.content || ev.error_code : undefined;
-        existing.errorCode = ev.error_code;
-        existing.truncated = ev.truncated;
-        existing.toolStatus = ev.status;
-        if (!existing.arguments && ev.arguments) {
-          existing.arguments = ev.arguments;
-        }
-        existing.status = failed ? "error" : "completed";
-        existing.completedAt = ev.created_at;
-        if (existing.createdAt && existing.completedAt) {
-          const diff = (Date.parse(existing.completedAt) - Date.parse(existing.createdAt)) / 1000;
-          if (Number.isFinite(diff) && diff >= 0) {
-            existing.duration = diff < 10 ? `${diff.toFixed(1)}s` : `${Math.round(diff)}s`;
-          }
-        }
-      } else {
-        const step: ToolCallStep = {
-          id: ev.id,
-          toolCallID: ev.tool_call_id || ev.id,
-          name: toolName,
-          arguments: ev.arguments,
-          result: ev.content || ev.error_message || "",
-          error: failed ? ev.error_message || ev.content || ev.error_code : undefined,
-          errorCode: ev.error_code,
-          truncated: ev.truncated,
-          status: failed ? "error" : "completed",
-          toolStatus: ev.status,
-          createdAt: ev.created_at,
-          completedAt: ev.created_at,
-        };
-        tools.push(step);
-        pushToolStep(timeline, step);
-      }
     }
+    if (event.type !== "tool_call" && event.type !== "tool_result") continue;
+    const isResult = event.type === "tool_result";
+    const failed = isResult && (Boolean(event.error_message || event.error_code) ||
+      Boolean(event.status && !["success", "succeeded", "skipped"].includes(event.status)));
+    addToolStep(timeline, tools, {
+      id: event.id,
+      toolCallID: event.tool_call_id,
+      runID: snapshot.run.id,
+      name: event.tool_name || event.title || "tool",
+      arguments: event.arguments,
+      status: isResult ? (failed ? "error" : "completed") : "running",
+      result: isResult ? event.content || event.error_message || "" : undefined,
+      error: failed ? event.error_message || event.content || event.error_code : undefined,
+      errorCode: event.error_code,
+      truncated: event.truncated,
+      toolStatus: event.status,
+      createdAt: isResult ? undefined : event.created_at,
+      completedAt: isResult ? event.created_at : undefined,
+    });
   }
 
   return { timeline, tools };
@@ -282,16 +242,42 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
  */
 export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = []): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
+  const runsByID = new Map(runs.map((snapshot) => [snapshot.run.id, snapshot]));
+  const runsByRequest = indexUniqueRuns(runs, ({ run }) => [run.request_id]);
+  const runsByReply = indexUniqueRuns(runs, ({ events }) => events.filter((event) => event.type === "answer").map((event) => event.message_id));
+  const runsByTool = indexUniqueRuns(runs, ({ events }) => events.map((event) => event.tool_call_id));
+  const runForMessage = (message: ChatItem) =>
+    (message.runID ? runsByID.get(message.runID) : undefined) ||
+    (message.historyID ? runsByReply.get(message.historyID) : undefined) ||
+    (message.toolCallID ? runsByTool.get(message.toolCallID) : undefined) ||
+    (message.requestID ? runsByRequest.get(message.requestID) : undefined);
+  const replyOwners = new Map<string, ChatItem>();
+  const runToolsInChat = new Map<string, Set<string>>();
+  const runsWithFinalReply = new Set<string>();
+  const isFinalReply = (message: ChatItem) => message.role === "assistant" &&
+    (message.finalReply || Boolean(message.historyID && runsByReply.get(message.historyID)));
+  for (const message of messages) {
+    const snapshot = runForMessage(message);
+    if (!snapshot || (message.role !== "assistant" && message.role !== "tool" && message.role !== "tool_call")) continue;
+    const runID = snapshot.run.id;
+    if (!runsWithFinalReply.has(runID) || isFinalReply(message)) replyOwners.set(runID, message);
+    if (isFinalReply(message)) runsWithFinalReply.add(runID);
+    if (message.toolCallID) {
+      const toolIDs = runToolsInChat.get(runID) || new Set<string>();
+      toolIDs.add(message.toolCallID);
+      runToolsInChat.set(runID, toolIDs);
+    }
+  }
   let currentAgentTurn: AgentTurnItem | null = null;
   let lastUserCreatedAt: string | undefined;
 
-  const flushAgentTurn = (nextUserCreatedAt?: string) => {
-    if (!currentAgentTurn) {
-      return;
-    }
+  const flushAgentTurn = () => {
+    if (!currentAgentTurn) return;
 
     const turn = currentAgentTurn;
-    const matchingRun = findMatchingRun(turn, runs, lastUserCreatedAt, nextUserCreatedAt);
+    const matchingRun = turn.runID ? runsByID.get(turn.runID) : undefined;
+    const owner = turn.runID ? replyOwners.get(turn.runID) : undefined;
+    const ownsRunReply = owner !== undefined && turn.messages.includes(owner);
 
     // 1. 识别本轮所有消息中的工具调用和助手消息分布
     const assistantIndices: number[] = [];
@@ -329,7 +315,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
       if (msg.role === "assistant") {
         const cleanText =
           msg.text && msg.text !== "(empty assistant message)" ? msg.text.trim() : "";
-        const isFinalAnswerMessage = idx === finalAssistantIdx && !hasToolsAfterFinalAssistant;
+        const isFinalAnswerMessage = isFinalReply(msg) || (idx === finalAssistantIdx && !hasToolsAfterFinalAssistant);
 
         if (!isSingleTrailingAssistantAfterTools && msg.reasoning?.trim()) {
           pushThoughtStep(timeline, `thought-reasoning-${msg.id}`, msg.reasoning);
@@ -342,61 +328,25 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
             pushThoughtStep(timeline, `thought-text-${msg.id}`, cleanText);
           }
         }
-      } else if (msg.role === "tool_call") {
-        const step: ToolCallStep = {
+      } else if (msg.role === "tool_call" || msg.role === "tool") {
+        const isResult = msg.role === "tool";
+        const failed = isResult && (Boolean(msg.toolError || msg.toolErrorCode) ||
+          Boolean(msg.toolStatus && !["success", "succeeded", "skipped"].includes(msg.toolStatus)));
+        addToolStep(timeline, tools, {
           id: msg.id,
           toolCallID: msg.toolCallID,
+          runID: runForMessage(msg)?.run.id,
           name: msg.toolName || "tool",
           arguments: msg.toolArguments,
-          status: "running",
+          status: isResult ? (failed ? "error" : "completed") : "running",
+          result: isResult ? msg.text : undefined,
+          error: msg.toolError,
+          errorCode: msg.toolErrorCode,
+          truncated: msg.toolTruncated,
           toolStatus: msg.toolStatus,
-          createdAt: msg.createdAt,
-        };
-        tools.push(step);
-        pushToolStep(timeline, step);
-      } else if (msg.role === "tool") {
-        const toolName = msg.toolName || "tool";
-        const existing = findMatchingPendingToolStep(
-          tools,
-          toolName,
-          msg.toolCallID,
-          msg.toolArguments,
-        );
-        if (existing) {
-          existing.result = msg.text;
-          existing.error = msg.toolError;
-          existing.errorCode = msg.toolErrorCode;
-          existing.truncated = msg.toolTruncated;
-          existing.toolStatus = msg.toolStatus;
-          if (!existing.arguments && msg.toolArguments) {
-            existing.arguments = msg.toolArguments;
-          }
-          existing.status = msg.toolError ? "error" : "completed";
-          existing.completedAt = msg.completedAt || msg.createdAt;
-          if (existing.createdAt && existing.completedAt) {
-            const diff = (Date.parse(existing.completedAt) - Date.parse(existing.createdAt)) / 1000;
-            if (Number.isFinite(diff) && diff >= 0) {
-              existing.duration = diff < 10 ? `${diff.toFixed(1)}s` : `${Math.round(diff)}s`;
-            }
-          }
-        } else {
-          const step: ToolCallStep = {
-            id: msg.id,
-            toolCallID: msg.toolCallID,
-            name: toolName,
-            arguments: msg.toolArguments,
-            result: msg.text,
-            error: msg.toolError,
-            errorCode: msg.toolErrorCode,
-            truncated: msg.toolTruncated,
-            status: msg.toolError ? "error" : "completed",
-            toolStatus: msg.toolStatus,
-            createdAt: msg.createdAt,
-            completedAt: msg.completedAt || msg.createdAt,
-          };
-          tools.push(step);
-          pushToolStep(timeline, step);
-        }
+          createdAt: isResult ? undefined : msg.createdAt,
+          completedAt: isResult ? msg.completedAt || msg.createdAt : undefined,
+        });
       } else if (isPermissionEvent(msg)) {
         const step: ToolCallStep = {
           id: msg.id,
@@ -410,125 +360,58 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
       }
     }
 
-    // 2. 如果是 SQLite 历史加载模式（所有 tool 在前，单条 assistant 在后且含多段 reasoning），
-    //    优先使用 matchingRun.events 的精确序列；若无 matchingRun，则将 reasoning 段落与工具步骤按顺序交错编排
     if (isSingleTrailingAssistantAfterTools) {
       const trailingAssistant = turn.messages[assistantIndices[0]];
-      const rawReasoning = trailingAssistant.reasoning?.trim() || "";
-      const runHasInterleaved =
-        matchingRun &&
-        matchingRun.events.some((e) => e.type === "reasoning") &&
-        matchingRun.events.some((e) => e.type === "tool_call" || e.type === "tool_result");
-
-      if (runHasInterleaved && matchingRun) {
-        const fromRun = buildTimelineFromRunEvents(matchingRun);
-        if (fromRun.tools.length > 0) {
-          turn.timeline = fromRun.timeline;
-          turn.tools = fromRun.tools;
-        }
+      const paragraphs = (trailingAssistant.reasoning || "").split(/\n\s*\n/).filter((part) => part.trim());
+      const interleaved: AgentTurnTimelineStep[] = [];
+      const perTool = Math.ceil(paragraphs.length / tools.length);
+      for (const [index, tool] of tools.entries()) {
+        const thought = paragraphs.slice(index * perTool, (index + 1) * perTool).join("\n\n");
+        pushThoughtStep(interleaved, `hist-thought-${turn.id}-${index}`, thought);
+        pushToolStep(interleaved, tool);
       }
-
-      if (turn.timeline.length === 0) {
-        const paragraphs = rawReasoning
-          ? rawReasoning
-              .split(/\n\s*\n/)
-              .map((p) => p.trim())
-              .filter(Boolean)
-          : [];
-
-        if (paragraphs.length > 0 && tools.length > 0) {
-          const interleaved: AgentTurnTimelineStep[] = [];
-          const P = paragraphs.length;
-          const T = tools.length;
-
-          if (P >= T) {
-            // 每个工具前分配至少一段思考，剩余思考放在最后一个工具之后
-            const perTool = Math.max(1, Math.floor(P / (T + 1)));
-            let pCursor = 0;
-            for (let tIdx = 0; tIdx < T; tIdx += 1) {
-              const take = tIdx === 0 ? Math.max(1, perTool) : perTool;
-              const chunk = paragraphs.slice(pCursor, Math.min(P, pCursor + take));
-              pCursor += chunk.length;
-              if (chunk.length > 0) {
-                pushThoughtStep(
-                  interleaved,
-                  `hist-thought-${turn.id}-${tIdx}`,
-                  chunk.join("\n\n"),
-                );
-              }
-              pushToolStep(interleaved, tools[tIdx]);
-            }
-            if (pCursor < P) {
-              pushThoughtStep(
-                interleaved,
-                `hist-thought-${turn.id}-tail`,
-                paragraphs.slice(pCursor).join("\n\n"),
-              );
-            }
-          } else {
-            // 思考段落少于工具数量：每段思考后跟随若干个工具调用
-            const toolsPerPara = Math.ceil(T / P);
-            let tCursor = 0;
-            for (let pIdx = 0; pIdx < P; pIdx += 1) {
-              pushThoughtStep(
-                interleaved,
-                `hist-thought-${turn.id}-${pIdx}`,
-                paragraphs[pIdx],
-              );
-              const sliceEnd = pIdx === P - 1 ? T : Math.min(T, tCursor + toolsPerPara);
-              while (tCursor < sliceEnd) {
-                pushToolStep(interleaved, tools[tCursor]);
-                tCursor += 1;
-              }
-            }
-            while (tCursor < T) {
-              pushToolStep(interleaved, tools[tCursor]);
-              tCursor += 1;
-            }
-          }
-
-          turn.timeline = interleaved;
-          turn.tools = tools;
-        } else {
-          if (rawReasoning) {
-            pushThoughtStep(timeline, `thought-single-${trailingAssistant.id}`, rawReasoning);
-          }
-          turn.timeline = timeline;
-          turn.tools = tools;
-        }
+      if (interleaved.length > 0) {
+        turn.timeline = interleaved;
+      } else {
+        pushThoughtStep(timeline, `thought-single-${trailingAssistant.id}`, trailingAssistant.reasoning);
       }
-    } else if (tools.length === 0 && matchingRun && matchingRun.events.length > 0) {
-      // 3. 如果 messages 中尚无工具记录，但 matchingRun.events 中有工具事件，从 run 事件回填
+    }
+    if (turn.timeline.length === 0) turn.timeline = timeline;
+    turn.tools = tools;
+
+    if (matchingRun) {
       const fromRun = buildTimelineFromRunEvents(matchingRun);
-      if (fromRun.timeline.length > 0) {
+      const elsewhere = runToolsInChat.get(matchingRun.run.id);
+      if (ownsRunReply && tools.length === 0 && !elsewhere?.size && fromRun.tools.length > 0) {
         turn.timeline = fromRun.timeline;
         turn.tools = fromRun.tools;
       } else {
-        turn.timeline = timeline;
-        turn.tools = tools;
+        for (const step of fromRun.tools) {
+          if (!step.toolCallID) continue;
+          const present = tools.some((tool) => tool.toolCallID === step.toolCallID);
+          if (present || (ownsRunReply && !elsewhere?.has(step.toolCallID))) {
+            addToolStep(turn.timeline, tools, step);
+          }
+        }
       }
-    } else {
-      turn.timeline = timeline;
-      turn.tools = tools;
     }
 
-    const hasFinishedAssistant = turn.messages.some(
-      (m) =>
-        m.role === "assistant" &&
-        (m.status === "done" || m.status === "paused" || m.status === "error"),
-    );
-    if (!hasFinishedAssistant && turn.tools.some((t) => t.status === "running")) {
+    const hasFinishedReply = turn.messages.some((message) => isFinalReply(message) ||
+      (message.role === "assistant" && ["done", "paused", "error"].includes(message.status || "")));
+    if (turn.status === "completed" && !hasFinishedReply && turn.tools.some((tool) => tool.status === "running")) {
       turn.status = "running";
+    }
+    if (matchingRun?.run.finished_at && turn.status === "running") {
+      turn.status = matchingRun.run.status === "paused" ? "paused" : matchingRun.run.status === "failed" ? "error" : "completed";
     }
 
     turn.text = answerParts.join("\n\n");
-
-    // 兼容 Run answer 事件：若消息列表中没有最终回复正文，但 matchingRun 中有 answer 快照事件，用其作为兜底正文
-    if (!turn.text && matchingRun) {
-      const answerEv = matchingRun.events.find((e) => e.type === "answer" && e.content);
-      if (answerEv?.content) {
-        turn.text = answerEv.content;
-      }
+    // 运行快照只给拥有该回复的片段补正文，避免把同一答案重复显示在工具片段里。
+    if (!turn.text && ownsRunReply && matchingRun) {
+      const answers = matchingRun.events.filter((event) => event.type === "answer" && event.content);
+      const answer = answers.find((event) => event.message_id && event.message_id === owner?.historyID) ||
+        (!runsWithFinalReply.has(matchingRun.run.id) && answers.length === 1 ? answers[0] : undefined);
+      if (answer?.content) turn.text = answer.content;
     }
 
     if (matchingRun?.run.title && (!turn.model || turn.model === "MyAI Agent")) {
@@ -590,7 +473,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
 
   for (const message of messages) {
     if (message.role === "user") {
-      flushAgentTurn(message.createdAt);
+      flushAgentTurn();
       lastUserCreatedAt = message.createdAt;
       items.push({
         type: "user_turn",
@@ -601,7 +484,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
     }
 
     if (message.role === "event" && !isPermissionEvent(message)) {
-      flushAgentTurn(message.createdAt);
+      flushAgentTurn();
       items.push({
         type: "event",
         id: message.id,
@@ -610,21 +493,15 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
       continue;
     }
 
-    // Assistant, tool_call, tool, or permission event -> merge into current Agent Turn
-    // 若当前 Agent Turn 存在且与当前消息的 requestID 不同（或者上一次 Agent 轮次已完成，新消息开启了新的后台轮次），
-    // 则先 flush 掉旧轮次，避免把后台续跑拼接到已结束的旧回答中。
-    if (
-      currentAgentTurn &&
-      (
-        (message.requestID && currentAgentTurn.requestID && message.requestID !== currentAgentTurn.requestID) ||
-        (currentAgentTurn.status !== "running" &&
-          currentAgentTurn.messages.some(
-            (m) => m.role === "assistant" && (m.status === "done" || m.status === "paused" || m.status === "error"),
-          ) &&
-          message.requestID !== currentAgentTurn.requestID)
-      )
-    ) {
-      flushAgentTurn(message.createdAt);
+    // Background continuations do not always have a visible user message between them.
+    const runID = message.runID || runForMessage(message)?.run.id;
+    if (currentAgentTurn) {
+      const differentRun = runID && currentAgentTurn.runID && runID !== currentAgentTurn.runID;
+      const differentRequest = message.requestID && currentAgentTurn.requestID && message.requestID !== currentAgentTurn.requestID;
+      const previousFinalReply = currentAgentTurn.messages.find(isFinalReply);
+      const nextReply = isFinalReply(message) && previousFinalReply && message.historyID !== previousFinalReply.historyID;
+      const differentKnownTurn = differentRun || differentRequest || nextReply;
+      if (differentKnownTurn) flushAgentTurn();
     }
 
     if (!currentAgentTurn) {
@@ -633,6 +510,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
         id: `turn-agent-${message.id}`,
         primaryMessageID: message.id,
         requestID: message.requestID,
+        runID,
         model: "MyAI Agent",
         status: "completed",
         reasoning: "",
@@ -650,6 +528,7 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
     if (!currentAgentTurn.requestID && message.requestID) {
       currentAgentTurn.requestID = message.requestID;
     }
+    currentAgentTurn.runID ||= runID;
     if (message.createdAt && (!currentAgentTurn.startedAt || message.createdAt < currentAgentTurn.startedAt)) {
       currentAgentTurn.startedAt = message.createdAt;
     }

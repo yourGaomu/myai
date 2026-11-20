@@ -41,6 +41,7 @@ type ParentContinuationRequest struct {
 }
 
 type ParentContinuationResult struct {
+	MessageID string
 	Content   string
 	Reasoning string
 	Usage     llm.TokenUsage

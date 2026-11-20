@@ -14,7 +14,6 @@ import (
 	planservice "myai/core/application/plan/service"
 	domainmessage "myai/core/domain/message"
 	agentplan "myai/core/plan"
-	sessionport "myai/core/port/session"
 	"myai/core/session"
 )
 
@@ -35,14 +34,22 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 	if s.Memory == nil {
 		return generationresult.Commit{}, errors.New("session memory is nil")
 	}
+	var committed *domainmessage.Message
 	if !command.Internal {
 		// 1. 提交最终采样原文，避免把多轮汇总的 reasoning 写回单条历史。
 		message := domainmessage.Assistant(command.Result.Content, command.Result.Reasoning, command.Result.ToolCalls)
 		if command.Result.Message != nil {
 			message = domainmessage.Clone(*command.Result.Message)
 		}
-		if err := s.Memory.AppendAssistantMessageTo(command.Session.ID, message); err != nil {
+		if message.Role != domainmessage.RoleAssistant {
+			return generationresult.Commit{}, errors.New("expected assistant message")
+		}
+		_, appended, err := s.Memory.AppendMessagesTo(command.Session.ID, message)
+		if err != nil {
 			return generationresult.Commit{}, err
+		}
+		if len(appended) == 1 {
+			committed = &appended[0]
 		}
 	}
 	if err := s.Memory.AddUsageTo(command.Session.ID, command.Result.Usage); err != nil {
@@ -69,15 +76,11 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 			}
 		}
 	}
-	var snapshot *session.Session
-	if memory, ok := s.Memory.(sessionport.TranscriptStore); ok {
-		var err error
-		snapshot, err = memory.Snapshot(command.Session.ID)
-		if err != nil {
-			return generationresult.Commit{}, err
-		}
+	snapshot, err := s.Memory.Snapshot(command.Session.ID)
+	if err != nil {
+		return generationresult.Commit{}, err
 	}
-	return generationresult.Commit{Plan: captured, Session: snapshot}, planErr
+	return generationresult.Commit{Plan: captured, Session: snapshot, AssistantMessage: committed}, planErr
 }
 
 func (s ResponseCommitService) planCapturer() generationport.PlanCapturer {

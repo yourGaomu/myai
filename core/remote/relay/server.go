@@ -40,6 +40,8 @@ type Server struct {
 	origins          map[string]struct{}
 	loopbackOrigins  map[string]struct{}
 	allowAllOrigins  bool
+
+	foregroundPermissions map[foregroundPermissionKey]*foregroundPermission // guarded by clientLock
 }
 
 type Option func(*Server)
@@ -98,6 +100,8 @@ func NewServer(addr string, authStore authorizationport.Store, options ...Option
 		agentCredentials: make(map[string]string),
 		origins:          make(map[string]struct{}),
 		loopbackOrigins:  make(map[string]struct{}),
+
+		foregroundPermissions: make(map[foregroundPermissionKey]*foregroundPermission),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -305,7 +309,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 
 		if role == "client" && protocol.IsAssetUploadRequest(message.Type) && len(raw) > protocol.AssetUploadMaxJSONBytes {
-			if err := writeError(peer, message, "upload JSON exceeds 524288 bytes"); err != nil {
+			if err := writeError(peer, message, errors.New("upload JSON exceeds 524288 bytes")); err != nil {
 				return
 			}
 			continue
@@ -314,7 +318,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
 		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, authenticatedAgent, &agentUserID, &agentDeviceID); err != nil {
 			log.Printf("%s handle message failed: %v", role, err)
-			if writeErr := writeError(peer, message, err.Error()); writeErr != nil {
+			if writeErr := writeError(peer, message, err); writeErr != nil {
 				log.Printf("%s error response failed: %v", role, writeErr)
 				return
 			}
@@ -417,8 +421,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
 	case protocol.TypePermissionResult:
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		// permission_result 属于原聊天请求，不能覆盖 request_id 已登记的请求类型，
 		// 否则后续 assistant_done 无法按 user_message 终态释放路由。
@@ -428,8 +432,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		return s.forwardToAgent(message)
 	case protocol.TypeUserQuestionAnswer:
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		if !s.authorizeInteraction(p, message, "question", controlReplyID(message, "question_id")) {
@@ -437,8 +441,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		return s.forwardToAgent(message)
 	case protocol.TypeUserQuestionList:
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		if !s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr) {
 			return fmt.Errorf("client request id is already owned by another client: request=%s", message.RequestID)
@@ -447,8 +451,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		return s.forwardToAgent(message)
 	case protocol.TypeUserMessage, protocol.TypeAgentRunList, protocol.TypeSessionList, protocol.TypeSessionNew, protocol.TypeSessionLoad, protocol.TypeSessionDelete, protocol.TypeSessionRestore, protocol.TypeSessionHistory, protocol.TypeSessionHistoryMeta, protocol.TypeSessionHistoryDelta, protocol.TypeSessionPermissionSet, protocol.TypeSessionModeSet, protocol.TypeSessionPlanExecute, protocol.TypeSessionContextQuery, protocol.TypeSessionContextSet, protocol.TypeSessionRAGSet, protocol.TypeSessionGenerationQuery, protocol.TypeSessionGenerationSet, protocol.TypeSessionStyleSet, protocol.TypeSessionCompact, protocol.TypeSessionPause, protocol.TypeSessionRegenerate, protocol.TypeModelList, protocol.TypeModelSwitch, protocol.TypeModelConfigAdd, protocol.TypeModelConfigTest, protocol.TypeModelConfigUpdate, protocol.TypeModelConfigDelete, protocol.TypeModelConfigEnabledSet, protocol.TypeModelConfigDefaultSet, protocol.TypeSkillList, protocol.TypeSkillReload, protocol.TypePluginList, protocol.TypePluginReload, protocol.TypePluginEnable, protocol.TypePluginDisable, protocol.TypeMCPReload, protocol.TypeAssetList, protocol.TypeFileList, protocol.TypeKnowledgeCatalogList, protocol.TypeKnowledgeCategoryCreate, protocol.TypeKnowledgeCategoryMove, protocol.TypeKnowledgeCategoryDelete, protocol.TypeKnowledgeBaseCreate, protocol.TypeKnowledgeBaseUpdate, protocol.TypeKnowledgeBaseDelete, protocol.TypeKnowledgeDocumentList, protocol.TypeKnowledgeDocumentIngest, protocol.TypeKnowledgeDocumentRetry, protocol.TypeKnowledgeDocumentDelete, protocol.TypeKnowledgeProfileList, protocol.TypeKnowledgeSearchPreview, protocol.TypeAIMemoryList, protocol.TypeAIMemoryCreate, protocol.TypeAIMemoryUpdate, protocol.TypeAIMemoryDelete, protocol.TypeAIMemoryRestore, protocol.TypeAIMemoryCandidateList, protocol.TypeAIMemoryCandidateApprove, protocol.TypeAIMemoryCandidateReject, protocol.TypeAIMemoryExtractionJobList, protocol.TypeAIMemoryExtractionJobRetry, protocol.TypeAIMemoryDreamRun, protocol.TypeAIMemoryDreamList, protocol.TypeSubagentDefinitionList, protocol.TypeSubagentDefinitionCreate, protocol.TypeSubagentDefinitionUpdate, protocol.TypeSubagentDefinitionDelete, protocol.TypeSubagentTaskList, protocol.TypeSubagentTaskCheck, protocol.TypeSubagentTaskMessage, protocol.TypeSubagentTaskFollowup, protocol.TypeSubagentTaskWait, protocol.TypeSubagentTaskCancel, protocol.TypeSubagentTaskApply, protocol.TypeSubagentTaskDiscard, protocol.TypeSubagentTaskResume, protocol.TypeFileRead, protocol.TypeChangesList, protocol.TypeChangeDiff, protocol.TypeChangeRevert, protocol.TypeHistoryList, protocol.TypeHistoryDiff, protocol.TypeHistoryRevert:
 		// 手机每次请求都校验 token，不能只信任客户端声明的 user/device。
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		if !s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr) {
 			return fmt.Errorf("client request id is already owned by another client: request=%s", message.RequestID)
@@ -456,8 +460,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeIntentConfigQuery, protocol.TypeIntentConfigSet, protocol.TypeIntentConfigTest, protocol.TypeIntentTraceList, protocol.TypeIntentTraceGet, protocol.TypeIntentTraceClear, protocol.TypeSubagentTaskDetail, protocol.TypeSubagentTaskEvents:
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		if !s.registerClient(message.RequestID, message.Type, p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr) {
 			return fmt.Errorf("client request id is already owned by another client: request=%s", message.RequestID)
@@ -465,8 +469,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		if err := protocol.ValidateAssetUploadMessage(message); err != nil {
 			return err
@@ -490,8 +494,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 			s.touchClient(message.RequestID)
 			return nil
 		}
-		if !s.validateClientToken(message.UserID, message.DeviceID, message.ClientToken) {
-			return fmt.Errorf("client token is invalid or expired")
+		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
+			return err
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		s.touchClientPeer(p)
@@ -512,45 +516,40 @@ func (s *Server) forwardToAgent(message protocol.Message) error {
 	return agent.peer.writeJSON(message)
 }
 
-func (s *Server) forwardToClient(message protocol.Message) error {
-	client, target, ok := s.clientPeerForMessage(
-		message.RequestID,
-		message.UserID,
-		message.DeviceID,
-	)
-	if !ok {
+func (s *Server) forwardToClient(message protocol.Message) (deliveryErr error) {
+	client, target, terminal := s.clientPeerForMessage(message, nil)
+	if terminal {
+		defer func() {
+			if deliveryErr == nil || isForegroundChatRequest(client.RequestType) {
+				s.finishClientRoute(client)
+			}
+		}()
+	}
+	if target == nil {
 		return fmt.Errorf("client request is not online: request=%s", message.RequestID)
 	}
 
-	if err := s.writeAuthorizedClient(target, message); err != nil {
+	if err := s.writeRoutedClient(target, client, message, nil); err != nil {
 		// The TCP close can race with an agent response. Retire the stale peer
-		// and retry once against a replacement connection for the same identity.
-		s.unregisterClientPeer(target)
-		_, replacement, found := s.clientPeerForMessage(
-			message.RequestID,
-			message.UserID,
-			message.DeviceID,
-		)
-		if !found || replacement == target {
+		// and retry once against the same request's paired identity.
+		s.unregisterClientPeerForRoute(target, client)
+		_, replacement, _ := s.clientPeerForMessage(message, client)
+		if replacement == nil || replacement == target {
 			return err
 		}
-		if err := s.writeAuthorizedClient(replacement, message); err != nil {
-			return err
-		}
-	}
-	terminal := isTerminalResponseForRequest(client.RequestType, message.Type)
-	if message.Type == protocol.TypeError {
-		var payload struct {
-			RequestType protocol.MessageType `json:"request_type"`
-		}
-		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
-			terminal = false
-		}
-	}
-	if terminal {
-		s.unregisterClient(message.RequestID)
+		return s.writeRoutedClient(replacement, client, message, nil)
 	}
 	return nil
+}
+
+func isTerminalClientResponse(requestType protocol.MessageType, message protocol.Message) bool {
+	if message.Type == protocol.TypeError {
+		switch controlReplyID(message, "request_type") {
+		case string(protocol.TypePermissionResult), string(protocol.TypeUserQuestionAnswer):
+			return false
+		}
+	}
+	return isTerminalResponseForRequest(requestType, message.Type)
 }
 
 func (s *Server) forwardEventToClients(message protocol.Message) error {
@@ -765,7 +764,9 @@ func controlReplyID(message protocol.Message, field string) string {
 	return id
 }
 
-func writeError(p *peer, received protocol.Message, text string) error {
+func writeError(p *peer, received protocol.Message, cause error) error {
+	var authError clientAuthError
+	_ = errors.As(cause, &authError)
 	message, err := protocol.NewMessage(
 		protocol.TypeError,
 		received.RequestID,
@@ -777,7 +778,14 @@ func writeError(p *peer, received protocol.Message, text string) error {
 			RequestType protocol.MessageType `json:"request_type"`
 			ApprovalID  string               `json:"approval_id,omitempty"`
 			QuestionID  string               `json:"question_id,omitempty"`
-		}{ErrorPayload: protocol.ErrorPayload{Message: text}, RequestType: received.Type, ApprovalID: controlReplyID(received, "approval_id"), QuestionID: controlReplyID(received, "question_id")},
+			ErrorCode   clientAuthError      `json:"error_code,omitempty"`
+		}{
+			ErrorPayload: protocol.ErrorPayload{Message: cause.Error()},
+			RequestType:  received.Type,
+			ApprovalID:   controlReplyID(received, "approval_id"),
+			QuestionID:   controlReplyID(received, "question_id"),
+			ErrorCode:    authError,
+		},
 	)
 	if err != nil {
 		return err

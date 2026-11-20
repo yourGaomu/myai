@@ -9,7 +9,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
-import android.net.ConnectivityManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -27,11 +26,14 @@ import org.json.JSONObject;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -40,13 +42,6 @@ import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 
 public final class RelayForegroundService extends Service {
-  public static final String ACTION_START = "com.myai.mobile.relay.START";
-  public static final String ACTION_STOP = "com.myai.mobile.relay.STOP";
-  public static final String EXTRA_WEBSOCKET_URL = "websocket_url";
-  public static final String EXTRA_USER_ID = "user_id";
-  public static final String EXTRA_DEVICE_ID = "device_id";
-  public static final String EXTRA_CLIENT_TOKEN = "client_token";
-
   private static final String CHANNEL_ID = "relay_connection";
   private static final int NOTIFICATION_ID = 18080;
   private static final String PREFS = "relay_foreground_service";
@@ -55,130 +50,220 @@ public final class RelayForegroundService extends Service {
   private static final String KEY_USER_ID = "user_id";
   private static final String KEY_DEVICE_ID = "device_id";
   private static final String KEY_CLIENT_TOKEN = "client_token";
-  private static final String DEFAULT_STATUS = "Relay 后台服务运行中";
+  private static final String KEY_PAIRING_ID = "pairing_id";
+  private static final String KEY_AUTH_REJECTED = "auth_rejected";
   private static final int MAX_QUEUED_MESSAGES = 256;
+  private static final int MAX_QUEUED_CHARS = 8 * 1024 * 1024;
+  private static final long CONNECT_TIMEOUT_MS = 10000L;
+  private static final long HEARTBEAT_TIMEOUT_MS = 10000L;
   private static final long HEARTBEAT_INTERVAL_MS = 25000L;
   private static final long MAX_RECONNECT_DELAY_MS = 30000L;
+  private static final String STOPPED_STATUS = "Relay 后台服务已停止";
+  private static final String CONNECTING_STATUS = "Relay 正在连接";
+  private static final String REJECTED_STATUS = "Relay 配对已失效，请重新配对";
 
-  private static final Object MESSAGE_LOCK = new Object();
-  private static final ArrayDeque<String> MESSAGE_QUEUE = new ArrayDeque<>();
-  private static volatile boolean running;
-  private static volatile String state = "stopped";
-  private static volatile String statusText = DEFAULT_STATUS;
-  private static volatile String lastError = "";
-  private static volatile RelayForegroundService instance;
-  private static volatile EventSink eventSink;
-
-  private final Object socketLock = new Object();
-  private final Handler handler = new Handler(Looper.getMainLooper());
-  private final Runnable heartbeatRunnable = new Runnable() {
-    @Override
-    public void run() {
-      sendHeartbeat();
-      synchronized (socketLock) {
-        if (enabled && webSocket != null && "connected".equals(state)) {
-          handler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
-        }
-      }
-    }
-  };
-  private final Runnable reconnectRunnable = new Runnable() {
-    @Override
-    public void run() {
-      synchronized (socketLock) {
-        reconnectScheduled = false;
-      }
-      connectIfNeeded();
-    }
-  };
+  // The Android main looper owns all transport state, including bridge commands,
+  // service lifecycle, timers and socket callbacks. Intents only wake the service;
+  // neither a delayed start intent nor a sticky restart can restore retired credentials.
+  private static final Handler MAIN = new Handler(Looper.getMainLooper());
+  private static boolean restored;
+  private static Configuration requested;
+  private static boolean authRejected;
+  private static boolean startPending;
+  private static RelayForegroundService instance;
+  private static EventSink eventSink;
+  private static Snapshot snapshot = new Snapshot("stopped", STOPPED_STATUS, "", "", "", 0);
 
   private OkHttpClient httpClient;
-  private ConnectivityManager connectivityManager;
-  private ConnectivityManager.NetworkCallback networkCallback;
-  private WebSocket webSocket;
-  private String websocketURL = "";
-  private String userID = "";
-  private String deviceID = "";
-  private String clientToken = "";
-  private boolean enabled;
-  private boolean reconnectScheduled;
+  private WebSocket.Factory socketFactory;
+  private boolean foreground;
+  private boolean stopping;
+  private Configuration configured;
+  private Connection active;
+  private Runnable reconnect;
   private int reconnectAttempt;
-  private long socketGeneration;
 
-  public interface EventSink {
-    void onState(String state, String status, String error);
+  static final class Snapshot {
+    final String state;
+    final String status;
+    final String error;
+    final String pairingID;
+    final String connectionID;
+    final long revision;
+
+    Snapshot(String state, String status, String error, String pairingID, String connectionID, long revision) {
+      this.state = state;
+      this.status = status;
+      this.error = error;
+      this.pairingID = pairingID;
+      this.connectionID = connectionID;
+      this.revision = revision;
+    }
+  }
+
+  interface EventSink {
+    void onState(Snapshot state);
     void onMessagesAvailable();
+  }
+
+  private static final class Configuration {
+    final String websocketURL;
+    final String userID;
+    final String deviceID;
+    final String clientToken;
+    final String pairingID;
+    final Request request;
+
+    private Configuration(String websocketURL, String userID, String deviceID, String clientToken,
+                          String pairingID, Request request) {
+      this.websocketURL = websocketURL;
+      this.userID = userID;
+      this.deviceID = deviceID;
+      this.clientToken = clientToken;
+      this.pairingID = pairingID;
+      this.request = request;
+    }
+
+    static Configuration parse(String websocketURL, String userID, String deviceID, String clientToken,
+                               String pairingID) {
+      String url = trim(websocketURL);
+      String user = trim(userID);
+      String device = trim(deviceID);
+      String token = trim(clientToken);
+      if (pairingID == null || pairingID.isEmpty() || !pairingID.equals(pairingID.trim())
+          || user.isEmpty() || device.isEmpty() || token.isEmpty()
+          || !(url.regionMatches(true, 0, "ws://", 0, 5) || url.regionMatches(true, 0, "wss://", 0, 6))) {
+        return null;
+      }
+      try {
+        Request request = new Request.Builder().url(url.replaceFirst("(?i)^ws", "http")).build();
+        if (!request.url().encodedUsername().isEmpty() || !request.url().encodedPassword().isEmpty()
+            || request.url().encodedQuery() != null || request.url().encodedFragment() != null) {
+          return null;
+        }
+        return new Configuration(url, user, device, token, pairingID, request);
+      } catch (IllegalArgumentException ignored) {
+        return null;
+      }
+    }
+
+    boolean matches(Configuration other) {
+      return other != null && pairingID.equals(other.pairingID) && request.url().equals(other.request.url())
+        && userID.equals(other.userID) && deviceID.equals(other.deviceID) && clientToken.equals(other.clientToken);
+    }
+  }
+
+  // The object identity is the internal generation. Its public UUID belongs to
+  // exactly one WebSocket, and no callback ever reads another socket's identity.
+  private static final class Connection {
+    final Configuration config;
+    final String id = UUID.randomUUID().toString();
+    final ArrayDeque<String> messages = new ArrayDeque<>();
+    WebSocket socket;
+    volatile boolean retired;
+    boolean authenticated;
+    String heartbeatID = "";
+    Runnable deadline;
+    Runnable heartbeat;
+    int bufferedChars;
+
+    Connection(Configuration config) {
+      this.config = config;
+    }
+
+    void clearMessages() {
+      messages.clear();
+      bufferedChars = 0;
+    }
+
+    boolean offer(String message) {
+      while (messages.size() >= MAX_QUEUED_MESSAGES || bufferedChars + message.length() > MAX_QUEUED_CHARS) {
+        if (!authenticated || messages.isEmpty()) {
+          return false;
+        }
+        bufferedChars -= messages.removeFirst().length();
+      }
+      messages.addLast(message);
+      bufferedChars += message.length();
+      return true;
+    }
   }
 
   @Override
   public void onCreate() {
     super.onCreate();
     instance = this;
-    loadPersistedConfiguration();
     httpClient = new OkHttpClient.Builder()
-      .connectTimeout(10, TimeUnit.SECONDS)
+      .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
       .readTimeout(0, TimeUnit.MILLISECONDS)
       .pingInterval(20, TimeUnit.SECONDS)
-      .retryOnConnectionFailure(true)
+      .retryOnConnectionFailure(false)
+      .followRedirects(false)
+      .followSslRedirects(false)
       .build();
-    registerNetworkCallback();
+    socketFactory = httpClient;
     createNotificationChannel();
+  }
+
+  // Deterministic tests can supply fake sockets before starting the service.
+  void setSocketFactory(WebSocket.Factory factory) {
+    socketFactory = factory;
   }
 
   @Override
   public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
-    if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-      disableAndStop();
+    startPending = false;
+    restoreConfiguration(this);
+    if (!foreground) {
+      // Even if a stop raced this wake-up, satisfy the foreground-service start
+      // requirement before stopping. The retired config is never used.
+      try {
+        Notification notification = buildNotification();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+          startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING);
+        } else {
+          startForeground(NOTIFICATION_ID, notification);
+        }
+        foreground = true;
+      } catch (RuntimeException ignored) {
+        stopTransport();
+        if (requested != null) {
+          publish("error", "无法启动 Relay 后台服务", "请在应用前台重试", "");
+        }
+        return START_NOT_STICKY;
+      }
+    }
+    stopping = false;
+    if (requested == null) {
+      stopTransport();
       return START_NOT_STICKY;
     }
-
-    Notification notification = buildNotification();
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-      startForeground(
-        NOTIFICATION_ID,
-        notification,
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-      );
-    } else {
-      startForeground(NOTIFICATION_ID, notification);
-    }
-    running = true;
-
-    if (intent != null && ACTION_START.equals(intent.getAction())) {
-      configureFromIntent(intent);
-    } else {
-      loadPersistedConfiguration();
-    }
-    if (hasConfiguration()) {
-      connectIfNeeded();
-    } else {
-      publishState("error", "等待 Relay 配置", "Relay URL、用户或 Token 为空");
-    }
+    configure(false);
     return START_STICKY;
   }
 
   @Override
   public void onDestroy() {
-    handler.removeCallbacks(heartbeatRunnable);
-    handler.removeCallbacks(reconnectRunnable);
-    unregisterNetworkCallback();
-    synchronized (socketLock) {
-      enabled = false;
-      cancelSocketLocked();
-    }
+    cancelReconnect();
+    retireSocket();
+    configured = null;
     if (httpClient != null) {
       httpClient.dispatcher().cancelAll();
       httpClient.connectionPool().evictAll();
     }
-    running = false;
-    state = "stopped";
-    statusText = DEFAULT_STATUS;
-    instance = null;
-    publishState("stopped", "Relay 后台服务已停止", "");
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-      stopForeground(STOP_FOREGROUND_REMOVE);
-    } else {
-      stopForeground(true);
+    if (instance == this) {
+      instance = null;
+      if (!stopping && !startPending) {
+        publishIdle();
+      }
+    }
+    if (foreground) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+      } else {
+        stopForeground(true);
+      }
+      foreground = false;
     }
     super.onDestroy();
   }
@@ -189,326 +274,434 @@ public final class RelayForegroundService extends Service {
     return null;
   }
 
-  public static boolean isRunning() {
-    return running;
-  }
-
-  public static String getState() {
-    return state;
-  }
-
-  public static String getStatusText() {
-    return statusText;
-  }
-
-  public static String getLastError() {
-    return lastError;
-  }
-
-  public static void setEventSink(EventSink sink) {
-    eventSink = sink;
-    if (sink != null) {
-      sink.onState(state, statusText, lastError);
-      synchronized (MESSAGE_LOCK) {
-        if (!MESSAGE_QUEUE.isEmpty()) {
-          sink.onMessagesAvailable();
-        }
-      }
+  static void onMain(Runnable task) {
+    if (Looper.myLooper() == MAIN.getLooper()) {
+      task.run();
+    } else {
+      MAIN.post(task);
     }
   }
 
-  public static List<String> drainMessages() {
-    List<String> messages = new ArrayList<>();
-    synchronized (MESSAGE_LOCK) {
-      while (!MESSAGE_QUEUE.isEmpty()) {
-        messages.add(MESSAGE_QUEUE.removeFirst());
+  static void setEventSink(EventSink sink) {
+    onMain(() -> {
+      eventSink = sink;
+      sink.onState(snapshot);
+      Connection connection = instance == null ? null : instance.active;
+      if (connection != null && connection.authenticated && !connection.messages.isEmpty()) {
+        sink.onMessagesAvailable();
       }
-    }
-    return messages;
+    });
   }
 
-  public static boolean sendMessage(String message) {
-    RelayForegroundService current = instance;
-    if (current == null) {
+  static void clearEventSink(EventSink sink) {
+    onMain(() -> {
+      if (eventSink == sink) {
+        eventSink = null;
+      }
+    });
+  }
+
+  // The scoped bridge commands below are called on MAIN. They resolve only after
+  // applying the request to the authoritative config or authenticated socket.
+  static boolean startScoped(Context context, String websocketURL, String userID, String deviceID,
+                             String clientToken, String pairingID, boolean retry) {
+    Configuration next = Configuration.parse(websocketURL, userID, deviceID, clientToken, pairingID);
+    if (next == null) {
       return false;
     }
-    WebSocket socket;
-    synchronized (current.socketLock) {
-      socket = current.webSocket;
-      if (!current.enabled || socket == null || !"connected".equals(state)) {
+    restoreConfiguration(context);
+    SharedPreferences preferences = preferences(context);
+    boolean changed = !next.matches(requested);
+    if (changed) {
+      if (instance != null) {
+        instance.cancelReconnect();
+        instance.retireSocket();
+      }
+      requested = next;
+      authRejected = false;
+      // Commit before acknowledging a new pairing so a sticky restart cannot
+      // race the write and use the replaced pairing.
+      if (!preferences.edit().clear()
+          .putBoolean(KEY_ENABLED, true)
+          .putString(KEY_PAIRING_ID, next.pairingID)
+          .putString(KEY_WEBSOCKET_URL, next.websocketURL)
+          .putString(KEY_USER_ID, next.userID)
+          .putString(KEY_DEVICE_ID, next.deviceID)
+          .putString(KEY_CLIENT_TOKEN, next.clientToken)
+          .commit()) {
+        requested = null;
+        preferences.edit().clear().commit();
+        if (instance != null) {
+          instance.stopTransport();
+        }
+        publish("error", "无法保存 Relay 配对", "请在应用前台重试", "");
         return false;
       }
-    }
-    boolean sent = socket.send(message);
-    if (!sent) {
-      current.handleSocketLost(current.socketGeneration, "消息发送失败");
-    }
-    return sent;
-  }
-
-  public static void updateStatus(Context context, String status) {
-    String normalizedStatus = status == null ? "" : status.trim();
-    statusText = normalizedStatus.isEmpty() ? DEFAULT_STATUS : normalizedStatus;
-    RelayForegroundService current = instance;
-    if (current != null && running) {
-      current.updateNotification();
-      current.emitState();
-    }
-  }
-
-  public static void requestStop(Context context) {
-    Context applicationContext = context.getApplicationContext();
-    applicationContext.getSharedPreferences(PREFS, MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_ENABLED, false)
-      .apply();
-    RelayForegroundService current = instance;
-    if (current != null) {
-      current.disableAndStop();
-    } else {
-      applicationContext.stopService(new Intent(applicationContext, RelayForegroundService.class));
-    }
-  }
-
-  private void configureFromIntent(Intent intent) {
-    String nextURL = trim(intent.getStringExtra(EXTRA_WEBSOCKET_URL));
-    String nextUserID = trim(intent.getStringExtra(EXTRA_USER_ID));
-    String nextDeviceID = trim(intent.getStringExtra(EXTRA_DEVICE_ID));
-    String nextToken = trim(intent.getStringExtra(EXTRA_CLIENT_TOKEN));
-    synchronized (socketLock) {
-      boolean changed = !websocketURL.equals(nextURL)
-        || !userID.equals(nextUserID)
-        || !deviceID.equals(nextDeviceID)
-        || !clientToken.equals(nextToken);
-      websocketURL = nextURL;
-      userID = nextUserID;
-      deviceID = nextDeviceID;
-      clientToken = nextToken;
-      // Compute validity from the new values themselves. Using hasConfiguration
-      // here would include the old enabled flag (false on the first start),
-      // preventing a newly configured service from ever connecting.
-      enabled = hasConnectionParameters();
-      reconnectAttempt = 0;
-      if (changed) {
-        cancelSocketLocked();
+    } else if (authRejected && retry) {
+      if (!preferences.edit().remove(KEY_AUTH_REJECTED).commit()) {
+        preferences.edit().putBoolean(KEY_AUTH_REJECTED, true).apply();
+        return false;
       }
+      authRejected = false;
     }
-    persistConfiguration();
+
+    if (instance != null && instance.foreground && !instance.stopping) {
+      instance.configure(retry);
+    } else if (!authRejected) {
+      if (!startPending) {
+        try {
+          Intent wake = new Intent(context, RelayForegroundService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (context.startForegroundService(wake) == null) {
+              return foregroundStartFailed();
+            }
+          } else if (context.startService(wake) == null) {
+            return foregroundStartFailed();
+          }
+          startPending = true;
+        } catch (RuntimeException ignored) {
+          return foregroundStartFailed();
+        }
+      }
+      publish("connecting", CONNECTING_STATUS, "", "");
+    }
+    return true;
   }
 
-  private void loadPersistedConfiguration() {
-    SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-    websocketURL = trim(preferences.getString(KEY_WEBSOCKET_URL, ""));
-    userID = trim(preferences.getString(KEY_USER_ID, ""));
-    deviceID = trim(preferences.getString(KEY_DEVICE_ID, ""));
-    clientToken = trim(preferences.getString(KEY_CLIENT_TOKEN, ""));
-    enabled = preferences.getBoolean(KEY_ENABLED, false);
+  private static boolean foregroundStartFailed() {
+    publish("error", "无法启动 Relay 后台服务", "请在应用前台重试", "");
+    return false;
   }
 
-  private void persistConfiguration() {
-    getSharedPreferences(PREFS, MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_ENABLED, enabled)
-      .putString(KEY_WEBSOCKET_URL, websocketURL)
-      .putString(KEY_USER_ID, userID)
-      .putString(KEY_DEVICE_ID, deviceID)
-      .putString(KEY_CLIENT_TOKEN, clientToken)
-      .apply();
+  static boolean stopScoped(Context context, String pairingID) {
+    if (pairingID == null) {
+      return false;
+    }
+    restoreConfiguration(context);
+    if (!pairingID.isEmpty() && (requested == null || !requested.pairingID.equals(pairingID))) {
+      return false;
+    }
+    requested = null;
+    authRejected = false;
+    if (instance != null && instance.foreground) {
+      instance.stopTransport();
+    }
+    boolean cleared = preferences(context).edit().clear().commit();
+    publishIdle();
+    return cleared;
   }
 
-  private boolean hasConfiguration() {
-    return enabled && hasConnectionParameters();
+  static boolean sendScoped(String pairingID, String connectionID, String message) {
+    RelayForegroundService current = instance;
+    Connection connection = scopedConnection(pairingID, connectionID);
+    if (current == null || connection == null || message == null || message.isEmpty()) {
+      return false;
+    }
+    if (offerToSocket(connection.socket, message)) {
+      return true;
+    }
+    current.socketLost(connection, "Relay 消息发送失败");
+    return false;
   }
 
-  private boolean hasConnectionParameters() {
-    return !websocketURL.isEmpty() && !userID.isEmpty() && !deviceID.isEmpty() && !clientToken.isEmpty();
+  static Snapshot getScopedState(Context context) {
+    restoreConfiguration(context);
+    return snapshot;
+  }
+
+  static List<String> drainScopedMessages(String pairingID, String connectionID) {
+    Connection connection = scopedConnection(pairingID, connectionID);
+    if (connection == null || connection.messages.isEmpty()) {
+      return Collections.emptyList();
+    }
+    List<String> drained = new ArrayList<>(connection.messages);
+    connection.clearMessages();
+    return drained;
+  }
+
+  @Nullable
+  private static Connection scopedConnection(String pairingID, String connectionID) {
+    Connection connection = instance == null ? null : instance.active;
+    return connection != null && connection.authenticated && connection.config == requested
+      && connection.config.pairingID.equals(pairingID) && connection.id.equals(connectionID)
+      ? connection : null;
+  }
+
+  private static SharedPreferences preferences(Context context) {
+    return context.getSharedPreferences(PREFS, MODE_PRIVATE);
+  }
+
+  private static void restoreConfiguration(Context context) {
+    if (restored) {
+      return;
+    }
+    SharedPreferences preferences = preferences(context);
+    boolean rejected = false;
+    try {
+      if (preferences.getBoolean(KEY_ENABLED, false)) {
+        requested = Configuration.parse(preferences.getString(KEY_WEBSOCKET_URL, ""),
+          preferences.getString(KEY_USER_ID, ""), preferences.getString(KEY_DEVICE_ID, ""),
+          preferences.getString(KEY_CLIENT_TOKEN, ""), preferences.getString(KEY_PAIRING_ID, ""));
+        rejected = requested != null && preferences.getBoolean(KEY_AUTH_REJECTED, false);
+      }
+    } catch (ClassCastException ignored) {
+      requested = null;
+    }
+    if (requested == null && !preferences.getAll().isEmpty()) {
+      // The JS side must migrate and explicitly start with a pairing ID. Do not
+      // connect using or retain the old unscoped values in native preferences.
+      preferences.edit().clear().commit();
+    }
+    authRejected = rejected;
+    restored = true;
+    publishIdle();
+  }
+
+  private void configure(boolean retry) {
+    if (configured != requested) {
+      configured = requested;
+      // This is a different configuration, not a successful reconnect attempt.
+      reconnectAttempt = 0;
+    }
+    if (authRejected) {
+      publishIdle();
+      return;
+    }
+    if (retry) {
+      cancelReconnect();
+    }
+    if (reconnect == null) {
+      connectIfNeeded();
+    }
   }
 
   private void connectIfNeeded() {
-    final long generation;
-    synchronized (socketLock) {
-      if (!hasConfiguration() || webSocket != null) {
-        return;
-      }
-      reconnectScheduled = false;
-      generation = ++socketGeneration;
-      publishState("connecting", "Relay 正在连接", "");
-      Request request = new Request.Builder().url(websocketURL).build();
-      webSocket = httpClient.newWebSocket(request, new RelayWebSocketListener(generation));
+    if (!foreground || stopping || configured == null || configured != requested || authRejected || active != null) {
+      return;
     }
-  }
-
-  private void sendHeartbeat() {
-    WebSocket socket;
-    synchronized (socketLock) {
-      socket = webSocket;
-      if (!enabled || socket == null || !"connected".equals(state)) {
-        return;
-      }
-    }
+    Connection connection = new Connection(configured);
+    active = connection;
     try {
-      JSONObject message = new JSONObject();
-      message.put("type", "heartbeat");
-      message.put("user_id", userID);
-      message.put("device_id", deviceID);
-      message.put("client_token", clientToken);
-      JSONObject payload = new JSONObject();
-      payload.put("time", isoNow());
-      message.put("payload", payload);
-      if (!socket.send(message.toString())) {
-        handleSocketLost(socketGeneration, "Relay 心跳发送失败");
-      }
-    } catch (JSONException error) {
-      handleSocketLost(socketGeneration, "Relay 心跳构造失败");
-    }
-  }
-
-  private void handleSocketOpened(long generation, WebSocket socket) {
-    synchronized (socketLock) {
-      if (generation != socketGeneration || socket != webSocket || !enabled) {
-        socket.cancel();
-        return;
-      }
-      reconnectAttempt = 0;
-      reconnectScheduled = false;
-      state = "connected";
-    }
-    publishState("connected", "Relay 已连接", "");
-    handler.removeCallbacks(heartbeatRunnable);
-    sendHeartbeat();
-    handler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
-  }
-
-  private void handleSocketMessage(long generation, WebSocket socket, String text) {
-    synchronized (socketLock) {
-      if (generation != socketGeneration || socket != webSocket) {
-        return;
-      }
-    }
-    if (isHeartbeat(text)) {
+      connection.socket = socketFactory.newWebSocket(connection.config.request, new RelaySocketListener(connection));
+    } catch (RuntimeException ignored) {
+      socketLost(connection, "Relay 无法建立连接");
       return;
     }
-    synchronized (MESSAGE_LOCK) {
-      if (MESSAGE_QUEUE.size() >= MAX_QUEUED_MESSAGES) {
-        MESSAGE_QUEUE.removeFirst();
-      }
-      MESSAGE_QUEUE.addLast(text);
-    }
-    EventSink sink = eventSink;
-    if (sink != null) {
-      sink.onMessagesAvailable();
-    }
+    publish("connecting", CONNECTING_STATUS, "", connection.id);
+    setDeadline(connection, CONNECT_TIMEOUT_MS, () -> socketLost(connection, "Relay 连接超时"));
   }
 
-  private void handleSocketLost(long generation, String error) {
-    synchronized (socketLock) {
-      if (generation != socketGeneration || webSocket == null) {
-        return;
-      }
-      cancelSocketLocked();
-      if (!hasConfiguration()) {
-        publishState("stopped", "Relay 已停止", "");
-        return;
-      }
-      publishState("reconnecting", "Relay 正在重连", error == null ? "" : error);
-      scheduleReconnectLocked();
-    }
+  private boolean isCurrent(Connection connection, WebSocket socket) {
+    return active == connection && connection.config == requested && connection.socket == socket;
   }
 
-  private void scheduleReconnectLocked() {
-    if (reconnectScheduled || !hasConfiguration()) {
+  private void socketOpened(Connection connection, WebSocket socket) {
+    if (!isCurrent(connection, socket)) {
       return;
     }
-    long delay = Math.min(MAX_RECONNECT_DELAY_MS, 500L * (1L << Math.min(reconnectAttempt, 6)));
+    publish("authenticating", "Relay 正在验证配对", "", connection.id);
+    sendHeartbeat(connection);
+  }
+
+  private void sendHeartbeat(Connection connection) {
+    if (!isCurrent(connection, connection.socket) || !connection.heartbeatID.isEmpty()) {
+      return;
+    }
+    Configuration config = connection.config;
+    String id = UUID.randomUUID().toString();
+    try {
+      JSONObject message = new JSONObject()
+        .put("type", "heartbeat")
+        .put("request_id", id)
+        .put("user_id", config.userID)
+        .put("device_id", config.deviceID)
+        .put("client_token", config.clientToken)
+        .put("payload", new JSONObject().put("time", isoNow()));
+      connection.heartbeatID = id;
+      if (!offerToSocket(connection.socket, message.toString())) {
+        socketLost(connection, "Relay 心跳发送失败");
+        return;
+      }
+      setDeadline(connection, HEARTBEAT_TIMEOUT_MS, () -> {
+        if (id.equals(connection.heartbeatID)) {
+          socketLost(connection, "Relay 认证或心跳回执超时");
+        }
+      });
+    } catch (JSONException ignored) {
+      socketLost(connection, "Relay 心跳构造失败");
+    }
+  }
+
+  private static boolean offerToSocket(WebSocket socket, String message) {
+    try {
+      return socket != null && socket.send(message);
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private void socketMessage(Connection connection, WebSocket socket, String text) {
+    if (!isCurrent(connection, socket)) {
+      return;
+    }
+    JSONObject message;
+    try {
+      message = new JSONObject(text);
+    } catch (JSONException ignored) {
+      return;
+    }
+    Object type = message.opt("type");
+    Object userID = message.opt("user_id");
+    Object deviceID = message.opt("device_id");
+    if (!(type instanceof String) || !matchesIdentity(userID, connection.config.userID)
+        || !matchesIdentity(deviceID, connection.config.deviceID)) {
+      return;
+    }
+
+    boolean heartbeat = "heartbeat".equals(type);
+    boolean correlated = !connection.heartbeatID.isEmpty() && connection.heartbeatID.equals(message.opt("request_id"));
+    if (heartbeat || (correlated && "error".equals(type))) {
+      if (correlated && connection.config.userID.equals(userID) && connection.config.deviceID.equals(deviceID)) {
+        JSONObject payload = message.optJSONObject("payload");
+        if (payload != null) {
+          if (heartbeat && "heartbeat".equals(payload.opt("received"))) {
+            heartbeatAcknowledged(connection);
+          } else if (!heartbeat && "client_auth_rejected".equals(payload.opt("error_code"))) {
+            authRejected = true;
+            retireSocket();
+            preferences(this).edit().putBoolean(KEY_AUTH_REJECTED, true).commit();
+            publishIdle();
+          } else if (!heartbeat && ("client_auth_unavailable".equals(payload.opt("error_code"))
+              || "client token is invalid or expired".equals(payload.opt("message")))) {
+            socketLost(connection, "Relay 暂时无法验证配对");
+          }
+        }
+      }
+      return;
+    }
+
+    // Replay frames may arrive before the auth ACK. They share the socket's
+    // buffer but are not observable or drainable until that socket authenticates.
+    if (message.remove("client_token") != null) {
+      text = message.toString();
+    }
+    boolean wasEmpty = connection.messages.isEmpty();
+    if (!connection.offer(text)) {
+      socketLost(connection, "Relay 待恢复消息过多");
+      return;
+    }
+    if (wasEmpty && connection.authenticated) {
+      emitMessagesAvailable();
+    }
+  }
+
+  private static boolean matchesIdentity(Object value, String expected) {
+    return value == null || value == JSONObject.NULL || "".equals(value) || expected.equals(value);
+  }
+
+  private void heartbeatAcknowledged(Connection connection) {
+    clearDeadline(connection);
+    connection.heartbeatID = "";
+    reconnectAttempt = 0;
+    connection.heartbeat = () -> sendHeartbeat(connection);
+    MAIN.postDelayed(connection.heartbeat, HEARTBEAT_INTERVAL_MS);
+    if (!connection.authenticated) {
+      connection.authenticated = true;
+      publish("connected", "Relay 已连接", "", connection.id);
+      if (!connection.messages.isEmpty()) {
+        emitMessagesAvailable();
+      }
+    }
+  }
+
+  private void setDeadline(Connection connection, long delay, Runnable action) {
+    clearDeadline(connection);
+    connection.deadline = action;
+    MAIN.postDelayed(action, delay);
+  }
+
+  private static void clearDeadline(Connection connection) {
+    if (connection.deadline != null) {
+      MAIN.removeCallbacks(connection.deadline);
+      connection.deadline = null;
+    }
+  }
+
+  private void socketLost(Connection connection, String reason) {
+    if (active != connection || requested != connection.config) {
+      return;
+    }
+    retireSocket();
+    publish("reconnecting", "Relay 正在重连", reason, "");
+    long delay = Math.min(MAX_RECONNECT_DELAY_MS, 500L << reconnectAttempt);
     reconnectAttempt = Math.min(reconnectAttempt + 1, 6);
-    reconnectScheduled = true;
-    handler.removeCallbacks(reconnectRunnable);
-    handler.postDelayed(reconnectRunnable, delay);
+    reconnect = () -> {
+      reconnect = null;
+      connectIfNeeded();
+    };
+    MAIN.postDelayed(reconnect, delay);
   }
 
-  private void cancelSocketLocked() {
-    handler.removeCallbacks(heartbeatRunnable);
-    WebSocket oldSocket = webSocket;
-    webSocket = null;
-    if (oldSocket != null) {
-      oldSocket.cancel();
+  private void cancelReconnect() {
+    if (reconnect != null) {
+      MAIN.removeCallbacks(reconnect);
+      reconnect = null;
     }
   }
 
-  private void disableAndStop() {
-    synchronized (socketLock) {
-      enabled = false;
-      reconnectScheduled = false;
-      handler.removeCallbacks(reconnectRunnable);
-      cancelSocketLocked();
+  private void retireSocket() {
+    Connection connection = active;
+    active = null;
+    if (connection != null) {
+      connection.retired = true;
+      clearDeadline(connection);
+      if (connection.heartbeat != null) {
+        MAIN.removeCallbacks(connection.heartbeat);
+      }
+      connection.clearMessages();
+      if (connection.socket != null) {
+        connection.socket.cancel();
+      }
     }
-    persistConfiguration();
+  }
+
+  private void stopTransport() {
+    stopping = true;
+    cancelReconnect();
+    retireSocket();
+    configured = null;
     stopSelf();
   }
 
-  private void registerNetworkCallback() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+  private static void publishIdle() {
+    if (authRejected) {
+      publish("auth_rejected", REJECTED_STATUS, REJECTED_STATUS, "");
+    } else {
+      publish("stopped", STOPPED_STATUS, "", "");
+    }
+  }
+
+  private static void publish(String state, String status, String error, String connectionID) {
+    String pairingID = requested == null ? "" : requested.pairingID;
+    if (state.equals(snapshot.state) && status.equals(snapshot.status) && error.equals(snapshot.error)
+        && pairingID.equals(snapshot.pairingID) && connectionID.equals(snapshot.connectionID)) {
       return;
     }
-    connectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-    if (connectivityManager == null) {
-      return;
-    }
-    networkCallback = new ConnectivityManager.NetworkCallback() {
-      @Override
-      public void onAvailable(android.net.Network network) {
-        handler.post(() -> {
-          synchronized (socketLock) {
-            if (enabled && webSocket == null) {
-              reconnectScheduled = false;
-              reconnectAttempt = 0;
-            }
-          }
-          connectIfNeeded();
-        });
+    snapshot = new Snapshot(state, status, error, pairingID, connectionID, snapshot.revision + 1);
+    if (instance != null && instance.foreground && !instance.stopping) {
+      NotificationManager manager = instance.getSystemService(NotificationManager.class);
+      if (manager != null) {
+        manager.notify(NOTIFICATION_ID, instance.buildNotification());
       }
-    };
-    try {
-      connectivityManager.registerDefaultNetworkCallback(networkCallback);
-    } catch (RuntimeException error) {
-      networkCallback = null;
+    }
+    if (eventSink != null) {
+      eventSink.onState(snapshot);
     }
   }
 
-  private void unregisterNetworkCallback() {
-    if (connectivityManager == null || networkCallback == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-      return;
-    }
-    try {
-      connectivityManager.unregisterNetworkCallback(networkCallback);
-    } catch (RuntimeException ignored) {
-      // The callback may already have been removed by the system.
-    }
-    networkCallback = null;
-  }
-
-  private void publishState(String nextState, String nextStatus, String error) {
-    state = nextState;
-    statusText = nextStatus == null || nextStatus.trim().isEmpty() ? DEFAULT_STATUS : nextStatus;
-    lastError = error == null ? "" : error;
-    updateNotification();
-    emitState();
-  }
-
-  private void emitState() {
-    EventSink sink = eventSink;
-    if (sink != null) {
-      sink.onState(state, statusText, lastError);
-    }
-  }
-
-  private void updateNotification() {
-    if (!running) {
-      return;
-    }
-    NotificationManager manager = getSystemService(NotificationManager.class);
-    if (manager != null) {
-      manager.notify(NOTIFICATION_ID, buildNotification());
+  private static void emitMessagesAvailable() {
+    if (eventSink != null) {
+      eventSink.onMessagesAvailable();
     }
   }
 
@@ -516,16 +709,12 @@ public final class RelayForegroundService extends Service {
     Intent launchIntent = new Intent(this, MainActivity.class);
     launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     PendingIntent pendingIntent = PendingIntent.getActivity(
-      this,
-      0,
-      launchIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-    );
+      this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
     return new NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.relay_notification)
       .setContentTitle(getString(R.string.app_name))
-      .setContentText(statusText)
+      .setContentText(snapshot.error.isEmpty() ? snapshot.status : snapshot.error)
       .setContentIntent(pendingIntent)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -538,24 +727,12 @@ public final class RelayForegroundService extends Service {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       return;
     }
-    NotificationChannel channel = new NotificationChannel(
-      CHANNEL_ID,
-      "Relay 连接",
-      NotificationManager.IMPORTANCE_LOW
-    );
+    NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Relay 连接", NotificationManager.IMPORTANCE_LOW);
     channel.setDescription("保持手机与 Relay 的后台连接");
     channel.setShowBadge(false);
     NotificationManager manager = getSystemService(NotificationManager.class);
     if (manager != null) {
       manager.createNotificationChannel(channel);
-    }
-  }
-
-  private static boolean isHeartbeat(String text) {
-    try {
-      return "heartbeat".equals(new JSONObject(text).optString("type"));
-    } catch (JSONException ignored) {
-      return false;
     }
   }
 
@@ -569,36 +746,67 @@ public final class RelayForegroundService extends Service {
     return value == null ? "" : value.trim();
   }
 
-  private final class RelayWebSocketListener extends WebSocketListener {
-    private final long generation;
+  private final class RelaySocketListener extends WebSocketListener {
+    private final Connection connection;
+    // Bound the handoff to MAIN as well as the socket's own message buffer.
+    private final AtomicInteger postedCount = new AtomicInteger();
+    private final AtomicInteger postedChars = new AtomicInteger();
+    private boolean overflowed; // Only accessed on the OkHttp reader thread.
 
-    private RelayWebSocketListener(long generation) {
-      this.generation = generation;
+    RelaySocketListener(Connection connection) {
+      this.connection = connection;
     }
 
     @Override
-    public void onOpen(WebSocket webSocket, Response response) {
-      handleSocketOpened(generation, webSocket);
+    public void onOpen(WebSocket socket, Response response) {
+      MAIN.post(() -> socketOpened(connection, socket));
     }
 
     @Override
-    public void onMessage(WebSocket webSocket, String text) {
-      handleSocketMessage(generation, webSocket, text);
+    public void onMessage(WebSocket socket, String text) {
+      if (connection.retired || overflowed) {
+        return;
+      }
+      int count = postedCount.incrementAndGet();
+      int chars = postedChars.addAndGet(text.length());
+      if (count > MAX_QUEUED_MESSAGES || chars > MAX_QUEUED_CHARS) {
+        overflowed = true;
+        postedCount.decrementAndGet();
+        postedChars.addAndGet(-text.length());
+        postLoss(socket, "Relay 待恢复消息过多");
+        return;
+      }
+      MAIN.post(() -> {
+        try {
+          socketMessage(connection, socket, text);
+        } finally {
+          postedCount.decrementAndGet();
+          postedChars.addAndGet(-text.length());
+        }
+      });
     }
 
     @Override
-    public void onClosing(WebSocket webSocket, int code, String reason) {
-      webSocket.close(code, reason);
+    public void onClosing(WebSocket socket, int code, String reason) {
+      postLoss(socket, "Relay 连接已断开");
     }
 
     @Override
-    public void onClosed(WebSocket webSocket, int code, String reason) {
-      handleSocketLost(generation, reason);
+    public void onClosed(WebSocket socket, int code, String reason) {
+      postLoss(socket, "Relay 连接已断开");
     }
 
     @Override
-    public void onFailure(WebSocket webSocket, Throwable throwable, @Nullable Response response) {
-      handleSocketLost(generation, throwable == null ? "Relay 连接失败" : throwable.getMessage());
+    public void onFailure(WebSocket socket, Throwable throwable, @Nullable Response response) {
+      postLoss(socket, "Relay 连接失败，请检查网络和服务器");
+    }
+
+    private void postLoss(WebSocket socket, String reason) {
+      MAIN.post(() -> {
+        if (isCurrent(connection, socket)) {
+          socketLost(connection, reason);
+        }
+      });
     }
   }
 }

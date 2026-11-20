@@ -270,12 +270,19 @@ func TestBackgroundStreamIdentitySequenceAndSlowSubscriber(t *testing.T) {
 	stream.OnRunStarted(domainagentrun.Run{ID: "run", SessionID: "parent"})
 	stream.OnAnswer("hello")
 	stream.OnRunCompleted(domainagentrun.Run{ID: "run", Status: domainagentrun.StatusSucceeded})
-	finish(ChatResponse{Result: llm.ChatResult{Content: "hello"}}, nil)
+	finish(ChatResponse{MessageID: "assistant-history-row", Result: llm.ChatResult{Content: "hello"}}, nil)
 	var previous uint64
 	for i := 0; i < 3; i++ {
 		e := <-fast
 		if e.Sequence <= previous || e.SessionID != "parent" || e.RunID != "run" || e.TurnID != stream.CorrelationID {
 			t.Fatalf("invalid event: %#v", e)
+		}
+		wantID := ""
+		if i == 2 {
+			wantID = "assistant-history-row"
+		}
+		if e.MessageID != wantID {
+			t.Fatalf("message ID must belong to completion only: %#v", e)
 		}
 		previous = e.Sequence
 	}

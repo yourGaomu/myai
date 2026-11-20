@@ -157,22 +157,9 @@ function tasksForSession(tasksBySession: Record<string, SubagentTask[]>, session
 // 3.0 任务快照更新：比较 task.updated_at，避免旧事件或迟到响应覆盖新状态
 function upsertTask(current: SubagentTask[], value: SubagentTask) {
   const existing = current.find((item) => item.id === value.id);
-  if (existing) {
-    if (existing.updated_at && value.updated_at) {
-      const existingTime = Date.parse(existing.updated_at);
-      const valueTime = Date.parse(value.updated_at);
-      if (Number.isFinite(existingTime) && Number.isFinite(valueTime) && valueTime < existingTime) {
-        return current;
-      }
-    }
-    if (
-      existing.event_sequence !== undefined &&
-      value.event_sequence !== undefined &&
-      value.event_sequence < existing.event_sequence
-    ) {
-      return current;
-    }
-  }
+  if (existing && (isOlderTask(value, existing) || (
+    existing.event_sequence !== undefined && value.event_sequence !== undefined && value.event_sequence < existing.event_sequence
+  ))) return current;
   const next = current.filter((item) => item.id !== value.id);
   next.push(existing ? { ...existing, ...value } : value);
   const sorted = next.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));

@@ -8,7 +8,6 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	modelport "myai/core/port/model"
 	outbox "myai/core/port/outbox"
-	repository "myai/core/port/repository"
 	"myai/core/session"
 )
 
@@ -34,12 +33,12 @@ func (w Writer) PrepareAssistantMessage(current *session.Session, result modelpo
 	if createdAt.IsZero() {
 		createdAt = w.now()
 	}
-	message := (chatmessagemapper.Mapper{IDs: w.IDs}).AssistantMessageFromSession(current, result, createdAt)
 	batch := outbox.Batch{Version: outbox.Version, SessionID: current.ID,
-		Messages: []repository.MessageRecord{message}, Metadata: messageMetadata(current, current.Model, "", createdAt, true),
+		Messages: (chatmessagemapper.Mapper{IDs: w.IDs}).AssistantTurn(current.ID, result, createdAt),
+		Metadata: messageMetadata(current, current.Model, "", createdAt, true),
 	}
 	if batch.Metadata.Sequence <= 0 {
-		batch.Metadata.Sequence = message.Sequence
+		batch.Metadata.Sequence = batch.Messages[len(batch.Messages)-1].Sequence
 	}
 	frozen, _, err := outbox.Freeze(batch)
 	return frozen, err

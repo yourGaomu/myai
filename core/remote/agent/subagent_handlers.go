@@ -267,6 +267,7 @@ func (agent *Agent) handleSubagentTaskResume(ctx context.Context, conn *websocke
 		})
 		return service.ChatResponse{
 			SessionID: resumed.Task.ParentSessionID,
+			MessageID: resumed.MessageID,
 			Result:    llm.ChatResult{Content: resumed.Content, Reasoning: resumed.Reasoning, Usage: resumed.Usage},
 		}, resumeErr
 	})
@@ -274,7 +275,7 @@ func (agent *Agent) handleSubagentTaskResume(ctx context.Context, conn *websocke
 		return resumed, err
 	}
 	if err := agent.writeRemoteMessage(conn, protocol.TypeAssistantDone, message.RequestID, response.SessionID, protocol.AssistantDonePayload{
-		Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: tokenUsagePayload(response.Result.Usage),
+		MessageID: response.MessageID, Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: tokenUsagePayload(response.Result.Usage),
 	}); err != nil {
 		return resumed, err
 	}

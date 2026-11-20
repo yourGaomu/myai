@@ -34,9 +34,13 @@ type Props = {
 export function describeConnection(status: string, connected: boolean, deviceID: string): { label: string; tone: Tone } {
   const device = deviceID.trim() || "电脑";
   if (connected) return { label: `${device} · 在线`, tone: "ok" };
+  if (/配对已失效/.test(status)) return { label: "配对已失效", tone: "off" };
+  if (/authenticating|正在认证|验证配对/i.test(status) && !/重连|reconnect/i.test(status)) {
+    return { label: "正在验证配对…", tone: "wait" };
+  }
   if (/pairing/i.test(status)) return { label: "正在配对…", tone: "wait" };
-  if (/reconnect/i.test(status)) return { label: `重连中 · ${device}`, tone: "wait" };
-  if (/connecting|restoring/i.test(status)) return { label: `正在连接 ${device}…`, tone: "wait" };
+  if (/reconnect|重连/i.test(status)) return { label: `重连中 · ${device}`, tone: "wait" };
+  if (/connecting|restoring|正在连接/i.test(status)) return { label: `正在连接 ${device}…`, tone: "wait" };
   return { label: `${device} · 离线`, tone: "off" };
 }
 

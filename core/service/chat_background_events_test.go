@@ -269,10 +269,25 @@ func TestBackgroundListQuestionsUsesTurnIdentityAndDeepCopies(t *testing.T) {
 		if len(other) != 1 || other[0].ID != "question-other" || other[0].RequestID != "other-turn" {
 			t.Fatalf("question listing crossed sessions or lost turn identity: %#v", other)
 		}
+		// The mobile reconnect query convenes all pending questions. Projecting
+		// the empty filter into a result would make the answer unrouteable.
+		all := s.ListBackgroundQuestions("")
+		if wantAll := []domaininteraction.Request{want[0], other[0], want[1]}; !reflect.DeepEqual(all, wantAll) {
+			t.Fatalf("global question snapshot = %#v, want %#v", all, wantAll)
+		}
+		if err := s.ResolveBackgroundQuestion(context.Background(), all[1].SessionID, all[1].RequestID, all[1].ID, backgroundTestAnswer()); err != nil {
+			t.Fatalf("answer using global snapshot identity: %v", err)
+		}
+		if got := backgroundTestReceive(t, pending[1].result); got.err != nil || !reflect.DeepEqual(got.answer, backgroundTestAnswer()) {
+			t.Fatalf("question answer = %#v", got)
+		}
+		if again := s.ListBackgroundQuestions(""); !reflect.DeepEqual(again, want) {
+			t.Fatalf("resolved question remains in global snapshot: %#v", again)
+		}
 		if got := s.ListBackgroundQuestions("missing-session"); len(got) != 0 {
 			t.Fatalf("missing session has pending questions: %#v", got)
 		}
-		for _, p := range pending {
+		for _, p := range []pendingQuestion{pending[0], pending[2]} {
 			if err := s.ResolveBackgroundQuestion(context.Background(), p.session, p.turn, p.request.ID, domaininteraction.Answer{Cancelled: true}); err != nil {
 				t.Fatal(err)
 			}

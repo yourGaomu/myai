@@ -15,6 +15,8 @@ type PermissionRequest struct {
 	Arguments  string
 	Permission tooldef.Permission
 	Mode       session.PermissionMode
+	// RequireFreshConsent means this call must not use or create a remembered grant.
+	RequireFreshConsent bool
 }
 
 type PermissionAskFunc func(PermissionRequest) bool

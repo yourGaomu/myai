@@ -23,7 +23,7 @@ import { CharacterHalo, PulseDot, useReduceMotion } from "../common/MotionEffect
 type Props = {
   bindCode: string;
   bottomInset: number;
-  failed: boolean;
+  errorMessage: string;
   normalizedRelayURL: string;
   onBindCodeChange: (code: string) => void;
   onPair: () => void;
@@ -40,13 +40,14 @@ export function PairingScreen(props: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
   const reduceMotion = useReduceMotion();
-  const { bindCode, failed, pending } = props;
+  const { bindCode, errorMessage, pending } = props;
+  const failed = Boolean(errorMessage);
   const inputRef = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
   const [custom, setCustom] = useState(false);
   const [editingRelay, setEditingRelay] = useState(false);
   const code = bindCode.trim();
-  const canPair = !pending && (custom ? code.length > 0 : code.length === 6);
+  const canPair = !pending && Boolean(props.normalizedRelayURL) && (custom ? code.length > 0 : code.length === 6);
   const cursor = Math.min(code.length, 5);
 
   const cellScales = useRef(cells.map(() => new Animated.Value(1))).current;
@@ -172,7 +173,7 @@ export function PairingScreen(props: Props) {
             {pending ? "正在配对…" : "配对并连接"}
           </Text>
         </Pressable>
-        {props.failed ? <Text style={styles.error}>配对失败。请检查配对码，并确认电脑上的 Agent 正在运行。</Text> : null}
+        {failed ? <Text accessibilityLiveRegion="polite" style={styles.error}>{errorMessage}</Text> : null}
 
         <View style={styles.spacer} />
         {editingRelay ? (

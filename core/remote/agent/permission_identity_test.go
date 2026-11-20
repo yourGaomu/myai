@@ -1,10 +1,20 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
+	tooladapter "myai/core/adapter/tool/executor"
+	generationcommand "myai/core/application/chat/generation/command"
 	domaininteraction "myai/core/domain/interaction"
+	domainmessage "myai/core/domain/message"
+	"myai/core/llm"
 	"myai/core/remote/protocol"
+	"myai/core/session"
+	"myai/core/tool"
+	tooldef "myai/core/tool/tool"
 )
 
 func TestPermissionRepliesMatchApprovalAndRequest(t *testing.T) {
@@ -124,13 +134,13 @@ func TestPermissionRuleScopeRemembersPerSessionToolAndPermissionCategory(t *test
 	if !<-w1 {
 		t.Fatal("expected w1 approved")
 	}
-	if !a.isSessionPermissionAllowed("session-a", "other_exec_tool", "execute") {
+	if !a.runtimes.get("session-a").isPermissionAllowed("other_exec_tool", "execute") {
 		t.Fatal("expected session-a execute category to be auto-allowed")
 	}
-	if a.isSessionPermissionAllowed("session-a", "write_file", "write") {
+	if a.runtimes.get("session-a").isPermissionAllowed("write_file", "write") {
 		t.Fatal("did not expect session-a write category to be auto-allowed")
 	}
-	if a.isSessionPermissionAllowed("session-b", "shell_exec", "execute") {
+	if a.runtimes.get("session-b").isPermissionAllowed("shell_exec", "execute") {
 		t.Fatal("did not expect rule to leak into session-b")
 	}
 
@@ -144,10 +154,10 @@ func TestPermissionRuleScopeRemembersPerSessionToolAndPermissionCategory(t *test
 		t.Fatal(err)
 	}
 	<-w2
-	if !a.isSessionPermissionAllowed("session-b", "write_file", "write") {
+	if !a.runtimes.get("session-b").isPermissionAllowed("write_file", "write") {
 		t.Fatal("expected session-b write_file tool to be auto-allowed")
 	}
-	if a.isSessionPermissionAllowed("session-b", "delete_file", "write") {
+	if a.runtimes.get("session-b").isPermissionAllowed("delete_file", "write") {
 		t.Fatal("did not expect session_tool rule to allow a different write tool")
 	}
 
@@ -162,12 +172,114 @@ func TestPermissionRuleScopeRemembersPerSessionToolAndPermissionCategory(t *test
 		t.Fatal(err)
 	}
 	<-w3
-	if a.isSessionPermissionAllowed("session-a", "read_file", "read") {
+	if a.runtimes.get("session-a").isPermissionAllowed("read_file", "read") {
 		t.Fatal("once permission approval should not persist as session rule")
 	}
 
 	a.runtimes.get("session-a").clearPermissionRules()
-	if a.isSessionPermissionAllowed("session-a", "shell_exec", "execute") {
+	if a.runtimes.get("session-a").isPermissionAllowed("shell_exec", "execute") {
 		t.Fatal("expected clearPermissionRules to reset cached session rules")
+	}
+}
+
+type testConsentTool struct {
+	name     string
+	executed *int
+}
+
+func (t testConsentTool) Name() string                   { return t.name }
+func (t testConsentTool) Description() string            { return t.name }
+func (t testConsentTool) Schema() any                    { return nil }
+func (t testConsentTool) Permission() tooldef.Permission { return tooldef.PermissionExecute }
+func (t testConsentTool) RequiresExplicitApproval() bool { return true }
+func (t testConsentTool) Call(context.Context, json.RawMessage) (tooldef.ToolOutput, error) {
+	*t.executed++
+	return tooldef.SuccessOutput("test tool ran"), nil
+}
+
+func replyToTestPermission(t *testing.T, a *Agent, requestID, sessionID, approvalID, scope string, allowed bool) error {
+	t.Helper()
+	message, err := protocol.NewMessage(protocol.TypePermissionResult, requestID, "user", "device", sessionID, protocol.PermissionResultPayload{
+		ApprovalID: approvalID, Allowed: allowed, Scope: scope,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a.handlePermissionResult(message)
+}
+
+func TestForegroundPermissionEnforcesFreshConsentThroughToolExecution(t *testing.T) {
+	for _, scope := range []string{"session_tool", "session_permission"} {
+		t.Run(scope, func(t *testing.T) {
+			const toolName, sid = "fixture_publish", "session"
+			a := &Agent{runtimes: newSessionRuntimeManager(), permissionWaiters: newPermissionWaiterRegistry(), permissionTimeout: time.Second}
+			runtime := a.runtimes.get(sid)
+			registry := tool.NewRegisterTools()
+			executed := 0
+			registry.Register(testConsentTool{name: toolName, executed: &executed})
+			executor := tooladapter.Executor{Registry: registry}
+			seen := make(map[string]bool)
+			call := func(id string, allow bool) {
+				t.Helper()
+				_, err := executor.Execute(context.Background(), generationcommand.ToolExecution{
+					Session: &session.Session{ID: sid, PermissionMode: session.PermissionModeFull},
+					Calls:   []domainmessage.ToolCall{{ID: id, Name: toolName, Arguments: `{}`}},
+					Stream: llm.ChatStreamHandler{OnToolAsk: func(request llm.ToolPermissionRequest) bool {
+						return a.askToolPermission(context.Background(), id, sid, request, func(payload protocol.PermissionAskPayload) error {
+							if executed != 0 {
+								t.Fatal("tool executed before per-call consent")
+							}
+							if !payload.RequireFreshConsent || payload.ApprovalID == "" || seen[payload.ApprovalID] || payload.Name != toolName {
+								t.Fatalf("invalid per-call approval: %#v", payload)
+							}
+							seen[payload.ApprovalID] = true
+							return replyToTestPermission(t, a, id, sid, payload.ApprovalID, scope, allow)
+						})
+					}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			runtime.allowPermissionRule(scope, toolName, string(tooldef.PermissionExecute))
+			call("deny", false)
+			if len(seen) != 1 || executed != 0 {
+				t.Fatal("remembered grant bypassed the foreground prompt or refusal")
+			}
+
+			runtime.clearPermissionRules()
+			call("allow", true)
+			if len(seen) != 2 || executed != 1 {
+				t.Fatal("foreground per-call consent did not authorize exactly one execution")
+			}
+			if runtime.isPermissionAllowed(toolName, string(tooldef.PermissionExecute)) {
+				t.Fatal("foreground per-call approval created a remembered rule")
+			}
+		})
+	}
+}
+
+func TestForegroundPermissionRemembersAndReusesOrdinaryGrants(t *testing.T) {
+	for _, scope := range []string{"session_tool", "session_permission"} {
+		t.Run(scope, func(t *testing.T) {
+			const sid = "session"
+			a := &Agent{runtimes: newSessionRuntimeManager(), permissionWaiters: newPermissionWaiterRegistry(), permissionTimeout: time.Second}
+			request := llm.ToolPermissionRequest{Name: "fixture", Permission: tooldef.PermissionWrite}
+			if !a.askToolPermission(context.Background(), "grant", sid, request, func(payload protocol.PermissionAskPayload) error {
+				if payload.RequireFreshConsent {
+					t.Fatal("ordinary approval unexpectedly requires fresh consent")
+				}
+				return replyToTestPermission(t, a, "grant", sid, payload.ApprovalID, scope, true)
+			}) {
+				t.Fatal("ordinary approval was not accepted")
+			}
+			if !a.askToolPermission(context.Background(), "reuse", sid, request, func(protocol.PermissionAskPayload) error {
+				t.Fatal("ordinary approval was not reused")
+				return nil
+			}) {
+				t.Fatal("remembered grant did not allow ordinary call")
+			}
+		})
 	}
 }

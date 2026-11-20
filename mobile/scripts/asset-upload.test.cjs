@@ -13,25 +13,29 @@ require.extensions[".ts"] = (module, filename) => {
   module._compile(outputText, filename);
 };
 const {
-  createAssetUploadClient, AssetUploadCanceledError,
+  createAssetUploadClient, AssetUploadCanceledError, AssetUploadDisconnectedError,
   assetUploadChunkSize: chunkSize, assetUploadMaxFileBytes: maxBytes,
+  assetUploadCompleteTimeoutMs: completeTimeoutMs,
 } = require("../src/utils/assetUpload.ts");
 const { messageWithAttachedFiles, parseAttachedFiles, attachmentKey } = require("../src/utils/attachments.ts");
 const { normalizeUploadedAsset, parseSharedAssets, assetSummaryToSharedAsset } = require("../src/utils/toolAssets.ts");
 
 const metadata = (size) => ({ asset_id: "asset-1", file_name: 'report & "draft".txt', content_type: "text/plain", size });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-function harness(onSend, timeout = 50) {
+function harness(onSend, { requestTimeoutMs = 50, completeTimeoutMs: completion = 50 } = {}) {
   const sent = [];
+  const owners = [];
   const reads = [];
-  let connected = true;
+  let scope = { pairingID: "pairing-1", connectionID: "connection-1" };
   let closed = 0;
   const client = createAssetUploadClient({
-    isConnected: () => connected,
-    requestTimeoutMs: timeout,
+    getScope: () => scope,
+    requestTimeoutMs,
+    completeTimeoutMs: completion,
     sendEnvelope(type, envelope) {
       const message = { type, ...envelope };
       sent.push(message);
+      owners.push(scope.pairingID);
       onSend?.(message, reply, client);
       return true;
     },
@@ -54,7 +58,12 @@ function harness(onSend, timeout = 50) {
       close() { closed++; },
     };
   }
-  return { client, sent, reads, reply, source, setConnected(value) { connected = value; }, get closed() { return closed; } };
+  return {
+    client, sent, owners, reads, reply, source,
+    upload(size, sessionID, signal) { return client.upload({ source: source(size), scope: { ...scope }, sessionID, signal }); },
+    setScope(pairingID, connectionID) { scope = { pairingID, connectionID }; },
+    get closed() { return closed; },
+  };
 }
 
 test("256 KiB chunks preserve bytes, offsets, envelope session and independent request IDs", async () => {
@@ -62,7 +71,7 @@ test("256 KiB chunks preserve bytes, offsets, envelope session and independent r
   const h = harness((message, reply) => {
     reply(message, message.type === "asset_upload_complete" ? { offset: size, asset: metadata(size) } : {});
   });
-  const result = await h.client.upload({ source: h.source(size), sessionID: "session-1" });
+  const result = await h.upload(size, "session-1");
   assert.equal(result.asset_id, "asset-1");
   assert.equal(result.short_url, undefined);
   assert.deepEqual(h.reads, [[0, chunkSize], [chunkSize, chunkSize], [chunkSize * 2, 7]]);
@@ -80,7 +89,7 @@ test("256 KiB chunks preserve bytes, offsets, envelope session and independent r
 
 test("boolean send and heartbeat cannot acknowledge upload; only matching result advances", async () => {
   const h = harness();
-  const upload = h.client.upload({ source: h.source(1), sessionID: "s" });
+  const upload = h.upload(1, "s");
   assert.equal(h.client.handleMessage({ type: "heartbeat", request_id: h.sent[0].request_id }), false);
   h.reply({ ...h.sent[0], request_id: "another-request" });
   await tick();
@@ -99,8 +108,8 @@ test("concurrent uploads resolve by request ID even when replies arrive out of o
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_chunk") reply(message);
   });
-  const a = h.client.upload({ source: h.source(1), sessionID: "a" });
-  const b = h.client.upload({ source: h.source(1), sessionID: "b" });
+  const a = h.upload(1, "a");
+  const b = h.upload(1, "b");
   h.reply(h.sent[1], { upload_id: "upload-b" });
   h.reply(h.sent[0], { upload_id: "upload-a" });
   await tick();
@@ -114,7 +123,7 @@ test("concurrent uploads resolve by request ID even when replies arrive out of o
 test("empty and oversize files reject locally before any send or read and close the source", async () => {
   for (const [size, expected] of [[0, /非空文件/], [maxBytes + 1, /50 MiB/]]) {
     const h = harness();
-    await assert.rejects(h.client.upload({ source: h.source(size), sessionID: "s" }), expected);
+    await assert.rejects(h.upload(size, "s"), expected);
     assert.deepEqual(h.sent, []);
     assert.deepEqual(h.reads, []);
     assert.equal(h.closed, 1);
@@ -123,7 +132,7 @@ test("empty and oversize files reject locally before any send or read and close 
 
 test("upload errors are consumed by correlation; unrelated errors fall through", async () => {
   const h = harness();
-  const failed = assert.rejects(h.client.upload({ source: h.source(1), sessionID: "s" }), /rejected/);
+  const failed = assert.rejects(h.upload(1, "s"), /rejected/);
   assert.equal(h.client.handleMessage({ type: "error", request_id: "chat-request", payload: { message: "chat error" } }), false);
   assert.equal(h.client.handleMessage({ type: "error", request_id: h.sent[0].request_id, payload: { message: "rejected" } }), true);
   await failed;
@@ -134,7 +143,7 @@ test("mismatched operation/upload ID is rejected and known upload is canceled on
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_begin" || message.type === "asset_upload_cancel") reply(message);
   });
-  const failed = assert.rejects(h.client.upload({ source: h.source(1), sessionID: "s" }), /无效/);
+  const failed = assert.rejects(h.upload(1, "s"), /无效/);
   await tick();
   h.reply(h.sent.find((message) => message.type === "asset_upload_chunk"), { upload_id: "wrong-upload" });
   await failed;
@@ -144,7 +153,7 @@ test("mismatched operation/upload ID is rejected and known upload is canceled on
 test("cancel while waiting for begin rejects promptly and cancels the late upload result", async () => {
   const controller = new AbortController();
   const h = harness((message, reply) => { if (message.type === "asset_upload_cancel") reply(message); });
-  const failed = assert.rejects(h.client.upload({ source: h.source(1), sessionID: "s", signal: controller.signal }), AssetUploadCanceledError);
+  const failed = assert.rejects(h.upload(1, "s", controller.signal), AssetUploadCanceledError);
   controller.abort();
   await failed;
   h.reply(h.sent[0]);
@@ -159,58 +168,185 @@ test("disconnect rejects pending uploads and reconnect sends best-effort cancel 
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_begin" || message.type === "asset_upload_cancel") reply(message);
   });
-  const failed = assert.rejects(h.client.upload({ source: h.source(2), sessionID: "s" }), /断开/);
+  const failed = assert.rejects(h.upload(2, "s"), AssetUploadDisconnectedError);
   await tick();
-  h.setConnected(false);
+  h.setScope("pairing-1", "");
   h.client.disconnect();
   await failed;
-  h.setConnected(true);
+  h.setScope("pairing-1", "connection-2");
   h.client.reconnect();
   await tick();
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_cancel").length, 1);
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_begin").length, 1);
 });
 
-test("begin timeout retries the same idempotency key with a new request ID", async () => {
+test("begin timeout retries the same idempotency key with a new request ID", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   let begins = 0;
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_begin" && ++begins === 1) return;
     reply(message, message.type === "asset_upload_complete" ? { offset: 1, asset: metadata(1) } : {});
-  }, 15);
-  await h.client.upload({ source: h.source(1), sessionID: "s" });
+  });
+  const upload = h.upload(1, "s");
+  t.mock.timers.tick(50);
+  await upload;
   const beginMessages = h.sent.filter((message) => message.type === "asset_upload_begin");
   assert.equal(beginMessages.length, 2);
   assert.equal(beginMessages[0].payload.idempotency_key, beginMessages[1].payload.idempotency_key);
   assert.notEqual(beginMessages[0].request_id, beginMessages[1].request_id);
 });
 
-test("chunk timeout asks status and does not resend bytes already accepted", async () => {
+test("chunk timeout asks status and does not resend bytes already accepted", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const size = 3;
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_chunk") return;
     if (message.type === "asset_upload_status") reply(message, { offset: size });
     else reply(message, message.type === "asset_upload_complete" ? { offset: size, asset: metadata(size) } : {});
-  }, 15);
-  await h.client.upload({ source: h.source(size), sessionID: "s" });
+  });
+  const upload = h.upload(size, "s");
+  await tick();
+  t.mock.timers.tick(50);
+  await upload;
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_chunk").length, 1);
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_status").length, 1);
 });
 
-test("uncertain complete recovers asset via status without a second backend create", async () => {
+test("uncertain complete recovers asset via status without a second backend create", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const size = 2;
   const h = harness((message, reply) => {
     if (message.type === "asset_upload_complete") return;
     reply(message, message.type === "asset_upload_status" ? { offset: size, asset: metadata(size) } : {});
-  }, 15);
-  await h.client.upload({ source: h.source(size), sessionID: "s" });
+  });
+  const upload = h.upload(size, "s");
+  await tick();
+  t.mock.timers.tick(50);
+  await upload;
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_complete").length, 1);
   assert.equal(h.sent.filter((message) => message.type === "asset_upload_begin").length, 1);
 });
 
-test("timeout exhausts bounded recovery and rejects rather than waiting on heartbeat", async () => {
-  const h = harness(undefined, 15);
-  await assert.rejects(h.client.upload({ source: h.source(1), sessionID: "s" }), /超时/);
+test("timeout exhausts bounded recovery and rejects rather than waiting on heartbeat", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const failed = assert.rejects(h.upload(1, "s"), /超时/);
+  t.mock.timers.tick(50);
+  await tick();
+  t.mock.timers.tick(50);
+  await failed;
   assert.equal(h.sent.length, 2);
+});
+
+test("complete waits through the Agent's five-minute worker window", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness((message, reply) => {
+    if (message.type !== "asset_upload_complete") reply(message);
+  }, { completeTimeoutMs });
+  const upload = h.upload(1, "s");
+  await tick();
+  t.mock.timers.tick(300_000);
+  await tick();
+  assert.deepEqual(h.sent.map(({ type }) => type), ["asset_upload_begin", "asset_upload_chunk", "asset_upload_complete"]);
+  h.reply(h.sent[2], { offset: 1, asset: metadata(1) });
+  assert.equal((await upload).asset_id, "asset-1");
+});
+
+test("completion recovery has a bounded same-upload rejoin, even if replies never finish", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness((message, reply) => {
+    if (message.type !== "asset_upload_complete") {
+      reply(message, message.type === "asset_upload_status" ? { offset: 1 } : {});
+    }
+  });
+  const failed = assert.rejects(h.upload(1, "s"), /超时/);
+  await tick();
+  t.mock.timers.tick(50);
+  await tick();
+  t.mock.timers.tick(50);
+  await failed;
+  assert.deepEqual(h.sent.map(({ type }) => type), [
+    "asset_upload_begin", "asset_upload_chunk", "asset_upload_complete", "asset_upload_status",
+    "asset_upload_complete", "asset_upload_cancel",
+  ]);
+  assert.ok(h.sent.slice(2).every(({ payload }) => payload.upload_id === "upload-1"));
+});
+
+test("disconnect after a completion reply, before await resumes, never delivers the asset", async () => {
+  const h = harness((message, reply) => {
+    if (message.type !== "asset_upload_complete") reply(message);
+  });
+  const failed = assert.rejects(h.upload(1, "s"), AssetUploadDisconnectedError);
+  await tick();
+  h.reply(h.sent[2], { offset: 1, asset: metadata(1) });
+  h.setScope("pairing-1", "");
+  h.client.disconnect();
+  await failed;
+  assert.equal(h.closed, 1);
+});
+
+test("cancel after a status reply, before await resumes, does not return the asset or send complete", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness((message, reply) => {
+    if (message.type === "asset_upload_begin" || message.type === "asset_upload_cancel") reply(message);
+  });
+  const controller = new AbortController();
+  const failed = assert.rejects(h.upload(1, "s", controller.signal), AssetUploadCanceledError);
+  await tick();
+  t.mock.timers.tick(50);
+  await tick();
+  assert.equal(h.sent[2].type, "asset_upload_status");
+  h.reply(h.sent[2], { offset: 1, asset: metadata(1) });
+  controller.abort();
+  await failed;
+  assert.deepEqual(h.sent.map(({ type }) => type), [
+    "asset_upload_begin", "asset_upload_chunk", "asset_upload_status", "asset_upload_cancel",
+  ]);
+});
+
+test("an old begin reply can only schedule cleanup on a new connection of the same pairing", async () => {
+  const h = harness((message, reply) => { if (message.type === "asset_upload_cancel") reply(message); });
+  const failed = assert.rejects(h.upload(1, "origin-session"), AssetUploadDisconnectedError);
+  h.setScope("pairing-1", "");
+  h.client.disconnect();
+  await failed;
+  h.setScope("pairing-1", "connection-2");
+  h.reply(h.sent[0]);
+  assert.equal(h.sent[1].type, "asset_upload_cancel");
+  assert.equal(h.sent[1].session_id, "origin-session");
+  assert.deepEqual(h.owners, ["pairing-1", "pairing-1"]);
+  assert.deepEqual(h.reads, []);
+});
+
+test("re-pair before the awaited begin continuation or after disconnect never sends old data or cleanup", async () => {
+  const h = harness();
+  const failed = assert.rejects(h.upload(1, "origin-session"), AssetUploadCanceledError);
+  h.reply(h.sent[0]);
+  h.setScope("pairing-2", "connection-2");
+  h.client.reconnect();
+  await failed;
+  assert.deepEqual(h.sent.map(({ type }) => type), ["asset_upload_begin"]);
+  assert.deepEqual(h.reads, []);
+
+  const late = harness((message, reply) => { if (message.type === "asset_upload_begin") reply(message); });
+  const lateFailure = assert.rejects(late.upload(1, "origin-session"), AssetUploadDisconnectedError);
+  await tick();
+  late.setScope("pairing-1", "");
+  late.client.disconnect();
+  await lateFailure;
+  late.setScope("pairing-2", "connection-2");
+  late.client.reconnect();
+  late.reply(late.sent[0]);
+  assert.deepEqual(late.owners, ["pairing-1", "pairing-1"]);
+});
+
+test("native enqueue failures are distinguished from cancellation and Agent errors", async () => {
+  const h = harness();
+  const failed = assert.rejects(h.upload(1, "s"), AssetUploadDisconnectedError);
+  assert.equal(h.client.handleMessage({ type: "error", request_id: h.sent[0].request_id, payload: {
+    request_type: "asset_upload_begin", transport_error: true,
+  } }), true);
+  await failed;
 });
 
 test("attachment metadata roundtrip keeps only asset ID, name, type and size in model text", () => {

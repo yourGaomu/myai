@@ -54,7 +54,7 @@ func (continuation Continuation) Continue(ctx context.Context, request subagentp
 		return subagentport.ParentContinuationResult{}, err
 	}
 	return subagentport.ParentContinuationResult{
-		Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: response.Result.Usage,
+		MessageID: response.MessageID, Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: response.Result.Usage,
 	}, nil
 }
 
@@ -77,7 +77,7 @@ func (continuation Continuation) ContinuePending(ctx context.Context, sessionID 
 		return subagentport.ParentContinuationResult{}, err
 	}
 	return subagentport.ParentContinuationResult{
-		Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: response.Result.Usage,
+		MessageID: response.MessageID, Content: response.Result.Content, Reasoning: response.Result.Reasoning, Usage: response.Result.Usage,
 	}, nil
 }
 

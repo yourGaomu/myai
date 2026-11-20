@@ -10,9 +10,15 @@ import { normalizeUploadedAsset } from "./toolAssets";
 
 export const assetUploadChunkSize = 262144;
 export const assetUploadMaxFileBytes = 52428800;
+// The Agent allows five minutes for its completion worker. Leave room for
+// admission and for the result to travel back through the Relay.
+export const assetUploadCompleteTimeoutMs = 330000;
 const uploadRequestPrefix = "asset-upload-";
+const maxCleanupEntries = 128;
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
+export type RelayUploadScope = Readonly<{ pairingID: string; connectionID: string }>;
+export type UploadTransportErrorPayload = ErrorPayload & { transport_error?: boolean };
 
 export type AssetUploadSource = {
   fileName: string;
@@ -22,26 +28,32 @@ export type AssetUploadSource = {
   close?: () => void;
 };
 
-export type UploadAssetOptions = {
+type UploadTarget = { sessionID: string; scope: RelayUploadScope };
+export type UploadAssetOptions = UploadTarget & {
   source: AssetUploadSource;
-  sessionID: string;
   signal?: AbortSignal;
 };
 
-type UploadContext = {
+type UploadContext = UploadTarget & {
   controller: AbortController;
-  sessionID: string;
+  failure?: Error;
   uploadID?: string;
-  cancelSent: boolean;
+  cancelQueued: boolean;
   completed: boolean;
 };
 
-type PendingRequest = {
+type PendingRequest = UploadTarget & {
   operation: AssetUploadOperation;
   uploadID?: string;
-  context?: UploadContext;
   resolve: (result: AssetUploadResultPayload) => void;
   reject: (error: Error) => void;
+};
+
+type Cleanup = {
+  pairingID: string;
+  sessionID: string;
+  uploadID: string;
+  lastAttempt?: string;
 };
 
 class UploadTimeoutError extends Error {
@@ -57,30 +69,51 @@ export class AssetUploadCanceledError extends Error {
   }
 }
 
+export class AssetUploadDisconnectedError extends Error {
+  constructor() {
+    super("Relay 连接已断开，文件上传已停止，请连接后重试。");
+  }
+}
+
+export function assertAssetUploadScope(expected: RelayUploadScope, current: RelayUploadScope) {
+  if (expected.pairingID !== current.pairingID) throw new AssetUploadCanceledError();
+  if (!expected.pairingID || !expected.connectionID || expected.connectionID !== current.connectionID) {
+    throw new AssetUploadDisconnectedError();
+  }
+}
+
 // A successful socket.send only queues a message, including on Android. Every
 // operation waits for its own correlated Agent result before advancing offsets.
 export function createAssetUploadClient({
   sendEnvelope,
-  isConnected,
+  getScope,
   requestTimeoutMs = 30000,
+  completeTimeoutMs = assetUploadCompleteTimeoutMs,
 }: {
   sendEnvelope: SendEnvelope;
-  isConnected: () => boolean;
+  getScope: () => RelayUploadScope;
   requestTimeoutMs?: number;
+  completeTimeoutMs?: number;
 }) {
   const pending = new Map<string, PendingRequest>();
   const active = new Set<UploadContext>();
   const beginRequests = new Map<string, UploadContext>();
-  const canceledUploads = new Map<string, string>();
+  const cancellations = new Map<string, Cleanup>();
+
+  function checkTarget(target: UploadTarget, context?: UploadContext) {
+    if (context?.failure) throw context.failure;
+    assertAssetUploadScope(target.scope, getScope());
+  }
 
   function request(
     operation: AssetUploadOperation,
     payload: object,
-    sessionID: string,
+    target: UploadTarget,
     context?: UploadContext,
   ): Promise<AssetUploadResultPayload> {
+    checkTarget(target, context);
+    const { scope, sessionID } = target;
     const signal = context?.controller.signal;
-    if (signal?.aborted) return Promise.reject(abortReason(signal));
     const requestID = `${uploadRequestPrefix}${newRequestID()}`;
     return new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -89,104 +122,129 @@ export function createAssetUploadClient({
         pending.delete(requestID);
       };
       const fail = (error: Error) => { cleanup(); reject(error); };
-      const onAbort = () => fail(abortReason(signal!));
-      const timer = setTimeout(() => fail(new UploadTimeoutError()), requestTimeoutMs);
+      const onAbort = () => fail(context?.failure || new AssetUploadCanceledError());
+      const timer = setTimeout(() => fail(new UploadTimeoutError()), operation === "complete" ? completeTimeoutMs : requestTimeoutMs);
       pending.set(requestID, {
-        operation,
+        operation, scope, sessionID,
         uploadID: "upload_id" in payload ? String(payload.upload_id) : undefined,
-        context,
         resolve: (result) => { cleanup(); resolve(result); },
         reject: fail,
       });
       if (operation === "begin" && context) {
+        // A timed-out or canceled begin can still deliver a newly allocated
+        // upload ID. Keep a bounded, pairing-scoped cleanup tombstone.
         beginRequests.set(requestID, context);
-        // Keep bounded tombstones for begin replies arriving after a timeout or
-        // cancellation: their newly learned upload ID must still be canceled.
-        if (beginRequests.size > 128) beginRequests.delete(beginRequests.keys().next().value!);
+        if (beginRequests.size > maxCleanupEntries) beginRequests.delete(beginRequests.keys().next().value!);
       }
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
         if (!sendEnvelope(`asset_upload_${operation}`, { request_id: requestID, session_id: sessionID, payload })) {
-          fail(new Error("Relay 连接不可用，文件上传未完成。"));
+          fail(new AssetUploadDisconnectedError());
         }
       } catch {
-        fail(new Error("Relay 连接不可用，文件上传未完成。"));
+        fail(new AssetUploadDisconnectedError());
       }
     });
   }
 
-  function cancelRemote(context: UploadContext) {
-    if (!context.uploadID || context.completed || context.cancelSent) return;
-    context.cancelSent = true;
-    canceledUploads.set(context.uploadID, context.sessionID);
-    flushCancellations();
+  function queueCancellation(context: UploadContext) {
+    const { uploadID, sessionID, scope: { pairingID } } = context;
+    if (!uploadID || context.completed || context.cancelQueued || pairingID !== getScope().pairingID) return;
+    context.cancelQueued = true;
+    cancellations.set(JSON.stringify([pairingID, sessionID, uploadID]), { pairingID, sessionID, uploadID });
+    if (cancellations.size > maxCleanupEntries) cancellations.delete(cancellations.keys().next().value!);
   }
 
   function flushCancellations() {
-    if (!isConnected()) return;
-    for (const [uploadID, sessionID] of canceledUploads) {
-      canceledUploads.delete(uploadID);
-      void request("cancel", { upload_id: uploadID }, sessionID).catch(() => {
-        // Retain failed cleanup for the next paired connection, without retrying
-        // begin/complete or creating another backend asset.
-        canceledUploads.set(uploadID, sessionID);
-      });
+    const scope = { ...getScope() };
+    for (const [key, cleanup] of cancellations) {
+      if (cleanup.pairingID !== scope.pairingID) {
+        cancellations.delete(key);
+        continue;
+      }
+      if (!scope.connectionID || cleanup.lastAttempt === scope.connectionID) continue;
+      // Cleanup may use a *new connection*, but only for the same pairing.
+      // Recheck before every send, not merely when the loop started.
+      if (scope.connectionID !== getScope().connectionID || scope.pairingID !== getScope().pairingID) return;
+      cleanup.lastAttempt = scope.connectionID;
+      void request("cancel", { upload_id: cleanup.uploadID }, { scope, sessionID: cleanup.sessionID }).then(() => {
+        if (cancellations.get(key) === cleanup) cancellations.delete(key);
+      }, () => { /* best effort; retry at most once on the next connection */ });
     }
   }
 
   function handleMessage(message: RelayMessage): boolean {
     const requestID = message.request_id || "";
     const waiting = pending.get(requestID);
+    const current = getScope();
+    const waitingIsCurrent = waiting && current.pairingID === waiting.scope.pairingID &&
+      current.connectionID === waiting.scope.connectionID && matchesSession(waiting, message);
     if (message.type === "error") {
-      const payload = (message.payload || {}) as ErrorPayload;
+      const payload = (message.payload || {}) as UploadTransportErrorPayload;
       if (!waiting && !requestID.startsWith(uploadRequestPrefix) && !payload.request_type?.startsWith("asset_upload_")) return false;
-      waiting?.reject(new Error(payload.message || "Agent 文件上传失败。"));
+      if (waitingIsCurrent && (!payload.request_type || payload.request_type === `asset_upload_${waiting.operation}`)) {
+        waiting.reject(payload.transport_error ? new AssetUploadDisconnectedError() : new Error(payload.message || "Agent 文件上传失败。"));
+        beginRequests.delete(requestID);
+      }
       return true;
     }
     if (message.type !== "asset_upload_result") return false;
     const result = message.payload as AssetUploadResultPayload | undefined;
-    const beginContext = beginRequests.get(requestID);
-    if (beginContext && result?.operation === "begin" && typeof result.upload_id === "string" && result.upload_id) {
+    const valid = result && typeof result.upload_id === "string" && result.upload_id &&
+      result.chunk_size === assetUploadChunkSize && result.max_file_bytes === assetUploadMaxFileBytes &&
+      Number.isSafeInteger(result.offset) && result.offset >= 0 && result.offset <= assetUploadMaxFileBytes;
+    const begin = beginRequests.get(requestID);
+    if (begin && valid && result.operation === "begin" && matchesSession(begin, message)) {
       beginRequests.delete(requestID);
-      beginContext.uploadID = result.upload_id;
-      if (beginContext.controller.signal.aborted) cancelRemote(beginContext);
+      if (current.pairingID === begin.scope.pairingID && (!begin.uploadID || begin.uploadID === result.upload_id)) {
+        begin.uploadID = result.upload_id;
+        // The Relay can deliver a delayed begin to a replacement peer for the
+        // same pairing. Learn its ID for cleanup, never resume that operation.
+        if (begin.failure || current.connectionID !== begin.scope.connectionID) {
+          queueCancellation(begin);
+          flushCancellations();
+        }
+      }
     }
-    if (!waiting) return true;
-    if (!result || result.operation !== waiting.operation || !result.upload_id ||
-        (waiting.uploadID && result.upload_id !== waiting.uploadID) ||
-        result.chunk_size !== assetUploadChunkSize || result.max_file_bytes !== assetUploadMaxFileBytes ||
-        !Number.isSafeInteger(result.offset) || result.offset < 0 || result.offset > assetUploadMaxFileBytes) {
+    if (!waitingIsCurrent) return true;
+    if (!valid || result.operation !== waiting.operation || (waiting.uploadID && result.upload_id !== waiting.uploadID) ||
+        (begin?.uploadID && begin.uploadID !== result.upload_id)) {
       waiting.reject(new Error("Agent 返回了无效的文件上传结果。"));
-      return true;
+    } else {
+      waiting.resolve(result);
     }
-    waiting.resolve(result);
     return true;
   }
 
-  async function upload({ source, sessionID, signal }: UploadAssetOptions): Promise<UploadedAssetPayload> {
-    const context: UploadContext = { controller: new AbortController(), sessionID, cancelSent: false, completed: false };
+  async function upload({ source, sessionID, signal, scope }: UploadAssetOptions): Promise<UploadedAssetPayload> {
+    const context: UploadContext = {
+      controller: new AbortController(), scope: { ...scope }, sessionID, cancelQueued: false, completed: false,
+    };
     const onAbort = () => {
-      context.controller.abort(new AssetUploadCanceledError());
-      cancelRemote(context);
+      abortUpload(context, new AssetUploadCanceledError());
+      queueCancellation(context);
+      flushCancellations();
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted) onAbort();
     active.add(context);
-    const checkCanceled = () => {
-      if (context.controller.signal.aborted) throw abortReason(context.controller.signal);
-    };
+    const check = () => checkTarget(context, context);
+    const ask = (operation: AssetUploadOperation, payload: object) => request(operation, payload, context, context);
     const uploadedAsset = (result: AssetUploadResultPayload) => {
+      check();
       if (!result.asset) return undefined;
       const asset = normalizeUploadedAsset(result.asset);
-      if (!asset || asset.size !== source.size) throw new Error("Agent 返回了无效的文件元数据。");
+      if (!asset || asset.size !== source.size || result.offset !== source.size) {
+        throw new Error("Agent 返回了无效的文件元数据。");
+      }
       context.completed = true;
       return asset;
     };
     try {
-      checkCanceled();
+      check();
+      if (!sessionID) throw new Error("请先加载会话再上传文件。");
       if (!Number.isSafeInteger(source.size) || source.size <= 0) throw new Error("文件为空或大小无效，请选择非空文件。");
       if (source.size > assetUploadMaxFileBytes) throw new Error("文件超过 50 MiB 上限，请选择较小的文件。");
-      if (!isConnected()) throw new Error("当前未连接 Relay，请先完成配对并连接。");
       const beginPayload = {
         file_name: source.fileName,
         content_type: source.contentType,
@@ -195,56 +253,63 @@ export function createAssetUploadClient({
       };
       let result: AssetUploadResultPayload;
       try {
-        result = await request("begin", beginPayload, sessionID, context);
+        result = await ask("begin", beginPayload);
       } catch (error) {
         if (!(error instanceof UploadTimeoutError)) throw error;
-        // The same key recovers an uncertain begin; each envelope still gets a
-        // new request ID. Never restart an upload with another create key.
-        result = await request("begin", beginPayload, sessionID, context);
+        // Retry with the same create key, not a second backend upload.
+        result = await ask("begin", beginPayload);
       }
-      context.uploadID = result.upload_id;
+      check();
+      const uploadID = result.upload_id;
+      const uploadRef = { upload_id: uploadID };
       const existingAsset = uploadedAsset(result);
       if (existingAsset) return existingAsset;
       let offset = result.offset;
       if (offset > source.size) throw new Error("Agent 返回了无效的上传偏移。");
       while (offset < source.size) {
-        checkCanceled();
+        check();
         const length = Math.min(assetUploadChunkSize, source.size - offset);
         const bytes = await source.read(offset, length);
-        checkCanceled();
+        check();
         if (bytes.length !== length) throw new Error("读取文件分块失败，请重新选择文件。");
-        const chunkPayload = { upload_id: context.uploadID, offset, data: encodeBase64(bytes) };
+        const chunkPayload = { ...uploadRef, offset, data: encodeBase64(bytes) };
         const expectedOffset = offset + length;
         try {
-          result = await request("chunk", chunkPayload, sessionID, context);
+          result = await ask("chunk", chunkPayload);
         } catch (error) {
           if (!(error instanceof UploadTimeoutError)) throw error;
-          result = await request("status", { upload_id: context.uploadID }, sessionID, context);
+          result = await ask("status", uploadRef);
           const recoveredAsset = uploadedAsset(result);
           if (recoveredAsset) return recoveredAsset;
-          if (result.offset === offset) result = await request("chunk", chunkPayload, sessionID, context);
+          if (result.offset === offset) result = await ask("chunk", chunkPayload);
         }
+        check();
         if (result.offset !== expectedOffset) throw new Error("Agent 返回了不一致的上传偏移。");
         offset = result.offset;
       }
       try {
-        result = await request("complete", { upload_id: context.uploadID }, sessionID, context);
+        result = await ask("complete", uploadRef);
       } catch (error) {
         if (!(error instanceof UploadTimeoutError)) throw error;
-        result = await request("status", { upload_id: context.uploadID }, sessionID, context);
+        // One status read and, if necessary, one same-ID rejoin. The server
+        // shares an existing worker/receipt or retries using its existing key.
+        result = await ask("status", uploadRef);
         const recoveredAsset = uploadedAsset(result);
         if (recoveredAsset) return recoveredAsset;
         if (result.offset !== source.size) throw new Error("Agent 尚未收到完整文件。");
-        result = await request("complete", { upload_id: context.uploadID }, sessionID, context);
+        result = await ask("complete", uploadRef);
       }
-      if (result.offset !== source.size) throw new Error("Agent 尚未收到完整文件。");
       const asset = uploadedAsset(result);
       if (!asset) throw new Error("Agent 未返回已上传文件的元数据。");
       return asset;
     } catch (error) {
-      context.controller.abort(error);
-      cancelRemote(context);
-      throw error;
+      // An abort/epoch change can race even with a rejected awaited reply.
+      let failure = error instanceof Error ? error : new Error("文件上传失败。");
+      try { check(); } catch (fenced) { if (fenced instanceof Error) failure = fenced; }
+      abortUpload(context, failure);
+      queueCancellation(context);
+      flushCancellations();
+      throw failure;
     } finally {
       active.delete(context);
       signal?.removeEventListener("abort", onAbort);
@@ -253,19 +318,27 @@ export function createAssetUploadClient({
   }
 
   function disconnect() {
-    const error = new Error("Relay 连接已断开，文件上传已停止，请重新上传。");
+    const error = new AssetUploadDisconnectedError();
     for (const context of active) {
-      context.controller.abort(error);
-      cancelRemote(context);
+      abortUpload(context, error);
+      queueCancellation(context);
     }
-    for (const request of [...pending.values()]) request.reject(error);
+    for (const waiting of [...pending.values()]) waiting.reject(error);
   }
 
   return { upload, handleMessage, disconnect, reconnect: flushCancellations };
 }
 
-function abortReason(signal: AbortSignal): Error {
-  return signal.reason instanceof Error ? signal.reason : new AssetUploadCanceledError();
+function matchesSession(target: UploadTarget, message: RelayMessage) {
+  return !message.session_id || message.session_id === target.sessionID;
+}
+
+function abortUpload(context: UploadContext, error: Error) {
+  if (context.failure) return;
+  // Keep the reason separately: not all React Native AbortSignal shims keep
+  // the argument to abort(), and disconnect is not a user cancellation.
+  context.failure = error;
+  context.controller.abort();
 }
 
 function encodeBase64(bytes: Uint8Array): string {
