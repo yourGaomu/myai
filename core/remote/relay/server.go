@@ -308,6 +308,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		// request cannot be closed by the read deadline while its Pong is delayed.
 		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 
+		if role == "client" && message.Type == protocol.TypeAssetImagePreview && len(raw) > protocol.AssetImagePreviewRequestMaxJSONBytes {
+			if err := writeError(peer, message, errors.New("image preview request is too large")); err != nil {
+				return
+			}
+			continue
+		}
 		if role == "client" && protocol.IsAssetUploadRequest(message.Type) && len(raw) > protocol.AssetUploadMaxJSONBytes {
 			if err := writeError(peer, message, errors.New("upload JSON exceeds 524288 bytes")); err != nil {
 				return
@@ -395,10 +401,17 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		var payload struct {
 			RequestType protocol.MessageType `json:"request_type"`
 		}
-		if json.Unmarshal(message.Payload, &payload) == nil && (payload.RequestType == protocol.TypePermissionResult || payload.RequestType == protocol.TypeUserQuestionAnswer) {
-			return s.forwardControlReply(message)
+		if json.Unmarshal(message.Payload, &payload) == nil {
+			switch payload.RequestType {
+			case protocol.TypePermissionResult, protocol.TypeUserQuestionAnswer:
+				return s.forwardControlReply(message)
+			case protocol.TypeAssetImagePreview:
+				return s.forwardAssetImagePreview(message)
+			}
 		}
 		return s.forwardToClient(message)
+	case protocol.TypeAssetImagePreviewResult:
+		return s.forwardAssetImagePreview(message)
 	case protocol.TypeAssetUploadResult:
 		return s.forwardToClient(message)
 	case protocol.TypeUserQuestionListResult:
@@ -468,6 +481,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
+	case protocol.TypeAssetImagePreview:
+		return s.routeAssetImagePreview(p, remoteAddr, message)
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
 		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
 			return err
@@ -656,6 +671,8 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypePluginMutationResult
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
 		return responseType == protocol.TypeAssetUploadResult
+	case protocol.TypeAssetImagePreview:
+		return responseType == protocol.TypeAssetImagePreviewResult
 	case protocol.TypeAssetList:
 		return responseType == protocol.TypeAssetListResult
 	case protocol.TypeKnowledgeCatalogList:

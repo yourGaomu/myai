@@ -47,6 +47,7 @@ import (
 	agentrunport "myai/core/port/agentrun"
 	asyncport "myai/core/port/async"
 	cacheport "myai/core/port/cache"
+	filesport "myai/core/port/files"
 	historyport "myai/core/port/history"
 	modelport "myai/core/port/model"
 	outboxport "myai/core/port/outbox"
@@ -87,6 +88,7 @@ type Configuration struct {
 	IntentController    *service.IntentController
 	HistoryStoreFactory historyport.StoreFactory
 	PersistenceQueue    *generationadapter.SessionQueue
+	AssetFiles          filesport.Service
 }
 
 func NewService(configuration Configuration) *service.ChatService {
@@ -169,6 +171,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	if sessionQueue == nil {
 		sessionQueue = generationadapter.NewSessionQueue(asyncTasks)
 	}
+	attachmentReader, _ := configuration.Store.(repository.SessionAttachmentReader)
+	lookupSessionAsset := sessionAssetLookup(configuration.Store, attachmentReader, sessionQueue)
 	var submitRecords func(context.Context, outboxport.Batch) error
 	if sessionQueue.Durable() {
 		submitRecords = sessionQueue.SubmitRecords
@@ -232,13 +236,15 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 	turnHooks := hooklifecycle.Bridge{Hooks: configuration.Hooks}
 	turnInputQueue := pendinginput.NewQueue()
 	agentLoop := generationservice.AgentLoopService{
-		Sessions:     configuration.Sessions,
-		Contexts:     contexts,
-		Tools:        toolcatalog.Catalog{Tools: configuration.Tools},
-		ToolExecutor: toolExecutor,
-		Compactor:    compactor,
-		TurnHooks:    turnHooks,
-		PendingInput: turnInputQueue,
+		Sessions:           configuration.Sessions,
+		Contexts:           contexts,
+		Tools:              toolcatalog.Catalog{Tools: configuration.Tools},
+		ToolExecutor:       toolExecutor,
+		Compactor:          compactor,
+		TurnHooks:          turnHooks,
+		PendingInput:       turnInputQueue,
+		AssetFiles:         configuration.AssetFiles,
+		LookupSessionAsset: lookupSessionAsset,
 		OnMessagesAccepted: func(ctx context.Context, current *session.Session, messages []domainmessage.Message) error {
 			if current == nil || len(messages) == 0 {
 				return nil
@@ -390,6 +396,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		ContinuationControl: continuationControl,
 		FlushPersistence:    sessionQueue.Flush,
 		RecordUploadedAsset: uploadedAssetRecorder(configuration, sessionQueue),
+		LookupSessionAsset:  lookupSessionAsset,
+		AssetFiles:          configuration.AssetFiles,
 		BlockSession:        sessionQueue.BlockSession,
 		ResumeSession:       sessionQueue.ResumeSession,
 		Models:              configuration.Models,

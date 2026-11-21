@@ -72,6 +72,8 @@ type ChatDependencies struct {
 	OnPendingTurnError  func(error)
 	FlushPersistence    func(context.Context) error
 	RecordUploadedAsset func(context.Context, string, string, filesport.Asset) error
+	LookupSessionAsset  filesport.SessionAssetLookup
+	AssetFiles          filesport.Service
 	// BlockSession persists a session tombstone before destructive store writes.
 	// ResumeSession starts a new epoch after a successful clear or restore.
 	BlockSession  func(context.Context, string) error

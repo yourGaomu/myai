@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import type { ChangeEntry, SubagentTask } from "../../protocol";
+import type { AssetSummary, ChangeEntry, SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import type { AgentTurnItem, AgentTurnTimelineStep } from "../../utils/chatRenderItems";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -13,14 +13,15 @@ import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
 import { RunningEdgeRail } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
+import { AssistantReply } from "./AssistantReply";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
-import { MarkdownText } from "./MarkdownText";
 import { ShimmerLabel } from "./ShimmerLabel";
 import { extractFileChanges, TurnChanges } from "./turn/TurnChanges";
 import { TurnTimeline } from "./turn/TurnTimeline";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
+  catalog: AssetSummary[];
   onInspectSubagent?: (taskID: string) => void;
   onOpenChangePath?: (path: string) => void;
   onOpenChanges?: () => void;
@@ -34,6 +35,7 @@ type Props = {
 // 一轮 Agent 回答：过程折叠成一行（点开是时间线），正文按文档排版，最后是变更摘要和操作。
 export function AgentTurnCard({
   buttonFeedback,
+  catalog,
   onInspectSubagent,
   onOpenChangePath,
   onOpenChanges,
@@ -89,7 +91,7 @@ export function AgentTurnCard({
   const hasContent = Boolean(turn.text.trim() || turn.reasoning?.trim());
   const showModel = Boolean(turn.model && turn.model !== "MyAI Agent");
 
-  if (!running && !hasContent && steps.length === 0 && errors.length > 0) {
+  if (!running && !hasContent && !turn.assets?.length && !turn.attachments?.length && steps.length === 0 && errors.length > 0) {
     return (
       <View style={styles.turn}>
         {errors.map((error, index) => (
@@ -164,11 +166,11 @@ export function AgentTurnCard({
         />
       ) : null}
 
-      {turn.text ? <MarkdownText text={turn.text} /> : null}
+      <AssistantReply assets={turn.assets} buttonFeedback={buttonFeedback} catalog={catalog} sessionID={sessionID} text={turn.text} />
       {turn.attachments?.length ? (
         <View style={styles.attachments}>
           {turn.attachments.map((attachment, index) => (
-            <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${turn.id}-att-${index}`} />
+            <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${turn.id}-att-${index}`} sessionID={sessionID} />
           ))}
         </View>
       ) : null}

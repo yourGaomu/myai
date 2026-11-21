@@ -8,10 +8,11 @@ import { useChatStyles } from "./styles";
 
 type Props = {
   attachment: ChatAttachment;
+  sessionID?: string;
   buttonFeedback: (style: StyleProp<ViewStyle>, active?: boolean) => StyleProp<ViewStyle>;
 };
 
-export function ChatAttachmentCard({ attachment, buttonFeedback }: Props) {
+export function ChatAttachmentCard({ attachment, buttonFeedback, sessionID }: Props) {
   const styles = useChatStyles();
   if (isUploadedAssetAttachment(attachment)) {
     return (
@@ -27,7 +28,8 @@ export function ChatAttachmentCard({ attachment, buttonFeedback }: Props) {
           size: attachment.size,
         }}
         buttonFeedback={buttonFeedback}
-        previewURL={attachment.local_uri}
+        localURI={attachment.local_uri}
+        sessionID={sessionID}
       />
     );
   }

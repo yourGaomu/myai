@@ -3,7 +3,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 
@@ -19,9 +21,12 @@ type Model struct {
 	Policy   RequestPolicy
 	// Enable when the SDK preserves finish metadata in streaming responses.
 	RequireStreamStopReason bool
+	// ChatCompletionsImages is set by adapters with a verified image_url mapping.
+	ChatCompletionsImages bool
 }
 
 var _ modelport.ChatModelPort = (*Model)(nil)
+var _ modelport.ImageInputSupport = (*Model)(nil)
 
 type TokenUsage = modelport.TokenUsage
 type ChatResult = modelport.ChatResult
@@ -30,14 +35,35 @@ type ToolResultEvent = modelport.ToolResultEvent
 type ToolPermissionRequest = modelport.ToolPermissionRequest
 type GenerateRequest = modelport.GenerateRequest
 
+func (m *Model) SupportsImageInput() bool {
+	return m != nil && m.ChatCompletionsImages
+}
+
 func (m *Model) Generate(ctx context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
-	return m.chatWithStreamToolsHandlerCtx(
+	if len(request.Images) > 0 && !m.SupportsImageInput() {
+		return modelport.ChatResult{}, modelport.ErrImageInputUnsupported
+	}
+	messages, err := llmmapper.ToLLMRequest(request)
+	if err != nil {
+		return modelport.ChatResult{}, err
+	}
+	result, err := m.chatWithStreamToolsHandlerCtx(
 		llmmapper.WithRequest(ctx, request),
-		llmmapper.ToLLMS(request.Messages),
+		messages,
 		llmmapper.ToLLMTools(request.Tools),
 		request.Stream,
 		request.Settings,
 	)
+	if len(request.Images) > 0 && !modelport.IsContextWindowExceeded(err) {
+		var requestErr *RequestError
+		if errors.As(err, &requestErr) {
+			switch requestErr.StatusCode {
+			case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+				return result, fmt.Errorf("%w (HTTP %d)", modelport.ErrImageInputRejected, requestErr.StatusCode)
+			}
+		}
+	}
+	return result, err
 }
 
 func (m *Model) ChatWithStream(mes []llms.MessageContent) (ChatResult, error) {

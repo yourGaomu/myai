@@ -1,10 +1,15 @@
 package langchaingo
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +63,133 @@ func writeAnswer(w http.ResponseWriter, text, reason string) {
 func consumeRequest(r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	r.Body.Close()
+}
+
+func TestChatCompletionsAdaptersSendDataURLOnUserMessage(t *testing.T) {
+	picture := image.NewRGBA(image.Rect(0, 0, 7, 5))
+	for _, tc := range []struct {
+		adapter  modelport.ProtocolAdapter
+		mimeType string
+		encode   func(io.Writer) error
+	}{
+		{OpenAIChatCompletionsAdapter{}, "image/jpeg", func(w io.Writer) error { return jpeg.Encode(w, picture, nil) }},
+		{MistralChatAdapter{}, "image/png", func(w io.Writer) error { return png.Encode(w, picture) }},
+	} {
+		t.Run(string(tc.adapter.Protocol()), func(t *testing.T) {
+			var encoded bytes.Buffer
+			if err := tc.encode(&encoded); err != nil {
+				t.Fatal(err)
+			}
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Messages []struct {
+						Role    string          `json:"role"`
+						Content json.RawMessage `json:"content"`
+					} `json:"messages"`
+				}
+				if r.URL.Path != "/v1/chat/completions" || json.NewDecoder(r.Body).Decode(&payload) != nil || len(payload.Messages) != 3 {
+					t.Error("invalid Chat Completions request")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				var text string
+				if first := payload.Messages[0]; first.Role != "user" || json.Unmarshal(first.Content, &text) != nil || text != "plain text" {
+					t.Error("text-only message shape changed")
+				}
+				var parts []struct {
+					Type     string `json:"type"`
+					Text     string `json:"text"`
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+				}
+				if user := payload.Messages[2]; user.Role != "user" || json.Unmarshal(user.Content, &parts) != nil || len(parts) != 2 || parts[0].Type != "text" || parts[0].Text != "see this" || parts[1].Type != "image_url" {
+					t.Error("image missing from the target user content array")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				prefix, content, ok := strings.Cut(parts[1].ImageURL.URL, ",")
+				data, err := base64.StdEncoding.DecodeString(content)
+				decoded, _, decodeErr := image.Decode(bytes.NewReader(data))
+				if !ok || prefix != "data:"+tc.mimeType+";base64" || err != nil || decodeErr != nil || !bytes.Equal(data, encoded.Bytes()) || decoded.Bounds().Dx() != 7 || decoded.Bounds().Dy() != 5 {
+					t.Error("adapter did not send the original, decodable image")
+				}
+				if calls.Add(1) == 1 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				writeAnswer(w, "ok", "stop")
+			}))
+			defer server.Close()
+			model, err := tc.adapter.CreateModel(modelport.CreationConfig{BaseURL: server.URL + "/v1", ModelName: "local-fixture", APIKey: "unused-test-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !model.(modelport.ImageInputSupport).SupportsImageInput() {
+				t.Fatal("adapter did not opt into image input")
+			}
+			request := localRequest()
+			request.Messages = []domainmessage.Message{
+				domainmessage.Text(domainmessage.RoleUser, "plain text"), domainmessage.Assistant("answer", "reasoning", nil), domainmessage.Text(domainmessage.RoleUser, "see this"),
+			}
+			attachment := modelport.NewInputImage(tc.mimeType, encoded.Bytes())
+			attachment.MessageIndex = 2
+			request.Images = []modelport.InputImage{attachment}
+			result, err := model.Generate(t.Context(), request)
+			if err != nil || result.Content != "ok" || calls.Load() != 2 {
+				t.Fatalf("result=%+v calls=%d err=%v", result, calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestChatCompletionsImageRejectionIsExplicitWithoutProviderEcho(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		t.Fatal(err)
+	}
+	request := localRequest()
+	request.Images = []modelport.InputImage{modelport.NewInputImage("image/jpeg", encoded.Bytes())}
+	for _, tc := range []struct {
+		name string
+		code int
+		body string
+		want error
+	}{
+		{"invalid", http.StatusBadRequest, `{"error":{"message":"echoed-private-data"}}`, modelport.ErrImageInputRejected},
+		{"too large", http.StatusRequestEntityTooLarge, `{"error":{"message":"echoed-private-data"}}`, modelport.ErrImageInputRejected},
+		{"context overflow", http.StatusBadRequest, `{"error":{"code":"context_length_exceeded","message":"echoed-private-data"}}`, modelport.ErrContextWindowExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			model, _ := localOpenAIModel(t, func(w http.ResponseWriter, r *http.Request) {
+				consumeRequest(r)
+				calls.Add(1)
+				w.WriteHeader(tc.code)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			_, err := model.Generate(t.Context(), request)
+			if !errors.Is(err, tc.want) || strings.Contains(err.Error(), "echoed-private-data") || calls.Load() != 1 {
+				t.Fatalf("calls=%d error=%v", calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestUnmappedImageProtocolRejectsRequestBeforeHTTP(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	model, err := (AnthropicMessagesAdapter{}).CreateModel(modelport.CreationConfig{BaseURL: server.URL, ModelName: "local", APIKey: "test-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := localRequest()
+	request.Images = []modelport.InputImage{modelport.NewInputImage("image/jpeg", nil)}
+	if _, err := model.Generate(t.Context(), request); !errors.Is(err, modelport.ErrImageInputUnsupported) || calls.Load() != 0 {
+		t.Fatalf("unsupported mapping reached HTTP or lost error: calls=%d error=%v", calls.Load(), err)
+	}
 }
 
 func TestOpenAIRetriesTransientHTTPFailuresOnly(t *testing.T) {

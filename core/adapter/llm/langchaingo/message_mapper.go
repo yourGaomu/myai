@@ -1,10 +1,42 @@
 package langchaingo
 
 import (
+	"encoding/base64"
+	"errors"
+	"net/http"
+
 	"github.com/tmc/langchaingo/llms"
 
 	domainmessage "myai/core/domain/message"
+	modelport "myai/core/port/model"
 )
+
+// ToLLMRequest adds request-only image parts to their user messages. Models
+// should call this only when their adapter speaks Chat Completions image_url.
+func ToLLMRequest(request modelport.GenerateRequest) ([]llms.MessageContent, error) {
+	messages := ToLLMS(request.Messages)
+	if len(request.Images) > modelport.MaxInputImages {
+		return nil, errors.New("model request exceeds the image count limit")
+	}
+	total := 0
+	for _, image := range request.Images {
+		if image.MessageIndex < 0 || image.MessageIndex >= len(messages) || request.Messages[image.MessageIndex].Role != domainmessage.RoleUser {
+			return nil, errors.New("model request images must belong to user messages")
+		}
+		data := image.Bytes()
+		if len(data) > modelport.MaxInputImageBytes || len(data) > modelport.MaxTotalInputImageBytes-total {
+			return nil, errors.New("model request exceeds the image byte limit")
+		}
+		if (image.MIMEType != "image/jpeg" && image.MIMEType != "image/png") || http.DetectContentType(data) != image.MIMEType {
+			return nil, errors.New("model request images must be JPEG or PNG")
+		}
+		total += len(data)
+		url := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		message := &messages[image.MessageIndex]
+		message.Parts = append(message.Parts, llms.ImageURLPart(url))
+	}
+	return messages, nil
+}
 
 func ToLLMS(messages []domainmessage.Message) []llms.MessageContent {
 	if len(messages) == 0 {

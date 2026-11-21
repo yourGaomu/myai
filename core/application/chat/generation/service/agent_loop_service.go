@@ -10,8 +10,10 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	generationport "myai/core/application/chat/generation/port"
 	generationresult "myai/core/application/chat/generation/result"
+	"myai/core/contextmgr"
 	domaingeneration "myai/core/domain/generation"
 	domainmessage "myai/core/domain/message"
+	"myai/core/port/files"
 	modelport "myai/core/port/model"
 	sessionport "myai/core/port/session"
 	"myai/core/session"
@@ -53,6 +55,8 @@ type AgentLoopService struct {
 	Compactor           generationport.AutoCompactor
 	TurnHooks           generationport.TurnLifecycleHooks
 	PendingInput        generationport.PendingTurnInput
+	AssetFiles          files.Service
+	LookupSessionAsset  files.SessionAssetLookup
 	OnPendingInputError func(error)
 	// 1. 持久化运行期间追加的上下文、mailbox 与中间回答，保持恢复后的消息顺序。
 	OnMessagesAppended func(current *session.Session, messages []domainmessage.Message)
@@ -114,6 +118,14 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	reasoningParts := make([]string, 0, maxToolRounds)
 	stopContinuations := 0
 	overflowRetried := false
+	var images turnImages
+	for index := len(command.Session.Messages) - 1; index >= 0; index-- {
+		message := command.Session.Messages[index]
+		if message.Role == domainmessage.RoleUser && !contextmgr.IsDynamicContext(message) && message.SyntheticReason != domainmessage.SyntheticReasonHookContext {
+			images.resumingSyntheticInput = message.IsSynthetic()
+			break
+		}
+	}
 	// Wait-only rounds have a separate bounded budget. Time spent waiting does
 	// not consume the budget intended for workspace/tool work.
 	waitRounds := 0
@@ -143,7 +155,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		if command.Stream.OnUserQuestion == nil {
 			tools = filterInteractiveTools(tools)
 		}
-		result, snapshot, err := s.generateSample(runCtx, command, tools, &overflowRetried)
+		result, snapshot, err := s.generateSample(runCtx, command, tools, &images, &overflowRetried)
 		if err != nil {
 			return modelport.ChatResult{}, err
 		}
@@ -213,6 +225,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			// sample instead of retrying a tool after a rejected durable write.
 			return modelport.ChatResult{}, errors.Join(err, persistErr)
 		}
+		images.acceptReads(calls, toolResult.Messages)
 		if hook := generationcommand.AfterToolRoundFrom(runCtx); hook != nil {
 			if hookErr := hook(runCtx, command.Session); hookErr != nil {
 				return modelport.ChatResult{}, hookErr
@@ -244,7 +257,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		return modelport.ChatResult{}, drainErr
 	}
 	// A tool-free final sample uses the same recovery limit as prior samples.
-	result, _, err := s.generateSample(runCtx, command, nil, &overflowRetried)
+	result, _, err := s.generateSample(runCtx, command, nil, &images, &overflowRetried)
 	if err != nil {
 		return modelport.ChatResult{}, err
 	}

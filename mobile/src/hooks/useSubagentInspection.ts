@@ -10,6 +10,7 @@ import type {
   SubagentTaskEventsResultPayload,
   SubagentTaskResultPayload,
 } from "../protocol";
+import { assetSummariesForSession, mergeAssetSummaries } from "../utils/toolAssets";
 
 type RequestTaskDetailFn = (
   taskID: string,
@@ -44,6 +45,7 @@ export function useSubagentInspection({
 }: Args) {
   // 1.0 状态定义：存储当前打开的子代理任务、Run、消息与事件
   const [inspectedTaskID, setInspectedTaskID] = useState<string | null>(null);
+  const [inspectionOriginID, setInspectionOriginID] = useState("");
   const [inspectedTask, setInspectedTask] = useState<SubagentTask | null>(null);
   const [selectedRunID, setSelectedRunID] = useState<string | null>(null);
   const [runs, setRuns] = useState<SubagentRunSummary[]>([]);
@@ -80,6 +82,7 @@ export function useSubagentInspection({
       // 3.1 记录当前查看的目标任务 ID，隔离后续切换或关闭后的迟到响应
       inspectedTaskIDRef.current = taskID;
       setInspectedTaskID(taskID);
+      setInspectionOriginID(currentSessionID);
       setError(null);
       setMessages([]);
       setNextMessageID("");
@@ -139,6 +142,7 @@ export function useSubagentInspection({
     realtimeBufferRef.current = [];
     eventsMapRef.current = new Map();
     setInspectedTaskID(null);
+    setInspectionOriginID("");
     setInspectedTask(null);
     setSelectedRunID(null);
     setTaskEvents([]);
@@ -224,10 +228,8 @@ export function useSubagentInspection({
       setNextMessageID(payload.next_message_id || "");
       setHasMoreMessages(Boolean(payload.has_more_messages));
 
-      // 8.4 资源合并：按 asset.id 合并
-      if (payload.assets && payload.assets.length > 0) {
-        setAssets((prev) => mergeAssets(prev, payload.assets));
-      }
+      const incomingAssets = assetSummariesForSession(payload.assets, payload.task.child_session_id || "");
+      if (incomingAssets.length) setAssets((prev) => mergeAssetSummaries(prev, incomingAssets));
     },
     [],
   );
@@ -316,8 +318,9 @@ export function useSubagentInspection({
     }
 
     // 10.3 资源事件创建：合并资源引用
-    if (payload.kind === "task.asset_created" && payload.assets && payload.assets.length > 0) {
-      setAssets((prev) => mergeAssets(prev, payload.assets || []));
+    if (payload.kind === "task.asset_created") {
+      const incomingAssets = assetSummariesForSession(payload.assets, payload.task.child_session_id || "");
+      if (incomingAssets.length) setAssets((prev) => mergeAssetSummaries(prev, incomingAssets));
     }
 
     // 10.4 更新任务快照（依据 updated_at）
@@ -344,6 +347,7 @@ export function useSubagentInspection({
     hasMoreMessages,
     inspectedTask,
     inspectedTaskID,
+    inspectionOriginID,
     loadingDetail,
     loadingEvents,
     loadingMoreMessages,
@@ -374,19 +378,5 @@ function mergeHistoryMessages(
   }
   return Array.from(map.values()).sort(
     (a, b) => Date.parse(a.created_at || "") - Date.parse(b.created_at || ""),
-  );
-}
-
-// 辅助函数：按 asset.id 去重合并共享资源
-function mergeAssets(existing: AssetSummary[], incoming: AssetSummary[]): AssetSummary[] {
-  const map = new Map<string, AssetSummary>();
-  for (const a of existing) {
-    map.set(a.id, a);
-  }
-  for (const a of incoming) {
-    map.set(a.id, a);
-  }
-  return Array.from(map.values()).sort(
-    (a, b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || ""),
   );
 }

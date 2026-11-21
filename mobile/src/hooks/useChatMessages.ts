@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
-import type { TokenUsage, ToolResultPayload } from "../protocol";
+import type { AssetSummary, TokenUsage, ToolResultPayload } from "../protocol";
+import { mergeAssetSummaries } from "../utils/toolAssets";
 import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
 import { attachmentKey } from "../utils/attachments";
@@ -273,8 +274,9 @@ export function useChatMessages() {
     reasoning?: string,
     messageID?: string,
     runID?: string,
+    assets?: AssetSummary[],
   ) => {
-    updateSessionChat(sessionID, (current) => finishAssistant(current, requestID, status, { content, reasoning, usage, messageID, runID }));
+    updateSessionChat(sessionID, (current) => finishAssistant(current, requestID, status, { content, reasoning, usage, messageID, runID, assets }));
   }, [updateSessionChat]);
 
   const markAssistantError = useCallback((sessionID: string, requestID: string | undefined, error?: string) => {
@@ -628,7 +630,7 @@ function finishAssistant(
   current: SessionChatState,
   requestID: string | undefined,
   status: ChatMessageStatus,
-  result: { content?: string; reasoning?: string; usage?: TokenUsage | null; error?: string; messageID?: string; runID?: string },
+  result: { content?: string; reasoning?: string; usage?: TokenUsage | null; error?: string; messageID?: string; runID?: string; assets?: AssetSummary[] },
 ): SessionChatState {
   const completedAt = new Date().toISOString();
   const settled = settleLiveRows(current, requestID, status, completedAt);
@@ -649,7 +651,10 @@ function finishAssistant(
     if (status === "done" && (item.role === "tool_call" || item.role === "tool" || item.role === "user")) break;
   }
   const target = persisted || live;
-  if (!target && !messageID && !content?.trim() && !reasoning?.trim() && status === "done") return settled;
+  const assets = result.assets?.length || persisted?.assets?.length || live?.assets?.length
+    ? mergeAssetSummaries(persisted?.assets || [], live?.assets || [], result.assets || [])
+    : undefined;
+  if (!target && !messageID && !content?.trim() && !reasoning?.trim() && !assets?.length && status === "done") return settled;
   const existingText = (status === "paused" ? live?.text || persisted?.text : persisted?.text || live?.text) || "";
   let text = content?.trim() ? content : existingText;
   if (status === "paused" && existingText.trim() && (!content?.trim() || !content.startsWith(existingText))) text = existingText;
@@ -659,6 +664,7 @@ function finishAssistant(
   }
   const replacement: ChatItem = {
     ...target,
+    assets,
     id: target?.id || messageID || newRequestID(),
     historyID: messageID || target?.historyID,
     finalReply: true,
@@ -743,6 +749,7 @@ function mergeHistory(current: SessionChatState, incoming: ChatItem[], source: H
       finalReply: existing.finalReply || stored.finalReply,
       requestID: existing.requestID || stored.requestID,
       runID: existing.runID || stored.runID,
+      assets: existing.assets || stored.assets,
       attachments: existing.attachments || stored.attachments,
       completedAt: existing.completedAt || stored.completedAt,
       status: preserveLive ? existing.status : stored.role === "user" && existing.requestID ? "done" : stored.status,

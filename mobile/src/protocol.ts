@@ -99,6 +99,8 @@ export type MessageType =
   | "background_turn_event"
   | "asset_list"
   | "asset_list_result"
+  | "asset_image_preview"
+  | "asset_image_preview_result"
   | "asset_upload_begin"
   | "asset_upload_chunk"
   | "asset_upload_status"
@@ -403,6 +405,7 @@ export type AssistantDeltaPayload = {
 
 export type AssistantDonePayload = {
   message_id?: string;
+  assets?: AssetSummary[];
   content?: string;
   reasoning?: string;
   usage?: TokenUsage;
@@ -497,6 +500,7 @@ export type BackgroundTurnKind =
 
 export type BackgroundTurnEventPayload = {
   message_id?: string;
+  assets?: AssetSummary[];
   turn_id?: string;
   request_id?: string;
   session_id?: string;
@@ -1151,6 +1155,15 @@ export type UploadedAssetPayload = {
   code?: string;
   expires_at?: string;
   max_visits?: number;
+};
+
+export type AssetImagePreviewPayload = { asset_id: string };
+
+export type AssetImagePreviewResultPayload = AssetImagePreviewPayload & {
+  content_type: "image/jpeg";
+  data: string;
+  width: number;
+  height: number;
 };
 
 export type AssetUploadOperation = "begin" | "chunk" | "status" | "complete" | "cancel";

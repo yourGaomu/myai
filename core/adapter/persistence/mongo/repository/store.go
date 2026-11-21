@@ -68,6 +68,13 @@ func (m *Store) EnsureIndexes(ctx context.Context) error {
 			"source_id": bson.M{"$gt": ""},
 		}),
 	})
+	if err != nil {
+		return err
+	}
+	_, err = m.database.Collection(assetsCollection).Indexes().CreateOne(ctx, gomongo.IndexModel{
+		Keys:    bson.D{{Key: "session_id", Value: 1}, {Key: "asset_id", Value: 1}},
+		Options: options.Index().SetName("assets_session_asset"),
+	})
 	return err
 }
 
@@ -533,6 +540,24 @@ func messageAfterFilter(cursor po.MessageDocument) bson.M {
 			}},
 		}},
 	}}
+}
+
+func (m *Store) FindSessionAttachment(ctx context.Context, sessionID, assetID string) (repository.AssetRecord, error) {
+	if sessionID == "" || assetID == "" {
+		return repository.AssetRecord{}, repository.ErrNotFound
+	}
+	filter := bson.M{
+		"session_id": sessionID,
+		"asset_id":   assetID,
+		"tool_name":  bson.M{"$in": bson.A{repository.AssetSourceUpload, repository.AssetSourceAttachImage, repository.AssetSourceShareFile}},
+		"deleted":    bson.M{"$ne": true},
+		"deleted_at": nil,
+	}
+	var document po.AssetDocument
+	if err := m.template.FindOne(ctx, assetsCollection, filter, &document); err != nil {
+		return repository.AssetRecord{}, repositoryError(err)
+	}
+	return mongomapper.AssetRecordFromDocument(document), nil
 }
 
 func (m *Store) ListAssets(ctx context.Context, sessionID string, limit int) ([]repository.AssetRecord, error) {

@@ -69,6 +69,8 @@ type clientEntry struct {
 	peer        *peer
 
 	foregroundFinished bool
+	previewSessionID   string
+	previewAssetID     string
 }
 
 type clientConnection struct {
@@ -259,7 +261,7 @@ func (s *Server) registerClient(requestID string, requestType protocol.MessageTy
 	s.pruneExpiredClientRoutesLocked(now)
 	clientID := clientTokenHash(clientToken)
 	if previous := s.clients[requestID]; previous != nil {
-		if previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
+		if previous.RequestType == protocol.TypeAssetImagePreview || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
 			return false
 		}
 		// Same-client retries keep the original request type so an eventual
@@ -357,9 +359,8 @@ func (s *Server) unregisterClientPeerForRoute(p *peer, owner *clientEntry) {
 
 	for _, client := range s.clients {
 		if client.peer == p {
-			// Do not discard an in-flight request just because its transport
-			// disappeared. A replacement connection for the same paired
-			// user/device can reclaim it below.
+			// Preview IDs stay reserved until their short TTL, and their old
+			// sockets are excluded from replay and rebinding.
 			client.peer = nil
 		}
 	}
@@ -423,7 +424,7 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 		}
 		return false
 	}
-	if client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
+	if client.RequestType == protocol.TypeAssetImagePreview || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
 		return false
 	}
 	client.peer = p
@@ -451,6 +452,9 @@ func (s *Server) clientPeerForMessage(message protocol.Message, expected *client
 			s.removeClientRouteLocked(client)
 		}
 		return nil, nil, false
+	}
+	if client.RequestType == protocol.TypeAssetImagePreview {
+		return nil, nil, false // A preview is tied to its original socket.
 	}
 	if message.UserID != "" && client.UserID != message.UserID || message.DeviceID != "" && client.DeviceID != message.DeviceID {
 		return nil, nil, false
@@ -514,7 +518,8 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 
 func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {
 	for _, client := range s.clients {
-		if now.Sub(client.LastSeenAt) > clientRouteTTL {
+		if now.Sub(client.LastSeenAt) > clientRouteTTL ||
+			client.RequestType == protocol.TypeAssetImagePreview && now.Sub(client.ConnectedAt) > assetPreviewRouteTTL {
 			s.removeClientRouteLocked(client)
 		}
 	}

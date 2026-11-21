@@ -174,6 +174,9 @@ func (s *Server) writeRoutedClient(p *peer, route *clientEntry, message protocol
 
 	s.clientLock.RLock()
 	ownsRoute := s.clients[route.RequestID] == route && route.ownsConnection(s.connections[p])
+	if route.RequestType == protocol.TypeAssetImagePreview {
+		ownsRoute = ownsRoute && route.peer == p && time.Since(route.ConnectedAt) <= assetPreviewRouteTTL
+	}
 	if pending != nil {
 		now := time.Now()
 		ownsRoute = ownsRoute && route.peer == p && now.Sub(route.LastSeenAt) <= clientRouteTTL &&
@@ -185,6 +188,17 @@ func (s *Server) writeRoutedClient(p *peer, route *clientEntry, message protocol
 			return nil // A resolved or expired ask is skipped on replay.
 		}
 		return errors.New("client request no longer belongs to this connection")
+	}
+	if route.RequestType == protocol.TypeAssetImagePreview {
+		if err := p.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
+			return err
+		}
+		defer p.conn.SetWriteDeadline(time.Time{})
+		if err := p.conn.WriteJSON(message); err != nil {
+			_ = p.close()
+			return err
+		}
+		return nil
 	}
 	return p.conn.WriteJSON(message)
 }

@@ -22,11 +22,8 @@ func requestBudget(command generationcommand.Run, tools []modelport.Tool) (conte
 	return contextmgr.NewRequestBudget(contextmgr.ResolveWindowTokens(command.Session.ContextWindowK, command.ModelWindowTokens), toolTokens, command.Settings.MaxOutputTokens), nil
 }
 
-func (s AgentLoopService) prepareSnapshot(ctx context.Context, command generationcommand.Run, tools []modelport.Tool) (contextmgr.Snapshot, error) {
-	budget, err := requestBudget(command, tools)
-	if err != nil {
-		return contextmgr.Snapshot{}, err
-	}
+func (s AgentLoopService) prepareSnapshot(ctx context.Context, command generationcommand.Run, budget contextmgr.RequestBudget) (contextmgr.Snapshot, error) {
+	var err error
 	turn := contextmgr.TurnContext{EnvironmentContext: command.EnvironmentContext, PlanContext: planSnapshot(command.Session.CurrentPlan)}
 	// Legacy transcripts keep their raw messages and checkpoint hash. Only the
 	// latest turn's dynamic instructions are projected into this request.
@@ -142,12 +139,27 @@ func quarantineInvalidToolExchanges(snapshot *contextmgr.Snapshot) error {
 	return nil
 }
 
-func (s AgentLoopService) generateSample(ctx context.Context, command generationcommand.Run, tools []modelport.Tool, retried *bool) (modelport.ChatResult, contextmgr.Snapshot, error) {
-	snapshot, err := s.prepareSnapshot(ctx, command, tools)
+func (s AgentLoopService) generateSample(ctx context.Context, command generationcommand.Run, tools []modelport.Tool, images *turnImages, retried *bool) (modelport.ChatResult, contextmgr.Snapshot, error) {
+	budget, err := requestBudget(command, tools)
+	if err != nil {
+		return modelport.ChatResult{}, contextmgr.Snapshot{}, err
+	}
+	build := func(budget contextmgr.RequestBudget) (modelport.GenerateRequest, contextmgr.Snapshot, int, error) {
+		snapshot, err := s.prepareSnapshot(ctx, command, budget)
+		if err != nil {
+			return modelport.GenerateRequest{}, snapshot, 0, err
+		}
+		if snapshot.Info.WindowK > 0 {
+			budget.WindowTokens = min(budget.WindowTokens, snapshot.Info.WindowK*1000)
+		}
+		request := modelport.GenerateRequest{Messages: snapshot.Messages, Tools: tools, Stream: command.Stream, Settings: command.Settings}
+		imageTokens, err := s.addRequestImages(ctx, command.Session.ID, command.Model, images, snapshot, command.Session.Messages, budget, &request)
+		return request, snapshot, imageTokens, err
+	}
+	request, snapshot, imageTokens, err := build(budget)
 	if err != nil {
 		return modelport.ChatResult{}, snapshot, err
 	}
-	request := modelport.GenerateRequest{Messages: snapshot.Messages, Tools: tools, Stream: command.Stream, Settings: command.Settings}
 	result, err := command.Model.Generate(ctx, request)
 	if !modelport.IsContextWindowExceeded(err) || retried == nil || *retried {
 		return result, snapshot, err
@@ -156,22 +168,19 @@ func (s AgentLoopService) generateSample(ctx context.Context, command generation
 	if _, ok := s.Compactor.(compactionport.RequestCompactor); !ok {
 		return result, snapshot, err
 	}
-	budget, budgetErr := requestBudget(command, tools)
-	if budgetErr != nil {
-		return result, snapshot, budgetErr
-	}
 	// Lower the accounting window to force an additional persisted checkpoint,
-	// then retry only the model sample. Tool execution is never replayed.
-	command.ModelWindowTokens = min(budget.WindowTokens*3/4, budget.ReservedTokens()+max(256, contextmgr.EstimateMessagesTokens(snapshot.Messages)/2))
-	rebuilt, compactErr := s.prepareSnapshot(ctx, command, tools)
+	// then retry only the model sample. Rebuild image bindings from the new
+	// snapshot and reuse any bytes already verified during this turn.
+	requestTokens := contextmgr.EstimateMessagesTokens(request.Messages) + imageTokens
+	budget.WindowTokens = min(budget.WindowTokens*3/4, budget.ReservedTokens()+max(256, requestTokens/2))
+	retry, rebuilt, retryImageTokens, compactErr := build(budget)
 	if compactErr != nil {
 		return result, snapshot, fmt.Errorf("model context overflow; recovery compaction failed: %w", compactErr)
 	}
-	if contextmgr.EstimateMessagesTokens(rebuilt.Messages) >= contextmgr.EstimateMessagesTokens(snapshot.Messages) {
+	if contextmgr.EstimateMessagesTokens(retry.Messages)+retryImageTokens >= requestTokens {
 		return result, snapshot, err
 	}
-	request.Messages = rebuilt.Messages
-	result, err = command.Model.Generate(ctx, request)
+	result, err = command.Model.Generate(ctx, retry)
 	return result, rebuilt, err
 }
 

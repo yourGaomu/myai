@@ -60,6 +60,7 @@ type Agent struct {
 	uploadsClosed         bool
 	uploadOperations      operationQueue
 	activeUploadReplies   atomic.Int32
+	activeImagePreviews   atomic.Int32
 }
 
 // WithMCPManager attaches the narrow application-level MCP reload facade.
@@ -368,6 +369,13 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 
 		if protocol.IsAssetUploadRequest(message.Type) && len(raw) > protocol.AssetUploadMaxJSONBytes {
 			if writeErr := a.writeHandlerError(conn, message, errors.New("upload JSON exceeds 524288 bytes")); writeErr != nil {
+				done <- writeErr
+				return
+			}
+			continue
+		}
+		if message.Type == protocol.TypeAssetImagePreview && len(raw) > protocol.AssetImagePreviewRequestMaxJSONBytes {
+			if writeErr := a.writeHandlerError(conn, message, errors.New("image preview request is too large")); writeErr != nil {
 				done <- writeErr
 				return
 			}
@@ -747,11 +755,18 @@ func (a *Agent) processPlanExecuteMessage(ctx context.Context, conn *websocket.C
 	}
 }
 
-func (a *Agent) writeJSON(conn *websocket.Conn, value any) error {
+func (a *Agent) writeJSON(conn *websocket.Conn, message protocol.Message) error {
 	// reasoning、answer、tool event 可能由不同回调触发，WebSocket 写操作必须串行化。
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
-	return conn.WriteJSON(value)
+	if message.Type == protocol.TypeAssetImagePreviewResult {
+		// A stalled thumbnail write must release the shared socket writer.
+		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			return err
+		}
+		defer conn.SetWriteDeadline(time.Time{})
+	}
+	return conn.WriteJSON(message)
 }
 
 func newRequestID() string {

@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import type { AssetSummary } from "../protocol";
+import { assetSummariesForSession } from "../utils/toolAssets";
 
 const emptyAssets: AssetSummary[] = [];
 
@@ -8,7 +9,7 @@ const emptyAssets: AssetSummary[] = [];
 export function useAssetState(sessionID: string) {
   const [snapshot, setSnapshot] = useState<{ sessionID: string; assets: AssetSummary[] } | null>(null);
   const setAssets = useCallback((targetSessionID: string, assets: AssetSummary[]) => {
-    setSnapshot({ sessionID: targetSessionID, assets });
+    setSnapshot({ sessionID: targetSessionID, assets: assetSummariesForSession(assets, targetSessionID) });
   }, []);
   const clearAssets = useCallback(() => setSnapshot(null), []);
 

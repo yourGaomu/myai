@@ -4,30 +4,34 @@ import { Feather } from "@expo/vector-icons";
 
 import { font, radius } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
+import type { AssetSummary } from "../../protocol";
 import type { ChatItem } from "../../types/chat";
+import { isImageAttachment } from "../../utils/attachments";
 import { copyToClipboard } from "../../utils/clipboard";
-import { parseSharedAssets } from "../../utils/toolAssets";
+import { assetSummaryToSharedAsset, isAssistantAssetTool, mergeSharedAssets, parseSharedAssets } from "../../utils/toolAssets";
 import { toolIcon, toolKind } from "../../utils/toolDisplay";
 import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { CharacterAvatar } from "../common/CharacterAvatar";
+import { AssistantReply } from "./AssistantReply";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
-import { MarkdownText } from "./MarkdownText";
 import { SharedAssetCard } from "./SharedAssetCard";
 import { useChatStyles } from "./styles";
 import { ThinkingReasoning } from "./ThinkingReasoning";
 
 type Props = {
   buttonFeedback: (style: StyleProp<ViewStyle>, active?: boolean) => StyleProp<ViewStyle>;
+  catalog?: AssetSummary[];
   hideReasoning?: boolean;
   message: ChatItem;
   onRegenerate: () => void;
+  sessionID?: string;
 };
 
-export function MessageBubble({ buttonFeedback, hideReasoning = false, message, onRegenerate }: Props) {
+export function MessageBubble({ buttonFeedback, catalog, hideReasoning = false, message, onRegenerate, sessionID }: Props) {
   const { palette } = useAppTheme();
   const styles = useChatStyles();
   const local = useThemedStyles(makeLocalStyles);
-  const sharedAssets = parseSharedAssets(message.toolName, message.text);
+  const sharedAssets = message.role === "tool" ? mergeSharedAssets(parseSharedAssets(message.toolName, message.text)) : [];
   const [expanded, setExpanded] = useState(message.role !== "tool_call" && (message.role !== "tool" || sharedAssets.length > 0));
   const [copied, setCopied] = useState(false);
 
@@ -89,12 +93,13 @@ export function MessageBubble({ buttonFeedback, hideReasoning = false, message, 
   }
 
   if (message.role === "user") {
+    const hasImage = message.attachments?.some(isImageAttachment);
     return (
-      <View style={styles.userTurnWrapper}>
+      <View style={[styles.userTurnWrapper, hasImage && styles.userImageTurnWrapper]}>
         <Pressable
           delayLongPress={280}
           onLongPress={() => void handleCopyText(message.text)}
-          style={styles.userMessage}
+          style={[styles.userMessage, hasImage && styles.userImageMessage]}
         >
           {message.text ? (
             <Text selectable style={styles.userMessageText}>
@@ -104,7 +109,7 @@ export function MessageBubble({ buttonFeedback, hideReasoning = false, message, 
           {message.attachments?.length ? (
             <View style={styles.messageAttachments}>
               {message.attachments.map((attachment, index) => (
-                <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} />
+                <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} sessionID={sessionID} />
               ))}
             </View>
           ) : null}
@@ -146,11 +151,17 @@ export function MessageBubble({ buttonFeedback, hideReasoning = false, message, 
           startedAt={message.createdAt}
         />
       ) : null}
-      {message.text ? <MarkdownText text={message.text} /> : null}
+      <AssistantReply
+        assets={message.assets?.filter((asset) => asset.asset_id && isAssistantAssetTool(asset.tool_name)).map(assetSummaryToSharedAsset)}
+        buttonFeedback={buttonFeedback}
+        catalog={catalog}
+        sessionID={sessionID}
+        text={message.text}
+      />
       {message.attachments?.length ? (
         <View style={styles.messageAttachments}>
           {message.attachments.map((attachment, index) => (
-            <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} />
+            <ChatAttachmentCard attachment={attachment} buttonFeedback={buttonFeedback} key={`${message.id}-attachment-${index}`} sessionID={sessionID} />
           ))}
         </View>
       ) : null}

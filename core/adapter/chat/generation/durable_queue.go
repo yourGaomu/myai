@@ -6,6 +6,7 @@ import (
 
 	runtimeservice "myai/core/application/runtime/service"
 	outbox "myai/core/port/outbox"
+	repository "myai/core/port/repository"
 )
 
 // NewDurableSessionQueue loads and validates recovery before starting any work.
@@ -101,8 +102,40 @@ func (q *SessionQueue) SubmitRecords(ctx context.Context, batch outbox.Batch) er
 	return nil
 }
 
+// PendingSessionAttachment includes durable receipts before the backend write
+// completes. Acknowledged assets are already visible through the repository.
+func (q *SessionQueue) PendingSessionAttachment(ctx context.Context, sessionID, assetID string) (repository.AssetRecord, bool, error) {
+	if q == nil {
+		return repository.AssetRecord{}, false, nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.blocked[sessionID] {
+		return repository.AssetRecord{}, false, outbox.ErrBlocked
+	}
+	if q.journal != nil {
+		blocked, err := q.journal.Blocked(ctx, sessionID)
+		if err != nil {
+			return repository.AssetRecord{}, false, err
+		}
+		if blocked {
+			return repository.AssetRecord{}, false, outbox.ErrBlocked
+		}
+	}
+	if queue := q.queues[sessionID]; queue != nil {
+		for _, task := range queue.tasks {
+			for _, asset := range task.assets {
+				if asset.AssetID == assetID && asset.SessionID == sessionID && asset.IsSessionAttachment() {
+					return asset, true, nil
+				}
+			}
+		}
+	}
+	return repository.AssetRecord{}, false, nil
+}
+
 func (q *SessionQueue) recordTask(entry outbox.Entry) *queuedSessionTask {
-	return &queuedSessionTask{sequence: entry.Sequence, run: func() error {
+	return &queuedSessionTask{assets: entry.Batch.Assets, sequence: entry.Sequence, run: func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultPersistenceTimeout)
 		defer cancel()
 		if err := q.sink.Apply(ctx, entry.Batch); err != nil {

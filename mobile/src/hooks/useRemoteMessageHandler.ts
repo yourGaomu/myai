@@ -12,6 +12,7 @@ import type {
   AgentRunListResultPayload,
   AgentRunStartedPayload,
   AssetListResultPayload,
+  AssetSummary,
   AssistantDeltaPayload,
   AssistantDonePayload,
   BackgroundTurnEventPayload,
@@ -65,6 +66,7 @@ import type {
   UserMessageQueuedPayload,
 } from "../protocol";
 import type { PendingAction, PermissionState, QuestionSync, RelayScope, UserQuestionState } from "../types/app";
+import { assetSummariesForSession } from "../utils/toolAssets";
 import type { SessionChatState } from "./useChatMessages";
 
 type Args = {
@@ -182,6 +184,7 @@ type Args = {
     reasoning?: string,
     messageID?: string,
     runID?: string,
+    assets?: AssetSummary[],
   ) => void;
   currentFilePath: string;
   getSessionChat: (sessionID: string) => SessionChatState;
@@ -511,6 +514,8 @@ export function useRemoteMessageHandler({
         }
         case "background_turn_event": {
           const payload = (message.payload || {}) as BackgroundTurnEventPayload;
+          if ((payload.session_id && message.session_id && payload.session_id !== message.session_id) ||
+              (payload.turn_id && message.request_id && payload.turn_id !== message.request_id)) break;
           const turnID = payload.turn_id || message.request_id || "";
           const targetSessionID =
             payload.session_id ||
@@ -694,6 +699,7 @@ export function useRemoteMessageHandler({
                   isPaused ? undefined : payload.reasoning,
                   payload.message_id,
                   payload.run?.id || payload.run_id,
+                  assetSummariesForSession(payload.assets, targetSessionID),
                 );
               }
 
@@ -702,6 +708,7 @@ export function useRemoteMessageHandler({
                 delete requestSessionMapRef.current[payload.request_id];
               }
               requestSessions();
+              if (targetSessionID === sessionIDRef.current) requestAssets(targetSessionID);
               break;
             }
           }
@@ -719,7 +726,8 @@ export function useRemoteMessageHandler({
           if (payload.retrieval && targetSessionID === sessionIDRef.current) applyKnowledgeSearch(payload.retrieval);
           completeAssistant(
             targetSessionID, requestID, payload.paused ? "paused" : "done", payload.usage || null,
-            payload.content, payload.paused ? undefined : payload.reasoning, payload.message_id,
+            payload.content, payload.paused ? undefined : payload.reasoning, payload.message_id, undefined,
+            assetSummariesForSession(payload.assets, targetSessionID),
           );
           if (payload.paused && payload.message) addEventMessage(targetSessionID, payload.message);
           finishTurnInteractions(targetSessionID, requestID);
@@ -761,7 +769,7 @@ export function useRemoteMessageHandler({
             payload.arguments || "",
             payload.result || "",
             Boolean(payload.error) ||
-              Boolean(payload.status && payload.status !== "success" && payload.status !== "skipped"),
+              Boolean(payload.status && !["success", "succeeded", "skipped"].includes(payload.status)),
             message.request_id,
             payload,
             payload.tool_call_id,
