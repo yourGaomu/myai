@@ -43,11 +43,11 @@ func TestBuildDependenciesWiresStableSessionServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendUserMessage() error = %v", err)
 	}
-	if len(prepared.Session.Messages) != initialMessageCount+2 {
-		t.Fatalf("message count = %d, want %d", len(prepared.Session.Messages), initialMessageCount+2)
+	if len(prepared.Session.Messages) != initialMessageCount+1 {
+		t.Fatalf("message count = %d, want %d", len(prepared.Session.Messages), initialMessageCount+1)
 	}
-	if !prepared.Session.Messages[initialMessageCount].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) {
-		t.Fatalf("expected runtime boundary message: %#v", prepared.Session.Messages)
+	if message := prepared.Session.Messages[initialMessageCount]; message.Role != domainmessage.RoleUser || message.IsSynthetic() || message.Text() != "hello" {
+		t.Fatalf("plain Chat should only append the user's message: %#v", message)
 	}
 
 	state := dependencies.CurrentState.State()

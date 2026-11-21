@@ -524,6 +524,8 @@ export type TokenUsage = {
   total_tokens?: number;
   reasoning_tokens?: number;
   prompt_cached_tokens?: number;
+  prompt_cache_reported?: boolean;
+  prompt_cache_incomplete?: boolean;
   available?: boolean;
 };
 

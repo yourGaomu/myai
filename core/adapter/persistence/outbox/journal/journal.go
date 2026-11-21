@@ -16,6 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	outboxencoding "myai/core/adapter/persistence/outbox/encoding"
 	outbox "myai/core/port/outbox"
 )
 
@@ -261,7 +262,7 @@ func outboxScope(value string) ([]byte, error) {
 }
 
 func (j *Journal) Append(ctx context.Context, batch outbox.Batch) (outbox.Entry, error) {
-	frozen, payload, err := outbox.Freeze(batch)
+	frozen, payload, err := outboxencoding.Freeze(batch)
 	if err != nil {
 		return outbox.Entry{}, err
 	}
@@ -332,7 +333,7 @@ func (j *Journal) Append(ctx context.Context, batch outbox.Batch) (outbox.Entry,
 		return nil
 	}
 	for _, record := range frozen.Messages {
-		if err := add("message", record.ID, record); err != nil {
+		if err := add("message", record.ID, outboxencoding.Message(record)); err != nil {
 			return outbox.Entry{}, err
 		}
 	}

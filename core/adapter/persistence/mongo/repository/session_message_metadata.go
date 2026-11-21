@@ -92,12 +92,14 @@ func (m *Store) TouchSessionMessages(ctx context.Context, record repository.Sess
 		// Usage is a cumulative snapshot, never a delta. $max also protects legacy
 		// sessions without a sequence and newer snapshots built from stale state.
 		update["$max"] = bson.M{
-			"usage.prompt_tokens":        usage.PromptTokens,
-			"usage.completion_tokens":    usage.CompletionTokens,
-			"usage.total_tokens":         usage.TotalTokens,
-			"usage.reasoning_tokens":     usage.ReasoningTokens,
-			"usage.prompt_cached_tokens": usage.PromptCachedTokens,
-			"usage.available":            usage.Available,
+			"usage.prompt_tokens":           usage.PromptTokens,
+			"usage.completion_tokens":       usage.CompletionTokens,
+			"usage.total_tokens":            usage.TotalTokens,
+			"usage.reasoning_tokens":        usage.ReasoningTokens,
+			"usage.prompt_cached_tokens":    usage.PromptCachedTokens,
+			"usage.prompt_cache_reported":   usage.PromptCacheReported,
+			"usage.prompt_cache_incomplete": usage.PromptCacheIncomplete,
+			"usage.available":               usage.Available,
 		}
 	}
 	result, err = m.template.UpdateOne(ctx, sessionsCollection, bson.M{"_id": record.ID, "$or": bson.A{

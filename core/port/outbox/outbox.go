@@ -75,33 +75,6 @@ type Batch struct {
 	Metadata  *Metadata
 }
 
-// Freeze supplies the envelope identity and makes an independent JSON snapshot.
-// A retry must reuse this batch; mapping again may generate different record IDs.
-func Freeze(batch Batch) (Batch, []byte, error) {
-	if batch.Version == 0 {
-		batch.Version = Version
-	}
-	if err := batch.Validate(); err != nil {
-		return Batch{}, nil, err
-	}
-	if batch.ID == "" {
-		encoded, err := json.Marshal(batch)
-		if err != nil {
-			return Batch{}, nil, err
-		}
-		batch.ID = Hash(encoded)
-	}
-	encoded, err := json.Marshal(batch)
-	if err != nil {
-		return Batch{}, nil, err
-	}
-	var frozen Batch
-	if err := json.Unmarshal(encoded, &frozen); err != nil {
-		return Batch{}, nil, err
-	}
-	return frozen, encoded, nil
-}
-
 func Hash(data []byte) string {
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])

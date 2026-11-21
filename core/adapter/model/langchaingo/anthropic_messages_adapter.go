@@ -31,7 +31,9 @@ func (AnthropicMessagesAdapter) CreateModel(config modelport.CreationConfig) (mo
 	options := []anthropic.Option{
 		anthropic.WithToken(config.APIKey),
 		anthropic.WithModel(config.ModelName),
-		anthropic.WithHTTPClient(&http.Client{Transport: modelTransport{base: http.DefaultTransport}}),
+		anthropic.WithHTTPClient(&http.Client{Transport: anthropicCacheTransport{
+			base: modelTransport{base: http.DefaultTransport, usage: anthropicMessagesUsage},
+		}}),
 	}
 	if config.BaseURL != "" {
 		options = append(options, anthropic.WithBaseURL(config.BaseURL))
@@ -40,5 +42,7 @@ func (AnthropicMessagesAdapter) CreateModel(config modelport.CreationConfig) (mo
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
+	return &corellm.Model{
+		LlmModel: model, RequireStreamStopReason: true, PrepareRequestContext: withAnthropicCachePrefix,
+	}, nil
 }

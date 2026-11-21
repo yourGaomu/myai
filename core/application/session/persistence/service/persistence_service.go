@@ -259,12 +259,14 @@ func PrepareSessionRecordForSave(command persistencecommand.PrepareRecord) (repo
 }
 
 func TokenUsageRecord(usage llm.TokenUsage) *repository.TokenUsageRecord {
-	if !usage.Available && usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 && usage.ReasoningTokens == 0 && usage.PromptCachedTokens == 0 {
+	if usage == (llm.TokenUsage{}) {
 		return nil
 	}
 	return &repository.TokenUsageRecord{
 		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
 		TotalTokens: usage.TotalTokens, ReasoningTokens: usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens, Available: usage.Available,
+		PromptCachedTokens:    usage.PromptCachedTokens,
+		PromptCacheReported:   usage.PromptCacheReported,
+		PromptCacheIncomplete: usage.PromptCacheIncomplete, Available: usage.Available,
 	}
 }

@@ -3,9 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
-	"time"
 
 	"myai/core/contextmgr"
 	generation "myai/core/domain/generation"
@@ -105,8 +103,7 @@ func TestAssistantGenerationServiceCompactErrorIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestAssistantGenerationServiceInjectsEnvironmentContextForTurn(t *testing.T) {
-	now := time.Date(2026, 9, 18, 15, 4, 5, 0, time.FixedZone("CST", 8*3600))
+func TestAssistantGenerationServiceDoesNotInjectVolatileEnvironment(t *testing.T) {
 	current := assistantGenerationSession()
 	current.WorkspaceRoot = `D:\Go_All\myai`
 	runner := &assistantRunner{result: modelport.ChatResult{Content: "answer"}}
@@ -116,18 +113,14 @@ func TestAssistantGenerationServiceInjectsEnvironmentContextForTurn(t *testing.T
 		Contexts:          &assistantContextProvider{},
 		AgentRunner:       runner,
 		ResponseCommitter: &assistantCommitter{},
-		Now:               func() time.Time { return now },
 	}.Generate(context.Background(), AssistantGenerationCommand{
 		Session: current,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := runner.command.EnvironmentContext
-	for _, want := range []string{"Friday", "星期五", "2026-09-18 15:04:05", `Workspace: D:\Go_All\myai`} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("expected environment context to contain %q, got %q", want, prompt)
-		}
+	if prompt := runner.command.EnvironmentContext; prompt != "" {
+		t.Fatalf("unexpected automatic environment context: %q", prompt)
 	}
 }
 

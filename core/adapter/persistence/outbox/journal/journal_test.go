@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	outboxencoding "myai/core/adapter/persistence/outbox/encoding"
 	outbox "myai/core/port/outbox"
 	repository "myai/core/port/repository"
 )
@@ -73,6 +74,53 @@ func TestJournalReopenPendingDoneAndStableIdentity(t *testing.T) {
 	var payload []byte
 	if err := j.db.QueryRow("SELECT payload FROM outbox_entries WHERE seq=?", entry.Sequence).Scan(&payload); err != nil || len(payload) != 0 {
 		t.Fatalf("ACK retained payload err=%v", err)
+	}
+}
+
+func TestJournalReplaysLegacyAndPromptCacheUsageBatches(t *testing.T) {
+	// Pre-reporting schema fixture: both MessageRecord and TokenUsageRecord are
+	// part of the immutable payload, so false flags must preserve its bytes.
+	const legacyJSON = `{"Version":1,"ID":"batch-old","SessionID":"session","Messages":[{"ID":"old","MessageID":"","SessionID":"session","Role":"assistant","Content":"chat old","Reasoning":"","ToolCallID":"","ToolName":"","ToolArguments":"","ToolError":"","ToolStatus":"","ToolErrorCode":"","ToolTruncated":false,"ToolPromptContent":"","ToolPromptError":"","ToolPromptTruncated":false,"SyntheticReason":"","SourceID":"","SourceKind":"","SourceTaskID":"","PromptTokens":0,"CompletionTokens":0,"TotalTokens":0,"ReasoningTokens":0,"PromptCachedTokens":2,"Sequence":1794312000000000000,"CreatedAt":"2026-11-10T12:00:00Z"}],"Assets":null,"Metadata":{"Kind":"","ParentSessionID":"","ParentTaskID":"","AgentDefinitionID":"","AgentDefinitionVer":0,"Model":"","Title":"","Usage":{"PromptTokens":0,"CompletionTokens":0,"TotalTokens":0,"ReasoningTokens":0,"PromptCachedTokens":2,"Available":true},"LastUsage":null,"Sequence":1794312000000000000,"IncludeUsage":true,"RequiresExisting":false,"CreatedAt":"2026-11-10T12:00:00Z","UpdatedAt":"2026-11-10T12:00:00Z"}}`
+	ctx := context.Background()
+	path := testPath(t)
+	j := mustOpen(t, path, testOptions())
+	old := testBatch("old", "session")
+	old.Messages[0].Role = repository.RoleAssistant
+	old.Messages[0].PromptCachedTokens = 2
+	at := old.Messages[0].CreatedAt
+	old.Metadata = &outbox.Metadata{Usage: &repository.TokenUsageRecord{PromptCachedTokens: 2, Available: true}, Sequence: at.UnixNano(), IncludeUsage: true, CreatedAt: at, UpdatedAt: at}
+	_, encoded, err := outboxencoding.Freeze(old)
+	if err != nil || string(encoded) != legacyJSON {
+		t.Fatalf("legacy payload changed: %s, err=%v", encoded, err)
+	}
+	if _, err := j.Append(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	messageJSON := strings.SplitN(strings.SplitN(legacyJSON, `"Messages":[`, 2)[1], `],"Assets"`, 2)[0]
+	var messageHash string
+	if err := j.db.QueryRow("SELECT hash FROM outbox_keys WHERE kind='message' AND id=?", old.Messages[0].ID).Scan(&messageHash); err != nil || messageHash != outbox.Hash([]byte(messageJSON)) {
+		t.Fatalf("legacy message identity changed: hash=%s, err=%v", messageHash, err)
+	}
+	newer := testBatch("new", "session")
+	newer.Messages[0].Role = repository.RoleAssistant
+	newer.Messages[0].PromptCacheReported = true
+	newer.Messages[0].PromptCacheIncomplete = true
+	newer.Metadata = &outbox.Metadata{LastUsage: &repository.TokenUsageRecord{PromptCacheReported: true, PromptCacheIncomplete: true}, Sequence: at.UnixNano(), IncludeUsage: true, CreatedAt: at, UpdatedAt: at}
+	if _, err := j.Append(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j = mustOpen(t, path, testOptions())
+	pending, err := j.Pending(ctx)
+	if err != nil || len(pending) != 2 {
+		t.Fatalf("pending=%v, err=%v", pending, err)
+	}
+	legacy, current := pending[0].Batch, pending[1].Batch
+	if legacy.Messages[0].PromptCachedTokens != 2 || legacy.Messages[0].PromptCacheReported || legacy.Metadata.Usage.PromptCacheReported ||
+		current.Messages[0] != newer.Messages[0] || *current.Metadata.LastUsage != *newer.Metadata.LastUsage {
+		t.Fatalf("usage changed during replay: legacy=%+v current=%+v", legacy, current)
 	}
 }
 

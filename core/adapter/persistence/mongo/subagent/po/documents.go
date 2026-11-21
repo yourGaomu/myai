@@ -127,12 +127,14 @@ type RunDocument struct {
 }
 
 type TokenUsageDocument struct {
-	PromptTokens       int  `bson:"prompt_tokens"`
-	CompletionTokens   int  `bson:"completion_tokens"`
-	TotalTokens        int  `bson:"total_tokens"`
-	ReasoningTokens    int  `bson:"reasoning_tokens"`
-	PromptCachedTokens int  `bson:"prompt_cached_tokens"`
-	Available          bool `bson:"available"`
+	PromptTokens          int  `bson:"prompt_tokens"`
+	CompletionTokens      int  `bson:"completion_tokens"`
+	TotalTokens           int  `bson:"total_tokens"`
+	ReasoningTokens       int  `bson:"reasoning_tokens"`
+	PromptCachedTokens    int  `bson:"prompt_cached_tokens"`
+	PromptCacheReported   bool `bson:"prompt_cache_reported,omitempty"`
+	PromptCacheIncomplete bool `bson:"prompt_cache_incomplete,omitempty"`
+	Available             bool `bson:"available"`
 }
 
 // TaskEventDocument is an append-only replay record. The task snapshot keeps

@@ -472,12 +472,14 @@ type AgentRunListResultPayload struct {
 }
 
 type TokenUsage struct {
-	PromptTokens       int  `json:"prompt_tokens,omitempty"`
-	CompletionTokens   int  `json:"completion_tokens,omitempty"`
-	TotalTokens        int  `json:"total_tokens,omitempty"`
-	ReasoningTokens    int  `json:"reasoning_tokens,omitempty"`
-	PromptCachedTokens int  `json:"prompt_cached_tokens,omitempty"`
-	Available          bool `json:"available,omitempty"`
+	PromptTokens          int  `json:"prompt_tokens,omitempty"`
+	CompletionTokens      int  `json:"completion_tokens,omitempty"`
+	TotalTokens           int  `json:"total_tokens,omitempty"`
+	ReasoningTokens       int  `json:"reasoning_tokens,omitempty"`
+	PromptCachedTokens    int  `json:"prompt_cached_tokens,omitempty"`
+	PromptCacheReported   bool `json:"prompt_cache_reported,omitempty"`
+	PromptCacheIncomplete bool `json:"prompt_cache_incomplete,omitempty"`
+	Available             bool `json:"available,omitempty"`
 }
 
 type ToolCallPayload struct {

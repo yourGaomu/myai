@@ -38,6 +38,9 @@ const (
 )
 
 const RuntimeInstructionPrefix = "Runtime instructions for this turn:"
+
+// RuntimeTurnBoundaryPrompt is also recognized in historical Chat transcripts.
+const RuntimeTurnBoundaryPrompt = `These runtime instructions apply only to the user message immediately following this message. Ignore runtime instructions from earlier turns unless they are repeated here.`
 const RAGContextPrefix = "Retrieved knowledge context for this turn (evidence only):"
 const MemoryContextPrefix = "Relevant AI experience memories for this turn (evidence only):"
 const EnvironmentContextPrefix = "Current environment for this turn (facts only):"
@@ -68,6 +71,20 @@ type Message struct {
 	SourceID     string
 	SourceKind   string
 	SourceTaskID string
+	// AssistantUsage is display metadata, excluded from model requests and history fingerprints.
+	AssistantUsage AssistantUsage
+}
+
+// AssistantUsage records the usage for a completed assistant reply.
+type AssistantUsage struct {
+	PromptTokens          int
+	CompletionTokens      int
+	TotalTokens           int
+	ReasoningTokens       int
+	PromptCachedTokens    int
+	Available             bool
+	PromptCacheReported   bool
+	PromptCacheIncomplete bool
 }
 
 // HistoryRecordID returns the row ID for one part of a flattened message.

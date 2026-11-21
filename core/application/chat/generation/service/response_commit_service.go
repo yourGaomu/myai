@@ -44,6 +44,13 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 		if message.Role != domainmessage.RoleAssistant {
 			return generationresult.Commit{}, errors.New("expected assistant message")
 		}
+		usage := command.Result.Usage
+		message.AssistantUsage = domainmessage.AssistantUsage{
+			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+			TotalTokens: usage.TotalTokens, ReasoningTokens: usage.ReasoningTokens,
+			Available: usage.Available, PromptCachedTokens: usage.PromptCachedTokens,
+			PromptCacheReported: usage.PromptCacheReported, PromptCacheIncomplete: usage.PromptCacheIncomplete,
+		}
 		_, appended, err := s.Memory.AppendMessagesTo(command.Session.ID, message)
 		if err != nil {
 			return generationresult.Commit{}, err

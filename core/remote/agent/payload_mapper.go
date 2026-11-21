@@ -190,11 +190,13 @@ func localHistoryUpToDate(local protocol.SessionHistoryMetaPayload, remote sessi
 
 func tokenUsageRecordFromMessage(record sessionresult.MessageListItem) protocol.TokenUsage {
 	return protocol.TokenUsage{
-		PromptTokens:       record.PromptTokens,
-		CompletionTokens:   record.CompletionTokens,
-		TotalTokens:        record.TotalTokens,
-		ReasoningTokens:    record.ReasoningTokens,
-		PromptCachedTokens: record.PromptCachedTokens,
+		PromptTokens:          record.PromptTokens,
+		CompletionTokens:      record.CompletionTokens,
+		TotalTokens:           record.TotalTokens,
+		ReasoningTokens:       record.ReasoningTokens,
+		PromptCachedTokens:    record.PromptCachedTokens,
+		PromptCacheReported:   record.PromptCacheReported,
+		PromptCacheIncomplete: record.PromptCacheIncomplete,
 		Available: record.PromptTokens > 0 ||
 			record.CompletionTokens > 0 ||
 			record.TotalTokens > 0 ||
@@ -208,12 +210,14 @@ func tokenUsageResultToPayload(usage *sessionresult.TokenUsage) *protocol.TokenU
 		return nil
 	}
 	payload := protocol.TokenUsage{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
+		PromptTokens:          usage.PromptTokens,
+		CompletionTokens:      usage.CompletionTokens,
+		TotalTokens:           usage.TotalTokens,
+		ReasoningTokens:       usage.ReasoningTokens,
+		PromptCachedTokens:    usage.PromptCachedTokens,
+		PromptCacheReported:   usage.PromptCacheReported,
+		PromptCacheIncomplete: usage.PromptCacheIncomplete,
+		Available:             usage.Available,
 	}
 	if tokenUsagePayloadIsZero(payload) {
 		return nil
@@ -230,12 +234,7 @@ func tokenUsagePayloadPtr(usage llm.TokenUsage) *protocol.TokenUsage {
 }
 
 func tokenUsagePayloadIsZero(usage protocol.TokenUsage) bool {
-	return !usage.Available &&
-		usage.PromptTokens == 0 &&
-		usage.CompletionTokens == 0 &&
-		usage.TotalTokens == 0 &&
-		usage.ReasoningTokens == 0 &&
-		usage.PromptCachedTokens == 0
+	return usage == (protocol.TokenUsage{})
 }
 
 func planPayload(currentPlan *agentplan.Plan) *protocol.Plan {
@@ -354,12 +353,14 @@ func skillDisplayPath(root string, path string) string {
 
 func tokenUsagePayload(usage llm.TokenUsage) protocol.TokenUsage {
 	return protocol.TokenUsage{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
+		PromptTokens:          usage.PromptTokens,
+		CompletionTokens:      usage.CompletionTokens,
+		TotalTokens:           usage.TotalTokens,
+		ReasoningTokens:       usage.ReasoningTokens,
+		PromptCachedTokens:    usage.PromptCachedTokens,
+		PromptCacheReported:   usage.PromptCacheReported,
+		PromptCacheIncomplete: usage.PromptCacheIncomplete,
+		Available:             usage.Available,
 	}
 }
 

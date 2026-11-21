@@ -6,6 +6,7 @@ import type { PermissionState, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
 import { attachmentKey } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
+import { usageHasValues } from "../utils/tokenUsage";
 
 export type SessionChatState = {
   activeAssistantID: string;
@@ -752,6 +753,8 @@ function mergeHistory(current: SessionChatState, incoming: ChatItem[], source: H
       assets: existing.assets || stored.assets,
       attachments: existing.attachments || stored.attachments,
       completedAt: existing.completedAt || stored.completedAt,
+      // A matching in-memory history row can arrive before its usage is persisted.
+      usage: (preserveLive && existing.usage) || (stored.usage && usageHasValues(stored.usage) ? stored.usage : existing.usage),
       status: preserveLive ? existing.status : stored.role === "user" && existing.requestID ? "done" : stored.status,
     });
   }

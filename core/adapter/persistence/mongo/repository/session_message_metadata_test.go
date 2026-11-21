@@ -165,6 +165,30 @@ func TestTouchSessionMessagesUsageIsOrderedCumulativeAndRetrySafe(t *testing.T) 
 	}
 }
 
+func TestTouchSessionMessagesPreservesPartialCacheCoverage(t *testing.T) {
+	store := NewWithTemplate(newMetadataMongo(t))
+	ctx := context.Background()
+	record := portrepository.SessionRecord{ID: "session"}
+	unknown := &portrepository.TokenUsageRecord{PromptCacheIncomplete: true}
+	zero := &portrepository.TokenUsageRecord{PromptCacheReported: true}
+	for i, usage := range []*portrepository.TokenUsageRecord{unknown, zero} {
+		// The later snapshot can lag cumulative state; completeness flags are
+		// monotonic for cumulative usage, but last usage is replaced in full.
+		record.Usage, record.LastUsage = usage, usage
+		if err := store.TouchSessionMessages(ctx, record, int64(i+1), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.GetSession(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &portrepository.TokenUsageRecord{PromptCacheReported: true, PromptCacheIncomplete: true}
+	if !reflect.DeepEqual(got.Usage, want) || !reflect.DeepEqual(got.LastUsage, zero) {
+		t.Fatalf("cache coverage changed: cumulative=%+v last=%+v", got.Usage, got.LastUsage)
+	}
+}
+
 func TestTouchSessionMessagesLegacyUsageAndMissingSnapshot(t *testing.T) {
 	for _, legacy := range []string{"missing", "null", "cumulative"} {
 		t.Run(legacy, func(t *testing.T) {

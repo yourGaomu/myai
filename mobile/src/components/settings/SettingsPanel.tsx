@@ -1513,7 +1513,7 @@ export function SettingsPanel({
           <ContextStat label="已选内容" value={context?.selected_tokens} suffix="令牌" />
           <ContextStat label="摘要" value={context?.summary_tokens} suffix="令牌" />
           <ContextStat label="前缀" value={context?.prefix_tokens} suffix="令牌" />
-          <ContextStat label="可缓存" value={context?.cacheable_tokens} suffix="令牌" />
+          <ContextStat label="可缓存（本地估算）" value={context?.cacheable_tokens} suffix="令牌" />
           <ContextStat label="消息数" value={context?.selected_messages} suffix="条" />
           <ContextStat label="版本" value={context?.summary_version} suffix="版" />
         </View>
@@ -1539,6 +1539,7 @@ export function SettingsPanel({
           <Text style={styles.contextNoteText}>
             {context?.has_summary ? "已有摘要，会把老消息压成稳定前缀" : "还没有摘要，当前主要发送最近消息"}
             {context?.truncated ? " / 已触发窗口裁剪" : ""}
+            {"。可缓存令牌数为本地估算，实际命中以回复中的上游用量为准。"}
           </Text>
         </View>
         {compact?.triggered ? (
@@ -1551,7 +1552,7 @@ export function SettingsPanel({
               <ContextStat label="压缩前" value={compact.before_tokens} suffix="令牌" />
               <ContextStat label="压缩后" value={compact.after_tokens} suffix="令牌" />
               <ContextStat label="新增" value={compact.new_messages} suffix="条消息" />
-              <ContextStat label="可缓存" value={compact.cacheable_tokens} suffix="令牌" />
+              <ContextStat label="可缓存（本地估算）" value={compact.cacheable_tokens} suffix="令牌" />
             </View>
             <View style={styles.hashGrid}>
               <HashPill label="前缀" value={compact.prefix_hash} />

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +126,35 @@ func TestTokenUsagePayloadPtrOmitsZeroValue(t *testing.T) {
 	result := tokenUsagePayloadPtr(llm.TokenUsage{TotalTokens: 7, Available: true})
 	if result == nil || result.TotalTokens != 7 {
 		t.Fatalf("unexpected token usage payload: %#v", result)
+	}
+}
+
+func TestPromptCacheReportingMatchesLiveHistoryAndSessionPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage llm.TokenUsage
+		want  string
+	}{
+		{"unknown", llm.TokenUsage{}.AsSample(), `{"prompt_cache_incomplete":true}`},
+		{"zero", llm.TokenUsage{PromptCacheReported: true}, `{"prompt_cache_reported":true}`},
+		{"partial zero", llm.TokenUsage{PromptCacheReported: true, PromptCacheIncomplete: true}, `{"prompt_cache_reported":true,"prompt_cache_incomplete":true}`},
+		{"legacy hit", llm.TokenUsage{PromptCachedTokens: 9, Available: true}, `{"prompt_cached_tokens":9,"available":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := tc.usage
+			history := tokenUsageRecordFromMessage(sessionresult.MessageListItem{
+				PromptCachedTokens: u.PromptCachedTokens, PromptCacheReported: u.PromptCacheReported, PromptCacheIncomplete: u.PromptCacheIncomplete,
+			})
+			session := tokenUsageResultToPayload(&sessionresult.TokenUsage{
+				PromptCachedTokens: u.PromptCachedTokens, PromptCacheReported: u.PromptCacheReported, PromptCacheIncomplete: u.PromptCacheIncomplete, Available: u.Available,
+			})
+			for path, payload := range map[string]any{"live": tokenUsagePayloadPtr(u), "history": history, "session": session} {
+				got, err := json.Marshal(payload)
+				if err != nil || string(got) != tc.want {
+					t.Errorf("%s payload = %s, err=%v, want %s", path, got, err, tc.want)
+				}
+			}
+		})
 	}
 }
 

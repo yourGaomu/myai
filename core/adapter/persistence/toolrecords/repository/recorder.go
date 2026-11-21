@@ -7,6 +7,7 @@ import (
 	"time"
 
 	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
+	outboxencoding "myai/core/adapter/persistence/outbox/encoding"
 	toolrecordsmapper "myai/core/adapter/persistence/toolrecords/mapper"
 	toolrecordsport "myai/core/adapter/persistence/toolrecords/port"
 	generationcommand "myai/core/application/chat/generation/command"
@@ -67,7 +68,7 @@ func (r Recorder) AcceptToolExecution(ctx context.Context, command generationcom
 		return err
 	}
 	batch := r.prepareRecords(command)
-	frozen, _, err := outbox.Freeze(batch)
+	frozen, _, err := outboxencoding.Freeze(batch)
 	if err != nil {
 		return outbox.SafeError("prepare tool records", err)
 	}

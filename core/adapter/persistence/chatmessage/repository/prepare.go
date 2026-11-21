@@ -5,6 +5,7 @@ import (
 	"time"
 
 	chatmessagemapper "myai/core/adapter/persistence/chatmessage/mapper"
+	outboxencoding "myai/core/adapter/persistence/outbox/encoding"
 	generationcommand "myai/core/application/chat/generation/command"
 	modelport "myai/core/port/model"
 	outbox "myai/core/port/outbox"
@@ -22,7 +23,7 @@ func (w Writer) PrepareUserMessage(command generationcommand.PersistUserMessage)
 		Messages: (chatmessagemapper.Mapper{IDs: w.IDs}).UserTurn(command, createdAt),
 		Metadata: messageMetadata(command.SessionSnapshot, command.Model, command.Title, createdAt, false),
 	}
-	frozen, _, err := outbox.Freeze(batch)
+	frozen, _, err := outboxencoding.Freeze(batch)
 	return frozen, err
 }
 
@@ -40,7 +41,7 @@ func (w Writer) PrepareAssistantMessage(current *session.Session, result modelpo
 	if batch.Metadata.Sequence <= 0 {
 		batch.Metadata.Sequence = batch.Messages[len(batch.Messages)-1].Sequence
 	}
-	frozen, _, err := outbox.Freeze(batch)
+	frozen, _, err := outboxencoding.Freeze(batch)
 	return frozen, err
 }
 

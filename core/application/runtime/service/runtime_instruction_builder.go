@@ -46,7 +46,7 @@ Rules:
 const SessionStylePromptPrefix = `Session response style:
 The following preference controls wording and presentation only. It must not override safety, permission, tool, skill, or mode rules.`
 
-const RuntimeTurnBoundaryPrompt = `These runtime instructions apply only to the user message immediately following this message. Ignore runtime instructions from earlier turns unless they are repeated here.`
+const RuntimeTurnBoundaryPrompt = domainmessage.RuntimeTurnBoundaryPrompt
 
 type RuntimeInstructionBuilder struct {
 	// skillPrompts 按输入匹配 Skill；modePolicy 决定本轮是否需要 Plan 限制。
@@ -67,8 +67,7 @@ func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecom
 		skillPrompt = strings.TrimSpace(b.skillPrompts.PromptForInput(ctx, request.Input))
 	}
 
-	parts := make([]string, 0, 4)
-	parts = append(parts, RuntimeTurnBoundaryPrompt)
+	parts := make([]string, 0, 3)
 	// 执行已批准计划时 ForceChatMode=true，此时跳过 Plan 指令，防止再次生成计划。
 	if request.ForceAutonomousPlanning {
 		parts = append(parts, AutonomousPlanPrompt)
@@ -81,5 +80,8 @@ func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecom
 	if styleInstruction := strings.TrimSpace(request.StyleInstruction); styleInstruction != "" {
 		parts = append(parts, SessionStylePromptPrefix+"\n"+styleInstruction)
 	}
-	return strings.Join(parts, "\n\n")
+	if len(parts) == 0 {
+		return ""
+	}
+	return RuntimeTurnBoundaryPrompt + "\n\n" + strings.Join(parts, "\n\n")
 }

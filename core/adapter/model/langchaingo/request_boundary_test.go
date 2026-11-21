@@ -13,14 +13,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/tmc/langchaingo/llms/googleai"
-	"google.golang.org/api/option"
 
 	"myai/core/contextmgr"
 	compaction "myai/core/domain/compaction"
@@ -640,7 +638,18 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 	request.Settings.MaxOutputTokens = 1024
 
 	type wirePart struct {
-		Text string `json:"text"`
+		Text         string `json:"text"`
+		CacheControl struct {
+			Type string `json:"type"`
+		} `json:"cache_control"`
+		FunctionCall *struct {
+			Name string            `json:"name"`
+			Args map[string]string `json:"args"`
+		} `json:"functionCall"`
+		FunctionResponse *struct {
+			Name     string            `json:"name"`
+			Response map[string]string `json:"response"`
+		} `json:"functionResponse"`
 	}
 	type wireMessage struct{ Role, Text string }
 	wantConversation := []wireMessage{
@@ -649,6 +658,27 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 	}
 	for _, provider := range []string{"openai", "anthropic", "google"} {
 		t.Run(provider, func(t *testing.T) {
+			providerRequest := request
+			wantHistory := wantConversation
+			const toolName = "read_file"
+			toolResult := domainmessage.ToolResult{ToolCallID: "call-local", Name: toolName, Content: "sample tool result"}
+			if provider == "google" {
+				providerRequest.Settings.Temperature = 0.25
+				providerRequest.Settings.TopP = 0.75
+				providerRequest.Tools = []modelport.Tool{{Type: "function", Function: &modelport.FunctionDefinition{
+					Name: toolName, Description: "Read a file",
+					Parameters: map[string]any{
+						"type": "object", "required": []string{"path"},
+						"properties": map[string]any{"path": map[string]any{"type": "string"}},
+					},
+				}}}
+				providerRequest.Messages = slices.Insert(slices.Clone(request.Messages), len(request.Messages)-2,
+					domainmessage.ToolCallMessage([]domainmessage.ToolCall{{ID: "call-local", Name: toolName, Arguments: `{"path":"note.txt"}`}}),
+					domainmessage.ToolResultMessage(toolResult),
+				)
+				wantHistory = slices.Insert(slices.Clone(wantConversation), 2, wireMessage{"model", ""}, wireMessage{"user", ""})
+				wantHistory[1].Role = "model"
+			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -667,8 +697,9 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 					t.Error("legacy runtime survived projection into provider body")
 				}
 				var payload struct {
-					System            string `json:"system"`
+					System            json.RawMessage `json:"system"`
 					SystemInstruction struct {
+						Role  string     `json:"role"`
 						Parts []wirePart `json:"parts"`
 					} `json:"systemInstruction"`
 					Messages []struct {
@@ -679,6 +710,25 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 						Role  string     `json:"role"`
 						Parts []wirePart `json:"parts"`
 					} `json:"contents"`
+					Tools []struct {
+						FunctionDeclarations []struct {
+							Name        string `json:"name"`
+							Description string `json:"description"`
+							Parameters  struct {
+								Type       int      `json:"type"`
+								Required   []string `json:"required"`
+								Properties map[string]struct {
+									Type int `json:"type"`
+								} `json:"properties"`
+							} `json:"parameters"`
+						} `json:"functionDeclarations"`
+					} `json:"tools"`
+					GenerationConfig struct {
+						MaxOutputTokens int     `json:"maxOutputTokens"`
+						Temperature     float64 `json:"temperature"`
+						TopP            float64 `json:"topP"`
+						CandidateCount  int     `json:"candidateCount"`
+					} `json:"generationConfig"`
 				}
 				if err := json.Unmarshal(body, &payload); err != nil {
 					t.Error(err)
@@ -692,7 +742,16 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 					}
 					return text.String()
 				}
-				policy := payload.System + joinParts(payload.SystemInstruction.Parts)
+				policy := joinParts(payload.SystemInstruction.Parts)
+				if provider == "anthropic" {
+					var parts []wirePart
+					if err := json.Unmarshal(payload.System, &parts); err != nil {
+						t.Error(err)
+					} else if len(parts) != 1 || parts[0].CacheControl.Type != "ephemeral" {
+						t.Errorf("expected one cached Anthropic system block, got %+v", parts)
+					}
+					policy = joinParts(parts)
+				}
 				var conversation []wireMessage
 				systems := 0
 				for index, message := range payload.Messages {
@@ -718,23 +777,13 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 					t.Errorf("unexpected system message count %d", systems)
 				}
 				for _, content := range payload.Contents {
-					role := content.Role
-					if role == "model" {
-						role = "assistant"
-					}
-					conversation = append(conversation, wireMessage{role, joinParts(content.Parts)})
+					conversation = append(conversation, wireMessage{content.Role, joinParts(content.Parts)})
 				}
 				if policy != fixedSystem {
 					t.Error("fixed system policy was truncated, replaced or combined with runtime context")
 				}
-				if len(conversation) != len(wantConversation) {
-					t.Errorf("conversation count = %d, want %d", len(conversation), len(wantConversation))
-				} else {
-					for index, want := range wantConversation {
-						if conversation[index] != want {
-							t.Errorf("message %d = %+v, want %+v", index, conversation[index], want)
-						}
-					}
+				if !slices.Equal(conversation, wantHistory) {
+					t.Errorf("conversation = %+v, want %+v", conversation, wantHistory)
 				}
 				switch provider {
 				case "openai":
@@ -752,6 +801,29 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 						fmt.Fprintf(w, "data: %s\n\n", event)
 					}
 				case "google":
+					if payload.SystemInstruction.Role != "system" {
+						t.Errorf("Gemini systemInstruction role=%q, want system", payload.SystemInstruction.Role)
+					}
+					if query := r.URL.Query(); query.Get("key") != "local-test" || query.Get("$alt") != "json;enum-encoding=int" || query.Get("alt") == "sse" {
+						t.Error("Gemini request did not use API key auth and native JSON streaming")
+					}
+					if config := payload.GenerationConfig; config.MaxOutputTokens != 1024 || config.Temperature != 0.25 || config.TopP != 0.75 || config.CandidateCount != 1 {
+						t.Errorf("unexpected Gemini generation settings: %+v", config)
+					}
+					const schemaObject, schemaString = 6, 1 // Gemini's enum-encoding=int wire values.
+					if len(payload.Tools) != 1 || len(payload.Tools[0].FunctionDeclarations) != 1 {
+						t.Errorf("unexpected Gemini tools: %+v", payload.Tools)
+					} else if tool := payload.Tools[0].FunctionDeclarations[0]; tool.Name != toolName || tool.Description != "Read a file" || tool.Parameters.Type != schemaObject || tool.Parameters.Properties["path"].Type != schemaString || !slices.Equal(tool.Parameters.Required, []string{"path"}) {
+						t.Errorf("unexpected Gemini function declaration: %+v", tool)
+					}
+					if len(payload.Contents) >= 4 {
+						if parts := payload.Contents[2].Parts; len(parts) != 1 || parts[0].FunctionCall == nil || parts[0].FunctionCall.Name != toolName || parts[0].FunctionCall.Args["path"] != "note.txt" {
+							t.Errorf("unexpected Gemini function call history: %+v", parts)
+						}
+						if parts := payload.Contents[3].Parts; len(parts) != 1 || parts[0].FunctionResponse == nil || parts[0].FunctionResponse.Name != toolName || parts[0].FunctionResponse.Response["response"] != toolResult.PromptContent() {
+							t.Errorf("unexpected Gemini function response history: %+v", parts)
+						}
+					}
 					w.Header().Set("Content-Type", "application/json")
 					fmt.Fprint(w, `[{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}]`)
 				}
@@ -765,23 +837,17 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 			case "anthropic":
 				model, err = (AnthropicMessagesAdapter{}).CreateModel(modelport.CreationConfig{BaseURL: server.URL + "/v1", ModelName: "local-model", APIKey: "local-test"})
 			case "google":
-				// Production Google config has no custom BaseURL. Inject only the
-				// test endpoint using the same native SDK's public options.
-				var native *googleai.GoogleAI
-				native, err = googleai.New(context.Background(), googleai.WithAPIKey("local-test"), googleai.WithHTTPClient(server.Client()), googleai.WithDefaultModel("local-model"), func(options *googleai.Options) {
-					options.ClientOptions = append(options.ClientOptions, option.WithEndpoint(server.URL))
-				})
-				if err == nil {
-					defer native.Close()
-					model = &corellm.Model{LlmModel: native, RequireStreamStopReason: true}
-				}
+				model, err = createGoogleGenerativeAIModel(modelport.CreationConfig{
+					Protocol: domainmodel.ProtocolGoogleGenerativeAI, AuthType: domainmodel.AuthTypeBearer,
+					ModelName: "local-model", APIKey: "local-test",
+				}, server.Client().Transport, server.URL)
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			result, err := model.Generate(ctx, request)
+			result, err := model.Generate(ctx, providerRequest)
 			if err != nil || result.Content != "ok" || calls.Load() != 1 {
 				t.Fatalf("calls=%d content=%q err=%v", calls.Load(), result.Content, err)
 			}

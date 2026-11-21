@@ -17,6 +17,11 @@ import (
 
 func TestReloadKeepsAssistantBoundariesAndMultipleToolCalls(t *testing.T) {
 	current := session.NewFromState(session.InitialState{ID: "reload", Model: "test"})
+	final := message.Assistant("same text", " final reasoning ", nil)
+	final.AssistantUsage = message.AssistantUsage{
+		PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15, ReasoningTokens: 2,
+		Available: true, PromptCacheReported: true, PromptCacheIncomplete: true,
+	}
 	current.AppendMessages(
 		message.Text(message.RoleUser, "question"),
 		message.Assistant("same text", " first reasoning ", []message.ToolCall{
@@ -24,10 +29,13 @@ func TestReloadKeepsAssistantBoundariesAndMultipleToolCalls(t *testing.T) {
 			{ID: "b", Type: "function", Name: "read", Arguments: "{}"},
 		}),
 		message.Assistant("", " reasoning only ", []message.ToolCall{{ID: "c", Type: "function", Name: "read", Arguments: "{}"}}),
-		message.Assistant("same text", " final reasoning ", nil),
+		final,
 	)
 	mapper := chatmapper.Mapper{}
 	records := mapper.MemoryMessages(current)
+	if last := records[len(records)-1]; !last.PromptCacheReported || !last.PromptCacheIncomplete || last.PromptCachedTokens != 0 {
+		t.Fatalf("memory history lost the partial zero count: %+v", last)
+	}
 	for i, record := range records {
 		encoded, err := bson.Marshal(mongomapper.MessageDocumentFromRecord(record))
 		if err != nil {
@@ -57,6 +65,14 @@ func TestReloadKeepsAssistantBoundariesAndMultipleToolCalls(t *testing.T) {
 		if restored[i].ID != current.Messages[i].ID || restored[i].Sequence != current.Messages[i].Sequence {
 			t.Fatal("message identity changed")
 		}
+	}
+	if got := restored[len(restored)-1].AssistantUsage; got != final.AssistantUsage {
+		t.Fatalf("reloaded usage = %+v, want %+v", got, final.AssistantUsage)
+	}
+	withoutUsage := append([]message.Message(nil), restored...)
+	withoutUsage[len(withoutUsage)-1].AssistantUsage = message.AssistantUsage{}
+	if contextmgr.StableMessagesHash(restored) != contextmgr.StableMessagesHash(withoutUsage) {
+		t.Fatal("assistant usage changed the stable history hash")
 	}
 	current.Messages = restored
 	if got := mapper.MemoryMessages(current); !reflect.DeepEqual(got, records) {

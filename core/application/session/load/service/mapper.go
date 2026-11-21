@@ -15,7 +15,9 @@ func TokenUsageFromRecord(record *repository.TokenUsageRecord) llm.TokenUsage {
 	return llm.TokenUsage{
 		PromptTokens: record.PromptTokens, CompletionTokens: record.CompletionTokens,
 		TotalTokens: record.TotalTokens, ReasoningTokens: record.ReasoningTokens,
-		PromptCachedTokens: record.PromptCachedTokens, Available: record.Available,
+		PromptCachedTokens:    record.PromptCachedTokens,
+		PromptCacheReported:   record.PromptCacheReported,
+		PromptCacheIncomplete: record.PromptCacheIncomplete, Available: record.Available,
 	}
 }
 
@@ -64,6 +66,16 @@ func MessagesFromRecords(records []repository.MessageRecord, systemInstruction .
 			}
 			index--
 			message := messageWithRecord(domainmessage.Assistant(content, reasoning, calls), firstRecord)
+			if firstRecord.Role == repository.RoleAssistant {
+				message.AssistantUsage = domainmessage.AssistantUsage{
+					PromptTokens: firstRecord.PromptTokens, CompletionTokens: firstRecord.CompletionTokens,
+					TotalTokens: firstRecord.TotalTokens, ReasoningTokens: firstRecord.ReasoningTokens,
+					PromptCachedTokens:  firstRecord.PromptCachedTokens,
+					PromptCacheReported: firstRecord.PromptCacheReported, PromptCacheIncomplete: firstRecord.PromptCacheIncomplete,
+					Available: firstRecord.PromptTokens > 0 || firstRecord.CompletionTokens > 0 || firstRecord.TotalTokens > 0 ||
+						firstRecord.ReasoningTokens > 0 || firstRecord.PromptCachedTokens > 0,
+				}
+			}
 			message.RecordIDs = recordIDs
 			messages = append(messages, message)
 		case repository.RoleTool:
