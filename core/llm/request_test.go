@@ -55,6 +55,25 @@ func TestRequestPolicyZeroValueKeepsBoundedDefaults(t *testing.T) {
 	}
 }
 
+func TestObservedUsageDoesNotLeakAcrossAttempts(t *testing.T) {
+	calls := 0
+	model := &Model{
+		Policy: RequestPolicy{MaxAttempts: 2, InitialBackoff: time.Millisecond},
+		LlmModel: functionLLM(func(ctx context.Context, _ []llms.MessageContent, _ ...llms.CallOption) (*llms.ContentResponse, error) {
+			calls++
+			if calls == 1 {
+				ObserveTokenUsage(ctx, TokenUsage{Available: true, PromptTokens: 3, PromptCachedTokens: 2, PromptCacheReported: true})
+				return nil, &RequestError{StatusCode: http.StatusServiceUnavailable}
+			}
+			return responseWithText("ok"), nil
+		}),
+	}
+	result, err := model.Chat(nil)
+	if err != nil || calls != 2 || result.Usage != (TokenUsage{PromptCacheIncomplete: true}) {
+		t.Fatalf("calls=%d usage=%+v err=%v", calls, result.Usage, err)
+	}
+}
+
 func TestModelRequestDeadlineAndCallerCancellation(t *testing.T) {
 	for _, mode := range []string{"policy deadline", "caller deadline", "caller cancellation"} {
 		t.Run(mode, func(t *testing.T) {

@@ -1188,6 +1188,7 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 	// 所有本地工具都在这里集中注册；业务层只通过 ToolCatalog/ToolExecutor 接口使用它们。
 	localTools := []tooldef.Tool{
 		local.NewListFilesToolWithWorkspace(app.workspace),
+		local.NewGetEnvironmentToolWithWorkspace(app.workspace),
 		local.NewReadFileToolWithWorkspace(app.workspace),
 		local.NewSearchFilesToolWithWorkspace(app.workspace),
 		local.NewWriteFileToolWithWorkspaceAndHistory(app.workspace, app.HistoryStoreFactory()),

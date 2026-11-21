@@ -23,6 +23,8 @@ type Model struct {
 	RequireStreamStopReason bool
 	// ChatCompletionsImages is set by adapters with a verified image_url mapping.
 	ChatCompletionsImages bool
+	// PrepareRequestContext lets an adapter retain request metadata the SDK cannot represent.
+	PrepareRequestContext func(context.Context, modelport.GenerateRequest) context.Context
 }
 
 var _ modelport.ChatModelPort = (*Model)(nil)
@@ -47,8 +49,12 @@ func (m *Model) Generate(ctx context.Context, request modelport.GenerateRequest)
 	if err != nil {
 		return modelport.ChatResult{}, err
 	}
+	ctx = llmmapper.WithRequest(ctx, request)
+	if m.PrepareRequestContext != nil {
+		ctx = m.PrepareRequestContext(ctx, request)
+	}
 	result, err := m.chatWithStreamToolsHandlerCtx(
-		llmmapper.WithRequest(ctx, request),
+		ctx,
 		messages,
 		llmmapper.ToLLMTools(request.Tools),
 		request.Stream,
@@ -146,11 +152,14 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 		callOptions = append(callOptions, llms.WithTools(tools), llms.WithToolChoice("auto"))
 	}
 
-	resp, err := m.generateContent(ctx, mes, callOptions...)
+	resp, usage, err := m.generateContent(ctx, mes, callOptions...)
 	if err != nil {
 		return ChatResult{Content: builder.String(), Reasoning: reasoningBuilder.String()}, err
 	}
 	result, err := resultFromResponse(resp, true)
+	if usage != nil {
+		result.Usage = *usage
+	}
 	if err != nil {
 		if result.Content == "" {
 			result.Content = builder.String()
@@ -166,6 +175,7 @@ func (m *Model) chatWithStreamToolsHandlerCtx(ctx context.Context, mes []llms.Me
 	if m.RequireStreamStopReason && result.StopReason == "" {
 		return result, ErrIncompleteResponse
 	}
+	result.Usage = result.Usage.AsSample()
 	if streamed {
 		// SDK tool deltas can replace a text callback in the same frame. Only
 		// deliver the missing suffix from the complete response.
@@ -202,7 +212,7 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 		ctx = context.Background()
 	}
 	settings := generation.SystemDefaults()
-	resp, err := m.generateContent(
+	resp, usage, err := m.generateContent(
 		ctx,
 		mes,
 		llms.WithTemperature(settings.Temperature),
@@ -212,7 +222,14 @@ func (m *Model) ChatCtx(ctx context.Context, mes []llms.MessageContent) (ChatRes
 	if err != nil {
 		return ChatResult{}, err
 	}
-	return resultFromResponse(resp, false)
+	result, err := resultFromResponse(resp, false)
+	if usage != nil {
+		result.Usage = *usage
+	}
+	if err == nil {
+		result.Usage = result.Usage.AsSample()
+	}
+	return result, err
 }
 
 func reasoningFromResponse(resp *llms.ContentResponse) string {

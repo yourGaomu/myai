@@ -160,7 +160,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			return modelport.ChatResult{}, err
 		}
 		// 4. 模型无工具调用时形成回答边界；有工具调用时继续当前 turn。
-		totalUsage = totalUsage.Add(result.Usage)
+		totalUsage = totalUsage.Add(result.Usage.AsSample())
 		reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 		if len(result.ToolCalls) == 0 {
 			continued, hookErr := s.continueAfterStopHook(runCtx, command, result, &stopContinuations)
@@ -261,7 +261,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	if err != nil {
 		return modelport.ChatResult{}, err
 	}
-	totalUsage = totalUsage.Add(result.Usage)
+	totalUsage = totalUsage.Add(result.Usage.AsSample())
 	reasoningParts = appendReasoningPart(reasoningParts, result.Reasoning)
 	return finalizeResult(result, totalUsage, reasoningParts), nil
 }

@@ -3,7 +3,7 @@ import { Feather } from "@expo/vector-icons";
 
 import type { TokenUsage } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-import { tokenCount, usageHasValues, usageSummary } from "../../utils/tokenUsage";
+import { promptCacheLabel, tokenCount, usageHasValues, usageSummary } from "../../utils/tokenUsage";
 import { radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 
@@ -44,11 +44,11 @@ export function TokenDock({ buttonFeedback, connected, isBusy, lastUsage, onSett
           <Text style={styles.tokenDockMeta}>输入 {tokenCount(lastUsage.prompt_tokens)}</Text>
           <Text style={styles.tokenDockMeta}>输出 {tokenCount(lastUsage.completion_tokens)}</Text>
           <Text style={styles.tokenDockMeta}>思考 {tokenCount(lastUsage.reasoning_tokens)}</Text>
-          <Text style={styles.tokenDockMeta}>缓存 {tokenCount(lastUsage.prompt_cached_tokens)}</Text>
         </View>
       ) : lastUsage ? (
         <Text style={styles.tokenDockMeta}>暂无令牌用量</Text>
       ) : null}
+      {lastUsage ? <Text style={styles.tokenDockMeta}>{promptCacheLabel(lastUsage)}</Text> : null}
     </View>
   );
 }

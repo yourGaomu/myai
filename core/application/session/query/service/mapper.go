@@ -36,7 +36,9 @@ func MessageListItems(records []repository.MessageRecord) []sessionresult.Messag
 			PromptTokens:     record.PromptTokens,
 			CompletionTokens: record.CompletionTokens, TotalTokens: record.TotalTokens,
 			ReasoningTokens: record.ReasoningTokens, PromptCachedTokens: record.PromptCachedTokens,
-			CreatedAt: record.CreatedAt,
+			PromptCacheReported:   record.PromptCacheReported,
+			PromptCacheIncomplete: record.PromptCacheIncomplete,
+			CreatedAt:             record.CreatedAt,
 		})
 	}
 	return items
@@ -73,6 +75,8 @@ func TokenUsageResultFromRecord(record *repository.TokenUsageRecord) *sessionres
 	return &sessionresult.TokenUsage{
 		PromptTokens: record.PromptTokens, CompletionTokens: record.CompletionTokens,
 		TotalTokens: record.TotalTokens, ReasoningTokens: record.ReasoningTokens,
-		PromptCachedTokens: record.PromptCachedTokens, Available: record.Available,
+		PromptCachedTokens:    record.PromptCachedTokens,
+		PromptCacheReported:   record.PromptCacheReported,
+		PromptCacheIncomplete: record.PromptCacheIncomplete, Available: record.Available,
 	}
 }

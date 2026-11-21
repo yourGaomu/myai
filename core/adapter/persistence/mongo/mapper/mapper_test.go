@@ -47,6 +47,7 @@ func TestSessionDocumentRoundTrip(t *testing.T) {
 			PromptCachedTokens: 4,
 			Available:          true,
 		},
+		LastUsage: &repository.TokenUsageRecord{PromptCacheReported: true, PromptCacheIncomplete: true},
 		CurrentPlan: &agentplan.Plan{
 			ID:        "plan-1",
 			SessionID: "session-1",
@@ -73,7 +74,15 @@ func TestSessionDocumentRoundTrip(t *testing.T) {
 	}
 	record.CompactionCheckpoint = &checkpoint
 
-	roundTrip := SessionRecordFromDocument(SessionDocumentFromRecord(record))
+	document := SessionDocumentFromRecord(record)
+	encoded, err := bson.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bson.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	roundTrip := SessionRecordFromDocument(document)
 	if !reflect.DeepEqual(roundTrip, record) {
 		t.Fatalf("round trip mismatch:\n got: %#v\nwant: %#v", roundTrip, record)
 	}
@@ -114,7 +123,7 @@ func TestRecordDocumentMappersRoundTrip(t *testing.T) {
 		Content: "done", ToolName: "shell", ToolStatus: "failed", ToolErrorCode: "command_exit_nonzero",
 		ToolError: "exit code 1", ToolTruncated: true,
 		ToolPromptContent: "bounded", ToolPromptError: "bounded error", ToolPromptTruncated: true,
-		TotalTokens: 12, Sequence: now.UnixNano(), CreatedAt: now,
+		TotalTokens: 12, PromptCacheReported: true, PromptCacheIncomplete: true, Sequence: now.UnixNano(), CreatedAt: now,
 	}
 	if got := MessageRecordFromDocument(MessageDocumentFromRecord(message)); !reflect.DeepEqual(got, message) {
 		t.Fatalf("message round trip mismatch: got %#v want %#v", got, message)

@@ -165,7 +165,9 @@ func usageDocument(usage modelport.TokenUsage) po.TokenUsageDocument {
 	return po.TokenUsageDocument{
 		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
 		TotalTokens: usage.TotalTokens, ReasoningTokens: usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens, Available: usage.Available,
+		PromptCachedTokens:    usage.PromptCachedTokens,
+		PromptCacheReported:   usage.PromptCacheReported,
+		PromptCacheIncomplete: usage.PromptCacheIncomplete, Available: usage.Available,
 	}
 }
 
@@ -173,7 +175,9 @@ func usageDomain(document po.TokenUsageDocument) modelport.TokenUsage {
 	return modelport.TokenUsage{
 		PromptTokens: document.PromptTokens, CompletionTokens: document.CompletionTokens,
 		TotalTokens: document.TotalTokens, ReasoningTokens: document.ReasoningTokens,
-		PromptCachedTokens: document.PromptCachedTokens, Available: document.Available,
+		PromptCachedTokens:    document.PromptCachedTokens,
+		PromptCacheReported:   document.PromptCacheReported,
+		PromptCacheIncomplete: document.PromptCacheIncomplete, Available: document.Available,
 	}
 }
 

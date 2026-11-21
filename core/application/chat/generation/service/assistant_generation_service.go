@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	compactionresult "myai/core/application/chat/compaction/result"
 	chatcontextservice "myai/core/application/chat/context/service"
@@ -28,7 +27,6 @@ type AssistantGenerationService struct {
 	AgentRunner       generationapi.AgentRunner
 	ResponseCommitter generationapi.ResponseCommitter
 	Persistence       generationport.Persistence
-	Now               func() time.Time
 	OnCompactError    func(error)
 }
 
@@ -78,8 +76,7 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 	result, err := s.AgentRunner.Run(ctx, generationcommand.Run{
 		Model: model, Session: command.Session, Stream: command.Stream,
 		RequestID: command.RequestID, ForceChatMode: command.ForceChatMode, Internal: command.Internal, ModelWindowTokens: modelWindowTokens,
-		Settings:           settings,
-		EnvironmentContext: environmentContextPrompt(s.now(), command.Session.WorkspaceRoot),
+		Settings: settings,
 	})
 	if err != nil {
 		return generationresult.GenerationResponse{}, err
@@ -132,11 +129,4 @@ func (s AssistantGenerationService) resolveGenerationSettings(current *session.S
 
 func (s AssistantGenerationService) contextInfo(current *session.Session) contextmgr.Info {
 	return chatcontextservice.QueryService{Contexts: s.Contexts}.Info(context.Background(), current)
-}
-
-func (s AssistantGenerationService) now() time.Time {
-	if s.Now != nil {
-		return s.Now()
-	}
-	return time.Now()
 }

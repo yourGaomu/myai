@@ -21,17 +21,18 @@ import (
 	command "myai/core/application/chat/generation/command"
 	result "myai/core/application/chat/generation/result"
 	service "myai/core/application/chat/generation/service"
+	runtimecommand "myai/core/application/runtime/command"
+	runtimeservice "myai/core/application/runtime/service"
 	loadservice "myai/core/application/session/load/service"
 	"myai/core/contextmgr"
 	"myai/core/domain/generation"
 	message "myai/core/domain/message"
-	"myai/core/plan"
 	modelport "myai/core/port/model"
 	"myai/core/port/repository"
 	"myai/core/session"
 )
 
-func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T) {
+func TestConversationWirePrefixSurvivesMailboxAndReload(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -57,9 +58,8 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 		t.Fatal(err)
 	}
 	current := session.NewFromState(session.InitialState{ID: "parent", Model: "test-model", ContextWindowK: 128})
-	current.CurrentPlan = &plan.Plan{ID: "plan-1", Goal: "检查结果", Status: plan.StatusRunning,
-		Steps: []plan.Step{{Order: 1, Title: "检查", Status: plan.StepStatusRunning}}}
-	current.AddUserTurn("完成任务后总结", "启动子代理并等待")
+	// Previously saved default runtime boilerplate must not change the wire prefix.
+	current.AddUserTurn(message.RuntimeTurnBoundaryPrompt, "启动子代理并等待")
 	store := &transcriptStore{}
 	mapper := messagemapper.Mapper{}
 	store.messages = mapper.MemoryMessages(current)
@@ -76,7 +76,7 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 		},
 	}
 	response, err := loop.Run(context.Background(), command.Run{Model: model, Session: current,
-		Settings: generation.SystemDefaults(), EnvironmentContext: "Current time: 12:00"})
+		Settings: generation.SystemDefaults()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 	if !reflect.DeepEqual(bodies[0]["tools"], bodies[1]["tools"]) {
 		t.Fatal("tools changed during turn")
 	}
-	if response.Usage.PromptCachedTokens != 16384 {
+	if response.Usage.PromptCachedTokens != 16384 || !response.Usage.PromptCacheReported || response.Usage.PromptCacheIncomplete {
 		t.Fatalf("cached usage lost: %+v", response.Usage)
 	}
 	if response.Message == nil || response.Message.Reasoning != " final reasoning " {
@@ -136,34 +136,117 @@ func TestConversationWirePrefixSurvivesMailboxPlanProgressAndReload(t *testing.T
 	if !reflect.DeepEqual(mapper.MemoryMessages(current), mapper.MemoryMessages(restored)) {
 		t.Fatal("reload changed durable message IDs or record ordering")
 	}
-	// 2. 下一条用户消息携带新的时间；上一轮环境和计划快照仍保留在原位置。
-	restored.AddUserTurn("完成任务后总结", "进一步解释")
+	// 2. 比较真实请求前缀，不从 wire body 中滤掉任何消息。
+	restored.AddUserTurn("", "进一步解释")
 	_, err = loop.Run(context.Background(), command.Run{Model: model, Session: restored,
-		Settings: generation.SystemDefaults(), EnvironmentContext: "Current time: 12:01"})
+		Settings: generation.SystemDefaults()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	third := wireMessages(t, bodies[2])
-	stableSecond := withoutRequestContext(second)
-	stableThird := withoutRequestContext(third)
-	assertWirePrefix(t, stableSecond, stableThird)
-	final := stableThird[len(stableSecond)].(map[string]any)
+	assertWirePrefix(t, second, third)
+	if !reflect.DeepEqual(bodies[1]["tools"], bodies[2]["tools"]) {
+		t.Fatal("tools changed between turns")
+	}
+	final := third[len(second)].(map[string]any)
 	if final["reasoning_content"] != " final reasoning " {
 		t.Fatalf("final reasoning replay=%v", final)
 	}
 }
 
-func withoutRequestContext(messages []any) []any {
-	result := make([]any, 0, len(messages))
-	for _, item := range messages {
-		message := item.(map[string]any)
-		text, _ := message["content"].(string)
-		if strings.HasPrefix(text, "Runtime instructions for this turn:") || strings.HasPrefix(text, "Current environment for this turn (facts only):") || strings.HasPrefix(text, "Current execution plan snapshot:") {
-			continue
+type replayModels struct{ model modelport.ChatModelPort }
+
+func (m replayModels) GetModel(string) modelport.ChatModelPort { return m.model }
+
+func TestFreshChatSessionsSendIdenticalRequests(t *testing.T) {
+	bodies := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
-		result = append(result, item)
+		bodies <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return result
+	memory := memoryadapter.NewStore("test-model")
+	generator := service.AssistantGenerationService{
+		Models: replayModels{model: model},
+		AgentRunner: service.AgentLoopService{
+			Contexts: contextservice.SnapshotService{}, Tools: replayTools{},
+		},
+		ResponseCommitter: service.ResponseCommitService{Memory: memory},
+	}
+	for _, id := range []string{"fresh-a", "fresh-b"} {
+		current := session.NewFromState(session.InitialState{ID: id, Model: "test-model", ContextWindowK: 128, WorkspaceRoot: t.TempDir()})
+		instruction := runtimeservice.NewRuntimeInstructionBuilder(nil).Build(context.Background(), runtimecommand.InstructionRequest{
+			AgentMode: session.AgentModeChat, Input: "same question",
+		})
+		current.AddUserTurn(instruction, "same question")
+		if err := memory.RestoreSession(current); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := generator.Generate(context.Background(), command.AssistantGeneration{Session: current, LatestInput: "same question"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := <-bodies, <-bodies
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("equivalent fresh sessions sent different requests:\nfirst=%v\nsecond=%v", first, second)
+	}
+	if messages := wireMessages(t, first); len(messages) != 2 {
+		t.Fatalf("plain chat included per-turn boilerplate: %v", messages)
+	}
+}
+
+func TestProjectedRequestDoesNotReplayOldTurnState(t *testing.T) {
+	bodies := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := session.NewFromState(session.InitialState{ID: "history", Model: "test-model", ContextWindowK: 128})
+	current.AddUserTurnWithContext("OLD_RETRIEVAL", "OLD_RULES", "previous question")
+	current.AppendMessages(message.SyntheticUserText(message.SyntheticReasonPlanContext, "OLD_PLAN"), message.Assistant("prior answer", "", nil))
+	current.AddUserTurnWithContext("NEW_RETRIEVAL", "NEW_RULES", "current question")
+	loop := service.AgentLoopService{Contexts: contextservice.SnapshotService{}}
+	if _, err := loop.Run(context.Background(), command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()}); err != nil {
+		t.Fatal(err)
+	}
+	wire := wireMessages(t, <-bodies)
+	if len(wire) != 6 {
+		t.Fatalf("unexpected projected history: %v", wire)
+	}
+	for i, want := range []string{"local AI coding assistant", "previous question", "prior answer", "NEW_RULES", "NEW_RETRIEVAL", "current question"} {
+		payload := wire[i].(map[string]any)
+		text, _ := payload["content"].(string)
+		if !strings.Contains(text, want) || strings.Contains(text, "OLD_") || (i > 0 && payload["role"] == "system") {
+			t.Fatalf("wire message %d: %v; want %q without old turn state", i, payload, want)
+		}
+	}
 }
 
 func wireMessages(t *testing.T, body map[string]any) []any {
@@ -209,7 +292,6 @@ func (executor replayExecutor) Execute(_ context.Context, c command.ToolExecutio
 	if err := executor.queue.EnqueueIdentified(c.Session.ID, "child-result", "子代理检查通过"); err != nil {
 		return result.ToolExecution{}, err
 	}
-	c.Session.CurrentPlan.Steps[0].Status = plan.StepStatusDone
 	return result.ToolExecution{Calls: c.Calls, Messages: []message.Message{message.ToolResultMessage(message.ToolResult{
 		ToolCallID: c.Calls[0].ID, Name: c.Calls[0].Name, Content: "done",
 	})}}, nil

@@ -16,6 +16,7 @@ import (
 type modelTransport struct {
 	base   http.RoundTripper
 	ollama bool
+	usage  usageProtocol
 }
 
 func (t modelTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -47,7 +48,13 @@ func (t modelTransport) RoundTrip(request *http.Request) (*http.Response, error)
 		return nil, failure
 	}
 	if response.Body != nil {
-		response.Body = &observedResponseBody{ReadCloser: response.Body, ctx: request.Context(), ollama: t.ollama}
+		body := &observedResponseBody{ReadCloser: response.Body, ctx: request.Context(), ollama: t.ollama}
+		if response.StatusCode == http.StatusOK && t.usage != noUsageObservation {
+			ctx := request.Context()
+			body.usage = &usageObserver{ctx: ctx, protocol: t.usage, streaming: corellm.RequestStreaming(ctx)}
+			corellm.ObserveTokenUsage(ctx, corellm.TokenUsage{})
+		}
+		response.Body = body
 	}
 	return response, nil
 }
@@ -79,6 +86,7 @@ type observedResponseBody struct {
 	io.ReadCloser
 	ctx      context.Context
 	ollama   bool
+	usage    *usageObserver
 	line     []byte
 	dropping bool
 }
@@ -86,6 +94,9 @@ type observedResponseBody struct {
 func (b *observedResponseBody) Read(data []byte) (int, error) {
 	n, err := b.ReadCloser.Read(data)
 	corellm.ObserveResponseRead(b.ctx, n, err)
+	if b.usage != nil {
+		b.usage.read(data[:n], err == io.EOF)
+	}
 	if b.ollama {
 		b.observeOllama(data[:n])
 		if err == io.EOF {

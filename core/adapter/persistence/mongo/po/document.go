@@ -66,33 +66,35 @@ type CompactionSummaryDocument struct {
 }
 
 type MessageDocument struct {
-	ID                  string    `bson:"_id"`
-	MessageID           string    `bson:"message_id,omitempty"`
-	SessionID           string    `bson:"session_id"`
-	Role                string    `bson:"role"`
-	Content             string    `bson:"content"`
-	Reasoning           string    `bson:"reasoning,omitempty"`
-	ToolCallID          string    `bson:"tool_call_id,omitempty"`
-	ToolName            string    `bson:"tool_name,omitempty"`
-	ToolArguments       string    `bson:"tool_arguments,omitempty"`
-	ToolError           string    `bson:"tool_error,omitempty"`
-	ToolStatus          string    `bson:"tool_status,omitempty"`
-	ToolErrorCode       string    `bson:"tool_error_code,omitempty"`
-	ToolTruncated       bool      `bson:"tool_truncated,omitempty"`
-	ToolPromptContent   string    `bson:"tool_prompt_content,omitempty"`
-	ToolPromptError     string    `bson:"tool_prompt_error,omitempty"`
-	ToolPromptTruncated bool      `bson:"tool_prompt_truncated,omitempty"`
-	SyntheticReason     string    `bson:"synthetic_reason,omitempty"`
-	SourceID            string    `bson:"source_id,omitempty"`
-	SourceKind          string    `bson:"source_kind,omitempty"`
-	SourceTaskID        string    `bson:"source_task_id,omitempty"`
-	PromptTokens        int       `bson:"prompt_tokens,omitempty"`
-	CompletionTokens    int       `bson:"completion_tokens,omitempty"`
-	TotalTokens         int       `bson:"total_tokens,omitempty"`
-	ReasoningTokens     int       `bson:"reasoning_tokens,omitempty"`
-	PromptCachedTokens  int       `bson:"prompt_cached_tokens,omitempty"`
-	Sequence            int64     `bson:"sequence,omitempty"`
-	CreatedAt           time.Time `bson:"created_at"`
+	ID                    string    `bson:"_id"`
+	MessageID             string    `bson:"message_id,omitempty"`
+	SessionID             string    `bson:"session_id"`
+	Role                  string    `bson:"role"`
+	Content               string    `bson:"content"`
+	Reasoning             string    `bson:"reasoning,omitempty"`
+	ToolCallID            string    `bson:"tool_call_id,omitempty"`
+	ToolName              string    `bson:"tool_name,omitempty"`
+	ToolArguments         string    `bson:"tool_arguments,omitempty"`
+	ToolError             string    `bson:"tool_error,omitempty"`
+	ToolStatus            string    `bson:"tool_status,omitempty"`
+	ToolErrorCode         string    `bson:"tool_error_code,omitempty"`
+	ToolTruncated         bool      `bson:"tool_truncated,omitempty"`
+	ToolPromptContent     string    `bson:"tool_prompt_content,omitempty"`
+	ToolPromptError       string    `bson:"tool_prompt_error,omitempty"`
+	ToolPromptTruncated   bool      `bson:"tool_prompt_truncated,omitempty"`
+	SyntheticReason       string    `bson:"synthetic_reason,omitempty"`
+	SourceID              string    `bson:"source_id,omitempty"`
+	SourceKind            string    `bson:"source_kind,omitempty"`
+	SourceTaskID          string    `bson:"source_task_id,omitempty"`
+	PromptTokens          int       `bson:"prompt_tokens,omitempty"`
+	CompletionTokens      int       `bson:"completion_tokens,omitempty"`
+	TotalTokens           int       `bson:"total_tokens,omitempty"`
+	ReasoningTokens       int       `bson:"reasoning_tokens,omitempty"`
+	PromptCachedTokens    int       `bson:"prompt_cached_tokens,omitempty"`
+	PromptCacheReported   bool      `bson:"prompt_cache_reported,omitempty"`
+	PromptCacheIncomplete bool      `bson:"prompt_cache_incomplete,omitempty"`
+	Sequence              int64     `bson:"sequence,omitempty"`
+	CreatedAt             time.Time `bson:"created_at"`
 }
 
 type ToolCallReferenceDocument struct {
@@ -153,12 +155,14 @@ type RAGSettingsDocument struct {
 }
 
 type TokenUsageDocument struct {
-	PromptTokens       int  `bson:"prompt_tokens,omitempty"`
-	CompletionTokens   int  `bson:"completion_tokens,omitempty"`
-	TotalTokens        int  `bson:"total_tokens,omitempty"`
-	ReasoningTokens    int  `bson:"reasoning_tokens,omitempty"`
-	PromptCachedTokens int  `bson:"prompt_cached_tokens,omitempty"`
-	Available          bool `bson:"available,omitempty"`
+	PromptTokens          int  `bson:"prompt_tokens,omitempty"`
+	CompletionTokens      int  `bson:"completion_tokens,omitempty"`
+	TotalTokens           int  `bson:"total_tokens,omitempty"`
+	ReasoningTokens       int  `bson:"reasoning_tokens,omitempty"`
+	PromptCachedTokens    int  `bson:"prompt_cached_tokens,omitempty"`
+	PromptCacheReported   bool `bson:"prompt_cache_reported,omitempty"`
+	PromptCacheIncomplete bool `bson:"prompt_cache_incomplete,omitempty"`
+	Available             bool `bson:"available,omitempty"`
 }
 
 type PlanDocument struct {

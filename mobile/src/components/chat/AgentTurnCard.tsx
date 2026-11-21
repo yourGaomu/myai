@@ -6,7 +6,7 @@ import type { AssetSummary, ChangeEntry, SubagentTask } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
 import type { AgentTurnItem, AgentTurnTimelineStep } from "../../utils/chatRenderItems";
 import { copyToClipboard } from "../../utils/clipboard";
-import { usageBreakdown } from "../../utils/tokenUsage";
+import { promptCacheLabel, usageBreakdown } from "../../utils/tokenUsage";
 import { font, radius, weight } from "../../constants/theme";
 import { useWallpaper } from "../../hooks/useWallpaperConfig";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
@@ -77,6 +77,7 @@ export function AgentTurnCard({
 
   const clock = useRunningClock(running, turn.startedAt);
   const tokens = useMemo(() => usageBreakdown(turn.usage), [turn.usage]);
+  const cacheLabel = turn.status === "completed" || turn.usage ? promptCacheLabel(turn.usage) : null;
   const files = useMemo(() => extractFileChanges(turn.tools, workspaceChanges), [turn.tools, workspaceChanges]);
   const open = manualOpen ?? (running || keepThinkingExpanded);
   const opCount = turn.tools?.length || 0;
@@ -194,7 +195,7 @@ export function AgentTurnCard({
         <TurnChanges files={files} onOpenChangePath={onOpenChangePath} onOpenChanges={onOpenChanges} />
       ) : null}
 
-      {!running && (hasContent || canRegenerate || tokens) ? (
+      {!running && (hasContent || canRegenerate || tokens || cacheLabel) ? (
         <View style={styles.actions}>
           {hasContent ? (
             <Pressable
@@ -221,7 +222,9 @@ export function AgentTurnCard({
               <Feather color={palette.ink3} name="rotate-ccw" size={17} />
             </Pressable>
           ) : null}
-          {tokens ? <Text style={styles.tokens}>{tokens.total} tokens</Text> : null}
+          {tokens || cacheLabel ? (
+            <Text style={styles.tokens}>{[tokens && `${tokens.total} tokens`, cacheLabel].filter(Boolean).join(" · ")}</Text>
+          ) : null}
         </View>
       ) : null}
       {copyState === "copied" || copyState === "failed" ? (
@@ -325,7 +328,7 @@ const makeStyles = ({ palette }: ReturnType<typeof useAppTheme>) =>
     action: { alignItems: "center", borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
     copyFeedback: { color: palette.ok, fontSize: font.caption },
     copyFailed: { color: palette.err },
-    tokens: { color: palette.ink3, fontSize: font.caption, marginLeft: 6 },
+    tokens: { color: palette.ink3, flexShrink: 1, fontSize: font.caption, marginLeft: 6 },
     error: { alignItems: "flex-start", backgroundColor: palette.errWash, borderRadius: radius.md, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
     errorIcon: { marginTop: 2 },
     errorText: { color: palette.err, flex: 1, fontSize: font.label + 0.5, lineHeight: 21 },

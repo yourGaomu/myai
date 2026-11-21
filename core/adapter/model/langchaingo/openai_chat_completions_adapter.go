@@ -44,7 +44,8 @@ func createOpenAIChatModel(config modelport.CreationConfig, protocol domainmodel
 		openai.WithBaseURL(config.BaseURL),
 		openai.WithModel(config.ModelName),
 	}
-	var transport http.RoundTripper = assistantReplayTransport{base: modelTransport{base: http.DefaultTransport}}
+	// The SDK already requests stream_options.include_usage for Chat Completions.
+	var transport http.RoundTripper = assistantReplayTransport{base: modelTransport{base: http.DefaultTransport, usage: chatCompletionsUsage}}
 	transport = generationSettingsTransport{base: transport, legacyMaxTokens: protocol == domainmodel.ProtocolMistralChat}
 	if domainmodel.NormalizeAuthType(config.AuthType) == domainmodel.AuthTypeNone {
 		transport = stripAuthorizationTransport{base: transport}

@@ -243,20 +243,20 @@ PlanModePrompt（仅 Plan 生成阶段）
 根据 LatestInput 匹配的 Skill prompt
 ```
 
-普通 Chat 且没有 Skill 时仍返回一个轻量 turn boundary，用于声明旧 runtime 指令只作用于各自紧随的 user message，避免旧 Plan/Style 规则泄漏到新 turn。
+普通 Chat 没有 Plan、Skill 或自定义风格时不生成 runtime 消息。当前回合的规则不延伸到后续回合，由固定 system 提示词统一说明。需要最新时间或工作区时，模型可以调用只读 `get_environment`，不再为每轮自动注入秒级时间。
 
 ## 11. 动态提示词如何插入
 
-`AddUserTurnTo` 在同一内存锁中按顺序追加两条消息：
+`AddUserTurnTo` 在同一内存锁中顺序追加可选 runtime 消息和真实用户消息：
 
 ```text
 [固定 system]
 [旧历史]
-[system: Runtime instructions for this turn, SyntheticReason=runtime_instruction]
+[user: Runtime instructions for this turn, SyntheticReason=runtime_instruction，可选]
 [最新 user]
 ```
 
-Synthetic Message 和真实 user message 随后由 `UserMessagePersistence` 以相同顺序写入 Mongo。它不出现在手机历史列表中，但会在会话重载时恢复到 `Session.Messages`，供后续轮次和 Prompt Cache 使用。
+Synthetic Message 随用户消息写入 Mongo，但不出现在手机历史列表中。请求投影只保留当前回合仍有效的动态上下文，旧的 Plan、Skill 和检索消息不会作为当前规则重放。
 
 ## 12. Context Snapshot
 
@@ -294,7 +294,9 @@ SummaryHash
 
 当前 `Prefix` 是实际选中消息中“当前 turn 之前”的稳定部分。当前 turn 的 Synthetic runtime message 和 user message不计入，但已经完成的旧 turn 会计入，因此下一轮可以继续复用完整历史前缀。
 
-provider 实际缓存命中量来自返回的 `PromptCachedTokens`，项目内哈希用于观察本地前缀是否稳定，两者不是同一个指标。
+服务商实际缓存命中量来自回包中的 `PromptCachedTokens`，与本地估算不同。`PromptCacheReported` 区分明确的 0 和未上报；一轮有多次模型请求时，`PromptCacheIncomplete` 表示至少有一次未上报，已知命中数只代表收到的部分。服务商的最小前缀长度、保留时长和缓存范围仍决定是否实际命中。
+
+原生 Gemini 逐帧读取 JSON 流，结束帧可不含正文，用量帧也可不含候选。最后一个有效的 `cachedContentTokenCount` 用于报告命中量；该计数已经包含在 `promptTokenCount` 中，不重复计入。应用不会自动创建 Gemini 命名缓存。
 
 ## 14. 消息窗口选择
 

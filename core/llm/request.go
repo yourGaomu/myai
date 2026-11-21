@@ -160,6 +160,12 @@ func RequestTopP(ctx context.Context) (float64, bool) {
 
 type requestAttemptKey struct{}
 
+// RequestStreaming reports whether the SDK call expects a streaming response.
+func RequestStreaming(ctx context.Context) bool {
+	attempt, ok := ctx.Value(requestAttemptKey{}).(*requestAttempt)
+	return ok && attempt.idle > 0
+}
+
 type requestAttempt struct {
 	mu         sync.Mutex
 	cancel     context.CancelCauseFunc
@@ -174,6 +180,7 @@ type requestAttempt struct {
 	failure    error
 	networkErr error
 	bodyErr    error
+	usage      *TokenUsage
 }
 
 func newRequestAttempt(ctx context.Context, idle time.Duration) (context.Context, *requestAttempt) {
@@ -286,9 +293,19 @@ func ObserveResponseChunk(ctx context.Context) {
 	}
 }
 
-func (m *Model) generateContent(ctx context.Context, messages []llms.MessageContent, options ...llms.CallOption) (*llms.ContentResponse, error) {
+// ObserveTokenUsage records a provider's wire-level accounting for this attempt.
+// An empty observation is authoritative when the SDK synthesizes zero values.
+func ObserveTokenUsage(ctx context.Context, usage TokenUsage) {
+	if attempt, ok := ctx.Value(requestAttemptKey{}).(*requestAttempt); ok {
+		attempt.mu.Lock()
+		defer attempt.mu.Unlock()
+		attempt.usage = &usage
+	}
+}
+
+func (m *Model) generateContent(ctx context.Context, messages []llms.MessageContent, options ...llms.CallOption) (*llms.ContentResponse, *TokenUsage, error) {
 	if m == nil || m.LlmModel == nil {
-		return nil, errors.New("model is nil")
+		return nil, nil, errors.New("model is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -304,7 +321,7 @@ func (m *Model) generateContent(ctx context.Context, messages []llms.MessageCont
 	streaming := call.StreamingFunc != nil || call.StreamingReasoningFunc != nil
 	for attemptIndex := 0; ; attemptIndex++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		idle := time.Duration(0)
 		if streaming {
@@ -335,6 +352,7 @@ func (m *Model) generateContent(ctx context.Context, messages []llms.MessageCont
 		cause := context.Cause(attemptCtx)
 		chunk := attempt.chunk
 		stopReason := attempt.stopReason
+		usage := attempt.usage
 		if cause != nil {
 			err = cause
 		} else if attempt.statusCode >= 400 {
@@ -358,23 +376,23 @@ func (m *Model) generateContent(ctx context.Context, messages []llms.MessageCont
 					}
 				}
 			}
-			return response, nil
+			return response, usage, nil
 		}
 		if chunk || !IsTransient(err) || attemptIndex+1 >= policy.MaxAttempts {
-			return nil, err
+			return nil, nil, err
 		}
 		delay, ok := retryDelay(policy, attemptIndex, err, time.Now())
 		if !ok {
-			return nil, err
+			return nil, nil, err
 		}
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
-			return nil, err
+			return nil, nil, err
 		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		case <-timer.C:
 		}
 	}

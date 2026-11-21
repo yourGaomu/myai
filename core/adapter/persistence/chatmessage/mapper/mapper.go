@@ -77,18 +77,20 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 
 func (m Mapper) AssistantMessage(sessionID string, result modelport.ChatResult, createdAt time.Time) repository.MessageRecord {
 	return repository.MessageRecord{
-		ID:                 m.newID(),
-		SessionID:          sessionID,
-		Role:               repository.RoleAssistant,
-		Content:            result.Content,
-		Reasoning:          result.Reasoning,
-		PromptTokens:       result.Usage.PromptTokens,
-		CompletionTokens:   result.Usage.CompletionTokens,
-		TotalTokens:        result.Usage.TotalTokens,
-		ReasoningTokens:    result.Usage.ReasoningTokens,
-		PromptCachedTokens: result.Usage.PromptCachedTokens,
-		Sequence:           messageSequence(createdAt),
-		CreatedAt:          createdAt,
+		ID:                    m.newID(),
+		SessionID:             sessionID,
+		Role:                  repository.RoleAssistant,
+		Content:               result.Content,
+		Reasoning:             result.Reasoning,
+		PromptTokens:          result.Usage.PromptTokens,
+		CompletionTokens:      result.Usage.CompletionTokens,
+		TotalTokens:           result.Usage.TotalTokens,
+		ReasoningTokens:       result.Usage.ReasoningTokens,
+		PromptCachedTokens:    result.Usage.PromptCachedTokens,
+		PromptCacheReported:   result.Usage.PromptCacheReported,
+		PromptCacheIncomplete: result.Usage.PromptCacheIncomplete,
+		Sequence:              messageSequence(createdAt),
+		CreatedAt:             createdAt,
 	}
 }
 
@@ -105,6 +107,8 @@ func (m Mapper) AssistantTurn(sessionID string, result modelport.ChatResult, cre
 		reply.TotalTokens = result.Usage.TotalTokens
 		reply.ReasoningTokens = result.Usage.ReasoningTokens
 		reply.PromptCachedTokens = result.Usage.PromptCachedTokens
+		reply.PromptCacheReported = result.Usage.PromptCacheReported
+		reply.PromptCacheIncomplete = result.Usage.PromptCacheIncomplete
 	}
 	return records
 }
@@ -269,10 +273,18 @@ func (m Mapper) messageRecords(sessionID string, message domainmessage.Message) 
 		return []repository.MessageRecord{record}
 	case domainmessage.RoleAssistant:
 		records := make([]repository.MessageRecord, 0, len(message.Parts)+1)
-		if text := message.Text(); text != "" || message.Reasoning != "" {
+		usage := message.AssistantUsage
+		if text := message.Text(); text != "" || message.Reasoning != "" || usage != (domainmessage.AssistantUsage{}) {
 			record := newRecord(repository.RoleAssistant)
 			record.Content = text
 			record.Reasoning = message.Reasoning
+			record.PromptTokens = usage.PromptTokens
+			record.CompletionTokens = usage.CompletionTokens
+			record.TotalTokens = usage.TotalTokens
+			record.ReasoningTokens = usage.ReasoningTokens
+			record.PromptCachedTokens = usage.PromptCachedTokens
+			record.PromptCacheReported = usage.PromptCacheReported
+			record.PromptCacheIncomplete = usage.PromptCacheIncomplete
 			records = append(records, record)
 		}
 		for _, part := range message.Parts {
@@ -350,15 +362,17 @@ func messageSequence(createdAt time.Time) int64 {
 }
 
 func tokenUsage(usage modelport.TokenUsage) *repository.TokenUsageRecord {
-	if !usage.Available && usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 && usage.ReasoningTokens == 0 && usage.PromptCachedTokens == 0 {
+	if usage == (modelport.TokenUsage{}) {
 		return nil
 	}
 	return &repository.TokenUsageRecord{
-		PromptTokens:       usage.PromptTokens,
-		CompletionTokens:   usage.CompletionTokens,
-		TotalTokens:        usage.TotalTokens,
-		ReasoningTokens:    usage.ReasoningTokens,
-		PromptCachedTokens: usage.PromptCachedTokens,
-		Available:          usage.Available,
+		PromptTokens:          usage.PromptTokens,
+		CompletionTokens:      usage.CompletionTokens,
+		TotalTokens:           usage.TotalTokens,
+		ReasoningTokens:       usage.ReasoningTokens,
+		PromptCachedTokens:    usage.PromptCachedTokens,
+		PromptCacheReported:   usage.PromptCacheReported,
+		PromptCacheIncomplete: usage.PromptCacheIncomplete,
+		Available:             usage.Available,
 	}
 }

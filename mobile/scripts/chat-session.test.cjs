@@ -38,6 +38,7 @@ try {
 }
 const { buildChatTurns } = require("../src/utils/chatRenderItems.ts");
 const { historyMessageToChatItem } = require("../src/utils/chatHistory.ts");
+const { promptCacheLabel, usageBreakdown } = require("../src/utils/tokenUsage.ts");
 const { findSubagentForLaunch, subagentLaunchState } = require("../src/utils/subagentLaunch.ts");
 const { toolKind } = require("../src/utils/toolDisplay.ts");
 
@@ -156,6 +157,31 @@ test("assistant reply identity reconciles when authoritative history arrives bef
   assert.equal(replies[0].text, "Parsed");
   assert.equal(replies[0].historyID, "reply");
   assert.equal(replies[0].requestID, "r");
+});
+
+test("turn cache labels distinguish a hit, reported zero, unknown, and partial reporting", () => {
+  assert.equal(promptCacheLabel({ prompt_cached_tokens: 80 }), "上游缓存命中 80");
+  assert.equal(promptCacheLabel({ prompt_cache_reported: true }), "上游缓存未命中（0）");
+  assert.equal(promptCacheLabel({ prompt_cached_tokens: 0 }), "上游缓存未上报");
+  assert.equal(promptCacheLabel({ prompt_cache_incomplete: true }), "上游缓存未上报");
+  assert.equal(promptCacheLabel(undefined), "上游缓存未上报");
+  assert.equal(promptCacheLabel({ prompt_cache_reported: true, prompt_cache_incomplete: true }), "上游缓存命中 0（部分上报）");
+  assert.equal(promptCacheLabel({ prompt_cached_tokens: 12, prompt_cache_incomplete: true }), "上游缓存命中 12（部分上报）");
+  assert.equal(usageBreakdown({ prompt_cache_reported: true }), null);
+});
+
+test("history reconciliation preserves live cache usage until the matching row contains usage", () => {
+  const chat = harness().render();
+  chat.addMessage("s", "user", "Question", "r");
+  chat.appendAssistant("s", "r", "Answer");
+  const liveUsage = { prompt_cache_reported: true, prompt_cache_incomplete: true };
+  chat.completeAssistant("s", "r", "done", liveUsage, "Answer", undefined, "reply");
+  const history = (usage) => historyMessageToChatItem({ id: "reply", role: "assistant", content: "Answer", usage });
+  chat.mergeSessionHistory("s", [history({})], "server");
+  assert.deepEqual(agentTurns(chat.getSessionChat("s").messages)[0].usage, liveUsage);
+  const storedUsage = { prompt_cached_tokens: 7, prompt_cache_reported: true };
+  chat.mergeSessionHistory("s", [history(storedUsage)], "server");
+  assert.deepEqual(agentTurns(chat.getSessionChat("s").messages)[0].usage, storedUsage);
 });
 
 test("background replies merge with cached and server history in either order and on replays", () => {

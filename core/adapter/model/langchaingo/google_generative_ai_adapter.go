@@ -3,8 +3,8 @@ package langchaingo
 import (
 	"context"
 	"net/http"
+	"strings"
 
-	"github.com/tmc/langchaingo/llms/googleai"
 	"google.golang.org/api/option"
 	googlehttp "google.golang.org/api/transport/http"
 
@@ -13,10 +13,7 @@ import (
 	modelport "myai/core/port/model"
 )
 
-// GoogleGenerativeAIAdapter creates Gemini models through Google's native
-// Generative AI API. The current LangChainGo client uses Google's standard
-// endpoint; BaseURL is retained in model metadata for a consistent config
-// shape but is not used as a custom HTTP endpoint by this SDK.
+// GoogleGenerativeAIAdapter uses Gemini's native API at Google's standard endpoint.
 type GoogleGenerativeAIAdapter struct{}
 
 var _ modelport.ProtocolAdapter = GoogleGenerativeAIAdapter{}
@@ -33,18 +30,20 @@ func (GoogleGenerativeAIAdapter) CreateModel(config modelport.CreationConfig) (m
 	if err := (GoogleGenerativeAIAdapter{}).ValidateConfig(config); err != nil {
 		return nil, err
 	}
-	transport, err := googlehttp.NewTransport(context.Background(), http.DefaultTransport, option.WithAPIKey(config.APIKey))
+	return createGoogleGenerativeAIModel(config, http.DefaultTransport, "")
+}
+
+func createGoogleGenerativeAIModel(config modelport.CreationConfig, base http.RoundTripper, endpoint string) (*corellm.Model, error) {
+	if endpoint == "" {
+		endpoint = "https://generativelanguage.googleapis.com"
+	}
+	transport, err := googlehttp.NewTransport(context.Background(), base, option.WithAPIKey(config.APIKey))
 	if err != nil {
 		return nil, err
 	}
-	model, err := googleai.New(
-		context.Background(),
-		googleai.WithAPIKey(config.APIKey),
-		googleai.WithHTTPClient(&http.Client{Transport: modelTransport{base: transport}}),
-		googleai.WithDefaultModel(config.ModelName),
-	)
-	if err != nil {
-		return nil, err
+	model := &geminiModel{
+		name: config.ModelName, endpoint: strings.TrimRight(endpoint, "/"),
+		client: &http.Client{Transport: modelTransport{base: transport}},
 	}
 	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
 }

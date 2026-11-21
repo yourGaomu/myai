@@ -38,8 +38,13 @@ func LatestUserInputIndex(messages []domainmessage.Message) int {
 
 func (t TurnContext) Messages() []domainmessage.Message {
 	messages := make([]domainmessage.Message, 0, 4)
+	runtime := strings.TrimSpace(t.RuntimeInstruction)
+	if runtime == domainmessage.RuntimeTurnBoundaryPrompt {
+		// Previous builds stored this boilerplate even for plain Chat turns.
+		runtime = ""
+	}
 	for _, message := range []domainmessage.Message{
-		domainmessage.RuntimeInstruction(t.RuntimeInstruction), domainmessage.RAGContext(t.RAGContext),
+		domainmessage.RuntimeInstruction(runtime), domainmessage.RAGContext(t.RAGContext),
 		domainmessage.EnvironmentContext(t.EnvironmentContext),
 	} {
 		if message.IsSynthetic() {
@@ -68,6 +73,9 @@ func requestHistory(messages []domainmessage.Message, start int, turn *TurnConte
 		byReason := make(map[domainmessage.SyntheticReason]int)
 		for index := max(0, attached); index < len(messages); index++ {
 			if !IsDynamicContext(messages[index]) {
+				continue
+			}
+			if text, ok := messages[index].RuntimeInstructionText(); ok && text == domainmessage.RuntimeTurnBoundaryPrompt {
 				continue
 			}
 			message := domainmessage.Clone(messages[index])

@@ -686,23 +686,25 @@ func compactSummary(info service.CompactInfo) string {
 }
 
 func tokenSummary(usage llm.TokenUsage) string {
-	if !usage.Available {
-		return "tokens unavailable"
+	text := "tokens unavailable"
+	if usage.Available {
+		text = fmt.Sprintf(
+			"tokens input %d output %d total %d",
+			usage.PromptTokens,
+			usage.CompletionTokens,
+			usage.TotalTokens,
+		)
+		if usage.ReasoningTokens > 0 {
+			text += fmt.Sprintf(" reasoning %d", usage.ReasoningTokens)
+		}
 	}
-
-	text := fmt.Sprintf(
-		"tokens input %d output %d total %d",
-		usage.PromptTokens,
-		usage.CompletionTokens,
-		usage.TotalTokens,
-	)
-	if usage.ReasoningTokens > 0 {
-		text += fmt.Sprintf(" reasoning %d", usage.ReasoningTokens)
+	if !usage.HasPromptCacheCount() {
+		return text + " · upstream cache not reported"
 	}
-	if usage.PromptCachedTokens > 0 {
-		text += fmt.Sprintf(" cached %d", usage.PromptCachedTokens)
+	text += fmt.Sprintf(" · upstream cached %d", usage.PromptCachedTokens)
+	if usage.PromptCacheIncomplete {
+		text += " (partial)"
 	}
-
 	return text
 }
 
