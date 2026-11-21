@@ -3,9 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,9 +21,11 @@ import (
 	uuid "myai/core/adapter/id/uuid"
 	messagemapper "myai/core/adapter/persistence/chatmessage/mapper"
 	runmemory "myai/core/adapter/persistence/memory/agentrun"
+	toolrecords "myai/core/adapter/persistence/toolrecords/repository"
 	sessionmemory "myai/core/adapter/session/memory"
 	subagentchat "myai/core/adapter/subagent/chat"
 	subagentmemory "myai/core/adapter/subagent/memory"
+	toolexecutor "myai/core/adapter/tool/executor"
 	runservice "myai/core/application/agentrun/service"
 	contextservice "myai/core/application/chat/context/service"
 	generationservice "myai/core/application/chat/generation/service"
@@ -27,10 +34,15 @@ import (
 	messageservice "myai/core/application/session/message/service"
 	queryservice "myai/core/application/session/query/service"
 	subagentservice "myai/core/application/subagent/service"
+	toolservice "myai/core/application/tool/service"
+	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	modelport "myai/core/port/model"
+	"myai/core/port/repository"
 	"myai/core/remote/protocol"
 	"myai/core/service"
+	"myai/core/tool"
+	"myai/core/tool/local"
 )
 
 type blockingFileFacade struct {
@@ -112,8 +124,44 @@ type replyIDTestModel struct {
 func (m replyIDTestModel) GetModel(string) modelport.ChatModelPort { return m }
 
 func (replyIDTestModel) Generate(_ context.Context, request modelport.GenerateRequest) (modelport.ChatResult, error) {
-	request.Stream.OnReasoning("final reasoning")
-	return modelport.ChatResult{Reasoning: "final reasoning"}, nil
+	callID := "image-call-" + request.Stream.CorrelationID
+	for _, message := range request.Messages {
+		for _, part := range message.Parts {
+			if part.ToolResult != nil && part.ToolResult.ToolCallID == callID {
+				request.Stream.OnReasoning("final reasoning")
+				return modelport.ChatResult{Reasoning: "final reasoning"}, nil
+			}
+		}
+	}
+	return modelport.ChatResult{ToolCalls: []domainmessage.ToolCall{{
+		ID: callID, Type: "function", Name: "attach_image", Arguments: `{"path":"result.png"}`,
+	}}}, nil
+}
+
+type replyIDAssetStore struct {
+	sync.Mutex
+	assets []repository.AssetRecord
+}
+
+func (*replyIDAssetStore) SaveMessage(context.Context, repository.MessageRecord) error { return nil }
+
+func (store *replyIDAssetStore) SaveAsset(_ context.Context, asset repository.AssetRecord) error {
+	store.Lock()
+	defer store.Unlock()
+	store.assets = append(store.assets, asset)
+	return nil
+}
+
+func (store *replyIDAssetStore) ListAssets(_ context.Context, sessionID string, _ int) ([]repository.AssetRecord, error) {
+	store.Lock()
+	defer store.Unlock()
+	var assets []repository.AssetRecord
+	for _, asset := range store.assets {
+		if asset.SessionID == sessionID {
+			assets = append(assets, asset)
+		}
+	}
+	return assets, nil
 }
 
 func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
@@ -124,6 +172,22 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 	if err := memory.PutSession(sessionID, fakeModelID, nil); err != nil {
 		t.Fatal(err)
 	}
+	workspace := t.TempDir()
+	file, err := os.Create(filepath.Join(workspace, "result.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeErr := png.Encode(file, image.NewRGBA(image.Rect(0, 0, 2, 3)))
+	if err := file.Close(); err != nil || encodeErr != nil {
+		t.Fatalf("create attachment fixture: %v / %v", encodeErr, err)
+	}
+	if err := memory.SetWorkspaceForSession(sessionID, workspace, ""); err != nil {
+		t.Fatal(err)
+	}
+	uploader := &uploadServiceStub{}
+	registered := tool.NewRegisterTools()
+	registered.Register(local.NewAttachImageToolWithWorkspaceAndFiles(workspace, uploader))
+	assets := &replyIDAssetStore{}
 	loader := loadservice.LoadService{Memory: memory}
 	contexts := contextservice.SnapshotService{}
 	runs := runmemory.New()
@@ -132,12 +196,16 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 		Models: replyIDTestModel{}, CurrentState: currentservice.StateQueryService{Memory: memory},
 		MessageCommands: messageservice.CommandService{Memory: memory, Loader: loader},
 		MessageQueries:  queryservice.MessageQueryService{Memory: memory, MemoryRecords: messagemapper.Mapper{}},
+		SessionQueries:  queryservice.SessionQueryService{Assets: assets},
 		TurnInputQueue:  pending,
 		AgentRunQueries: runservice.QueryService{Repository: runs},
 		GenerationTasks: generationservice.TaskService{
 			RequestIDs: uuid.Generator{}, Runs: runservice.CommandService{Repository: runs, IDs: uuid.Generator{}},
 			Generator: generationservice.AssistantGenerationService{
-				Models: replyIDTestModel{}, AgentRunner: generationservice.AgentLoopService{Sessions: memory, Contexts: contexts},
+				Models: replyIDTestModel{}, AgentRunner: generationservice.AgentLoopService{
+					Sessions: memory, Contexts: contexts, Tools: toolservice.SelectionService{Catalog: registered},
+					ToolExecutor: toolexecutor.Executor{Registry: registered}, ToolRecords: toolrecords.Recorder{Persistence: assets},
+				},
 				ResponseCommitter: generationservice.ResponseCommitService{Memory: memory},
 			},
 		},
@@ -151,7 +219,10 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	subagents := &subagentservice.Service{Tasks: tasks, ParentContinuation: subagentchat.Continuation{Chat: chat}}
-	a := &Agent{chatService: chat, subagentService: subagents, runtimes: newSessionRuntimeManager()}
+	a := &Agent{
+		chatService: chat, subagentService: subagents, runtimes: newSessionRuntimeManager(),
+		permissionWaiters: newPermissionWaiterRegistry(), permissionTimeout: 5 * time.Second,
+	}
 	events, unsubscribe := chat.SubscribeBackgroundTurns(32)
 	defer unsubscribe()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,18 +233,13 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 		}
 		defer conn.Close()
 		go a.forwardBackgroundTurns(ctx, conn, events)
-		// Dispatch serially so a terminal response cannot race a following
-		// generation request against the runtime's cleanup.
+		// The read loop stays available to answer approvals during generation.
 		for {
 			var message protocol.Message
 			if err := conn.ReadJSON(&message); err != nil {
 				return
 			}
 			if err := a.handleRelayMessage(ctx, conn, message); err != nil {
-				t.Error(err)
-				return
-			}
-			if err := a.waitForOperations(ctx); err != nil {
 				t.Error(err)
 				return
 			}
@@ -204,10 +270,45 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 			if message.Type == protocol.TypeError {
 				t.Fatalf("request %s failed: %s", message.RequestID, message.Payload)
 			}
+			if message.Type == protocol.TypePermissionAsk {
+				permission, err := protocol.DecodePayload[protocol.PermissionAskPayload](message)
+				if err != nil || permission.Name != "attach_image" || !permission.RequireFreshConsent {
+					t.Fatalf("invalid attachment approval: %+v / %v", permission, err)
+				}
+				approve := protocol.PermissionResultPayload{ApprovalID: permission.ApprovalID, Allowed: true}
+				approval, err := json.Marshal(approve)
+				if err != nil {
+					t.Fatal(err)
+				}
+				send(protocol.TypePermissionResult, message.RequestID, string(approval))
+				continue
+			}
 			if message.Type == kind && (requestID == "" || message.RequestID == requestID) {
 				return message
 			}
 		}
+	}
+	assertAsset := func(summaries []protocol.AssetSummary, requestID string) {
+		t.Helper()
+		if len(summaries) != 1 {
+			t.Fatalf("request %s returned %d attachment summaries", requestID, len(summaries))
+		}
+		live := summaries[0]
+		if live.ID == "" || live.AssetID != "asset-1" || live.ToolCallID != "image-call-"+requestID || live.SessionID != sessionID ||
+			live.ToolName != "attach_image" || live.FileName != "result.png" || live.ContentType != "image/png" || live.Size <= 0 || live.ShortURL != "" {
+			t.Fatalf("invalid attachment summary: %+v", live)
+		}
+		send(protocol.TypeAssetList, "assets", `{}`)
+		persisted, err := protocol.DecodePayload[protocol.AssetListResultPayload](read(protocol.TypeAssetListResult, "assets"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, asset := range persisted.Assets {
+			if asset.ID == live.ID && asset.AssetID == live.AssetID && asset.RequestID == live.RequestID && asset.ToolCallID == live.ToolCallID {
+				return
+			}
+		}
+		t.Fatalf("live attachment %s is missing from the recorded asset list", live.ID)
 	}
 	assertReply := func(messageID, requestID string) {
 		t.Helper()
@@ -263,7 +364,11 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 			t.Fatalf("invalid terminal reasoning-only reply for %s: %+v / %v", request.id, done, err)
 		}
 		seen[done.MessageID] = true
+		assertAsset(done.Assets, request.id)
 		assertReply(done.MessageID, request.id)
+		if err := a.waitForOperations(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := chat.EnqueueQueuedUserTurn(ctx, sessionID, "queued-request", "queued question"); err != nil {
@@ -278,12 +383,30 @@ func TestRemoteReplyIDsMatchHistoryAndRunSnapshots(t *testing.T) {
 			if event.RequestID != "queued-request" || event.Status != "succeeded" || event.Reasoning != "final reasoning" || seen[event.MessageID] {
 				t.Fatalf("invalid background completion: %+v", event)
 			}
+			assertAsset(event.Assets, event.TurnID)
 			assertReply(event.MessageID, event.TurnID)
 			break
+		}
+		if len(event.Assets) != 0 {
+			t.Fatalf("background %s published assets before completion", event.Kind)
+		}
+		if event.Kind == "permission_ask" {
+			if event.Permission == nil || event.Permission.Name != "attach_image" || !event.Permission.RequireFreshConsent {
+				t.Fatalf("invalid background attachment approval: %+v", event)
+			}
+			approve := protocol.PermissionResultPayload{ApprovalID: event.ApprovalID, Allowed: true}
+			approval, err := json.Marshal(approve)
+			if err != nil {
+				t.Fatal(err)
+			}
+			send(protocol.TypePermissionResult, event.TurnID, string(approval))
 		}
 		if event.MessageID != "" {
 			t.Fatalf("background %s received a top-level reply ID", event.Kind)
 		}
+	}
+	if got := uploader.calls.Load(); got != 4 {
+		t.Fatalf("expected one upload per completed turn, got %d", got)
 	}
 }
 

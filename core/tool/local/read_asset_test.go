@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"myai/core/port/files"
+	toolruntime "myai/core/tool/runtimecontext"
 )
 
 type fakeAssetDownloader struct {
@@ -120,5 +121,69 @@ func TestReadAssetToolPropagatesDownloadError(t *testing.T) {
 	_, err := NewReadAssetToolWithFiles(&fakeAssetDownloader{err: want}).Call(context.Background(), []byte(`{"asset_id":"asset-123"}`))
 	if !errors.Is(err, want) {
 		t.Fatalf("download error = %v, want %v", err, want)
+	}
+}
+
+func TestScopedReadAssetChecksSessionAndReturnsImageReferenceWithoutFileBytes(t *testing.T) {
+	asset := files.Asset{AssetID: "asset-123", FileName: "photo.jpg", ContentType: "image/jpeg", Size: 128, ShortURL: "https://example.com/private?sig=secret"}
+	downloader := &fakeAssetDownloader{response: files.Download{Asset: asset, Data: []byte("image bytes")}}
+	lookup := func(_ context.Context, sessionID, assetID string) (files.Asset, error) {
+		if sessionID != "allowed" || assetID != asset.AssetID {
+			return files.Asset{}, errors.New("fake rejection with private storage details")
+		}
+		return asset, nil
+	}
+	tool := NewReadAssetToolWithFiles(downloader, lookup)
+	args := []byte(`{"asset_id":"asset-123"}`)
+	wrongSession := toolruntime.WithExecution(t.Context(), toolruntime.Execution{SessionID: "wrong", ParentSessionID: "allowed"})
+	rightSession := toolruntime.WithExecution(t.Context(), toolruntime.Execution{SessionID: "allowed"})
+	for _, tc := range []struct {
+		ctx  context.Context
+		tool *ReadAssetTool
+	}{
+		{t.Context(), tool}, {wrongSession, tool}, {rightSession, NewReadAssetToolWithFiles(downloader, nil)},
+	} {
+		if _, err := tc.tool.Call(tc.ctx, args); !errors.Is(err, files.ErrSessionAssetUnavailable) {
+			t.Fatalf("unauthorized call returned %v", err)
+		}
+	}
+	output, err := tool.Call(rightSession, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result readAssetResult
+	if err := json.Unmarshal([]byte(output.Content), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.AssetID != asset.AssetID || !result.ImageReference || result.Parsed.Text != "" || result.Parsed.Supported || result.Parsed.Kind != "image" || result.Truncated {
+		t.Fatalf("wrong image reference metadata: %+v", result)
+	}
+	if downloader.request.AssetID != "" || strings.Contains(output.Content, "head_hex") || strings.Contains(output.Content, "sig=secret") || strings.Contains(output.Content, "image bytes") {
+		t.Fatal("image reference downloaded data or leaked private details")
+	}
+	output, err = tool.Call(rightSession, []byte(`{"asset_id":"asset-123","max_bytes":64}`))
+	if err != nil || !output.Truncated || strings.Contains(output.Content, "image_reference") || !strings.Contains(output.Content, "Image content was not provided") || downloader.request.AssetID != "" {
+		t.Fatalf("incorrect image limit handling: %+v %v", output, err)
+	}
+}
+
+func TestScopedReadAssetRetainsTextAndRejectsMismatchedDownload(t *testing.T) {
+	asset := files.Asset{AssetID: "note", FileName: "note.txt", ContentType: "text/plain", BusinessID: "demo", Size: 4}
+	downloader := &fakeAssetDownloader{response: files.Download{Asset: asset, Data: []byte("note")}}
+	tool := NewReadAssetToolWithFiles(downloader, func(_ context.Context, sessionID, assetID string) (files.Asset, error) {
+		if sessionID != "allowed" || assetID != "note" {
+			t.Fatal("lookup was not scoped to current session and requested asset")
+		}
+		return asset, nil
+	})
+	ctx := toolruntime.WithExecution(t.Context(), toolruntime.Execution{SessionID: "allowed"})
+	args := []byte(`{"asset_id":"note"}`)
+	output, err := tool.Call(ctx, args)
+	if err != nil || !strings.Contains(output.Content, `"text": "note"`) || strings.Contains(output.Content, "image_reference") {
+		t.Fatalf("text parsing regressed: %+v %v", output, err)
+	}
+	downloader.response.Asset.BusinessID = "other"
+	if _, err := tool.Call(ctx, args); !errors.Is(err, files.ErrSessionAssetUnavailable) {
+		t.Fatalf("mismatched download returned %v", err)
 	}
 }

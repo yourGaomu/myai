@@ -1,6 +1,7 @@
 import type { ChatAttachment, ChatItem } from "../types/chat";
-import type { AgentRunSnapshot, TokenUsage } from "../protocol";
-import { parseSharedAsset } from "./toolAssets";
+import type { AgentRunSnapshot, AssetSummary, TokenUsage } from "../protocol";
+import { isAssetID } from "./assetImagePreview";
+import { assetSummaryToSharedAsset, isAssistantAssetTool, mergeSharedAssets, parseSharedAsset, parseSharedAssets, type SharedAsset } from "./toolAssets";
 
 export type ToolCallStep = {
   id: string;
@@ -43,6 +44,7 @@ export type AgentTurnItem = {
   tools: ToolCallStep[];
   timeline: AgentTurnTimelineStep[];
   text: string;
+  assets?: SharedAsset[];
   attachments?: ChatAttachment[];
   usage?: TokenUsage;
   startedAt?: string;
@@ -240,7 +242,7 @@ function buildTimelineFromRunEvents(snapshot: AgentRunSnapshot): {
  * 将平铺的 ChatItem 消息序列聚合为结构化的 Agent Turn 与 User Turn 列表，
  * 并生成「思考段落 ↔ 工具调用」按时间顺序交错的 timeline。
  */
-export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = []): ChatRenderItem[] {
+export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = [], sessionAssets: AssetSummary[] = []): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
   const runsByID = new Map(runs.map((snapshot) => [snapshot.run.id, snapshot]));
   const runsByRequest = indexUniqueRuns(runs, ({ run }) => [run.request_id]);
@@ -563,7 +565,55 @@ export function buildChatTurns(messages: ChatItem[], runs: AgentRunSnapshot[] = 
   }
 
   flushAgentTurn();
+  attachTurnAssets(items, sessionAssets, isFinalReply);
   return items;
+}
+
+function attachTurnAssets(items: ChatRenderItem[], catalog: AssetSummary[], isFinalReply: (message: ChatItem) => boolean) {
+  const turns = items.filter((item): item is AgentTurnItem => item.type === "agent_turn");
+  const replies = new Map<string, AgentTurnItem>();
+  const groupKey = (turn: AgentTurnItem) => turn.runID ? `run:${turn.runID}` : turn.requestID ? `request:${turn.requestID}` : turn.id;
+  for (const turn of turns) {
+    const key = groupKey(turn);
+    const previous = replies.get(key);
+    if (!previous?.messages.some(isFinalReply) || turn.messages.some(isFinalReply)) replies.set(key, turn);
+  }
+
+  const byRequest = new Map<string, AgentTurnItem | null>();
+  const byCall = new Map<string, AgentTurnItem | null>();
+  function index(indexed: Map<string, AgentTurnItem | null>, key: string, owner: AgentTurnItem | null) {
+    indexed.set(key, indexed.has(key) && indexed.get(key) !== owner ? null : owner);
+  }
+  function add(owner: AgentTurnItem, assets: SharedAsset[]) {
+    if (assets.length) owner.assets = mergeSharedAssets(owner.assets || [], assets);
+  }
+  for (const turn of turns) {
+    const owner = replies.get(groupKey(turn)) || turn;
+    if (turn.requestID) index(byRequest, turn.requestID, owner);
+    for (const tool of turn.tools) {
+      if (!isAssistantAssetTool(tool.name)) continue;
+      if (tool.toolCallID) index(byCall, tool.toolCallID, tool.status === "error" ? null : owner);
+      if (tool.status === "completed" && !tool.truncated) {
+        add(owner, parseSharedAssets(tool.name, tool.result).filter((asset) => isAssetID(asset.assetID)));
+      }
+    }
+    for (const message of turn.messages) {
+      add(owner, (message.assets || []).filter((asset) =>
+        isAssetID(asset.asset_id) && isAssistantAssetTool(asset.tool_name),
+      ).map(assetSummaryToSharedAsset));
+    }
+  }
+
+  for (const asset of catalog) {
+    if (!isAssetID(asset.asset_id) || !isAssistantAssetTool(asset.tool_name)) continue;
+    const requestOwner = asset.request_id ? byRequest.get(asset.request_id) : undefined;
+    // Reopened SQLite history has tool-call IDs but no request IDs. A stored
+    // call is more specific, including when several plan runs share a request.
+    const callOwner = asset.tool_call_id ? byCall.get(asset.tool_call_id) : undefined;
+    if (callOwner === null || (callOwner && requestOwner && callOwner !== requestOwner)) continue;
+    const owner = callOwner || requestOwner;
+    if (owner) add(owner, [assetSummaryToSharedAsset(asset)]);
+  }
 }
 
 /**

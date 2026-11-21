@@ -1,4 +1,5 @@
 import type {
+  AssetSummary,
   FileReadResultPayload,
   TokenUsage,
   UploadedAssetPayload,
@@ -19,6 +20,7 @@ export type ChatMessageStatus =
   "streaming" | "done" | "paused" | "error" | "tool_running" | "queued";
 
 export type ChatItem = {
+  assets?: AssetSummary[];
   attachments?: ChatAttachment[];
   completedAt?: string;
   id: string;

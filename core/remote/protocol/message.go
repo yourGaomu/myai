@@ -368,6 +368,7 @@ type AssistantDeltaPayload struct {
 
 type AssistantDonePayload struct {
 	MessageID string                               `json:"message_id,omitempty"`
+	Assets    []AssetSummary                       `json:"assets,omitempty"`
 	Content   string                               `json:"content"`
 	Reasoning string                               `json:"reasoning,omitempty"`
 	Usage     TokenUsage                           `json:"usage,omitempty"`
@@ -444,6 +445,7 @@ type BackgroundTurnEventPayload struct {
 	Kind       string                `json:"kind"`
 	Status     string                `json:"status,omitempty"`
 	MessageID  string                `json:"message_id,omitempty"`
+	Assets     []AssetSummary        `json:"assets,omitempty"`
 	Content    string                `json:"content,omitempty"`
 	Reasoning  string                `json:"reasoning,omitempty"`
 	Error      string                `json:"error,omitempty"`

@@ -5,15 +5,8 @@ import * as Haptics from "expo-haptics";
 
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { copyToClipboard } from "../../utils/clipboard";
+import { isEscapedMarkdown, markdownImage, markdownInlineMatches, markdownLinkTarget, parseMarkdownBlocks, webURL, type MarkdownBlock } from "../../utils/chatMarkdown";
 import { useChatStyles, type ChatStyles } from "./styles";
-
-type MarkdownBlock =
-  | { type: "heading"; level: 1 | 2 | 3; text: string }
-  | { type: "paragraph"; text: string }
-  | { type: "list"; ordered: boolean; items: string[] }
-  | { type: "code"; language: string; text: string }
-  | { type: "table"; header: string[]; rows: string[][] }
-  | { type: "quote"; lines: string[] };
 
 // tone="muted" 用于过程时间线里的思考文字：更小、更淡，和最终回答拉开层次。
 export function MarkdownText({ text, tone = "default" }: { text: string; tone?: "default" | "muted" }) {
@@ -182,16 +175,6 @@ function MarkdownLink({ children, styles, url }: { children: ReactNode; styles: 
   );
 }
 
-function webURL(text: string) {
-  if (!/^https?:\/\//i.test(text) || /[\s\u0000-\u001f\u007f]/.test(text)) return null;
-  try {
-    const url = new URL(text);
-    return url.hostname ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
 function trimURL(text: string) {
   let end = text.length;
   while (end > 0) {
@@ -211,28 +194,29 @@ function trimURL(text: string) {
 
 function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyles, allowLinks = true): ReactNode[] {
   const parts: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!?\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"\n]*")?\)|https?:\/\/[^\s<>`"'，。！？；：、（）【】《》「」『』]+)/gi;
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
   let partIndex = 0;
 
-  while ((match = pattern.exec(text))) {
+  for (const match of markdownInlineMatches(text)) {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
 
     const token = match[0];
     const key = `${keyPrefix}-${partIndex}`;
-    if (token.startsWith("**")) {
+    if (isEscapedMarkdown(text, match.index)) {
+      parts.push(token);
+    } else if (token.startsWith("**")) {
       parts.push(
         <Text key={key} style={styles.markdownStrong}>
           {renderMarkdownInline(token.slice(2, -2), key, styles, allowLinks)}
         </Text>,
       );
     } else if (token.startsWith("`")) {
+      const fence = token.match(/^`+/)?.[0].length || 1;
       parts.push(
         <Text key={key} style={styles.markdownInlineCode}>
-          {token.slice(1, -1)}
+          {token.slice(fence, -fence)}
         </Text>,
       );
     } else if (token.startsWith("*")) {
@@ -243,17 +227,23 @@ function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyle
       );
     } else if (!allowLinks) {
       parts.push(token);
+    } else if (token.startsWith("![")) {
+      const image = markdownImage(token);
+      if (image?.kind === "external") {
+        parts.push(<MarkdownLink key={key} styles={styles} url={image.url}>{image.alt || "查看图片"}</MarkdownLink>);
+      } else if (image) {
+        parts.push(image.alt || "图片");
+      } else {
+        parts.push(token);
+      }
     } else if (token.startsWith("[")) {
-      const link = token.match(/^\[([^\]\n]+)\]\((.*)\)$/);
-      const target = link?.[2].replace(/\s+"[^"\n]*"$/, "").replace(/^<(.*)>$/, "$1") || "";
-      const url = webURL(target);
+      const link = token.match(/^\[((?:\\.|[^\]\\\n])+)\]\((.*)\)$/);
+      const url = link && webURL(markdownLinkTarget(link[2]));
       if (link && url) {
         parts.push(<MarkdownLink key={key} styles={styles} url={url}>{renderMarkdownInline(link[1], `${key}-label`, styles, false)}</MarkdownLink>);
       } else {
         parts.push(token);
       }
-    } else if (token.startsWith("![")) {
-      parts.push(token);
     } else {
       const target = trimURL(token);
       const url = webURL(target);
@@ -273,127 +263,4 @@ function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyle
   }
 
   return parts;
-}
-
-function parseMarkdownBlocks(text: string): MarkdownBlock[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks: MarkdownBlock[] = [];
-
-  for (let index = 0; index < lines.length; ) {
-    const line = lines[index];
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      index += 1;
-      continue;
-    }
-
-    const fenceMatch = trimmed.match(/^```(\S*)\s*$/);
-    if (fenceMatch) {
-      const language = fenceMatch[1] || "";
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith("```")) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) {
-        index += 1;
-      }
-      blocks.push({ type: "code", language, text: codeLines.join("\n") });
-      continue;
-    }
-
-    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (headingMatch) {
-      blocks.push({
-        type: "heading",
-        level: headingMatch[1].length as 1 | 2 | 3,
-        text: headingMatch[2],
-      });
-      index += 1;
-      continue;
-    }
-
-    if (trimmed.startsWith(">")) {
-      const quoteLines: string[] = [];
-      while (index < lines.length && lines[index].trim().startsWith(">")) {
-        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
-        index += 1;
-      }
-      blocks.push({ type: "quote", lines: quoteLines });
-      continue;
-    }
-
-    if (index + 1 < lines.length && isTableRow(trimmed) && isTableDivider(lines[index + 1].trim())) {
-      const header = splitTableRow(trimmed);
-      const rows: string[][] = [];
-      index += 2;
-      while (index < lines.length && isTableRow(lines[index].trim())) {
-        rows.push(splitTableRow(lines[index].trim()));
-        index += 1;
-      }
-      blocks.push({ type: "table", header, rows });
-      continue;
-    }
-
-    const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
-    const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
-    if (orderedMatch || unorderedMatch) {
-      const ordered = Boolean(orderedMatch);
-      const items: string[] = [];
-      while (index < lines.length) {
-        const candidate = lines[index].trim();
-        const match = ordered ? candidate.match(/^\d+\.\s+(.+)$/) : candidate.match(/^[-*]\s+(.+)$/);
-        if (!match) {
-          break;
-        }
-        items.push(match[1]);
-        index += 1;
-      }
-      blocks.push({ type: "list", ordered, items });
-      continue;
-    }
-
-    const paragraphLines: string[] = [];
-    while (index < lines.length) {
-      const candidate = lines[index].trim();
-      if (
-        !candidate ||
-        candidate.startsWith("```") ||
-        candidate.startsWith(">") ||
-        /^(#{1,3})\s+/.test(candidate) ||
-        /^[-*]\s+/.test(candidate) ||
-        /^\d+\.\s+/.test(candidate) ||
-        (index + 1 < lines.length && isTableRow(candidate) && isTableDivider(lines[index + 1].trim()))
-      ) {
-        break;
-      }
-      paragraphLines.push(lines[index]);
-      index += 1;
-    }
-    blocks.push({ type: "paragraph", text: paragraphLines.join("\n") });
-  }
-
-  return blocks;
-}
-
-function isTableRow(line: string) {
-  return line.includes("|") && line.replace(/\|/g, "").trim().length > 0;
-}
-
-function isTableDivider(line: string) {
-  if (!line.includes("|")) {
-    return false;
-  }
-  const cells = splitTableRow(line);
-  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
-}
-
-function splitTableRow(line: string) {
-  return line
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
 }

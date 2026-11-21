@@ -176,6 +176,7 @@ export type PlanContentProps = {
 };
 
 export type ChatContentProps = {
+  assets: AssetSummary[];
   activeAssistantID: string;
   activePlan?: Plan;
   activitySlot?: MotionSlot;

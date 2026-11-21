@@ -6,7 +6,7 @@ import type { SubagentTask } from "../../../protocol";
 import type { ButtonFeedback } from "../../../types/ui";
 import type { ToolCallStep } from "../../../utils/chatRenderItems";
 import { subagentLaunchLabel, subagentLaunchState } from "../../../utils/subagentLaunch";
-import { parseSharedAssets } from "../../../utils/toolAssets";
+import { isAssistantAssetTool, mergeSharedAssets, parseSharedAssets } from "../../../utils/toolAssets";
 import { parseToolArgs, toolCommand, toolIcon, toolKind, toolTarget, toolVerb } from "../../../utils/toolDisplay";
 import { fontFamily, font, radius, weight } from "../../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../../theme/ThemeProvider";
@@ -33,7 +33,7 @@ export function ToolStepRow({ buttonFeedback, onInspectSubagent, task, tool, tur
   const [open, setOpen] = useState(failed);
   const target = useMemo(() => toolTarget(tool.name, tool.arguments), [tool.arguments, tool.name]);
   const request = useMemo(() => requestText(tool), [tool]);
-  const sharedAssets = parseSharedAssets(tool.name, tool.result || "");
+  const sharedAssets = isAssistantAssetTool(tool.name) ? [] : mergeSharedAssets(parseSharedAssets(tool.name, tool.result));
   const output = tool.error || tool.result || "";
   const label = launch ? subagentLaunchLabel[launch] : toolVerb(kind, failed ? "error" : running ? "running" : "done");
   const verbStyle = failed ? styles.verbError : running ? styles.verbRunning : styles.verbDone;

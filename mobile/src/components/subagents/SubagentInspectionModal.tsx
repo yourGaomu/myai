@@ -20,8 +20,9 @@ import type {
   SubagentTaskResultPayload,
 } from "../../protocol";
 import type { ButtonFeedback } from "../../types/ui";
-import { assetSummaryToSharedAsset } from "../../utils/toolAssets";
+import { assetSummariesForSession, assetSummaryToSharedAsset, isAssistantAssetTool, mergeAssetSummaries, mergeSharedAssets, parseSharedAssets } from "../../utils/toolAssets";
 import { formatDateTime } from "../../utils/format";
+import { AssistantReply } from "../chat/AssistantReply";
 import { MarkdownText } from "../chat/MarkdownText";
 import { SharedAssetCard } from "../chat/SharedAssetCard";
 import { radius, weight } from "../../constants/theme";
@@ -86,6 +87,7 @@ export function SubagentInspectionModal({
   const styles = useThemedStyles(createStyles);
   const [activeTab, setActiveTab] = useState<TabType>("process");
   const [thoughtExpanded, setThoughtExpanded] = useState(true);
+  const childSessionID = task?.child_session_id || "";
 
   // 1.0 过滤当前选中的 Run 对应的事件（若指定 selectedRunID）
   const filteredEvents = useMemo(() => {
@@ -149,11 +151,7 @@ export function SubagentInspectionModal({
         });
       } else if (ev.kind === "task.asset_created" && ev.assets) {
         // 2.2 资产产生事件：收集并支持即时渲染
-        for (const item of ev.assets) {
-          if (!eventAssets.some((a) => a.id === item.id)) {
-            eventAssets.push(item);
-          }
-        }
+        eventAssets.push(...assetSummariesForSession(ev.assets, childSessionID));
       } else if (ev.kind === "task.waiting") {
         isWaiting = true;
         waitingStatus = ev.status || "等待子任务";
@@ -170,26 +168,27 @@ export function SubagentInspectionModal({
       reasoningText: reasoningText.trim() || task?.reasoning || "",
       answerText: finalAnswer,
       tools,
-      eventAssets,
+      eventAssets: mergeAssetSummaries(eventAssets),
       permissionDenials,
       isWaiting,
       waitingStatus,
     };
-  }, [filteredEvents, task]);
+  }, [childSessionID, filteredEvents, task]);
 
-  // 合并全部已发现资产（事件中的即时资产 + 落库资源）
-  const allAssets = useMemo(() => {
-    const map = new Map<string, AssetSummary>();
-    for (const a of assets) {
-      map.set(a.id, a);
-    }
-    for (const a of processViewModel.eventAssets) {
-      map.set(a.id, a);
-    }
-    return Array.from(map.values());
-  }, [assets, processViewModel.eventAssets]);
+  const allAssets = useMemo(() => mergeAssetSummaries(processViewModel.eventAssets, assets)
+    .filter((asset) => asset.session_id === childSessionID)
+    .sort((a, b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || "")),
+  [assets, childSessionID, processViewModel.eventAssets]);
+  const produced = useMemo(() => mergeSharedAssets(
+    processViewModel.tools.flatMap((tool) => tool.status === "success" && !tool.truncated && isAssistantAssetTool(tool.name)
+      ? parseSharedAssets(tool.name, tool.result) : []),
+    processViewModel.eventAssets.filter((asset) => asset.asset_id && isAssistantAssetTool(asset.tool_name)).map(assetSummaryToSharedAsset),
+    allAssets.filter((asset) => asset.asset_id && isAssistantAssetTool(asset.tool_name) && processViewModel.tools.some((tool) =>
+      tool.toolCallID === asset.tool_call_id && tool.name === asset.tool_name && tool.status !== "failed",
+    )).map(assetSummaryToSharedAsset),
+  ), [allAssets, processViewModel]);
 
-  if (!task) return null;
+  if (!task || !visible) return null;
 
   const isRunning = task.status === "running";
   const statusLabel = formatStatusLabel(task.status);
@@ -519,31 +518,13 @@ export function SubagentInspectionModal({
                   </View>
                 ) : null}
 
-                {/* 7.5 产生的资产预览 (复用 SharedAssetCard) */}
-                {processViewModel.eventAssets.length > 0 ? (
-                  <View style={styles.assetsSection}>
-                    <View style={styles.iconRow}>
-                      <Feather color={palette.brand} name="image" size={14} />
-                      <Text style={styles.sectionHeaderTitle}>产物与资源</Text>
-                    </View>
-                    {processViewModel.eventAssets.map((asset) => (
-                      <SharedAssetCard
-                        asset={assetSummaryToSharedAsset(asset)}
-                        buttonFeedback={buttonFeedback}
-                        key={asset.id}
-                      />
-                    ))}
-                  </View>
-                ) : null}
-
-                {/* 7.6 最终回答正文 */}
-                {processViewModel.answerText ? (
+                {processViewModel.answerText || produced.length ? (
                   <View style={styles.answerCard}>
                     <View style={styles.iconRow}>
                       <Feather color={palette.brand} name="zap" size={14} />
                       <Text style={styles.answerHeaderTitle}>子代理回答</Text>
                     </View>
-                    <MarkdownText text={processViewModel.answerText} />
+                    <AssistantReply assets={produced} buttonFeedback={buttonFeedback} catalog={allAssets} sessionID={childSessionID} text={processViewModel.answerText} />
                   </View>
                 ) : isRunning ? (
                   <View style={styles.emptyNotice}>
@@ -613,7 +594,9 @@ export function SubagentInspectionModal({
                           </Text>
                         ) : null}
                       </View>
-                      {m.content ? <MarkdownText text={m.content} /> : null}
+                      {m.role === "assistant" ? (
+                        <AssistantReply buttonFeedback={buttonFeedback} catalog={allAssets} sessionID={childSessionID} text={m.content || ""} />
+                      ) : m.content ? <MarkdownText text={m.content} /> : null}
                       {m.tool_error ? (
                         <Text style={styles.toolErrorText}>{m.tool_error}</Text>
                       ) : null}
@@ -635,7 +618,8 @@ export function SubagentInspectionModal({
                     <SharedAssetCard
                       asset={assetSummaryToSharedAsset(asset)}
                       buttonFeedback={buttonFeedback}
-                      key={asset.id}
+                      key={asset.asset_id || asset.id}
+                      sessionID={asset.asset_id ? childSessionID : undefined}
                     />
                   ))
                 )}
@@ -1101,9 +1085,6 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     },
     toolErrorText: {
       color: palette.err,
-    },
-    assetsSection: {
-      gap: 8,
     },
     answerCard: {
       backgroundColor: palette.surface1,

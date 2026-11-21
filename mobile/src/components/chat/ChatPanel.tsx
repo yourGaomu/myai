@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -11,11 +11,12 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-import type { AgentRunSnapshot, ChangeEntry, Plan, SubagentTask } from "../../protocol";
+import type { AgentRunSnapshot, AssetSummary, ChangeEntry, Plan, SubagentTask } from "../../protocol";
 import type { UserQuestionState } from "../../types/app";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { latestRegeneratableTurnID } from "../../hooks/useChatActions";
+import { AssetPreviewVisibleContext } from "../../hooks/useAssetImagePreview";
 import { buildChatTurns, type ChatRenderItem } from "../../utils/chatRenderItems";
 import type { MotionSlot } from "../../utils/motionRegistry";
 import { radius, space, weight } from "../../constants/theme";
@@ -35,6 +36,7 @@ type Props = {
   activeAssistantID: string;
   activePlan?: Plan;
   activitySlot?: MotionSlot;
+  assets: AssetSummary[];
   buttonFeedback: ButtonFeedback;
   changesCount?: number;
   chatScrollRef: RefObject<ScrollView | null>;
@@ -68,6 +70,7 @@ export function ChatPanel({
   activeAssistantID,
   activePlan,
   activitySlot = "thinking",
+  assets,
   buttonFeedback,
   changesCount = 0,
   chatScrollRef,
@@ -99,7 +102,8 @@ export function ChatPanel({
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
 
-  const renderItems = useMemo(() => buildChatTurns(messages, runs), [messages, runs]);
+  const renderItems = useMemo(() => buildChatTurns(messages, runs, assets), [assets, messages, runs]);
+  const [viewport, setViewport] = useState({ offset: 0, height: 0 });
   const followTailRef = useRef(true);
   const lastViewportHeightRef = useRef<number>(0);
   const scrolledRef = useRef(false);
@@ -177,6 +181,7 @@ export function ChatPanel({
         }}
         onLayout={(event) => {
           const currentHeight = event.nativeEvent.layout.height;
+          setViewport((current) => current.height === currentHeight ? current : { ...current, height: currentHeight });
           if (lastViewportHeightRef.current > 0 && currentHeight < lastViewportHeightRef.current) {
             if (followTailRef.current) {
               scrollToTail(true);
@@ -186,6 +191,9 @@ export function ChatPanel({
         }}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          const offset = contentOffset.y;
+          const height = layoutMeasurement.height;
+          setViewport((current) => current.offset === offset && current.height === height ? current : { offset, height });
           const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
           followTailRef.current = distanceFromBottom <= 44;
 
@@ -231,9 +239,10 @@ export function ChatPanel({
             {renderItems.map((item) => {
               if (item.type === "agent_turn") {
                 return (
-                  <View key={item.id}>
+                  <PreviewRow key={JSON.stringify([sessionID, item.id])} viewport={viewport}>
                     <AgentTurnCard
                       buttonFeedback={buttonFeedback}
+                      catalog={assets}
                       onInspectSubagent={onInspectSubagent}
                       onOpenChangePath={onOpenChangePath}
                       onOpenChanges={onOpenChanges}
@@ -243,14 +252,7 @@ export function ChatPanel({
                       turn={item}
                       workspaceChanges={workspaceChanges}
                     />
-                  </View>
-                );
-              }
-              if (item.type === "user_turn") {
-                return (
-                  <View key={item.id}>
-                    <MessageBubble buttonFeedback={buttonFeedback} message={item.message} onRegenerate={ignoreRegenerate} />
-                  </View>
+                  </PreviewRow>
                 );
               }
               if (item.type === "tool_group") {
@@ -261,14 +263,16 @@ export function ChatPanel({
                 );
               }
               return (
-                <View key={item.id}>
+                <PreviewRow key={JSON.stringify([sessionID, item.id])} viewport={viewport}>
                   <MessageBubble
                     buttonFeedback={buttonFeedback}
+                    catalog={assets}
                     hideReasoning={item.message.role === "assistant" && isCoveredByRun(item.message, runs)}
                     message={item.message}
                     onRegenerate={ignoreRegenerate}
+                    sessionID={sessionID}
                   />
-                </View>
+                </PreviewRow>
               );
             })}
 
@@ -316,6 +320,21 @@ export function ChatPanel({
           </Text>
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+function PreviewRow({ children, viewport }: { children: ReactNode; viewport: { offset: number; height: number } }) {
+  const [layout, setLayout] = useState<{ y: number; height: number } | null>(null);
+  const overscan = 160;
+  const visible = Boolean(layout && viewport.height > 0 &&
+    layout.y + layout.height >= viewport.offset - overscan &&
+    layout.y <= viewport.offset + viewport.height + overscan);
+  return (
+    <View onLayout={({ nativeEvent: { layout: next } }) => {
+      setLayout((current) => current?.y === next.y && current.height === next.height ? current : next);
+    }}>
+      <AssetPreviewVisibleContext.Provider value={visible}>{children}</AssetPreviewVisibleContext.Provider>
     </View>
   );
 }
@@ -443,6 +462,7 @@ const makeStyles = ({ font, palette, shadow }: ReturnType<typeof useAppTheme>) =
     },
     messages: {
       gap: space.xxl,
+      position: "relative",
       paddingBottom: 22,
       paddingHorizontal: space.xl,
     },

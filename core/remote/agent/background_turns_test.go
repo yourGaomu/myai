@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	domaininteraction "myai/core/domain/interaction"
+	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
 	"myai/core/remote/protocol"
 	"myai/core/service"
@@ -190,6 +191,36 @@ func TestBackgroundPayloadUsesPublicDTOsAndPreservesApproval(t *testing.T) {
 		flag := wire.Permission.RequireFreshConsent
 		if fresh && (flag == nil || !*flag) || !fresh && flag != nil {
 			t.Fatalf("require_fresh_consent JSON does not match fresh=%v: %s", fresh, data)
+		}
+	}
+}
+
+func TestCompletionAssetPayloadOnlyCarriesSameSessionMetadata(t *testing.T) {
+	asset := domaintool.SharedAsset{
+		ID: "record", AssetID: "asset-image", SessionID: "session", RequestID: "tool-request", ToolCallID: "image-call",
+		FileName: "result.png", ContentType: "image/png", Size: 100, ShortURL: "https://example.invalid/?signature=secret", ShortCode: "secret-code",
+	}
+	foreign, incomplete := asset, asset
+	foreign.SessionID, incomplete.ToolCallID = "other-session", ""
+	event := service.BackgroundTurnEvent{SessionID: "session", Kind: "completed", Status: "succeeded", Assets: []domaintool.SharedAsset{asset, foreign, incomplete}}
+	payload := backgroundTurnPayload(event)
+	if len(payload.Assets) != 1 || payload.Assets[0].AssetID != asset.AssetID || payload.Assets[0].ToolCallID != asset.ToolCallID ||
+		payload.Assets[0].RequestID != asset.RequestID || payload.Assets[0].ShortURL != "" || payload.Assets[0].Code != "" {
+		t.Fatalf("incorrect attachment metadata: %+v", payload.Assets)
+	}
+
+	event.Status = "paused"
+	for _, payload := range []any{backgroundTurnPayload(event), protocol.AssistantDonePayload{Content: "no attachments"}} {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["assets"]; ok {
+			t.Fatalf("%T with no attachments serialized assets: %s", payload, encoded)
 		}
 	}
 }

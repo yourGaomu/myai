@@ -81,7 +81,8 @@ func subagentEventPayload(event subagentport.TaskEvent) protocol.SubagentTaskRes
 	}
 	for _, asset := range event.Assets {
 		payload.Assets = append(payload.Assets, protocol.AssetSummary{
-			ID: asset.ID, SessionID: asset.SessionID, RequestID: asset.RequestID,
+			ID: asset.ID, AssetID: asset.AssetID, BusinessID: asset.BusinessID, Checksum: asset.Checksum,
+			MaxVisits: asset.MaxVisits, SessionID: asset.SessionID, RequestID: asset.RequestID,
 			ToolCallID: asset.ToolCallID, ToolName: asset.ToolName, Path: asset.LocalPath,
 			FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
 			ShortURL: asset.ShortURL, Code: asset.ShortCode, ExpiresAt: asset.ExpiresAt, CreatedAt: asset.CreatedAt,

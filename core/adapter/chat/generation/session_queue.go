@@ -9,12 +9,14 @@ import (
 
 	runtimeservice "myai/core/application/runtime/service"
 	outbox "myai/core/port/outbox"
+	repository "myai/core/port/repository"
 )
 
 type queuedSessionTask struct {
 	run      func() error
 	result   chan error
 	started  bool
+	assets   []repository.AssetRecord
 	sequence int64
 }
 

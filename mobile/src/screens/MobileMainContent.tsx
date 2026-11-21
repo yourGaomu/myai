@@ -148,6 +148,7 @@ export function MobileMainContent({
           activeAssistantID={chat.activeAssistantID}
           activePlan={chat.activePlan}
           activitySlot={chat.activitySlot}
+          assets={chat.assets}
           buttonFeedback={common.buttonFeedback}
           changesCount={chat.changesCount}
           chatScrollRef={chat.chatScrollRef}

@@ -2,6 +2,25 @@ package repository
 
 import "time"
 
+const (
+	AssetSourceUpload      = "asset_upload"
+	AssetSourceAttachImage = "attach_image"
+	AssetSourceShareFile   = "share_file"
+)
+
+// IsSessionAttachment excludes metadata-only tool results from authorization.
+func (a AssetRecord) IsSessionAttachment() bool {
+	if a.Deleted || a.DeletedAt != nil {
+		return false
+	}
+	switch a.ToolName {
+	case AssetSourceUpload, AssetSourceAttachImage, AssetSourceShareFile:
+		return true
+	default:
+		return false
+	}
+}
+
 type AssetRecord struct {
 	ID          string
 	AssetID     string

@@ -1,4 +1,5 @@
 import type { AssetSummary, UploadedAssetPayload } from "../protocol";
+import { isAssetID } from "./assetImagePreview";
 
 export type SharedAsset = {
   assetID: string;
@@ -17,17 +18,78 @@ export type SharedAsset = {
 export function assetSummaryToSharedAsset(summary: AssetSummary): SharedAsset {
   return {
     assetID: summary.asset_id || summary.id,
-    businessID: summary.business_id,
-    checksum: summary.checksum,
-    code: summary.code,
-    contentType: summary.content_type,
-    expiresAt: summary.expires_at,
-    fileName: summary.file_name,
-    maxVisits: summary.max_visits,
-    path: summary.path,
+    businessID: stringValue(summary.business_id),
+    checksum: stringValue(summary.checksum),
+    code: stringValue(summary.code),
+    contentType: stringValue(summary.content_type),
+    expiresAt: stringValue(summary.expires_at),
+    fileName: stringValue(summary.file_name),
+    maxVisits: numberValue(summary.max_visits),
+    path: stringValue(summary.path),
     shortURL: assetPublicURL(summary.short_url),
-    size: summary.size,
+    size: numberValue(summary.size),
   };
+}
+
+export function isAssistantAssetTool(toolName?: string) {
+  return toolName === "attach_image" || toolName === "share_file";
+}
+
+// Whitelist metadata from authenticated completions and the session asset list.
+// The database record ID is distinct from the previewable asset ID.
+export function assetSummariesForSession(value: unknown, sessionID: string): AssetSummary[] {
+  if (!sessionID || !Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || (item.session_id !== undefined && item.session_id !== sessionID)) return [];
+    const id = stringValue(item.id);
+    const assetID = isAssetID(item.asset_id) ? item.asset_id : undefined;
+    if (!id && !assetID) return [];
+    return [{
+      id: id || assetID!, asset_id: assetID, session_id: sessionID,
+      request_id: stringValue(item.request_id), tool_call_id: stringValue(item.tool_call_id), tool_name: stringValue(item.tool_name),
+      business_id: stringValue(item.business_id), checksum: stringValue(item.checksum),
+      file_name: stringValue(item.file_name), content_type: stringValue(item.content_type), path: stringValue(item.path),
+      size: numberValue(item.size), short_url: assetPublicURL(item.short_url), code: stringValue(item.code),
+      expires_at: stringValue(item.expires_at), max_visits: numberValue(item.max_visits), created_at: stringValue(item.created_at),
+    }];
+  });
+}
+
+// Prefer defined metadata from the newer source without discarding an existing
+// short link when a completion only reports file identity.
+export function mergeSharedAssets(...groups: (readonly SharedAsset[])[]): SharedAsset[] {
+  const assets = new Map<string, SharedAsset>();
+  for (const group of groups) {
+    for (const asset of group) {
+      const previous = assets.get(asset.assetID);
+      assets.set(asset.assetID, previous ? mergeAssetFields(previous, asset) : asset);
+    }
+  }
+  return [...assets.values()];
+}
+
+export function mergeAssetSummaries(...groups: (readonly AssetSummary[])[]): AssetSummary[] {
+  const canonicalIDs = new Map<string, string>();
+  for (const group of groups) {
+    for (const asset of group) if (asset.asset_id) canonicalIDs.set(asset.id, asset.asset_id);
+  }
+  const assets = new Map<string, AssetSummary>();
+  for (const group of groups) {
+    for (const asset of group) {
+      const key = asset.asset_id || canonicalIDs.get(asset.id) || asset.id;
+      const previous = assets.get(key);
+      assets.set(key, previous ? mergeAssetFields(previous, asset) : asset);
+    }
+  }
+  return [...assets.values()];
+}
+
+function mergeAssetFields<T extends object>(previous: T, next: T): T {
+  const merged = { ...previous };
+  for (const key in next) {
+    if (next[key] !== undefined) merged[key] = next[key];
+  }
+  return merged;
 }
 
 // Copy only the canonical public metadata fields. Local URIs, backend storage
@@ -57,7 +119,7 @@ const shortLinksTools = new Set([
 ]);
 
 function isAssetTool(toolName?: string) {
-  if (toolName === "share_file") return true;
+  if (isAssistantAssetTool(toolName)) return true;
   if (!toolName) return false;
   // Native MCP tools may expose their original name or a server-qualified name.
   if (shortLinksTools.has(toolName)) return true;
@@ -101,6 +163,13 @@ export function isPreviewableImageAsset(asset: SharedAsset) {
   if (contentType.startsWith("image/") && contentType !== "image/svg+xml") return true;
   const sourceName = `${asset.fileName || ""} ${asset.path || ""}`.toLowerCase();
   return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"].some((extension) => sourceName.endsWith(extension) || sourceName.includes(`${extension} `));
+}
+
+export function isRelayPreviewImageAsset(asset: SharedAsset) {
+  const contentType = asset.contentType?.toLowerCase().split(";", 1)[0].trim();
+  if (contentType && ["image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/x-png"].includes(contentType)) return true;
+  if (contentType && contentType !== "application/octet-stream" && contentType !== "image/*") return false;
+  return /\.(?:jpe?g|png)$/i.test(asset.fileName || asset.path || "");
 }
 
 export function assetPublicURL(value: unknown): string | undefined {

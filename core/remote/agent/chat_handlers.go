@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/websocket"
 
 	domainagentrun "myai/core/domain/agentrun"
 	domaininteraction "myai/core/domain/interaction"
+	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	intentport "myai/core/port/intent"
@@ -92,6 +94,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, conn *websocket.Conn, mes
 		Compact:   compactInfoPayload(response.Compact),
 		Plan:      planPayload(response.Plan),
 		Retrieval: chatRetrievalPayload(response.Retrieval),
+		Assets:    response.assets,
 	})
 }
 
@@ -114,6 +117,7 @@ func (a *Agent) handleRegenerateMessage(ctx context.Context, conn *websocket.Con
 		Context:   contextInfoPayload(response.Context),
 		Compact:   compactInfoPayload(response.Compact),
 		Plan:      planPayload(response.Plan),
+		Assets:    response.assets,
 	})
 }
 
@@ -133,6 +137,7 @@ func (a *Agent) handleSessionPlanExecute(ctx context.Context, conn *websocket.Co
 		Context:   contextInfoPayload(response.Context),
 		Compact:   compactInfoPayload(response.Compact),
 		Plan:      planPayload(response.Plan),
+		Assets:    response.assets,
 	}); err != nil {
 		return err
 	}
@@ -148,8 +153,32 @@ func (a *Agent) handleSessionPlanExecute(ctx context.Context, conn *websocket.Co
 	return a.writeRemoteMessage(conn, protocol.TypeSessionPlanExecuteResult, message.RequestID, sessionID, result)
 }
 
-func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, run func(llm.ChatStreamHandler) (service.ChatResponse, error)) (service.ChatResponse, error) {
+type streamedChatResponse struct {
+	service.ChatResponse
+	assets []protocol.AssetSummary
+}
+
+func completionAssetSummaries(sessionID string, assets []domaintool.SharedAsset) []protocol.AssetSummary {
+	var summaries []protocol.AssetSummary
+	for _, asset := range assets {
+		if asset.SessionID != sessionID || asset.ID == "" || asset.AssetID == "" || asset.ToolCallID == "" {
+			continue
+		}
+		// Completion events carry identities and file metadata. Public sharing
+		// and authenticated previews retain their own protocol paths.
+		summaries = append(summaries, protocol.AssetSummary{
+			ID: asset.ID, AssetID: asset.AssetID, BusinessID: asset.BusinessID, Checksum: asset.Checksum,
+			SessionID: asset.SessionID, RequestID: asset.RequestID, ToolCallID: asset.ToolCallID, ToolName: asset.ToolName,
+			Path: asset.LocalPath, FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size, CreatedAt: asset.CreatedAt,
+		})
+	}
+	return summaries
+}
+
+func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, message protocol.Message, sessionID string, run func(llm.ChatStreamHandler) (service.ChatResponse, error)) (streamedChatResponse, error) {
 	// 把模型回调映射为远程协议事件，手机可分别渲染 reasoning、正文、工具和权限状态。
+	var assetMu sync.Mutex
+	var assets []domaintool.SharedAsset
 	sendErrCh := make(chan error, 1)
 	send := func(messageType protocol.MessageType, payload any) error {
 		err := a.writeRemoteMessage(conn, messageType, message.RequestID, sessionID, payload)
@@ -205,6 +234,11 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 			payload.Message = fmt.Sprintf("Reloaded %d local skill(s).", payload.Count)
 			send(protocol.TypeSkillReloadResult, payload)
 		},
+		OnAsset: func(asset domaintool.SharedAsset) {
+			assetMu.Lock()
+			defer assetMu.Unlock()
+			assets = append(assets, asset)
+		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			return a.askToolPermission(ctx, message.RequestID, sessionID, request, func(payload protocol.PermissionAskPayload) error {
 				return send(protocol.TypePermissionAsk, payload)
@@ -235,16 +269,18 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 		},
 	})
 	if err != nil {
-		return service.ChatResponse{}, err
+		return streamedChatResponse{}, err
 	}
 
 	select {
 	case err := <-sendErrCh:
-		return service.ChatResponse{}, err
+		return streamedChatResponse{}, err
 	default:
 	}
 
-	return response, nil
+	assetMu.Lock()
+	defer assetMu.Unlock()
+	return streamedChatResponse{ChatResponse: response, assets: completionAssetSummaries(sessionID, assets)}, nil
 }
 
 func (a *Agent) writePausedAssistantDone(conn *websocket.Conn, requestID string, sessionID string) error {

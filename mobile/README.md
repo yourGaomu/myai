@@ -66,13 +66,20 @@ The Agent stages the file and calls its host files service through the
 `short_links` MCP backend. It combines the mobile chunks into backend parts:
 non-final parts are **32 MiB**, and each backend MCP request is limited to
 **48 MiB** including Base64 and JSON overhead. These limits are distinct from
-the mobile chunk size; the model never transports the file bytes.
+the mobile chunk size. File upload and storage use the host files service.
 
 Uploading creates an **AssetID** and structured asset metadata without a public
 short link. Chats and knowledge-base imports reference `asset_id`; a public
 share is a separate action requiring explicit approval. The host reads metadata
-and downloads through MCP, while document parsing stays in MyAI. Resource cards
-accept upload-only metadata with no `short_url` or `code`.
+and downloads through MCP, while document parsing stays in MyAI.
+
+For JPEG and PNG attachments, the Agent can send verified image content to an
+image-capable Chat Completions provider. The selected provider receives the image
+for analysis. Conversation history keeps its asset reference. Android can fetch
+a private thumbnail through its paired Relay connection when the local image is
+unavailable, including after reopening history. `attach_image` lets the Agent
+return a workspace JPEG or PNG after user approval. These features require a
+matching Agent, Relay, and mobile client.
 
 File features require an independently deployed compatible new backend with
 its existing ten tools plus `get_asset_info`, `get_asset_download_url` and

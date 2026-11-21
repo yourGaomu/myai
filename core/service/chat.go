@@ -37,6 +37,7 @@ import (
 	domainsubagent "myai/core/domain/subagent"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
+	modelport "myai/core/port/model"
 	"myai/core/session"
 	"myai/core/skill"
 )
@@ -802,7 +803,10 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 			if finish != nil {
 				finish(queuedResponse, queuedErr)
 			}
-			if queuedErr != nil {
+			// A provider rejection of an image request has already been reported
+			// to the queued turn's subscribers. The other items can still run.
+			permanent := finish != nil && errors.Is(queuedErr, modelport.ErrImageInputRejected)
+			if queuedErr != nil && !permanent {
 				remaining := append(append([]domaingeneration.PendingTurnInputItem(nil), userItems[index:]...), mailboxItems...)
 				return ChatResponse{}, errors.Join(queuedErr, requeue(remaining))
 			}
@@ -810,7 +814,9 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 				remaining := append(append([]domaingeneration.PendingTurnInputItem(nil), userItems[index:]...), mailboxItems...)
 				return ChatResponse{}, errors.Join(ackErr, requeue(remaining))
 			}
-			response = queuedResponse
+			if queuedErr == nil {
+				response = queuedResponse
+			}
 		}
 		pendingItems = mailboxItems
 		if len(pendingItems) == 0 {

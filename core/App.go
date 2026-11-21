@@ -802,6 +802,7 @@ func (app *Application) InitChatService() {
 		AgentRunObserver:    app.memoryRunObserver(),
 		HistoryStoreFactory: app.HistoryStoreFactory(),
 		PersistenceQueue:    app.persistenceQueue,
+		AssetFiles:          app.fileService,
 	})
 	if err := app.chatService.Bootstrap(context.Background()); err != nil {
 		panic(err)
@@ -1195,7 +1196,10 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 		local.NewInstallSkillToolWithWorkspaceRegistryHooksAndSkills(app.workspace, app.skillRoot(), app.skillHubRegistry(), app.hookManager, app.skillManager),
 		local.NewAskUserTool(),
 	}
-	localTools = append(localTools, local.NewReadAssetToolWithFiles(app.fileService))
+	localTools = append(localTools, local.NewReadAssetToolWithFiles(app.fileService, func(ctx context.Context, sessionID, assetID string) (filesport.Asset, error) {
+		return app.chatService.LookupSessionAsset(ctx, sessionID, assetID)
+	}))
+	localTools = append(localTools, local.NewAttachImageToolWithWorkspaceAndFiles(app.workspace, app.fileService))
 	localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndFiles(app.workspace, app.fileService))
 	if app.knowledgeSearchService != nil {
 		localTools = append(localTools, local.NewKnowledgeSearchTool(app.knowledgeSearchService))

@@ -1,17 +1,38 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import * as DocumentPicker from "expo-document-picker";
+import { File, Paths } from "expo-file-system";
+import { Platform } from "react-native";
 
 import { maxAttachedFiles } from "../constants/app";
 import type { FileEntry, FileReadResultPayload, RelayMessage } from "../protocol";
 import type { PendingAction, ViewMode } from "../types/app";
 import type { ChatAttachment, UploadedAssetAttachment } from "../types/chat";
-import { attachmentKey, inferMimeType, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
+import { attachmentKey, inferMimeType, isImageAttachment, isWorkspaceFileAttachment, messageWithAttachedFiles, workspaceFileAttachment } from "../utils/attachments";
+import { pickedImageURI } from "../utils/assetImagePreview";
 import { AssetUploadCanceledError, AssetUploadDisconnectedError, assertAssetUploadScope, type RelayUploadScope } from "../utils/assetUpload";
 import type { UploadMobileAsset } from "./useAssetUpload";
 import { newRequestID } from "../utils/ids";
 import { parentPathOf } from "../utils/paths";
 
 type SendEnvelope = (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
+const pickedPreviewLifetimeMs = 5 * 60_000;
+const pickedPreviewMaxBytes = 64 * 1024 * 1024;
+const pickedPreviewMaxEntries = 12;
+
+function releasePickedURI(uri: string) {
+  try {
+    if (Platform.OS === "web") {
+      if (uri.startsWith("blob:")) URL.revokeObjectURL(uri);
+      return;
+    }
+    // DocumentPicker was called with copyToCacheDirectory. Never delete the
+    // original document, only its one-level copy inside the picker's cache.
+    const prefix = `${Paths.cache.uri.replace(/\/$/, "")}/DocumentPicker/`;
+    if (!uri.startsWith(prefix)) return;
+    const name = uri.slice(prefix.length);
+    if (name && name !== "." && name !== ".." && /^[a-z\d_.-]+$/i.test(name)) new File(uri).delete();
+  } catch { /* The picker or operating system may have removed the copy. */ }
+}
 
 type Args = {
   addErrorMessage: (message: string) => void;
@@ -135,11 +156,34 @@ export function useFileActions({
   }, [addErrorMessage, filePreview, isCurrentDraft, setAttachedFiles, setViewMode]);
 
   const uploadRef = useRef<{ controller: AbortController; onError: (message: string) => void } | null>(null);
+  const pickedPreviews = useRef(new Map<string, { size: number; timer: ReturnType<typeof setTimeout> }>());
+  const releasePickedPreview = useCallback((uri: string) => {
+    const previews = pickedPreviews.current;
+    const preview = previews.get(uri);
+    if (!preview) return;
+    previews.delete(uri);
+    clearTimeout(preview.timer);
+    releasePickedURI(uri);
+  }, []);
+  const retainPickedPreview = useCallback((uri: string, size: number) => {
+    const previews = pickedPreviews.current;
+    clearTimeout(previews.get(uri)?.timer);
+    previews.delete(uri);
+    const timer = setTimeout(() => releasePickedPreview(uri), pickedPreviewLifetimeMs);
+    previews.set(uri, { size, timer });
+    let bytes = [...previews.values()].reduce((total, preview) => total + preview.size, 0);
+    for (const [key, preview] of previews) {
+      if (previews.size <= pickedPreviewMaxEntries && bytes <= pickedPreviewMaxBytes) break;
+      releasePickedPreview(key);
+      bytes -= preview.size;
+    }
+  }, [releasePickedPreview]);
   useEffect(() => () => {
     const upload = uploadRef.current;
     uploadRef.current = null;
     upload?.controller.abort();
-  }, []);
+    for (const uri of pickedPreviews.current.keys()) releasePickedPreview(uri);
+  }, [releasePickedPreview]);
   const cancelFileUpload = useCallback(() => {
     const upload = uploadRef.current;
     if (!upload) return;
@@ -171,6 +215,8 @@ export function useFileActions({
     const upload = { controller, onError: addErrorMessage };
     uploadRef.current = upload;
     startPending("upload");
+    let pickedURI: string | undefined;
+    let keepPickedPreview = false;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
@@ -178,10 +224,10 @@ export function useFileActions({
         base64: false,
         type: kind === "image" ? ["image/*"] : ["image/*", "*/*"],
       });
-      if (uploadRef.current !== upload || controller.signal.aborted) return;
+      const asset = result.assets?.[0];
+      pickedURI = asset?.uri;
+      if (!asset || uploadRef.current !== upload || controller.signal.aborted) return;
       assertAssetUploadScope(scope, relayScopeRef.current);
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
       const uploaded = await uploadMobileAsset({ asset, scope, sessionID, signal: controller.signal });
       if (uploadRef.current !== upload || controller.signal.aborted) return;
       assertAssetUploadScope(scope, relayScopeRef.current);
@@ -190,8 +236,13 @@ export function useFileActions({
         content_type: uploaded.content_type || inferMimeType(asset.name, asset.mimeType),
         file_name: uploaded.file_name || asset.name || "已上传文件",
         kind: "uploaded_asset",
-        local_uri: asset.uri,
       };
+      const localURI = isImageAttachment(attachment) ? pickedImageURI(pickedURI) : undefined;
+      if (localURI) {
+        retainPickedPreview(localURI, uploaded.size);
+        attachment.local_uri = localURI;
+        keepPickedPreview = true;
+      }
       // The setter belongs to the originating draft. Never move the visible
       // screen or attach to whichever session happens to be open now.
       setAttachedFiles((current) => {
@@ -205,12 +256,13 @@ export function useFileActions({
         addErrorMessage(failure instanceof Error ? failure.message : "文件上传失败，请稍后重试。");
       }
     } finally {
+      if (pickedURI && !keepPickedPreview) releasePickedURI(pickedURI);
       if (uploadRef.current === upload) {
         uploadRef.current = null;
         stopPending("upload");
       }
     }
-  }, [addErrorMessage, isCurrentDraft, relayScopeRef, sessionID, setAttachedFiles, startPending, stopPending, uploadMobileAsset]);
+  }, [addErrorMessage, isCurrentDraft, relayScopeRef, retainPickedPreview, sessionID, setAttachedFiles, startPending, stopPending, uploadMobileAsset]);
 
   const removeAttachedFile = useCallback((key: string) => {
     setAttachedFiles((current) => current.filter((file) => attachmentKey(file) !== key));

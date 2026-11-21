@@ -20,8 +20,8 @@ func (MistralChatAdapter) ValidateConfig(config modelport.CreationConfig) error 
 	return validateMistralConfig(config)
 }
 
-func (MistralChatAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
-	if err := (MistralChatAdapter{}).ValidateConfig(config); err != nil {
+func (adapter MistralChatAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
+	if err := adapter.ValidateConfig(config); err != nil {
 		return nil, err
 	}
 	// The native SDK creates requests without ctx and performs hidden retries.
@@ -37,5 +37,5 @@ func (MistralChatAdapter) CreateModel(config modelport.CreationConfig) (modelpor
 	if config.ModelName == "" {
 		config.ModelName = "open-mistral-7b"
 	}
-	return createOpenAIChatModel(config, true)
+	return createOpenAIChatModel(config, adapter.Protocol())
 }

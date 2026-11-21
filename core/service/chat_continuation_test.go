@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -257,6 +260,93 @@ func TestQueuedUserInputStartsItsOwnBackgroundTurn(t *testing.T) {
 	}
 	if !observedDelta || !observedCompletion {
 		t.Fatalf("queued answer was not streamed to completion: delta=%v completed=%v", observedDelta, observedCompletion)
+	}
+}
+
+type imageAckTestQueue struct {
+	*pendinginput.Queue
+	attempts []string
+	ackError error
+}
+
+func (queue *imageAckTestQueue) Acknowledge(id string) error {
+	queue.attempts = append(queue.attempts, id)
+	if queue.ackError != nil && id == "img-request" {
+		return queue.ackError
+	}
+	return queue.Queue.Acknowledge(id)
+}
+
+func TestQueuedUserImageRejectionCompletesOnlyTheRejectedItem(t *testing.T) {
+	ackError := errors.New("ack unavailable")
+	transient := errors.New("model unavailable")
+	for _, tc := range []struct {
+		name       string
+		background bool
+		failure    error
+		ackError   error
+		wantErr    error
+		wantAck    []string
+		wantCalls  []string
+		wantQueued []string
+	}{
+		{name: "background rejection", background: true, failure: modelport.ErrImageInputRejected,
+			wantAck: []string{"img-request", "next-request", "mailbox"}, wantCalls: []string{"one image", "plain next", "child result mailbox"}},
+		{name: "background with failed ack", background: true, failure: modelport.ErrImageInputRejected, ackError: ackError, wantErr: ackError,
+			wantAck: []string{"img-request"}, wantCalls: []string{"one image"}, wantQueued: []string{"img-request", "next-request", "mailbox"}},
+		{name: "foreground rejection", failure: modelport.ErrImageInputRejected, wantErr: modelport.ErrImageInputRejected,
+			wantCalls: []string{"one image"}, wantQueued: []string{"img-request", "next-request", "mailbox"}},
+		{name: "background transient failure", background: true, failure: transient, wantErr: transient,
+			wantCalls: []string{"one image"}, wantQueued: []string{"img-request", "next-request", "mailbox"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			queue := &imageAckTestQueue{Queue: pendinginput.NewQueue(), ackError: tc.ackError}
+			service := NewChatService(ChatDependencies{
+				Models: autoPlanModelRegistry{}, TurnInputQueue: queue,
+				MessageCommands: &recordingAutoPlanMessages{current: &session.Session{ID: "parent", Model: "test"}},
+				GenerationTasks: continuationGenerator(func(_ context.Context, cmd generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
+					calls = append(calls, cmd.LatestInput)
+					if cmd.LatestInput == "one image" {
+						return generationresult.GenerationResponse{}, fmt.Errorf("generation failed: %w", tc.failure)
+					}
+					return generationresult.GenerationResponse{Result: modelport.ChatResult{Content: "answered"}}, nil
+				}),
+			})
+			events, unsubscribe := service.SubscribeBackgroundTurns(8)
+			defer unsubscribe()
+			if err := queue.EnqueueNextTurn("parent", "img-request", "one image"); err != nil {
+				t.Fatal(err)
+			}
+			if err := queue.EnqueueNextTurn("parent", "next-request", "plain next"); err != nil {
+				t.Fatal(err)
+			}
+			if err := queue.EnqueueAgentMessage("parent", childCompletion("mailbox")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.continuePendingStreamForSession(t.Context(), "parent", llm.ChatStreamHandler{}, tc.background); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("generation error = %v, want %v", err, tc.wantErr)
+			}
+			var queued []string
+			for _, item := range queue.DrainIdentified("parent") {
+				queued = append(queued, item.ID)
+			}
+			if !reflect.DeepEqual(calls, tc.wantCalls) || !reflect.DeepEqual(queue.attempts, tc.wantAck) || !reflect.DeepEqual(queued, tc.wantQueued) {
+				t.Fatalf("calls=%v ack=%v queued=%v", calls, queue.attempts, queued)
+			}
+			if tc.background {
+				select {
+				case event := <-events:
+					if event.RequestID != "img-request" || event.Kind != "completed" || event.Status != "failed" || !strings.Contains(event.Error, tc.failure.Error()) {
+						t.Fatalf("wrong queued failure event: %+v", event)
+					}
+				default:
+					t.Fatal("queued failure did not emit a completion event")
+				}
+			} else if len(events) != 0 {
+				t.Fatal("foreground failure emitted a background event")
+			}
+		})
 	}
 }
 

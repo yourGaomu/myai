@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	domainagentrun "myai/core/domain/agentrun"
 	domaininteraction "myai/core/domain/interaction"
+	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
 )
 
@@ -24,6 +25,7 @@ type BackgroundTurnEvent struct {
 	ApprovalID                              string
 	Permission                              *llm.ToolPermissionRequest
 	Question                                *domaininteraction.Request
+	Assets                                  []domaintool.SharedAsset
 }
 
 type backgroundInteraction struct {
@@ -107,6 +109,7 @@ func (s *ChatService) SubscribeBackgroundTurns(buffer int) (<-chan BackgroundTur
 }
 
 func cloneBackgroundEvent(event BackgroundTurnEvent) BackgroundTurnEvent {
+	event.Assets = domaintool.CloneSharedAssets(event.Assets)
 	if event.Permission != nil {
 		permission := *event.Permission
 		event.Permission = &permission
@@ -252,6 +255,7 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 	var sequence uint64
 	var runID string
 	var finishedRun *domainagentrun.Run
+	var assets []domaintool.SharedAsset
 	identify := func(event BackgroundTurnEvent) BackgroundTurnEvent {
 		if event.Run != nil {
 			runID = event.Run.ID
@@ -278,6 +282,11 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 		OnRunCompleted: func(run domainagentrun.Run) { mu.Lock(); finishedRun = &run; mu.Unlock() },
 		OnAnswer:       func(text string) { emit(BackgroundTurnEvent{Kind: "delta", Content: text}) },
 		OnReasoning:    func(text string) { emit(BackgroundTurnEvent{Kind: "delta", Reasoning: text}) },
+		OnAsset: func(asset domaintool.SharedAsset) {
+			mu.Lock()
+			defer mu.Unlock()
+			assets = append(assets, asset)
+		},
 		OnToolAsk: func(request llm.ToolPermissionRequest) bool {
 			id := uuid.NewString()
 			result := ask(BackgroundTurnEvent{Kind: "permission_ask", ApprovalID: id, Permission: &request}, turnCtx)
@@ -314,11 +323,14 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 			}
 		}
 		mu.Lock()
-		run := finishedRun
-		mu.Unlock()
-		emit(BackgroundTurnEvent{
+		defer mu.Unlock()
+		event := BackgroundTurnEvent{
 			Kind: "completed", Status: status, Error: errorText, MessageID: messageID,
-			Content: response.Result.Content, Reasoning: response.Result.Reasoning, Run: run,
-		})
+			Content: response.Result.Content, Reasoning: response.Result.Reasoning, Run: finishedRun,
+		}
+		if err == nil {
+			event.Assets = assets
+		}
+		s.publishBackgroundTurn(identify(event))
 	}
 }

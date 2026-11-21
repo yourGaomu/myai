@@ -15,6 +15,7 @@ import { SideDrawer } from "../components/navigation/SideDrawer";
 import type { ChangeEntry, RelayMessage } from "../protocol";
 import type { QuestionSync } from "../types/app";
 import type { RelayPairing } from "../utils/relayPairing";
+import { AssetPreviewConnectionContext, useAssetImagePreview } from "../hooks/useAssetImagePreview";
 import { useAssetState } from "../hooks/useAssetState";
 import { useAssetUpload } from "../hooks/useAssetUpload";
 import { useAgentRunState } from "../hooks/useAgentRunState";
@@ -473,6 +474,7 @@ function PairedWorkspace({
     hasMoreMessages: inspectionHasMoreMessages,
     inspectedTask,
     inspectedTaskID,
+    inspectionOriginID,
     loadingDetail: inspectionLoadingDetail,
     loadingEvents: inspectionLoadingEvents,
     loadingMoreMessages: inspectionLoadingMoreMessages,
@@ -491,6 +493,11 @@ function PairedWorkspace({
     requestTaskDetail,
     requestTaskEvents,
     tasks: subagentTasks,
+  });
+  const inspectionVisible = Boolean(inspectedTaskID && inspectionOriginID === sessionID);
+  const { previewConnection, syncPreviewConnection, handleAssetPreviewMessage } = useAssetImagePreview({
+    relayScopeRef, sessionIDRef, sessionID, sendEnvelope,
+    inspectionSessionID: inspectionVisible ? inspectedTask?.child_session_id : undefined,
   });
 
   const { setPluginEnabled } = usePluginActions({
@@ -986,13 +993,15 @@ function PairedWorkspace({
   }, [getSessionChats, inspectedTaskID, refreshInspection, refreshRemoteState, requestAIMemories, requestAIMemoryCandidates, requestAIMemoryDreamRuns, requestAIMemoryExtractionJobs, requestAgentRuns, requestCatalog, requestIntentConfig, requestProfiles, requestSessionHistory, requestSubagentDefinitions, sessionIDRef]);
 
   const handleConnected = useCallback(() => {
+    syncPreviewConnection();
     reconnectAssetUploads();
     reconnectKnowledgeUploads();
     requestUserQuestionSync();
     refreshAllRemoteState();
-  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestUserQuestionSync]);
+  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestUserQuestionSync, syncPreviewConnection]);
 
   const handleDisconnected = useCallback(() => {
+    syncPreviewConnection();
     questionSyncRef.current = null;
     resetRemoteQueries();
     disconnectModelDelete();
@@ -1000,12 +1009,12 @@ function PairedWorkspace({
     disconnectKnowledgeUploads();
     disconnectAssetUploads();
     stopPending("pause");
-  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetRemoteQueries, stopPending]);
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetRemoteQueries, stopPending, syncPreviewConnection]);
 
   const dispatchRelayMessage = useCallback((message: RelayMessage) => {
-    if (handleKnowledgeUploadMessage(message)) return;
+    if (handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
     handleRemoteMessage(message);
-  }, [handleKnowledgeUploadMessage, handleRemoteMessage]);
+  }, [handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
   useLayoutEffect(() => {
     onEnqueueFailureRef.current = dispatchRelayMessage;
   }, [dispatchRelayMessage]);
@@ -1374,6 +1383,7 @@ function PairedWorkspace({
       header={header}
       scrollEnabled={viewMode !== "chat" && viewMode !== "changeDetail"}
     >
+      <AssetPreviewConnectionContext value={previewConnection}>
       <MobileMainContent
         changes={{
           canOpenSelectedChangeFile,
@@ -1397,6 +1407,7 @@ function PairedWorkspace({
         }}
         chat={{
           activeAssistantID: currentChat.activeAssistantID,
+          assets,
           activePlan: activeSession?.current_plan,
           activitySlot: currentActivitySlot,
           changesCount: changes.length,
@@ -1648,8 +1659,9 @@ function PairedWorkspace({
         sessionReady={inspectionSessionReady}
         task={inspectedTask}
         taskEvents={inspectionTaskEvents}
-        visible={Boolean(inspectedTaskID)}
+        visible={inspectionVisible}
       />
+      </AssetPreviewConnectionContext>
 
       {/* 全局侧栏：新对话、文件、变更、知识库、按日期分组的会话、设置、回收站 */}
       <SideDrawer

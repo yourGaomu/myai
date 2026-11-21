@@ -25,11 +25,11 @@ func (OpenAIChatCompletionsAdapter) ValidateConfig(config modelport.CreationConf
 	return validateOpenAIConfig(config)
 }
 
-func (OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
-	return createOpenAIChatModel(config, false)
+func (adapter OpenAIChatCompletionsAdapter) CreateModel(config modelport.CreationConfig) (modelport.ChatModelPort, error) {
+	return createOpenAIChatModel(config, adapter.Protocol())
 }
 
-func createOpenAIChatModel(config modelport.CreationConfig, legacyMaxTokens bool) (modelport.ChatModelPort, error) {
+func createOpenAIChatModel(config modelport.CreationConfig, protocol domainmodel.Protocol) (modelport.ChatModelPort, error) {
 	if err := (OpenAIChatCompletionsAdapter{}).ValidateConfig(config); err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func createOpenAIChatModel(config modelport.CreationConfig, legacyMaxTokens bool
 		openai.WithModel(config.ModelName),
 	}
 	var transport http.RoundTripper = assistantReplayTransport{base: modelTransport{base: http.DefaultTransport}}
-	transport = generationSettingsTransport{base: transport, legacyMaxTokens: legacyMaxTokens}
+	transport = generationSettingsTransport{base: transport, legacyMaxTokens: protocol == domainmodel.ProtocolMistralChat}
 	if domainmodel.NormalizeAuthType(config.AuthType) == domainmodel.AuthTypeNone {
 		transport = stripAuthorizationTransport{base: transport}
 	}
@@ -55,7 +55,11 @@ func createOpenAIChatModel(config modelport.CreationConfig, legacyMaxTokens bool
 	if err != nil {
 		return nil, err
 	}
-	return &corellm.Model{LlmModel: model, RequireStreamStopReason: true}, nil
+	return &corellm.Model{
+		LlmModel: model, RequireStreamStopReason: true,
+		// Both adapters use the SDK's Chat Completions image_url wire format.
+		ChatCompletionsImages: protocol == domainmodel.ProtocolOpenAIChatCompletions || protocol == domainmodel.ProtocolMistralChat,
+	}, nil
 }
 
 type stripAuthorizationTransport struct {
