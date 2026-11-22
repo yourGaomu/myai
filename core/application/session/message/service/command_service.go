@@ -48,11 +48,17 @@ func (s CommandService) AppendUserMessage(ctx context.Context, command messageco
 			return messageresult.Command{}, fmt.Errorf("source message id %q conflicts with existing session message", command.SourceID)
 		}
 	}
-	runtimeInstruction := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForceAutonomousPlanning)
+	runtimeInstruction, skillPromptTokens := s.runtimeInstruction(ctx, current, command.Input, command.ForceChatMode, command.ForceAutonomousPlanning)
 	turn := &session.Session{}
 	turn.AddUserTurnWithMetadata(command.RAGContext, runtimeInstruction, command.Input, command.SyntheticReason, command.SourceID, command.SourceKind, command.SourceTaskID)
 	var appended []domainmessage.Message
 	if memory, ok := s.Memory.(sessionport.TranscriptStore); ok {
+		for index := range turn.Messages {
+			if turn.Messages[index].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) {
+				turn.Messages[index].SkillPromptTokens = skillPromptTokens
+				break
+			}
+		}
 		current, appended, err = memory.AppendMessagesTo(current.ID, turn.Messages...)
 	} else {
 		messageCount := len(current.Messages)
@@ -96,16 +102,20 @@ func (s CommandService) PrepareRegeneration(ctx context.Context, command message
 	return messageresult.Command{Session: current, Input: input, RuntimeInstruction: latestRuntimeInstruction(current.Messages)}, nil
 }
 
-func (s CommandService) runtimeInstruction(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) string {
+func (s CommandService) runtimeInstruction(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) (string, int) {
 	if s.RuntimeInstructions == nil {
-		return ""
+		return "", 0
+	}
+	if provider, ok := s.RuntimeInstructions.(messageport.AccountingRuntimeInstructionProvider); ok {
+		text, skillPromptTokens := provider.PromptForModeWithAccounting(ctx, current, input, forceChatMode, forceAutonomousPlanning)
+		return strings.TrimSpace(text), skillPromptTokens
 	}
 	if forceAutonomousPlanning {
 		if provider, ok := s.RuntimeInstructions.(messageport.PlanningRuntimeInstructionProvider); ok {
-			return strings.TrimSpace(provider.PromptForMode(ctx, current, input, forceChatMode, true))
+			return strings.TrimSpace(provider.PromptForMode(ctx, current, input, forceChatMode, true)), 0
 		}
 	}
-	return strings.TrimSpace(s.RuntimeInstructions.Prompt(ctx, current, input, forceChatMode))
+	return strings.TrimSpace(s.RuntimeInstructions.Prompt(ctx, current, input, forceChatMode)), 0
 }
 
 func latestRuntimeInstruction(messages []domainmessage.Message) string {

@@ -21,13 +21,17 @@ type ViperLoader struct {
 	ConfigFile string
 }
 
-func (l ViperLoader) Load(workspace string) (Properties, error) {
-	// YAML 提供默认值，环境变量覆盖部署差异；workspace 用于解析 Skill 等相对路径。
+func (l ViperLoader) source(path string) *viper.Viper {
 	v := viper.New()
-	v.SetConfigFile(l.configFile())
+	v.SetConfigFile(path)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	return v
+}
 
+func (l ViperLoader) Load(workspace string) (Properties, error) {
+	// YAML provides defaults and deployment environment variables override them.
+	v := l.source(l.configFile())
 	if err := v.ReadInConfig(); err != nil {
 		return Properties{}, err
 	}
@@ -35,10 +39,7 @@ func (l ViperLoader) Load(workspace string) (Properties, error) {
 }
 
 func (l ViperLoader) LoadOptional(workspace string) (Properties, bool, error) {
-	v := viper.New()
-	v.SetConfigFile(l.configFile())
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
+	v := l.source(l.configFile())
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
@@ -49,6 +50,30 @@ func (l ViperLoader) LoadOptional(workspace string) (Properties, bool, error) {
 	}
 	properties, err := l.Map(v, workspace)
 	return properties, true, err
+}
+
+// ConfigPath resolves the explicit or default source relative to the process
+// working directory, independently of the workspace used for declarations.
+func (l ViperLoader) ConfigPath() (string, error) {
+	path, err := filepath.Abs(l.configFile())
+	if err != nil {
+		return "", errors.New("cannot resolve application configuration path")
+	}
+	return path, nil
+}
+
+// LoadMCP reads the same MCP keys as application startup without mapping or
+// validating unrelated deployment settings. It does not resolve header values.
+func (l ViperLoader) LoadMCP() (MCPProperties, error) {
+	path, err := l.ConfigPath()
+	if err != nil {
+		return MCPProperties{}, err
+	}
+	v := l.source(path)
+	if err := v.ReadInConfig(); err != nil {
+		return MCPProperties{}, errors.New("cannot read MCP declaration configuration")
+	}
+	return mapMCP(v)
 }
 
 func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
@@ -318,25 +343,31 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	if err := v.UnmarshalKey("hooks.commands", &properties.Hooks.Commands); err != nil {
 		return Properties{}, err
 	}
-	if err := v.UnmarshalKey("mcp.servers", &properties.MCP.Servers); err != nil {
+	mcpProperties, err := mapMCP(v)
+	if err != nil {
 		return Properties{}, err
 	}
-	// 1. 新短链服务仅通过 MCP 接入；显式服务器配置优先，避免重复注册工具。
+	properties.MCP = mcpProperties
+	return properties, nil
+}
+
+func mapMCP(v *viper.Viper) (MCPProperties, error) {
+	var properties MCPProperties
+	if err := v.UnmarshalKey("mcp.servers", &properties.Servers); err != nil {
+		return MCPProperties{}, errors.New("invalid MCP server declarations")
+	}
+	// An explicit short_links declaration (including a disabled one) wins.
 	if endpoint := strings.TrimSpace(v.GetString("short_links.mcp_url")); endpoint != "" {
-		configured := false
-		for _, server := range properties.MCP.Servers {
+		for _, server := range properties.Servers {
 			if strings.TrimSpace(server.Name) == "short_links" {
-				configured = true
-				break
+				return properties, nil
 			}
 		}
-		if !configured {
-			properties.MCP.Servers = append(properties.MCP.Servers, MCPServerProperties{
-				Name: "short_links", URL: endpoint,
-				Headers:    map[string]string{"X-API-Key": "${SHORT_LINKS_API_KEY}"},
-				Permission: "execute", TimeoutSeconds: 60, Required: false,
-			})
-		}
+		properties.Servers = append(properties.Servers, MCPServerProperties{
+			Name: "short_links", URL: endpoint,
+			Headers:    map[string]string{"X-API-Key": "${SHORT_LINKS_API_KEY}"},
+			Permission: "execute", TimeoutSeconds: 60,
+		})
 	}
 	return properties, nil
 }

@@ -9,6 +9,9 @@ import (
 
 type ToolOutput = domaintool.ToolOutput
 
+// ImageAssetID identifies a session-authorized image read in an internal execution result.
+type ImageAssetID string
+
 func SuccessOutput(content string) ToolOutput {
 	return domaintool.SuccessOutput(content)
 }
@@ -35,6 +38,12 @@ type UserInteraction interface {
 
 type ExplicitApproval interface {
 	RequiresExplicitApproval() bool
+}
+
+// PermissionIdentity identifies the resolved external tool independently of its exposed name.
+// An empty identity means permission cannot be remembered for this tool.
+type PermissionIdentity interface {
+	PermissionIdentity() string
 }
 
 // SandboxedShell attests that this shell invocation will use an OS sandbox.

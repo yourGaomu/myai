@@ -21,6 +21,7 @@ import (
 	"myai/core/mcp"
 	filesport "myai/core/port/files"
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 type mockBackend struct {
@@ -101,7 +102,7 @@ func (b *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	case "tools/list":
-		names := append(append([]string(nil), uploadTools...), "get_asset_info", "get_asset_download_url", "create_asset_shortlink", "create_url_shortlink", "upload_file_and_share")
+		names := append(append([]string(nil), uploadTools...), "cancel_asset_upload", "get_asset_info", "get_asset_download_url", "create_asset_shortlink", "create_url_shortlink", "upload_file_and_share")
 		infos := make([]mcp.ToolInfo, 0, len(names))
 		for _, name := range names {
 			infos = append(infos, mcp.ToolInfo{Name: name})
@@ -170,7 +171,7 @@ func startService(t *testing.T, backend *mockBackend) (*Service, *mcp.Manager, *
 	server := httptest.NewServer(backend)
 	t.Cleanup(server.Close)
 	registry := tool.NewRegisterTools()
-	manager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: server.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
+	manager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: server.URL + "/api/mcp", Required: true, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), TimeoutSeconds: 5,
 		Headers: map[string]string{"Authorization": "Bearer secret", "X-API-Key": "api-secret"}}}})
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
 		t.Fatal(err)
@@ -281,7 +282,7 @@ func TestMultipartLeaseSurvivesReloadDuringTransfer(t *testing.T) {
 	candidate := newBackend()
 	candidateServer := httptest.NewServer(candidate)
 	defer candidateServer.Close()
-	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true}}}, registry); err != nil {
+	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}, registry); err != nil {
 		close(resume)
 		t.Fatal(err)
 	}

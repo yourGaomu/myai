@@ -94,6 +94,8 @@ export type MessageType =
   | "plugin_enable"
   | "plugin_disable"
   | "plugin_mutation_result"
+  | "mcp_list"
+  | "mcp_list_result"
   | "mcp_reload"
   | "mcp_reload_result"
   | "background_turn_event"
@@ -825,7 +827,22 @@ export type SessionRegeneratePayload = {
   session_id?: string;
 };
 
+// Local estimates for the latest completed successful model request.
+export type RequestContext = {
+  model: string;
+  window_tokens: number;
+  message_tokens: number;
+  system_tokens: number;
+  skill_tokens: number;
+  mcp_tool_tokens: number;
+  other_tool_tokens: number;
+  other_tokens: number;
+  output_reserve_tokens: number;
+  safety_reserve_tokens: number;
+};
+
 export type ContextInfo = {
+  request_context?: RequestContext;
   window_k?: number;
   full_tokens?: number;
   selected_tokens?: number;
@@ -1112,6 +1129,17 @@ export type PluginMutationResultPayload = {
   plugins?: PluginInfo[];
   count?: number;
   message?: string;
+};
+
+export type MCPServerSummary = {
+  name: string;
+  state: "loaded" | "disabled" | "unavailable";
+  inventory_tool_count: number;
+  exposed_tool_count: number;
+};
+
+export type MCPListResultPayload = {
+  servers: MCPServerSummary[];
 };
 
 export type MCPReloadPayload = {};

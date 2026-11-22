@@ -26,6 +26,7 @@ import (
 	"myai/core/session"
 	"myai/core/tool"
 	"myai/core/tool/local"
+	"myai/core/trust"
 )
 
 func TestMCPFileShareReadAndKnowledgeIngest(t *testing.T) {
@@ -163,7 +164,7 @@ func TestMCPFileShareReadAndKnowledgeIngest(t *testing.T) {
 	var manager *mcp.Manager
 	files := filesadapter.New(func() *mcp.Manager { return manager })
 	manager = mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{
-		Name: "short_links", URL: backend.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
+		Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), Name: "short_links", URL: backend.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
 		Headers: map[string]string{"X-Integration-MCP": "composition"},
 	}}})
 	defer manager.Close()

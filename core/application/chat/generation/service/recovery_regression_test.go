@@ -382,6 +382,10 @@ func TestImageInputLimitsCountAndTotalDownloadBytes(t *testing.T) {
 	}
 }
 
+type visionTools struct{ tools []modelport.Tool }
+
+func (v visionTools) ToolsForSession(*session.Session, bool) []modelport.Tool { return v.tools }
+
 type visionRecordSink struct{ recorded []command.ToolExecutionRecord }
 
 func (sink *visionRecordSink) RecordToolExecution(_ context.Context, record command.ToolExecutionRecord) {
@@ -429,6 +433,7 @@ func TestAgentLoopVisionReadAssetUsesExecutedCallsAndPreservesBatchAndRecords(t 
 	service := AgentLoopService{
 		Sessions: memory, Contexts: contextservice.SnapshotService{}, AssetFiles: fileService, LookupSessionAsset: fileService.lookup,
 		ToolExecutor: toolexecutor.Executor{Registry: registry, Hooks: hook}, ToolRecords: records,
+		Tools: visionTools{registry.LLMTools()},
 	}
 	response, err := service.Run(t.Context(), command.Run{Session: current, Model: model})
 	if err != nil || response.Content != "finished" || model.calls != 2 {
@@ -474,11 +479,36 @@ func TestAgentLoopVisionReadAssetUsesExecutedCallsAndPreservesBatchAndRecords(t 
 	if rendering := fmt.Sprintf("%#v", next.Images); strings.Contains(rendering, "[]uint8") || strings.Contains(rendering, base64.StdEncoding.EncodeToString(extra.Data)) {
 		t.Fatal("image bytes leaked through Go request formatting")
 	}
-	fresh := &visionModel{}
-	if _, err := service.Run(t.Context(), command.Run{Session: stored, Model: fresh}); err != nil {
+	if response.Message == nil || len(response.Message.ImageReceipts) != 2 {
+		t.Fatal("successful sample did not record both image projections")
+	}
+	committed, err := (ResponseCommitService{Memory: memory}).Commit(command.Commit{Session: stored, Result: response})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fresh.requests[0].Images) != 1 || len(fileService.requests) != 3 || fileService.requests[2].AssetID != "photo" {
-		t.Fatal("historical tool response was replayed as a new image or old bytes crossed a run boundary")
+	// Mention the same image as an explicit attachment in the next turn.
+	// It must not steal the historical tool image's location.
+	if _, _, err := memory.AppendMessagesTo("session", imageMessage("describe it again", extra)); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &visionModel{}
+	if _, err := service.Run(t.Context(), command.Run{Session: committed.Session, Model: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.requests[0].Images) != 2 || len(fileService.requests) != 4 || fileService.requests[2].AssetID != "photo" || fileService.requests[3].AssetID != "extra" {
+		t.Fatal("historical images were not revalidated and replayed")
+	}
+	if replay := fresh.requests[0].Images[1]; replay.MessageIndex != index || !bytes.Equal(replay.Bytes(), extra.Data) {
+		t.Fatal("replayed tool image moved or changed")
+	}
+	service.Tools = nil
+	revoked := &visionModel{}
+	if _, err := service.Run(t.Context(), command.Run{Session: committed.Session, Model: revoked}); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range revoked.requests[0].Images {
+		if strings.Contains(revoked.requests[0].Messages[image.MessageIndex].Text(), "Image from read_asset") {
+			t.Fatal("revoked tool permission did not prevent historical image replay")
+		}
 	}
 }

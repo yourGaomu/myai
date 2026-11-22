@@ -12,6 +12,7 @@ import (
 	"myai/core/adapter/persistence/mongo/po"
 	mongotemplate "myai/core/adapter/persistence/mongo/template"
 
+	domainmessage "myai/core/domain/message"
 	repository "myai/core/port/repository"
 )
 
@@ -46,9 +47,34 @@ func TestStoreDelegatesImmutableMessageUpsertToTemplate(t *testing.T) {
 	if !ok || inserted.ID != "message-1" || update["$set"] != nil {
 		t.Fatalf("unexpected immutable upsert: %#v", operations.update)
 	}
-	filter := operations.filter.(bson.M)
-	if filter["_id"] != message.ID || filter["session_id"] != message.SessionID {
+	filter := operations.filter.(bson.D)
+	fields := bson.M{}
+	for _, field := range filter {
+		fields[field.Key] = field.Value
+	}
+	if fields["_id"] != message.ID || fields["session_id"] != message.SessionID {
 		t.Fatalf("immutable identity filter missing: %#v", filter)
+	}
+	for _, key := range []string{"image_receipts", "request_context", "skill_prompt_tokens"} {
+		if absent, ok := fields[key].(bson.M); !ok || absent["$exists"] != false {
+			t.Fatalf("missing immutable absence match for %s: %#v", key, filter)
+		}
+	}
+
+	message.ImageReceipts = []domainmessage.ImageReceipt{{Version: 1, AssetID: "first"}, {Version: 1, AssetID: "second"}}
+	message.RequestContext = &domainmessage.RequestContext{Model: "model", WindowTokens: 8000}
+	message.SkillPromptTokens = 31
+	if err := store.SaveMessage(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range operations.filter.(bson.D) {
+		fields[field.Key] = field.Value
+	}
+	if receipts, ok := fields["image_receipts"].(bson.A); !ok || len(receipts) != 2 || fields["skill_prompt_tokens"] != int32(31) {
+		t.Fatalf("private metadata missing from immutable filter: %#v", fields)
+	}
+	if context, ok := fields["request_context"].(bson.D); !ok || len(context) != 10 || context[0].Key != "model" {
+		t.Fatalf("request context must match the complete ordered document: %#v", fields)
 	}
 }
 

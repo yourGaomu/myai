@@ -90,6 +90,10 @@ func (s ResponseCommitService) Commit(command generationcommand.Commit) (generat
 	return generationresult.Commit{Plan: captured, Session: snapshot, AssistantMessage: committed}, planErr
 }
 
+func (s ResponseCommitService) DiscardRequestMetadata(current *session.Session, message domainmessage.Message) {
+	discardRequestMetadata(s.Memory, current, []domainmessage.Message{message})
+}
+
 func (s ResponseCommitService) planCapturer() generationport.PlanCapturer {
 	if s.PlanCapturer != nil {
 		return s.PlanCapturer

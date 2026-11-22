@@ -22,5 +22,14 @@ func (s QueryService) Info(ctx context.Context, current *session.Session) contex
 	if s.Contexts == nil {
 		return contextmgr.Info{WindowK: contextmgr.DefaultWindowK}
 	}
-	return s.Contexts.Snapshot(current).Info
+	info := s.Contexts.Snapshot(current).Info
+	for index := len(current.Messages) - 1; index >= 0; index-- {
+		message := current.Messages[index]
+		if sample := message.RequestContext; sample != nil {
+			copy := *sample
+			info.RequestContext = &copy
+			break
+		}
+	}
+	return info
 }

@@ -6,6 +6,7 @@ type permissionRuleTarget struct {
 	sessionID           string
 	toolName            string
 	permission          string
+	identity            string
 	requireFreshConsent bool
 }
 

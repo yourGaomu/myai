@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	outboxencoding "myai/core/adapter/persistence/outbox/encoding"
+	"myai/core/domain/message"
 	outbox "myai/core/port/outbox"
 	repository "myai/core/port/repository"
 )
@@ -119,8 +121,58 @@ func TestJournalReplaysLegacyAndPromptCacheUsageBatches(t *testing.T) {
 	}
 	legacy, current := pending[0].Batch, pending[1].Batch
 	if legacy.Messages[0].PromptCachedTokens != 2 || legacy.Messages[0].PromptCacheReported || legacy.Metadata.Usage.PromptCacheReported ||
-		current.Messages[0] != newer.Messages[0] || *current.Metadata.LastUsage != *newer.Metadata.LastUsage {
+		legacy.Messages[0].ImageReceipts != nil || legacy.Messages[0].RequestContext != nil || legacy.Messages[0].SkillPromptTokens != 0 ||
+		!reflect.DeepEqual(current.Messages[0], newer.Messages[0]) || *current.Metadata.LastUsage != *newer.Metadata.LastUsage {
 		t.Fatalf("usage changed during replay: legacy=%+v current=%+v", legacy, current)
+	}
+}
+
+func TestJournalRestoresPrivateRequestMetadataAndRejectsSameIDChanges(t *testing.T) {
+	ctx := context.Background()
+	path := testPath(t)
+	j := mustOpen(t, path, testOptions())
+	batch := testBatch("sampling", "session")
+	record := &batch.Messages[0]
+	record.Role = repository.RoleToolCall
+	record.ImageReceipts = []message.ImageReceipt{
+		{Version: 1, AssetID: "first", SHA256: "first-sha", MIMEType: "image/png", SourceMessageID: "user", AnchorMessageID: "user"},
+		{Version: 1, AssetID: "second", SHA256: "second-sha", MIMEType: "image/jpeg", SourceMessageID: "result", AnchorMessageID: "batch-end", ToolCallID: "call"},
+	}
+	record.RequestContext = &message.RequestContext{Model: "test", WindowTokens: 8000, MessageTokens: 12}
+	batch.Messages = append(batch.Messages, repository.MessageRecord{
+		ID: "runtime", SessionID: "session", Role: repository.RoleUser, Content: "runtime", SkillPromptTokens: 23,
+		CreatedAt: record.CreatedAt, Sequence: record.Sequence - 1,
+	})
+	if _, err := j.Append(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j = mustOpen(t, path, testOptions())
+	pending, err := j.Pending(ctx)
+	if err != nil || len(pending) != 1 || !reflect.DeepEqual(pending[0].Batch, batch) {
+		t.Fatalf("private metadata did not survive restart: %+v, %v", pending, err)
+	}
+	for name, change := range map[string]func(outbox.Batch){
+		"receipt order": func(b outbox.Batch) {
+			r := b.Messages[0].ImageReceipts
+			r[0], r[1] = r[1], r[0]
+		},
+		"context omitted":  func(b outbox.Batch) { b.Messages[0].RequestContext = nil },
+		"skill provenance": func(b outbox.Batch) { b.Messages[1].SkillPromptTokens++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed, _, err := outboxencoding.Freeze(batch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed.ID = "another batch"
+			change(changed)
+			if _, err := j.Append(ctx, changed); err != outbox.ErrConflict {
+				t.Fatalf("same record ID with changed metadata: %v", err)
+			}
+		})
 	}
 }
 

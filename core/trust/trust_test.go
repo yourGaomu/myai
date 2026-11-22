@@ -82,6 +82,36 @@ func TestConfirmationPersistsOnlyExplicitApproval(t *testing.T) {
 	}
 }
 
+func TestGrantChecksOnlyItsOriginalApproval(t *testing.T) {
+	ctx := context.Background()
+	request := requestForTest(t, t.TempDir(), map[string]string{"command": "fixture"})
+	store := NewStore(filepath.Join(t.TempDir(), "trust.json"))
+	for _, persist := range []bool{false, true} {
+		confirmations := 0
+		policy := &Policy{Store: store, Confirm: func(context.Context, Request) (Approval, error) {
+			confirmations++
+			return Approval{Allowed: true, Persist: persist}, nil
+		}}
+		grant, err := policy.AuthorizeWithGrant(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := grant.Check(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Revoke(request); err != nil {
+			t.Fatal(err)
+		}
+		err = grant.Check(ctx)
+		if persist && !errors.Is(err, ErrUntrusted) || !persist && err != nil {
+			t.Fatalf("grant check after revocation (persistent=%t): %v", persist, err)
+		}
+		if confirmations != 1 {
+			t.Fatalf("grant check prompted again: %d confirmations", confirmations)
+		}
+	}
+}
+
 func TestWorkspaceCannotSupplyItsOwnTrustStore(t *testing.T) {
 	workspace := t.TempDir()
 	request := requestForTest(t, workspace, map[string]string{"command": "dummy"})

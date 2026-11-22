@@ -21,17 +21,19 @@ import (
 )
 
 type callExecution struct {
-	skip     bool
-	call     domainmessage.ToolCall
-	message  domainmessage.Message
-	entries  []domaintool.ExecutionEntry
-	asset    domaintool.SharedAsset
-	hasAsset bool
+	skip         bool
+	call         domainmessage.ToolCall
+	message      domainmessage.Message
+	entries      []domaintool.ExecutionEntry
+	asset        domaintool.SharedAsset
+	hasAsset     bool
+	imageAssetID tooldef.ImageAssetID
 }
 
 type ExecutionService struct {
 	// 每个工具调用按 Hook -> 权限 -> 执行 -> 结果 Hook -> Asset 提取的顺序处理。
 	Registry    toolport.Registry
+	Invoker     toolport.Invoker
 	Hooks       toolport.HookBridge
 	Permissions toolapi.PermissionService
 	Assets      toolport.AssetExtractor
@@ -109,6 +111,7 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 		Entries:  make([]domaintool.ExecutionEntry, 0, len(command.Calls)*2),
 		Assets:   make([]domaintool.SharedAsset, 0),
 	}
+	var imageReads map[string]tooldef.ImageAssetID
 	for _, slot := range slots {
 		if slot.skip {
 			continue
@@ -119,8 +122,24 @@ func (s ExecutionService) Execute(ctx context.Context, command toolcommand.Execu
 		if slot.hasAsset {
 			result.Assets = append(result.Assets, slot.asset)
 		}
+		if slot.imageAssetID != "" && strings.TrimSpace(slot.call.ID) != "" {
+			if imageReads == nil {
+				imageReads = make(map[string]tooldef.ImageAssetID)
+			}
+			imageReads[slot.call.ID] = slot.imageAssetID
+		}
 	}
-	return result, nil
+	if len(imageReads) > 0 {
+		// A result cannot be uniquely matched to a reused call ID.
+		seen := make(map[string]bool, len(command.Calls))
+		for _, call := range command.Calls {
+			if seen[call.ID] {
+				delete(imageReads, call.ID)
+			}
+			seen[call.ID] = true
+		}
+	}
+	return result.WithImageReads(imageReads), nil
 }
 
 func (s ExecutionService) skippedCall(command toolcommand.Execution, call domainmessage.ToolCall, index int, createdAt time.Time) callExecution {
@@ -227,6 +246,12 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		baseAsk := ask
 		ask = func(request toolcommand.PermissionRequest) bool {
 			request.ToolCallID = call.ID
+			if external, ok := registeredTool.(tooldef.PermissionIdentity); ok {
+				request.PermissionIdentity = external.PermissionIdentity()
+				if request.PermissionIdentity == "" {
+					request.RequireFreshConsent = true
+				}
+			}
 			return baseAsk(request)
 		}
 	}
@@ -242,16 +267,25 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		Ask:                 ask,
 	})
 	output := domaintool.ToolOutput{}
+	var imageAssetID tooldef.ImageAssetID
 	var toolErr error
 	if permissionDecision.Allowed {
-		output, toolErr = callTool(ctx, registeredTool, call)
+		output, imageAssetID, toolErr = s.callTool(ctx, registeredTool, call)
 	} else {
 		output = domaintool.FailedOutput(domaintool.ResultStatusDenied, "permission_denied", permissionDecision.Message)
 	}
 	if toolErr != nil {
 		output = outputForError(ctx, toolErr)
 	}
-	return s.finishedCall(ctx, command, call, permission, output.Normalized(), toolErr, entries, resultCreatedAt)
+	output = output.Normalized()
+	result := s.finishedCall(ctx, command, call, permission, output, toolErr, entries, resultCreatedAt)
+	if imageAssetID != "" && toolErr == nil && ctx.Err() == nil && output.Status == domaintool.ResultStatusSuccess && !output.Truncated {
+		execution, ok := executioncontext.CurrentExecution(ctx)
+		if ok && execution.SessionID == command.SessionID {
+			result.imageAssetID = imageAssetID
+		}
+	}
+	return result
 }
 
 type toolCallPanicError struct {
@@ -265,15 +299,20 @@ func (err *toolCallPanicError) Error() string {
 
 // callTool isolates extension code only. Hooks, callbacks, assets and durable
 // state failures must remain visible to their callers.
-func callTool(ctx context.Context, registered tooldef.Tool, call domainmessage.ToolCall) (output domaintool.ToolOutput, err error) {
+func (s ExecutionService) callTool(ctx context.Context, registered tooldef.Tool, call domainmessage.ToolCall) (output domaintool.ToolOutput, imageAssetID tooldef.ImageAssetID, err error) {
 	returned := false
 	defer func() {
 		if !returned {
 			err = &toolCallPanicError{name: call.Name, value: recover()}
 			output = domaintool.ToolOutput{}
+			imageAssetID = ""
 		}
 	}()
-	output, err = registered.Call(ctx, []byte(call.Arguments))
+	if s.Invoker != nil {
+		output, imageAssetID, err = s.Invoker.Invoke(ctx, registered, []byte(call.Arguments))
+	} else {
+		output, err = registered.Call(ctx, []byte(call.Arguments))
+	}
 	returned = true
 	return
 }

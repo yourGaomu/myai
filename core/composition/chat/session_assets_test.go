@@ -22,6 +22,33 @@ func (s *planRecoveryStore) FindSessionAttachment(_ context.Context, sessionID, 
 	return repository.AssetRecord{}, repository.ErrNotFound
 }
 
+func TestSessionAssetLookupClearRetainsPersistedAttachmentAndDiscardsPending(t *testing.T) {
+	ctx := planRecoveryContext(t)
+	h := newOutboxRecoveryHarness(t, journal.Options{})
+	for _, id := range []string{"ast_persisted", "ast_pending"} {
+		asset := files.Asset{AssetID: id, FileName: "attachment.txt", ContentType: "text/plain", Size: 5, CreatedAt: time.Now().UTC()}
+		if err := h.chat.RecordUploadedAsset(ctx, h.sessionID, id, 0, asset); err != nil {
+			t.Fatal(err)
+		}
+		if id == "ast_persisted" {
+			h.async.drain()
+		}
+		if _, err := h.chat.LookupSessionAsset(ctx, h.sessionID, id); err != nil {
+			t.Fatalf("fresh attachment %s unavailable: %v", id, err)
+		}
+	}
+	if err := h.chat.ClearSession(ctx, h.sessionID); err != nil {
+		t.Fatal(err)
+	}
+	h.async.drain()
+	if _, err := h.chat.LookupSessionAsset(ctx, h.sessionID, "ast_pending"); !errors.Is(err, files.ErrSessionAssetUnavailable) {
+		t.Fatalf("cleared pending attachment was admitted: %v", err)
+	}
+	if _, err := h.chat.LookupSessionAsset(ctx, h.sessionID, "ast_persisted"); err != nil {
+		t.Fatalf("clear discarded a persisted attachment: %v", err)
+	}
+}
+
 func TestSessionAssetLookupSeesPendingUploadAndPersistedAttachment(t *testing.T) {
 	ctx := planRecoveryContext(t)
 	h := newOutboxRecoveryHarness(t, journal.Options{})

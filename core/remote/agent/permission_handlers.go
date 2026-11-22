@@ -34,6 +34,7 @@ func newPermissionRuleTarget(sessionID string, request llm.ToolPermissionRequest
 		sessionID:           sessionID,
 		toolName:            request.Name,
 		permission:          string(request.Permission),
+		identity:            request.PermissionIdentity,
 		requireFreshConsent: request.RequireFreshConsent,
 	}
 }
@@ -53,7 +54,11 @@ func (a *Agent) canReusePermission(target permissionRuleTarget) bool {
 		return false
 	}
 	sid := a.resolvePermissionSessionID(target.sessionID, "")
-	return a.runtimes.get(sid).isPermissionAllowed(target.toolName, target.permission)
+	runtime := a.runtimes.get(sid)
+	if target.identity != "" {
+		return runtime.isExternalPermissionAllowed(target.identity)
+	}
+	return runtime.isPermissionAllowed(target.toolName, target.permission)
 }
 
 func (a *Agent) recordSessionPermissionRule(target permissionRuleTarget, fallbackSessionID, scope string) {
@@ -65,7 +70,12 @@ func (a *Agent) recordSessionPermissionRule(target permissionRuleTarget, fallbac
 		return
 	}
 	sid := a.resolvePermissionSessionID(target.sessionID, fallbackSessionID)
-	a.runtimes.get(sid).allowPermissionRule(scope, target.toolName, target.permission)
+	runtime := a.runtimes.get(sid)
+	if target.identity != "" {
+		runtime.allowExternalPermission(target.identity)
+		return
+	}
+	runtime.allowPermissionRule(scope, target.toolName, target.permission)
 }
 
 func (a *Agent) handlePermissionResult(message protocol.Message) error {

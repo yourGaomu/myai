@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"myai/core/contextmgr"
 	"myai/core/session"
 	tooldef "myai/core/tool/tool"
 )
@@ -111,6 +112,25 @@ func TestRuntimeInstructionBuilderAddsSessionStyleAfterModeAndSkillRules(t *test
 	}
 	if !strings.Contains(prompt, "Use concise Chinese.") {
 		t.Fatalf("missing style instruction: %q", prompt)
+	}
+}
+
+func TestRuntimeInstructionBuilderAccountsForSelectedSkillText(t *testing.T) {
+	const skill = "Use 文 and test"
+	builder := NewRuntimeInstructionBuilder(stubSkillPromptProvider{prompt: "  " + skill + "\n"})
+	request := InstructionRequest{AgentMode: session.AgentModePlan, StyleInstruction: "  concise  "}
+	text, skillTokens := builder.BuildWithAccounting(t.Context(), request)
+	want := RuntimeTurnBoundaryPrompt + "\n\n" + PlanModePrompt + "\n\n" + skill + "\n\n" + SessionStylePromptPrefix + "\nconcise"
+	if text != want || builder.Build(t.Context(), request) != want || skillTokens != contextmgr.EstimateTextTokens(skill) {
+		t.Fatalf("unexpected prompt or skill estimate: %q (%d)", text, skillTokens)
+	}
+
+	// A style instruction can contain the same text as a Skill without its provenance.
+	builder = NewRuntimeInstructionBuilder(stubSkillPromptProvider{prompt: " \n "})
+	request.StyleInstruction = skill
+	text, skillTokens = builder.BuildWithAccounting(t.Context(), request)
+	if !strings.Contains(text, skill) || skillTokens != 0 {
+		t.Fatalf("style text was misattributed to Skills: %q (%d)", text, skillTokens)
 	}
 }
 

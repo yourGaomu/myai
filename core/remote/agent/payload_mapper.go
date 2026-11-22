@@ -16,6 +16,15 @@ import (
 )
 
 func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
+	var requestContext *protocol.RequestContext
+	if sample := info.RequestContext; sample != nil {
+		requestContext = &protocol.RequestContext{
+			Model: sample.Model, WindowTokens: sample.WindowTokens, MessageTokens: sample.MessageTokens,
+			SystemTokens: sample.SystemTokens, SkillTokens: sample.SkillTokens, MCPToolTokens: sample.MCPToolTokens,
+			OtherToolTokens: sample.OtherToolTokens, OtherTokens: sample.OtherTokens,
+			OutputReserveTokens: sample.OutputReserveTokens, SafetyReserveTokens: sample.SafetyReserveTokens,
+		}
+	}
 	return protocol.ContextInfo{
 		WindowK:           info.WindowK,
 		FullTokens:        info.FullTokens,
@@ -32,6 +41,7 @@ func contextInfoPayload(info service.ContextInfo) protocol.ContextInfo {
 		SummaryHash:       info.SummaryHash,
 		PrefixHash:        info.PrefixHash,
 		Checkpoint:        compactionCheckpointPayload(info.Checkpoint),
+		RequestContext:    requestContext,
 	}
 }
 

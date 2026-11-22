@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +49,39 @@ func TestClientListAndCallTool(t *testing.T) {
 	}
 	if got := formatCallResult(result); got != "hello" {
 		t.Fatalf("got %q, want hello", got)
+	}
+}
+
+const stdioDiagnosticMarker = "fixture-stdio-private-marker"
+
+func TestClientStdioFailuresHideDiagnostics(t *testing.T) {
+	var logs strings.Builder
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previousWriter)
+	config := trustedHelperConfig(t, map[string]string{"ZZ_TEST_PRIVATE_STDIO": "1"})
+	request, err := TrustRequest(config, config.TrustWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(config)
+	if err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if client.ApprovalDigest() != request.Digest {
+		t.Fatal("stdio client digest did not match the authorized declaration")
+	}
+	if _, err := client.ListTools(context.Background()); err == nil || err.Error() != "mcp JSON-RPC error -32603" {
+		t.Errorf("unexpected stdio RPC error: %v", err)
+	}
+	_ = client.Close()
+	if strings.Contains(logs.String(), stdioDiagnosticMarker) {
+		t.Fatal("raw stdio diagnostics reached the logger")
+	}
+	config.Command = filepath.Join(t.TempDir(), stdioDiagnosticMarker)
+	if err := NewClient(config).Start(context.Background()); err == nil || err.Error() != "start mcp process failed" {
+		t.Fatalf("unexpected subprocess startup error: %v", err)
 	}
 }
 
@@ -290,6 +325,15 @@ func TestMCPHelperProcess(t *testing.T) {
 				},
 			})
 		case "tools/list":
+			if os.Getenv("ZZ_TEST_PRIVATE_STDIO") == "1" {
+				fmt.Fprintln(os.Stderr, stdioDiagnosticMarker)
+				fmt.Fprintln(os.Stdout, stdioDiagnosticMarker)
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0", "id": json.RawMessage(request.ID),
+					"error": map[string]any{"code": -32603, "message": stdioDiagnosticMarker, "data": stdioDiagnosticMarker},
+				})
+				continue
+			}
 			result := map[string]any{
 				"tools": []map[string]any{
 					{

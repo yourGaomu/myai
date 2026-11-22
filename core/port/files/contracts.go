@@ -24,6 +24,13 @@ func IsSessionAssetID(id string) bool {
 	return true
 }
 
+// UploadCanceller resolves an upload by its internal idempotency key on the
+// original backend. A nonempty asset means completion won the race. An error
+// means cancellation is unconfirmed and must be retried with the same key.
+type UploadCanceller interface {
+	CancelUpload(ctx context.Context, idempotencyKey string) (Asset, error)
+}
+
 type Service interface {
 	Upload(context.Context, UploadRequest) (Asset, error)
 	Share(context.Context, ShareRequest) (Asset, error)

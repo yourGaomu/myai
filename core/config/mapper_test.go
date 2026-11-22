@@ -109,8 +109,9 @@ func TestMapperCreatesIndependentHookAndMCPConfigs(t *testing.T) {
 		Headers:    map[string]string{"X-API-Key": "${TEST_MCP_KEY}"},
 		Permission: "read",
 	}}}
-	mcpConfig := mapper.MCPConfig("C:/workspace", mcpProperties)
-	if len(mcpConfig.Servers) != 1 || mcpConfig.Servers[0].WorkingDir != "C:/workspace" {
+	workspace := t.TempDir()
+	mcpConfig := mapper.MCPConfig(workspace, mcpProperties)
+	if len(mcpConfig.Servers) != 1 || mcpConfig.Servers[0].WorkingDir != workspace || mcpConfig.Servers[0].TrustWorkspace != workspace {
 		t.Fatalf("unexpected mcp config: %#v", mcpConfig)
 	}
 	mcpConfig.Servers[0].Args[0] = "changed"

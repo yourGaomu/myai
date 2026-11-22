@@ -45,6 +45,7 @@ import type { ChatItem } from "../types/chat";
 import type { DocumentImportStatus, KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
+import type { MCPInventory } from "../hooks/useMCPState";
 import type { ModelDeleteFeedback } from "../utils/modelDelete";
 import type { SettingsSection } from "../components/settings/SettingsHome";
 import type { MotionSlot } from "../utils/motionRegistry";
@@ -126,6 +127,8 @@ export type SettingsContentProps = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
+  onRefreshMCPInventory: () => void;
+  mcpInventory: MCPInventory;
   reloadMCP: () => void;
   mcpReloading: boolean;
   mcpMessage: string;

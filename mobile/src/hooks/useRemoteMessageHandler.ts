@@ -39,12 +39,10 @@ import type {
   ModelConfigMutationResultPayload,
   ModelConfigTestResultPayload,
   ModelSwitchResultPayload,
-  MCPReloadResultPayload,
   PluginListResultPayload,
   PluginMutationResultPayload,
   PermissionAskPayload,
   RelayMessage,
-  SessionContextQueryResultPayload,
   SessionGenerationResultPayload,
   SessionListResultPayload,
   SessionPlanExecuteUpdatePayload,
@@ -154,9 +152,6 @@ type Args = {
   applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   applyPluginList: (payload?: PluginListResultPayload | PluginMutationResultPayload) => void;
-  applyMCPReload: (payload?: MCPReloadResultPayload) => void;
-  applyMCPError: (message: string) => void;
-  isMCPOperationPending: boolean;
   applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
   applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
@@ -226,6 +221,7 @@ type Args = {
   setSessionContext: (
     sessionID: string,
     context: NonNullable<AssistantDonePayload["context"]>,
+    source: "live",
   ) => void;
   setSessionPendingPermission: (
     sessionID: string,
@@ -303,9 +299,6 @@ export function useRemoteMessageHandler({
   applySessionGenerationError,
   applySkillList,
   applyPluginList,
-  applyMCPReload,
-  applyMCPError,
-  isMCPOperationPending,
   applySubagentDefinitionList,
   applySubagentDefinitionMutation,
   applySubagentTaskList,
@@ -720,7 +713,9 @@ export function useRemoteMessageHandler({
           if (!requestID || targetSessionID === null) break;
           const payload = (message.payload || {}) as AssistantDonePayload;
           setSessionLastUsage(targetSessionID, payload.usage || null);
-          if (payload.context) setSessionContext(targetSessionID, payload.context);
+          if (payload.context && (!payload.paused || payload.context.window_k || payload.context.request_context)) {
+            setSessionContext(targetSessionID, payload.context, "live");
+          }
           if (payload.compact) setSessionCompact(targetSessionID, payload.compact);
           if (payload.plan) applyAssistantPlan(targetSessionID, payload.plan);
           if (payload.retrieval && targetSessionID === sessionIDRef.current) applyKnowledgeSearch(payload.retrieval);
@@ -884,15 +879,6 @@ export function useRemoteMessageHandler({
           );
           requestSessions();
           break;
-        case "session_context_query_result": {
-          stopPending("context");
-          const payload = message.payload as SessionContextQueryResultPayload | undefined;
-          const targetSessionID = (payload?.session_id || message.session_id || sessionIDRef.current).trim();
-          if (targetSessionID && payload?.context) {
-            setSessionContext(targetSessionID, payload.context);
-          }
-          break;
-        }
         case "session_generation_query_result":
         case "session_generation_set_result":
         case "session_style_set_result": {
@@ -994,10 +980,6 @@ export function useRemoteMessageHandler({
         case "plugin_mutation_result":
           stopPending("plugins");
           applyPluginList(message.payload as PluginListResultPayload | PluginMutationResultPayload | undefined);
-          break;
-        case "mcp_reload_result":
-          stopPending("mcp");
-          applyMCPReload(message.payload as MCPReloadResultPayload | undefined);
           break;
         case "asset_list_result":
           if (!acceptAssetList(message)) break;
@@ -1188,7 +1170,6 @@ export function useRemoteMessageHandler({
           if (action === "generation" && isGenerationOperationPending) applySessionGenerationError(text);
           if ((action === "knowledge" || type === "session_rag_set") && isKnowledgeOperationPending) applyKnowledgeError(text);
           if (action === "memory" && isMemoryOperationPending) applyAIMemoryError(text);
-          if (action === "mcp" && isMCPOperationPending) applyMCPError(text);
           if (type === "session_pause" && requestID) forgetRequest(requestID);
           addErrorMessage(sessionID, text);
           break;
@@ -1259,9 +1240,6 @@ export function useRemoteMessageHandler({
       applySessionGenerationError,
       applySkillList,
       applyPluginList,
-      applyMCPReload,
-      applyMCPError,
-      isMCPOperationPending,
       applySubagentDefinitionList,
       applySubagentDefinitionMutation,
       applySubagentTaskList,
@@ -1346,14 +1324,12 @@ function pendingActionForError(type: RelayMessage["type"]): PendingAction | unde
   if (type.startsWith("model_")) return "models";
   if (type.startsWith("skill_")) return "skills";
   if (type.startsWith("plugin_")) return "plugins";
-  if (type.startsWith("mcp_")) return "mcp";
   if (type === "asset_list") return "assets";
   if (type.startsWith("file_")) return "files";
   if (type === "changes_list") return "changes";
   if (type === "history_list") return "history";
   if (type.endsWith("_diff")) return "diff";
   if (type.endsWith("_revert")) return "revert";
-  if (type === "session_context_query") return "context";
   if (type.startsWith("session_generation_") || type === "session_style_set") return "generation";
   if (type === "session_pause") return "pause";
   if (type === "session_plan_execute") return "plan";

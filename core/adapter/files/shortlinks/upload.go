@@ -50,14 +50,9 @@ func (u uploadSession) validate(request filesport.UploadRequest, previous *uploa
 		return errors.New("invalid short_links upload session")
 	}
 	switch u.Status {
-	case "initializing", "uploading", "completing", "completed", "cancelled", "cleanup_pending", "failed":
+	case "initializing", "uploading", "completing", "completed", "cancelled", "cleanup_pending", "failed", "expired":
 	default:
 		return errors.New("invalid short_links upload state")
-	}
-	if u.Status == "uploading" || u.Status == "initializing" || u.Status == "completing" {
-		if !u.ExpiresAt.After(time.Now()) {
-			return errors.New("short_links upload session expired")
-		}
 	}
 	seen := make(map[int]bool, len(u.ReceivedParts))
 	var received int64
@@ -81,7 +76,7 @@ func (u uploadSession) validate(request filesport.UploadRequest, previous *uploa
 			return errors.New("short_links upload session identity changed")
 		}
 		for _, part := range previous.ReceivedParts {
-			if !seen[part] && u.Status != "cancelled" && u.Status != "failed" && u.Status != "cleanup_pending" {
+			if !seen[part] && !u.terminal() && u.Status != "cleanup_pending" {
 				return errors.New("short_links upload progress regressed")
 			}
 		}
@@ -119,6 +114,45 @@ func (s *Service) Upload(ctx context.Context, request filesport.UploadRequest) (
 	return asset, err
 }
 
+func (u uploadSession) terminal() bool {
+	return u.Status == "cancelled" || u.Status == "failed" || u.Status == "expired"
+}
+
+func uploadBegin(ctx context.Context, lease *mcp.ServerLease, request filesport.UploadRequest, receipt *uploadReceipt) (uploadSession, error) {
+	args := map[string]any{"fileName": request.FileName, "sizeBytes": request.Size,
+		"contentType": request.ContentType, "idempotencyKey": request.IdempotencyKey}
+	var session uploadSession
+	alreadyAttempted := receipt != nil && receipt.started
+	if err := ctx.Err(); err != nil {
+		return session, err
+	}
+	if receipt != nil {
+		receipt.started = true
+	}
+	err := call(ctx, lease, "begin_asset_upload", args, &session)
+	if uncertainCall(err) && ctx.Err() == nil {
+		// No parts or completion have been sent. Recover once using the same
+		// key and original lease. A rejection cannot resolve the first call.
+		alreadyAttempted = true
+		session = uploadSession{}
+		err = call(ctx, lease, "begin_asset_upload", args, &session)
+	}
+	if err != nil {
+		var failure *callFailure
+		if receipt != nil && !alreadyAttempted && errors.As(err, &failure) && failure.notCreated {
+			receipt.started = false
+		}
+		return uploadSession{}, safeError("begin file upload", err)
+	}
+	if err := session.validate(request, nil); err != nil {
+		return uploadSession{}, err
+	}
+	if receipt != nil {
+		receipt.remember(session)
+	}
+	return session, nil
+}
+
 func upload(ctx context.Context, lease *mcp.ServerLease, request filesport.UploadRequest, data []byte, receipt *uploadReceipt) (filesport.Asset, error) {
 	if request.IdempotencyKey == "" {
 		var key [16]byte
@@ -127,52 +161,21 @@ func upload(ctx context.Context, lease *mcp.ServerLease, request filesport.Uploa
 		}
 		request.IdempotencyKey = "myai-" + hex.EncodeToString(key[:])
 	}
-	args := map[string]any{"fileName": request.FileName, "sizeBytes": request.Size,
-		"contentType": request.ContentType, "idempotencyKey": request.IdempotencyKey}
 	var session uploadSession
 	var err error
 	if receipt != nil && receipt.session != nil {
 		// Never begin a known session again, including a completion whose
 		// response and first status query were lost.
 		session, err = uploadStatus(ctx, lease, request, *receipt.session)
-		if err != nil {
-			if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(time.Now()) && session.Status != "completed" {
-				receipt.terminalError = true
-			}
-			return filesport.Asset{}, err
-		}
 	} else {
-		if receipt != nil && receipt.started && !receipt.retryBegin {
-			return filesport.Asset{}, errors.New("previous file upload outcome is uncertain; refusing to create another session")
-		}
-		if receipt != nil {
-			receipt.started, receipt.retryBegin = true, false
-		}
-		err = call(ctx, lease, "begin_asset_upload", args, &session)
-		// This is the only automatic repeat of begin. The same key identifies
-		// the unfinished session; no parts/completion have been sent yet.
-		if uncertainCall(err) && ctx.Err() == nil {
-			session = uploadSession{}
-			err = call(ctx, lease, "begin_asset_upload", args, &session)
-		}
-		if err != nil {
-			if receipt != nil {
-				receipt.retryBegin = uncertainCall(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-			}
-			return filesport.Asset{}, safeError("begin file upload", err)
-		}
+		session, err = uploadBegin(ctx, lease, request, receipt)
 	}
-	if err := session.validate(request, nil); err != nil {
+	if err != nil {
 		return filesport.Asset{}, err
 	}
 	if receipt != nil {
-		receipt.session = &session
-		defer func() {
-			if session.Status == "cancelled" || session.Status == "failed" ||
-				!session.ExpiresAt.After(time.Now()) && session.Status != "completed" {
-				receipt.terminalError = true
-			}
-		}()
+		receipt.remember(session)
+		defer func() { receipt.remember(session) }()
 	}
 	if session.Status == "initializing" || session.Status == "completing" {
 		next, statusErr := uploadStatus(ctx, lease, request, session)
@@ -180,6 +183,12 @@ func upload(ctx context.Context, lease *mcp.ServerLease, request filesport.Uploa
 			return filesport.Asset{}, statusErr
 		}
 		session = next
+	}
+	if session.terminal() {
+		return filesport.Asset{}, errors.New("short_links upload session has ended")
+	}
+	if !session.ExpiresAt.After(time.Now()) && session.Status != "completed" {
+		return filesport.Asset{}, errors.New("short_links upload session deadline passed; query or cancel the existing session")
 	}
 	if session.Status != "uploading" && session.Status != "completed" && session.Status != "completing" {
 		return filesport.Asset{}, errors.New("short_links upload is not ready; resume its existing session later")
@@ -214,10 +223,13 @@ func upload(ctx context.Context, lease *mcp.ServerLease, request filesport.Uploa
 		if err := next.validate(request, &session); err != nil {
 			return filesport.Asset{}, err
 		}
+		session = next
 		if !next.received(number) || next.Status != "uploading" && next.Status != "completed" {
 			return filesport.Asset{}, errors.New("short_links did not confirm the uploaded part")
 		}
-		session = next
+		if session.Status != "completed" && !session.ExpiresAt.After(time.Now()) {
+			return filesport.Asset{}, errors.New("short_links upload session deadline passed")
+		}
 	}
 	if session.Status != "completed" {
 		if *session.ReceivedBytes != request.Size {
@@ -242,11 +254,14 @@ func upload(ctx context.Context, lease *mcp.ServerLease, request filesport.Uploa
 	if session.Status != "completed" || session.Asset == nil {
 		return filesport.Asset{}, errors.New("file completion is pending; resume the existing upload session")
 	}
-	asset, err := session.Asset.asset("")
+	return session.checkedAsset(sha256.Sum256(data))
+}
+
+func (u uploadSession) checkedAsset(checksum [32]byte) (filesport.Asset, error) {
+	asset, err := u.Asset.asset("")
 	if err != nil {
 		return filesport.Asset{}, err
 	}
-	checksum := sha256.Sum256(data)
 	if asset.Checksum != "" && asset.Checksum != hex.EncodeToString(checksum[:]) {
 		return filesport.Asset{}, errors.New("uploaded asset checksum does not match the file")
 	}

@@ -15,6 +15,8 @@ type PermissionRequest struct {
 	Arguments  string
 	Permission tooldef.Permission
 	Mode       session.PermissionMode
+	// PermissionIdentity is populated by the executor from the resolved tool.
+	PermissionIdentity string
 	// RequireFreshConsent means this call must not use or create a remembered grant.
 	RequireFreshConsent bool
 }

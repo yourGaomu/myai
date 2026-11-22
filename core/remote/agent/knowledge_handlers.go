@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
@@ -11,6 +12,7 @@ import (
 	documentcommand "myai/core/application/knowledge/document/command"
 	querycommand "myai/core/application/knowledge/query/command"
 	searchcommand "myai/core/application/knowledge/search/command"
+	"myai/core/port/files"
 	"myai/core/remote/protocol"
 )
 
@@ -144,7 +146,23 @@ func (a *Agent) handleKnowledgeDocumentIngest(ctx context.Context, conn *websock
 		return fmt.Errorf("decode knowledge document ingest failed: %w", err)
 	}
 	return a.mutateKnowledgeDocuments(ctx, conn, message, payload.KnowledgeBaseID, "Document accepted for indexing.", func() error {
-		_, err := a.knowledgeService.IngestDocument(ctx, documentcommand.Ingest{KnowledgeBaseID: payload.KnowledgeBaseID, AssetID: payload.AssetID})
+		if _, err := a.uploadOwner(message); err != nil {
+			return errors.New("knowledge ingest requires an authenticated paired client")
+		}
+		lookup, ok := a.chatService.(interface {
+			LookupSessionAsset(context.Context, string, string) (files.Asset, error)
+		})
+		if !ok || strings.TrimSpace(message.SessionID) == "" || len(message.SessionID) > 512 || !files.IsSessionAssetID(payload.AssetID) {
+			return files.ErrSessionAssetUnavailable
+		}
+		asset, err := lookup.LookupSessionAsset(ctx, message.SessionID, payload.AssetID)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil || asset.AssetID != payload.AssetID || asset.Size <= 0 {
+			return files.ErrSessionAssetUnavailable
+		}
+		_, err = a.knowledgeService.IngestDocument(ctx, documentcommand.Ingest{KnowledgeBaseID: payload.KnowledgeBaseID, AssetID: asset.AssetID})
 		return err
 	})
 }

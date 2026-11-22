@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"encoding/json"
 
 	toolcommand "myai/core/application/tool/command"
 	toolresult "myai/core/application/tool/result"
@@ -13,6 +14,12 @@ import (
 
 type Registry interface {
 	GetTool(name string) (tooldef.Tool, error)
+}
+
+// Invoker runs the resolved tool and may return trusted image-read metadata.
+// Implementations must recognize the concrete built-in, never its name or JSON.
+type Invoker interface {
+	Invoke(ctx context.Context, registered tooldef.Tool, args json.RawMessage) (domaintool.ToolOutput, tooldef.ImageAssetID, error)
 }
 
 type AssetExtractor interface {

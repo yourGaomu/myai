@@ -45,6 +45,40 @@ func TestConcurrentSameNameToolsKeepIndependentCallIdentity(t *testing.T) {
 	}
 }
 
+type identifiedFixtureTool struct {
+	fakeTool
+	identity string
+}
+
+func (t identifiedFixtureTool) PermissionIdentity() string { return t.identity }
+
+func TestExternalPermissionIdentityFollowsResolvedToolIntoStream(t *testing.T) {
+	for _, tc := range []struct {
+		name, identity string
+		fresh          bool
+	}{{name: "known", identity: "resolved-external-tool"}, {name: "unknown", fresh: true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := identifiedFixtureTool{fakeTool: fakeTool{name: "model_alias", permission: tooldef.PermissionExecute}, identity: tc.identity}
+			executor := Executor{Registry: fakeRegistry{tools: map[string]tooldef.Tool{"model_alias": fixture}}}
+			asked := false
+			_, err := executor.Execute(context.Background(), generationcommand.ToolExecution{
+				Session: &session.Session{ID: "session", PermissionMode: session.PermissionModeAsk},
+				Calls:   []domainmessage.ToolCall{{ID: "call", Name: "model_alias"}},
+				Stream: modelport.ChatStreamHandler{OnToolAsk: func(r modelport.ToolPermissionRequest) bool {
+					asked = true
+					if r.ToolCallID != "call" || r.Name != "model_alias" || r.PermissionIdentity != tc.identity || r.RequireFreshConsent != tc.fresh {
+						t.Errorf("unexpected permission request: %+v", r)
+					}
+					return false
+				}},
+			})
+			if err != nil || !asked {
+				t.Fatalf("expected a permission request, asked=%v, err=%v", asked, err)
+			}
+		})
+	}
+}
+
 func TestSharedAssetEventUsesSameIDAsPersistedBatch(t *testing.T) {
 	var streamed domaintool.SharedAsset
 	executor := Executor{Registry: fakeRegistry{tools: map[string]tooldef.Tool{

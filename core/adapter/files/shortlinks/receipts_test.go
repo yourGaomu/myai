@@ -14,6 +14,7 @@ import (
 
 	"myai/core/mcp"
 	filesport "myai/core/port/files"
+	"myai/core/trust"
 )
 
 func explicitUpload(key, content string) filesport.UploadRequest {
@@ -38,10 +39,12 @@ func TestCommittedCompletionLostStatusResumesOriginalSessionAfterReload(t *testi
 	if err == nil || backend.calls["complete_asset_upload"] != 1 {
 		t.Fatalf("expected uncertain completion: %v, calls=%v", err, backend.calls)
 	}
+	// An elapsed cached deadline must not erase a possibly committed completion.
+	service.receipts["stable-receiver-key"].session.ExpiresAt = time.Now().Add(-uploadReceiptTTL - time.Minute)
 	candidate := newBackend()
 	candidateServer := httptest.NewServer(candidate)
 	defer candidateServer.Close()
-	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true}}}, registry); err != nil {
+	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}, registry); err != nil {
 		t.Fatal(err)
 	}
 	backend.mu.Lock()
@@ -172,7 +175,7 @@ func TestCloseReleasesRetainedLeaseAndRejectsFutureWork(t *testing.T) {
 	candidate := newBackend()
 	candidateServer := httptest.NewServer(candidate)
 	defer candidateServer.Close()
-	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true}}}, registry); err != nil {
+	if err := manager.Reload(context.Background(), mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: candidateServer.URL, Required: true, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}, registry); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.Close(); err != nil {
@@ -216,6 +219,94 @@ func TestTerminalCancellationReleasesLeaseAndKeepsKeyFailClosed(t *testing.T) {
 	}
 	if _, err := service.Upload(context.Background(), explicitUpload("cancelled-key", "abc")); err == nil || backend.calls["begin_asset_upload"] != 1 {
 		t.Fatal("cancelled key recreated an upload")
+	}
+}
+
+func TestConfirmedBeginRejectionReclaimsCapacity(t *testing.T) {
+	backend := newBackend()
+	backend.override = func(name string, _ map[string]json.RawMessage) (any, int, bool) {
+		if name == "begin_asset_upload" {
+			return map[string]any{"isError": true, "structuredContent": map[string]string{"uploadOutcome": "not_created"}}, 0, true
+		}
+		return nil, 0, false
+	}
+	service, _, _ := startService(t, backend)
+	for index := range maxUploadReceipts + 1 {
+		if _, err := service.Upload(context.Background(), explicitUpload(fmt.Sprintf("rejected-%d", index), "abc")); err == nil {
+			t.Fatal("backend rejection was acknowledged")
+		}
+	}
+	if len(service.receipts) != 0 || backend.calls["begin_asset_upload"] != maxUploadReceipts+1 {
+		t.Fatalf("confirmed failures exhausted recovery capacity: %v", backend.calls)
+	}
+}
+
+func TestMCPFileCancellationStaysOnOriginalLease(t *testing.T) {
+	backend := newBackend()
+	cancelAttempts := 0
+	backend.override = func(name string, args map[string]json.RawMessage) (any, int, bool) {
+		switch name {
+		case "upload_asset_part":
+			return map[string]any{"isError": true}, 0, true
+		case "cancel_asset_upload":
+			if argument[string](args, "uploadSessionId") != "upl_test" {
+				t.Error("cancel did not use the original session")
+			}
+			cancelAttempts++
+			if cancelAttempts == 1 {
+				return map[string]any{"isError": true}, 0, true
+			}
+			result := backend.session()
+			result["status"] = "cancelled"
+			return map[string]any{"structuredContent": result}, 0, true
+		}
+		return nil, 0, false
+	}
+	service, manager, registry := startService(t, backend)
+	ctx := context.Background()
+	if _, err := service.Upload(ctx, explicitUpload("scoped-key", "abc")); err == nil {
+		t.Fatal("expected partial upload")
+	}
+	candidate := newBackend()
+	server := httptest.NewServer(candidate)
+	defer server.Close()
+	if err := manager.Reload(ctx, mcp.Config{Servers: []mcp.ServerConfig{{Name: serverName, URL: server.URL, Required: true, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()}}}, registry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CancelUpload(ctx, "scoped-key"); err == nil {
+		t.Fatal("cleanup failure was reported as success")
+	}
+	if _, err := service.Upload(ctx, explicitUpload("scoped-key", "abc")); err == nil {
+		t.Fatal("pending cancellation allowed upload to resume")
+	}
+	if asset, err := service.CancelUpload(ctx, "scoped-key"); err != nil || asset.AssetID != "" {
+		t.Fatalf("cancel retry = %+v, %v", asset, err)
+	}
+	if receipt := service.receipts["scoped-key"]; receipt.lease != nil || !receipt.terminalError || cancelAttempts != 2 || len(candidate.calls) != 0 {
+		t.Fatal("cancellation did not release original lease or reached the replaced backend")
+	}
+}
+
+func TestExpiredStatusReclaimsLease(t *testing.T) {
+	backend := newBackend()
+	backend.override = func(name string, _ map[string]json.RawMessage) (any, int, bool) {
+		if name == "upload_asset_part" {
+			return nil, http.StatusServiceUnavailable, true
+		}
+		if name == "get_asset_upload_status" {
+			result := backend.session()
+			result["status"], result["expiresAt"] = "expired", time.Now().Add(-time.Minute)
+			return map[string]any{"structuredContent": result}, 0, true
+		}
+		return nil, 0, false
+	}
+	service, _, _ := startService(t, backend)
+	if _, err := service.Upload(context.Background(), explicitUpload("expired-key", "abc")); err == nil {
+		t.Fatal("expired session was acknowledged")
+	}
+	receipt := service.receipts["expired-key"]
+	if receipt == nil || receipt.lease != nil || !receipt.terminalError || receipt.finishedAt.IsZero() {
+		t.Fatal("confirmed expiry did not release and age out the receipt")
 	}
 }
 

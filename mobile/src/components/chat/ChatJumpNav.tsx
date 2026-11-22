@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ButtonFeedback } from "../../types/ui";
 import { radius, weight } from "../../constants/theme";
@@ -18,99 +18,68 @@ type Props = {
   onJump: (id: string) => void;
   onToggle: () => void;
   open: boolean;
+  topClearance: number;
+  viewportHeight: number;
 };
 
+const railSize = 44;
+const railInset = 8;
+export const chatJumpRailClearance = railSize + railInset + 6;
 const maxRailMarkers = 12;
 const waveWidths = [7, 11, 8, 12, 9, 11];
 
-export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }: Props) {
+export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open, topClearance, viewportHeight }: Props) {
   const styles = useThemedStyles(createStyles);
   const reduceMotion = useReduceMotion();
-  const [mounted, setMounted] = useState(open);
-  const anim = useRef(new Animated.Value(open ? 1 : 0)).current;
+  const anim = useRef(new Animated.Value(0)).current;
+  const railRef = useRef<View | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setMounted(true);
-      if (reduceMotion) {
-        anim.setValue(1);
-        return;
-      }
-      Animated.spring(anim, {
-        bounciness: 5,
-        speed: 20,
-        toValue: 1,
-        useNativeDriver: true,
-      }).start();
+    if (!open || reduceMotion) {
+      anim.setValue(open ? 1 : 0);
       return;
     }
-    if (!mounted) return;
-    if (reduceMotion) {
-      anim.setValue(0);
-      setMounted(false);
-      return;
-    }
-    Animated.timing(anim, {
-      duration: 150,
-      easing: Easing.in(Easing.quad),
-      toValue: 0,
+    const animation = Animated.spring(anim, {
+      bounciness: 5,
+      speed: 20,
+      toValue: 1,
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setMounted(false);
     });
-  }, [anim, mounted, open, reduceMotion]);
+    animation.start();
+    return () => animation.stop();
+  }, [anim, open, reduceMotion]);
 
-  if (anchors.length < 2) {
-    return null;
-  }
+  if (anchors.length < 2) return null;
 
+  const close = () => {
+    onToggle();
+    if (Platform.OS === "web") railRef.current?.focus();
+  };
+  const webKeyboardHandlers = Platform.OS === "web" ? {
+    onKeyDown: (event: { key: string; stopPropagation: () => void }) => {
+      if (open && event.key === "Escape") {
+        event.stopPropagation();
+        close();
+      }
+    },
+  } : {};
   const markers = compactMarkers(anchors);
-  const panelScale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
   const panelTranslateX = anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] });
+  // Leave room for the close button and the return-to-bottom action when the keyboard is open.
+  const bottomSpace = 56;
+  const top = viewportHeight > 0 ? Math.min(topClearance, Math.max(0, viewportHeight - bottomSpace - 96)) : topClearance;
+  const maxHeight = viewportHeight > 0 ? Math.min(280, Math.max(0, viewportHeight - top - bottomSpace)) : 280;
 
   return (
-    <View pointerEvents="box-none" style={styles.container}>
-      {mounted ? (
-        <Animated.View
-          onStartShouldSetResponder={() => true}
-          style={[
-            styles.panel,
-            {
-              opacity: anim,
-              transform: [{ translateX: panelTranslateX }, { scale: panelScale }],
-            },
-          ]}
-        >
-          <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>跳转消息</Text>
-            <Pressable onPress={onToggle} style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}>
-              <Text style={styles.closeText}>隐藏</Text>
-            </Pressable>
-          </View>
-          <ScrollView
-            bounces={false}
-            contentContainerStyle={styles.anchorList}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            overScrollMode="never"
-            showsVerticalScrollIndicator
-            style={styles.anchorScroll}
-          >
-            {anchors.map((anchor) => (
-              <Pressable
-                key={anchor.id}
-                onPress={() => onJump(anchor.id)}
-                style={({ pressed }) => buttonFeedback(styles.anchorItem, pressed)}
-              >
-                <Text style={styles.anchorIndex}>Q{anchor.index}</Text>
-                <Text numberOfLines={2} style={styles.anchorTitle}>{anchor.title}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </Animated.View>
-      ) : null}
-
-      <Pressable onPress={onToggle} style={({ pressed }) => buttonFeedback([styles.railButton, open && styles.railButtonActive], pressed)}>
+    <View {...webKeyboardHandlers} pointerEvents="box-none" style={[styles.container, { top, height: open ? Math.max(railSize, maxHeight) : railSize }]}>
+      <Pressable
+        accessibilityLabel={`跳转消息，共 ${anchors.length} 条`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={onToggle}
+        ref={railRef}
+        style={({ pressed }) => buttonFeedback([styles.railButton, open && styles.railButtonActive], pressed)}
+      >
         <View style={styles.railTrack}>
           {markers.map((anchor, idx) => (
             <View
@@ -125,6 +94,54 @@ export function ChatJumpNav({ anchors, buttonFeedback, onJump, onToggle, open }:
         </View>
         <Text style={styles.railText}>{anchors.length}</Text>
       </Pressable>
+
+      {open ? (
+        <View pointerEvents="box-none" style={styles.panelSlot}>
+          <Animated.View
+            style={[
+              styles.panel,
+              { maxHeight, opacity: anim, transform: [{ translateX: panelTranslateX }] },
+            ]}
+          >
+            <View style={styles.panelHeader}>
+              <Text accessibilityRole="header" numberOfLines={1} style={styles.panelTitle}>跳转消息</Text>
+              <Pressable
+                accessibilityLabel="关闭消息跳转"
+                accessibilityRole="button"
+                onPress={close}
+                style={({ pressed }) => buttonFeedback(styles.closeButton, pressed)}
+              >
+                <Text style={styles.closeText}>隐藏</Text>
+              </Pressable>
+            </View>
+            <ScrollView
+              bounces={false}
+              contentContainerStyle={styles.anchorList}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              overScrollMode="never"
+              showsVerticalScrollIndicator
+              style={styles.anchorScroll}
+            >
+              {anchors.map((anchor) => (
+                <Pressable
+                  accessibilityLabel={`Q${anchor.index}，${anchor.title}`}
+                  accessibilityRole="button"
+                  key={anchor.id}
+                  onPress={() => {
+                    onJump(anchor.id);
+                    if (Platform.OS === "web") railRef.current?.focus();
+                  }}
+                  style={({ pressed }) => buttonFeedback(styles.anchorItem, pressed)}
+                >
+                  <Text style={styles.anchorIndex}>Q{anchor.index}</Text>
+                  <Text numberOfLines={2} style={styles.anchorTitle}>{anchor.title}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -146,11 +163,9 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   StyleSheet.create({
     container: {
       alignItems: "flex-end",
-      bottom: 12,
-      justifyContent: "flex-start",
+      left: railInset,
       position: "absolute",
-      right: 8,
-      top: 10,
+      right: railInset,
       zIndex: 20,
     },
     railButton: {
@@ -159,13 +174,11 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       borderColor: palette.hairline,
       borderRadius: radius.pill,
       borderWidth: 1,
-      gap: 5,
+      flexDirection: "row",
+      gap: 4,
       justifyContent: "center",
-      maxHeight: 128,
-      overflow: "hidden",
-      paddingHorizontal: 5,
-      paddingVertical: 9,
-      width: 26,
+      minHeight: railSize,
+      width: railSize,
       ...shadow.card,
     },
     railButtonActive: {
@@ -173,9 +186,9 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     },
     railTrack: {
       alignItems: "center",
-      gap: 3,
+      gap: 1,
       justifyContent: "center",
-      maxHeight: 88,
+      maxHeight: 35,
       overflow: "hidden",
     },
     railMarker: {
@@ -192,21 +205,24 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       fontSize: font.micro,
       fontWeight: weight.semibold,
     },
+    panelSlot: {
+      left: 0,
+      position: "absolute",
+      right: railSize + 8,
+      top: 0,
+    },
     panel: {
+      alignSelf: "flex-end",
       backgroundColor: palette.surface2,
       borderColor: palette.hairlineStrong,
       borderRadius: radius.lg,
       borderWidth: 1,
       gap: 6,
-      maxHeight: 280,
+      maxWidth: 248,
       overflow: "hidden",
       padding: 8,
-      position: "absolute",
-      right: 34,
+      width: "100%",
       ...shadow.float,
-      top: 0,
-      width: 248,
-      zIndex: 30,
     },
     panelHeader: {
       alignItems: "center",
@@ -225,7 +241,7 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       backgroundColor: palette.surface1,
       borderRadius: radius.pill,
       justifyContent: "center",
-      minHeight: 26,
+      minHeight: 44,
       paddingHorizontal: 9,
     },
     closeText: {
@@ -234,7 +250,8 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       fontWeight: weight.semibold,
     },
     anchorScroll: {
-      maxHeight: 232,
+      flexShrink: 1,
+      minHeight: 0,
     },
     anchorList: {
       gap: 4,
@@ -247,6 +264,8 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
       borderWidth: 1,
       flexDirection: "row",
       gap: 6,
+      justifyContent: "center",
+      minHeight: 44,
       paddingHorizontal: 8,
       paddingVertical: 6,
     },

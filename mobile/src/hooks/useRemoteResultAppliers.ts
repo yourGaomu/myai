@@ -46,6 +46,7 @@ type Args = {
   pendingHistorySessionIDRef: RefObject<string>;
   relayScopeRef: RefObject<RelayScope>;
   sessionNavigationRef: RefObject<SessionNavigationState>;
+  removeSessionContext: (sessionID: string) => void;
   requestAssets: (sessionID?: string) => boolean;
   requestChanges: () => boolean;
   requestFiles: (path?: string) => boolean;
@@ -93,6 +94,7 @@ export function useRemoteResultAppliers({
   pendingHistorySessionIDRef,
   relayScopeRef,
   sessionNavigationRef,
+  removeSessionContext,
   requestAssets,
   requestChanges,
   requestFiles,
@@ -237,6 +239,7 @@ export function useRemoteResultAppliers({
           setDeletedSessions((current) => current.filter((session) => session.id !== affectedID));
           return true;
         }
+        removeSessionContext(affectedID);
         const fallback = nextSessions.find((session) => session.id === targetSessionID) || payload.session;
         setSessions((current) => {
           const active = current.filter((session) => session.id !== affectedID);
@@ -457,6 +460,7 @@ export function useRemoteResultAppliers({
     historySessionIDRef,
     pendingHistorySessionIDRef,
     relayScopeRef,
+    removeSessionContext,
     sessionNavigationRef,
     sessionIDRef,
     setChangeDiff,

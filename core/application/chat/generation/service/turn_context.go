@@ -16,7 +16,38 @@ func (s AgentLoopService) appendMessages(ctx context.Context, current *session.S
 	if err != nil {
 		return err
 	}
-	return s.persistMessages(ctx, current, appended)
+	if err := s.persistMessages(ctx, current, appended); err != nil {
+		discardRequestMetadata(s.Sessions, current, appended)
+		return err
+	}
+	return nil
+}
+
+// Preserve executed evidence, but never let a rejected durable write provide
+// proof of presentation or a context report to later requests.
+func discardRequestMetadata(store any, current *session.Session, messages []domainmessage.Message) {
+	var ids []string
+	for _, message := range messages {
+		if message.RequestContext != nil || len(message.ImageReceipts) != 0 {
+			ids = append(ids, message.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if discarder, ok := store.(interface{ DiscardRequestMetadata(string, []string) }); ok {
+		discarder.DiscardRequestMetadata(current.ID, ids)
+	}
+	for index := range current.Messages {
+		message := &current.Messages[index]
+		for _, id := range ids {
+			if message.ID == id {
+				message.RequestContext = nil
+				message.ImageReceipts = nil
+				break
+			}
+		}
+	}
 }
 
 func (s AgentLoopService) appendSessionMessages(current *session.Session, messages ...domainmessage.Message) ([]domainmessage.Message, error) {

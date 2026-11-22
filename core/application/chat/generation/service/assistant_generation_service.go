@@ -14,6 +14,7 @@ import (
 	chatport "myai/core/application/chat/port"
 	"myai/core/contextmgr"
 	generation "myai/core/domain/generation"
+	domainmessage "myai/core/domain/message"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 )
@@ -100,6 +101,11 @@ func (s AssistantGenerationService) Generate(ctx context.Context, command genera
 		persistedResult.Message = committed
 		if durable, ok := s.Persistence.(generationport.DurablePersistence); ok {
 			if persistErr := durable.AcceptAssistant(ctx, command.Session, persistedResult); persistErr != nil {
+				if discard, ok := s.ResponseCommitter.(interface {
+					DiscardRequestMetadata(*session.Session, domainmessage.Message)
+				}); ok {
+					discard.DiscardRequestMetadata(command.Session, *committed)
+				}
 				err = errors.Join(err, fmt.Errorf("accept assistant persistence: %w", persistErr))
 			}
 		} else if s.Persistence != nil {

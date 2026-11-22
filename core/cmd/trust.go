@@ -41,7 +41,7 @@ func newTrustCommand(store *trust.Store) *cobra.Command {
 	}
 	flags := command.PersistentFlags()
 	flags.StringVar(&options.workspace, "workspace", ".", "workspace directory")
-	flags.StringVar(&options.config, "config", "", "declaration config file (default: <workspace>/resource/application.yaml)")
+	flags.StringVar(&options.config, "config", "", "declaration config file (MCP: relative to the current directory, default ./resource/application.yaml; hooks/plugins: relative to workspace)")
 	flags.StringVar(&options.pluginRoot, "root", "", "plugin root override, relative to workspace")
 	flags.StringVar(&options.kind, "kind", "", "declaration kind: hook, plugin, or mcp")
 	flags.StringVar(&options.id, "id", "", "complete declaration digest from trust list")
@@ -142,7 +142,11 @@ func runTrustAction(command *cobra.Command, store *trust.Store, options trustOpt
 		if err := writer.Flush(); err != nil {
 			return err
 		}
-		fmt.Fprintln(command.OutOrStdout(), "Review command, arguments, and environment in the local declaration file before approving its full ID. Values are hidden here.")
+		if kind == trust.KindMCP {
+			fmt.Fprintln(command.OutOrStdout(), "Review HTTP endpoints and header declarations or stdio commands, arguments, and environment in the Agent configuration before approving the full ID. Values are hidden here.")
+		} else {
+			fmt.Fprintln(command.OutOrStdout(), "Review command, arguments, and environment in the local declaration file before approving its full ID. Values are hidden here.")
+		}
 		return nil
 	}
 	id := strings.ToLower(strings.TrimSpace(options.id))
@@ -165,6 +169,25 @@ func runTrustAction(command *cobra.Command, store *trust.Store, options trustOpt
 // Reading the workspace configuration is limited to an explicit user trust
 // command. Errors never echo YAML source, command arguments, or credential data.
 func readTrustRequests(workspace, configPath, pluginRoot string, kind trust.Kind) ([]trust.Request, error) {
+	if kind == trust.KindMCP {
+		properties, err := (appconfig.ViperLoader{ConfigFile: configPath}).LoadMCP()
+		if err != nil {
+			return nil, err
+		}
+		config := (appconfig.Mapper{}).MCPConfig(workspace, properties)
+		var requests []trust.Request
+		for _, server := range config.Servers {
+			if server.Disabled {
+				continue
+			}
+			request, err := mcp.TrustRequest(server, workspace)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, request)
+		}
+		return requests, nil
+	}
 	if configPath == "" {
 		configPath = filepath.Join(workspace, "resource", "application.yaml")
 	} else if !filepath.IsAbs(configPath) {
@@ -197,24 +220,6 @@ func readTrustRequests(workspace, configPath, pluginRoot string, kind trust.Kind
 			pluginRoot = filepath.Join(workspace, pluginRoot)
 		}
 		return plugin.ReviewRequests(pluginRoot, workspace)
-	case trust.KindMCP:
-		var properties appconfig.MCPProperties
-		if err := v.UnmarshalKey("mcp.servers", &properties.Servers); err != nil {
-			return nil, errors.New("invalid MCP declarations")
-		}
-		config := (appconfig.Mapper{}).MCPConfig(workspace, properties)
-		var requests []trust.Request
-		for _, server := range config.Servers {
-			if strings.TrimSpace(server.Command) == "" || strings.TrimSpace(server.URL) != "" {
-				continue
-			}
-			request, err := mcp.TrustRequest(server, workspace)
-			if err != nil {
-				return nil, errors.New("invalid MCP executable declaration")
-			}
-			requests = append(requests, request)
-		}
-		return requests, nil
 	}
 	return nil, errors.New("invalid declaration kind")
 }
@@ -223,6 +228,8 @@ func trustSummary(request trust.Request) string {
 	var fields struct {
 		Event    string            `json:"event"`
 		Name     string            `json:"name"`
+		URL      string            `json:"url"`
+		Headers  map[string]string `json:"headers"`
 		Command  string            `json:"command"`
 		Args     []string          `json:"args"`
 		Env      map[string]string `json:"env"`
@@ -241,6 +248,9 @@ func trustSummary(request trust.Request) string {
 	case trust.KindPlugin:
 		return fmt.Sprintf("plugin=%q executable=%q args=%d env=%d", fields.Manifest.ID, filepath.Base(fields.Command), len(fields.Manifest.Args), len(fields.Manifest.Env))
 	default:
+		if fields.URL != "" {
+			return fmt.Sprintf("server=%q transport=http headers=%d", fields.Name, len(fields.Headers))
+		}
 		return fmt.Sprintf("server=%q executable=%q args=%d env=%d", fields.Name, filepath.Base(fields.Command), len(fields.Args), len(fields.Env))
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"myai/core/tool"
 	tooldef "myai/core/tool/tool"
+	"myai/core/trust"
 )
 
 func rawLeaseServer(t *testing.T, marker string) *httptest.Server {
@@ -54,7 +55,7 @@ func TestRawServerLeasePinsRuntimeUntilReleaseAcrossReloadAndClose(t *testing.T)
 	defer oldServer.Close()
 	defer newServer.Close()
 	registry := tool.NewRegisterTools()
-	manager := NewManager(Config{Servers: []ServerConfig{{Name: "short_links", URL: oldServer.URL + "/api/mcp?credential=hidden", Required: true}}})
+	manager := NewManager(Config{Servers: []ServerConfig{{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), Name: "short_links", URL: oldServer.URL + "/api/mcp?credential=hidden", Required: true}}})
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestRawServerLeasePinsRuntimeUntilReleaseAcrossReloadAndClose(t *testing.T)
 	if _, err := lease.CallTool(context.Background(), "not-advertised", nil); err == nil {
 		t.Fatal("unknown original tool accepted")
 	}
-	if err := manager.Reload(context.Background(), Config{Servers: []ServerConfig{{Name: "short_links", URL: newServer.URL, Required: true}}}, registry); err != nil {
+	if err := manager.Reload(context.Background(), Config{Servers: []ServerConfig{{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), Name: "short_links", URL: newServer.URL, Required: true}}}, registry); err != nil {
 		t.Fatal(err)
 	}
 	result, err := lease.CallTool(context.Background(), "upload_asset_part", json.RawMessage(`{}`))

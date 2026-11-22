@@ -38,7 +38,7 @@ try {
 }
 const { buildChatTurns } = require("../src/utils/chatRenderItems.ts");
 const { historyMessageToChatItem } = require("../src/utils/chatHistory.ts");
-const { promptCacheLabel, usageBreakdown } = require("../src/utils/tokenUsage.ts");
+const { promptCacheLabel, turnUsageSummary, usageBreakdown } = require("../src/utils/tokenUsage.ts");
 const { findSubagentForLaunch, subagentLaunchState } = require("../src/utils/subagentLaunch.ts");
 const { toolKind } = require("../src/utils/toolDisplay.ts");
 
@@ -168,6 +168,38 @@ test("turn cache labels distinguish a hit, reported zero, unknown, and partial r
   assert.equal(promptCacheLabel({ prompt_cache_reported: true, prompt_cache_incomplete: true }), "上游缓存命中 0（部分上报）");
   assert.equal(promptCacheLabel({ prompt_cached_tokens: 12, prompt_cache_incomplete: true }), "上游缓存命中 12（部分上报）");
   assert.equal(usageBreakdown({ prompt_cache_reported: true }), null);
+});
+
+test("turn usage summary keeps exact counts and does not treat missing counts as zero", () => {
+  assert.equal(
+    turnUsageSummary({ total_tokens: 1234 }),
+    "输入 未上报 · 输出 未上报 · 上游缓存未上报 · 合计 1234 tokens",
+  );
+  assert.equal(
+    turnUsageSummary({ prompt_tokens: 1200, completion_tokens: 0, prompt_cache_reported: true }),
+    "输入 1200 · 输出 0 · 上游缓存未命中（0） · 合计 1200 tokens",
+  );
+  assert.equal(
+    turnUsageSummary({ prompt_tokens: 1200, prompt_cached_tokens: 12, prompt_cache_incomplete: true }),
+    "输入 1200 · 输出 未上报 · 上游缓存命中 12（部分上报） · 合计 未上报",
+  );
+  assert.equal(turnUsageSummary(), "输入 未上报 · 输出 未上报 · 上游缓存未上报 · 合计 未上报");
+});
+
+test("the turn footer gets all token counts from assistant_done and history", () => {
+  const chat = harness().render();
+  chat.addMessage("s", "user", "Question", "r");
+  chat.appendAssistant("s", "r", "Answer");
+  const usage = { prompt_tokens: 15334, completion_tokens: 5, total_tokens: 15339, prompt_cached_tokens: 15104 };
+  const reply = { content: "Answer", usage };
+  chat.remote({ type: "assistant_done", session_id: "s", request_id: "r", payload: { ...reply, message_id: "reply" } });
+  const footer = (state) => turnUsageSummary(agentTurns(state.getSessionChat("s").messages)[0].usage);
+  const expected = "输入 15334 · 输出 5 · 上游缓存命中 15104 · 合计 15339 tokens";
+  assert.equal(footer(chat), expected);
+
+  const reopened = harness().render();
+  reopened.mergeSessionHistory("s", [historyMessageToChatItem({ ...reply, id: "reply", role: "assistant" })], "server");
+  assert.equal(footer(reopened), expected);
 });
 
 test("history reconciliation preserves live cache usage until the matching row contains usage", () => {

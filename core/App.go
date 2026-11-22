@@ -119,6 +119,7 @@ type Application struct {
 	// 它只负责创建和持有基础设施，不承载聊天、Plan 等业务规则。
 	threadPool                  *adapterthreadpool.Pool
 	properties                  appconfig.Properties
+	configPath                  string
 	client                      *llm.Client
 	sessionMemory               *memorysession.Store
 	mongoDb                     *mongo.Client
@@ -165,6 +166,7 @@ type Application struct {
 	skillManager                *skill.Manager
 	hookManager                 *hook.Manager
 	mcpManager                  *mcp.Manager
+	mcpWorkspace                string
 	pluginManager               *pluginruntime.Manager
 	localCommandExecutor        executionport.CommandExecutor
 	isolatedSandboxManager      sandboxport.Manager
@@ -232,7 +234,11 @@ func GetApp() *Application {
 }
 
 func (app *Application) InitConfig() {
-	properties, err := (appconfig.ViperLoader{}).Load(app.workspace)
+	path, err := (appconfig.ViperLoader{}).ConfigPath()
+	if err != nil {
+		panic(err)
+	}
+	properties, err := (appconfig.ViperLoader{ConfigFile: path}).Load(app.workspace)
 	if err != nil {
 		panic(err)
 	}
@@ -240,6 +246,7 @@ func (app *Application) InitConfig() {
 		panic(fmt.Errorf("invalid deployment credentials: %w", err))
 	}
 	app.properties = properties
+	app.configPath = path
 }
 
 func (app *Application) InitMongoDb() {
@@ -1214,7 +1221,12 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 }
 
 func (app *Application) InitMCP() *mcp.Manager {
-	config := (appconfig.Mapper{}).MCPConfig(app.workspace, app.properties.MCP)
+	workspace, err := filepath.Abs(app.workspace)
+	if err != nil {
+		panic("cannot resolve MCP workspace")
+	}
+	app.mcpWorkspace = workspace
+	config := (appconfig.Mapper{}).MCPConfig(workspace, app.properties.MCP)
 	app.mcpManager = mcp.NewManager(config)
 	if len(config.Servers) == 0 {
 		return app.mcpManager
@@ -1227,6 +1239,13 @@ func (app *Application) InitMCP() *mcp.Manager {
 	return app.mcpManager
 }
 
+func (app *Application) MCPServerStatuses() ([]mcp.ServerStatus, error) {
+	if app == nil || app.mcpManager == nil {
+		return nil, errors.New("mcp manager is not configured")
+	}
+	return app.mcpManager.ServerStatuses(), nil
+}
+
 // ReloadMCP rereads MCP settings and atomically replaces the configured
 // runtimes. A failed candidate keeps the currently active servers and tools.
 func (app *Application) ReloadMCP(ctx context.Context) error {
@@ -1236,16 +1255,12 @@ func (app *Application) ReloadMCP(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	properties, err := (appconfig.ViperLoader{}).Load(app.workspace)
+	properties, err := (appconfig.ViperLoader{ConfigFile: app.configPath}).LoadMCP()
 	if err != nil {
 		return err
 	}
-	config := (appconfig.Mapper{}).MCPConfig(app.workspace, properties.MCP)
-	if err := app.mcpManager.Reload(ctx, config, app.toolRegister); err != nil {
-		return err
-	}
-	app.properties.MCP = properties.MCP
-	return nil
+	config := (appconfig.Mapper{}).MCPConfig(app.mcpWorkspace, properties)
+	return app.mcpManager.Reload(ctx, config, app.toolRegister)
 }
 
 func (app *Application) InitPlugins() *pluginruntime.Manager {

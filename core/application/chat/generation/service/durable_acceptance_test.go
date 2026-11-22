@@ -62,6 +62,10 @@ func TestDurableAssistantRejectionReturnsCompletedAnswerAndError(t *testing.T) {
 	if model.calls != 1 || persistence.calls != 1 || persistence.legacy != 0 {
 		t.Fatalf("unexpected retries or void fallback: model=%d accept=%d legacy=%d", model.calls, persistence.calls, persistence.legacy)
 	}
+	stored, err := memory.Snapshot("session")
+	if err != nil || stored.Messages[len(stored.Messages)-1].RequestContext != nil || response.Context.RequestContext != nil {
+		t.Fatalf("rejected assistant write left a request report in history: %v", err)
+	}
 }
 
 type acceptanceModelFunc func(context.Context, modelport.GenerateRequest) (modelport.ChatResult, error)

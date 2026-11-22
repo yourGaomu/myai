@@ -1,6 +1,10 @@
 package repository
 
-import "time"
+import (
+	"time"
+
+	"myai/core/domain/message"
+)
 
 const (
 	RoleSystem    = "system"
@@ -42,6 +46,10 @@ type MessageRecord struct {
 	PromptCacheIncomplete bool
 	Sequence              int64
 	CreatedAt             time.Time
+	// Private transcript metadata belongs on the first row of a grouped message.
+	ImageReceipts     []message.ImageReceipt
+	RequestContext    *message.RequestContext
+	SkillPromptTokens int
 }
 
 type MessageHistoryMeta struct {

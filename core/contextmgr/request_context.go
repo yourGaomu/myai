@@ -43,8 +43,10 @@ func (t TurnContext) Messages() []domainmessage.Message {
 		// Previous builds stored this boilerplate even for plain Chat turns.
 		runtime = ""
 	}
+	runtimeMessage := domainmessage.RuntimeInstruction(runtime)
+	runtimeMessage.SkillPromptTokens = t.SkillPromptTokens
 	for _, message := range []domainmessage.Message{
-		domainmessage.RuntimeInstruction(runtime), domainmessage.RAGContext(t.RAGContext),
+		runtimeMessage, domainmessage.RAGContext(t.RAGContext),
 		domainmessage.EnvironmentContext(t.EnvironmentContext),
 	} {
 		if message.IsSynthetic() {

@@ -511,6 +511,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handlePluginList(ctx, conn, message)
 	case protocol.TypePluginReload:
 		a.enqueueCatalogMutation(ctx, conn, message, a.handlePluginReload)
+	case protocol.TypeMCPList:
+		return a.handleMCPList(conn, message)
 	case protocol.TypeMCPReload:
 		a.enqueueCatalogMutation(ctx, conn, message, a.handleMCPReload)
 	case protocol.TypePluginEnable:

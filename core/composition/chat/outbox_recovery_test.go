@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -579,7 +580,7 @@ func assertOutboxRecoveryRecords(t *testing.T, want, got []repository.MessageRec
 	for index := range want {
 		left, right := want[index], got[index]
 		left.CreatedAt, right.CreatedAt = left.CreatedAt.UTC(), right.CreatedAt.UTC()
-		if left != right {
+		if !reflect.DeepEqual(left, right) {
 			t.Fatalf("backend replay changed record payload, identity or order at %d: got=%s/%d/%s want=%s/%d/%s", index, right.ID, right.Sequence, right.Role, left.ID, left.Sequence, left.Role)
 		}
 	}

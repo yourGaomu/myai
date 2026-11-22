@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +74,44 @@ type Message struct {
 	SourceTaskID string
 	// AssistantUsage is display metadata, excluded from model requests and history fingerprints.
 	AssistantUsage AssistantUsage
+	// These fields are private transcript metadata, excluded from model requests and history fingerprints.
+	ImageReceipts     []ImageReceipt
+	RequestContext    *RequestContext
+	SkillPromptTokens int
+}
+
+// ImageReceipt describes one image in a successful model request, in slice order.
+type ImageReceipt struct {
+	Version         int
+	AssetID         string
+	SHA256          string
+	MIMEType        string
+	SourceMessageID string // Original user message or tool result.
+	AnchorMessageID string // User message or last result in the tool batch.
+	ToolCallID      string // Empty for user attachments.
+}
+
+// RequestContext records the local context estimate for one successful model request.
+type RequestContext struct {
+	Model               string
+	WindowTokens        int
+	MessageTokens       int
+	SystemTokens        int
+	SkillTokens         int
+	MCPToolTokens       int
+	OtherToolTokens     int
+	OtherTokens         int
+	OutputReserveTokens int
+	SafetyReserveTokens int
+}
+
+// Clone returns an independent copy of the optional request context.
+func (r *RequestContext) Clone() *RequestContext {
+	if r == nil {
+		return nil
+	}
+	cloned := *r
+	return &cloned
 }
 
 // AssistantUsage records the usage for a completed assistant reply.
@@ -156,6 +195,8 @@ type ToolResult struct {
 func Clone(message Message) Message {
 	cloned := message
 	cloned.RecordIDs = append([]string(nil), message.RecordIDs...)
+	cloned.ImageReceipts = slices.Clone(message.ImageReceipts)
+	cloned.RequestContext = message.RequestContext.Clone()
 	if len(message.Parts) == 0 {
 		return cloned
 	}

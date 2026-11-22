@@ -356,7 +356,7 @@ func (rt *RegisterTools) LLMToolsByPermission(allow func(tooldef.Permission) boo
 }
 
 func llmToolFromRegistered(t tooldef.Tool) modelport.Tool {
-	return modelport.Tool{
+	tool := modelport.Tool{
 		Type: "function",
 		Function: &modelport.FunctionDefinition{
 			Name:        t.Name(),
@@ -364,4 +364,8 @@ func llmToolFromRegistered(t tooldef.Tool) modelport.Tool {
 			Parameters:  t.Schema(),
 		},
 	}
+	if source, ok := t.(interface{ ModelToolOrigin() modelport.ToolOrigin }); ok {
+		tool = tool.WithOrigin(source.ModelToolOrigin())
+	}
+	return tool
 }

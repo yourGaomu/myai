@@ -36,7 +36,16 @@ func testOwner() Owner {
 	return Owner{UserID: "user", DeviceID: "device", SessionID: "session", ClientID: "paired-client"}
 }
 
-func testReceiver(t *testing.T, service *fakeService, recorder Recorder, config Config) *Receiver {
+type cancellingFakeService struct {
+	*fakeService
+	cancel func(context.Context, string) (files.Asset, error)
+}
+
+func (s *cancellingFakeService) CancelUpload(ctx context.Context, key string) (files.Asset, error) {
+	return s.cancel(ctx, key)
+}
+
+func testReceiver(t *testing.T, service files.Service, recorder Recorder, config Config) *Receiver {
 	t.Helper()
 	if config.TempDir == "" {
 		config.TempDir = t.TempDir()
@@ -448,6 +457,90 @@ func TestReceiverCompleteCoalescesAndCancelJoinsWorker(t *testing.T) {
 	entries, err := os.ReadDir(r.dir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("cancel retained temp file: %v %v", entries, err)
+	}
+}
+
+func TestReceiverCancellationScopesBackendAndJoinsUpload(t *testing.T) {
+	started := make(chan string, 1)
+	exited := make(chan struct{})
+	var calls atomic.Int32
+	service := &cancellingFakeService{
+		fakeService: &fakeService{upload: func(ctx context.Context, request files.UploadRequest) (files.Asset, error) {
+			started <- request.IdempotencyKey
+			<-ctx.Done()
+			close(exited)
+			return files.Asset{}, ctx.Err()
+		}},
+	}
+	service.cancel = func(_ context.Context, _ string) (files.Asset, error) {
+		select {
+		case <-exited:
+		default:
+			t.Error("backend cancel ran before upload worker exited")
+		}
+		if calls.Add(1) == 1 {
+			return files.Asset{}, errors.New("cleanup pending")
+		}
+		return files.Asset{}, nil
+	}
+	r := testReceiver(t, service, nil, Config{ReceiptTTL: time.Nanosecond})
+	owner := testOwner()
+	begun := beginUpload(t, r, owner, "client-key", []byte("content"))
+	if _, err := r.Complete(context.Background(), owner, begun.UploadID, "first"); err != nil {
+		t.Fatal(err)
+	}
+	backendKey := <-started
+	cancelBackend := service.cancel
+	service.cancel = func(ctx context.Context, key string) (files.Asset, error) {
+		if key != backendKey || key == "client-key" {
+			t.Error("cancel did not use the scoped upload key")
+		}
+		return cancelBackend(ctx, key)
+	}
+	other := owner
+	other.ClientID = "different-client"
+	if _, err := r.Cancel(context.Background(), other, begun.UploadID); err == nil || calls.Load() != 0 {
+		t.Fatal("unrelated owner reached backend cancellation")
+	}
+	if _, err := r.Cancel(context.Background(), owner, begun.UploadID); err == nil {
+		t.Fatal("cleanup failure was acknowledged")
+	}
+	if _, err := r.Complete(context.Background(), owner, begun.UploadID, "late-complete"); err == nil {
+		t.Fatal("completion restarted during pending cleanup")
+	}
+	if _, err := r.Cancel(context.Background(), owner, begun.UploadID); err != nil || calls.Load() != 2 {
+		t.Fatalf("cleanup could not be retried: %v", err)
+	}
+}
+
+func TestReceiverCancellationRecoversCommittedAssetAndRecords(t *testing.T) {
+	service := &cancellingFakeService{
+		fakeService: &fakeService{upload: func(context.Context, files.UploadRequest) (files.Asset, error) {
+			return files.Asset{}, errors.New("completion response lost")
+		}},
+		cancel: func(context.Context, string) (files.Asset, error) {
+			return files.Asset{AssetID: "committed"}, nil
+		},
+	}
+	var recorded atomic.Int32
+	r := testReceiver(t, service, func(_ context.Context, session, request string, _ uint64, asset files.Asset) error {
+		if session != "session" || request != "original" || asset.AssetID != "committed" {
+			t.Error("recording lost original upload identity")
+		}
+		recorded.Add(1)
+		return nil
+	}, Config{})
+	owner := testOwner()
+	begun := beginUpload(t, r, owner, "key", []byte("content"))
+	if _, err := completeUpload(t, r, owner, begun.UploadID, "original"); err == nil {
+		t.Fatal("lost completion was acknowledged")
+	}
+	result, err := r.Cancel(context.Background(), owner, begun.UploadID)
+	if err != nil || result.Asset == nil || result.Asset.AssetID != "committed" || recorded.Load() != 1 {
+		t.Fatalf("committed asset was not recorded: %+v %v", result, err)
+	}
+	if _, err := completeUpload(t, r, owner, begun.UploadID, "retry"); err != nil || service.calls.Load() != 1 || recorded.Load() != 1 {
+		t.Fatalf("completion did not reuse recorded asset: %v", err)
 	}
 }
 

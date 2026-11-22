@@ -16,6 +16,7 @@ type sessionRuntime struct {
 	permMu             sync.Mutex
 	allowedTools       map[string]bool
 	allowedPermissions map[string]bool
+	allowedExternal    map[string]bool
 }
 
 type sessionRuntimeManager struct {
@@ -140,6 +141,21 @@ func (r *sessionRuntime) isPermissionAllowed(toolName, permission string) bool {
 	return false
 }
 
+func (r *sessionRuntime) allowExternalPermission(identity string) {
+	r.permMu.Lock()
+	defer r.permMu.Unlock()
+	if r.allowedExternal == nil {
+		r.allowedExternal = make(map[string]bool)
+	}
+	r.allowedExternal[identity] = true
+}
+
+func (r *sessionRuntime) isExternalPermissionAllowed(identity string) bool {
+	r.permMu.Lock()
+	defer r.permMu.Unlock()
+	return r.allowedExternal[identity]
+}
+
 func (r *sessionRuntime) clearPermissionRules() {
 	if r == nil {
 		return
@@ -147,5 +163,6 @@ func (r *sessionRuntime) clearPermissionRules() {
 	r.permMu.Lock()
 	r.allowedTools = nil
 	r.allowedPermissions = nil
+	r.allowedExternal = nil
 	r.permMu.Unlock()
 }

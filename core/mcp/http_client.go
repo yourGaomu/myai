@@ -10,7 +10,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -18,32 +17,27 @@ import (
 
 var httpEnvironmentVariable = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-func (c *Client) startHTTP(ctx context.Context) error {
-	// 1. 远程地址与进程命令互斥，避免配置错误时启动意外进程。
-	if strings.TrimSpace(c.config.Command) != "" {
-		return errors.New("mcp server must configure either url or command, not both")
-	}
-	endpoint, err := expandHTTPEnvironment(c.config.URL)
-	if err != nil {
-		return err
-	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
-		return errors.New("mcp HTTP url must be an absolute http(s) URL without userinfo or fragment")
-	}
-	// 1.1 凭据从环境变量读取，禁止写入工具描述，也不把服务端错误正文写进日志。
+func (c *Client) startHTTP(ctx context.Context, endpoint string) error {
+	// Start has approved this exact endpoint and its header templates. Read
+	// the header environment values only after that approval.
 	headers := make(http.Header)
 	for name, template := range c.config.Headers {
-		value, err := expandHTTPEnvironment(template)
-		if err != nil {
-			return err
-		}
-		if !validHTTPHeaderName(name) || strings.ContainsAny(value, "\r\n") {
-			return errors.New("invalid mcp HTTP header")
+		if !validHTTPHeaderName(name) {
+			return errors.New("invalid mcp HTTP header name")
 		}
 		switch strings.ToLower(name) {
 		case "host", "content-length", "content-type", "accept", "mcp-session-id", "mcp-protocol-version":
-			return fmt.Errorf("mcp HTTP header %s is managed by the transport", name)
+			return errors.New("mcp HTTP header is managed by the transport")
+		}
+		if _, exists := headers[http.CanonicalHeaderKey(name)]; exists {
+			return errors.New("duplicate mcp HTTP header name")
+		}
+		value, err := expandHTTPEnvironment(template)
+		if err != nil {
+			return errors.New("mcp HTTP header environment reference is not configured")
+		}
+		if strings.ContainsFunc(value, func(r rune) bool { return r < ' ' && r != '\t' || r == 0x7f }) {
+			return errors.New("invalid mcp HTTP header value")
 		}
 		headers.Set(name, value)
 	}
@@ -79,7 +73,7 @@ func (c *Client) sendHTTP(ctx context.Context, message rpcRequest) (*rpcResponse
 	defer cancel()
 	body, err := json.Marshal(message)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("encode mcp HTTP request failed")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.httpURL, bytes.NewReader(body))
 	if err != nil {
@@ -99,12 +93,7 @@ func (c *Client) sendHTTP(ctx context.Context, message rpcRequest) (*rpcResponse
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		// 2.1 url.Error 含完整 URL；向上仅返回内部原因，防止查询参数中的凭据泄漏。
-		var transportError *url.Error
-		if errors.As(err, &transportError) {
-			err = transportError.Err
-		}
-		return nil, fmt.Errorf("mcp HTTP %s failed: %w", message.Method, err)
+		return nil, mcpStageError("mcp HTTP "+message.Method+" request failed", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -142,7 +131,7 @@ func (c *Client) sendHTTP(ctx context.Context, message rpcRequest) (*rpcResponse
 	}
 	payload, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, err
+		return nil, mcpStageError("read mcp HTTP response failed", err)
 	}
 	if len(payload) > maxStdioMessageSize {
 		return nil, errors.New("mcp HTTP response exceeds size limit")
@@ -181,7 +170,7 @@ func readHTTPEventResponse(reader *io.LimitedReader, requestID int64) (*rpcRespo
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read mcp HTTP event stream: %w", err)
+		return nil, mcpStageError("read mcp HTTP event stream failed", err)
 	}
 	return nil, errors.New("mcp HTTP event stream ended without a response")
 }
@@ -202,18 +191,15 @@ func decodeHTTPResponse(payload []byte, requestID int64) (*rpcResponse, error) {
 }
 
 func expandHTTPEnvironment(template string) (string, error) {
-	// 4. 只展开显式 ${NAME}，变量缺失时拒绝连接，不发送空凭据。
-	var missing string
+	// Expand only explicit ${NAME} references and reject missing values.
+	missing := false
 	value := httpEnvironmentVariable.ReplaceAllStringFunc(template, func(match string) string {
-		name := match[2 : len(match)-1]
-		value, ok := os.LookupEnv(name)
-		if !ok || strings.TrimSpace(value) == "" {
-			missing = name
-		}
+		value, ok := os.LookupEnv(match[2 : len(match)-1])
+		missing = missing || !ok || strings.TrimSpace(value) == ""
 		return value
 	})
-	if missing != "" {
-		return "", fmt.Errorf("mcp HTTP environment variable %s is not configured", missing)
+	if missing {
+		return "", errors.New("mcp HTTP environment reference is not configured")
 	}
 	return strings.TrimSpace(value), nil
 }

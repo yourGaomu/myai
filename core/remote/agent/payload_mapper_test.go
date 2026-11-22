@@ -10,6 +10,7 @@ import (
 	"myai/core/contextmgr"
 	compaction "myai/core/domain/compaction"
 	"myai/core/domain/generation"
+	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/remote/protocol"
@@ -28,6 +29,22 @@ func TestContextStatePayloadIncludesSummary(t *testing.T) {
 	})
 	if payload.WindowK != 16 || !payload.HasSummary || !strings.Contains(payload.Summary, "继续") || payload.Checkpoint == nil || payload.Checkpoint.SourceHistoryHash != "source-hash" {
 		t.Fatalf("unexpected context state payload: %#v", payload)
+	}
+}
+
+func TestRequestContextPayloadIsOptionalAndKeepsZeroCounts(t *testing.T) {
+	info := contextmgr.Info{WindowK: 16}
+	legacy, err := json.Marshal(contextInfoPayload(info))
+	if err != nil || strings.Contains(string(legacy), `"request_context"`) {
+		t.Fatalf("legacy payload changed: %s, %v", legacy, err)
+	}
+	info.RequestContext = &domainmessage.RequestContext{Model: "vision", WindowTokens: 15555, SystemTokens: 120, SafetyReserveTokens: 64}
+	live := contextInfoPayload(info)
+	query := contextStatePayload(service.ContextState{Info: info, Summary: "saved summary"})
+	encoded, err := json.Marshal(query)
+	if err != nil || live.RequestContext == nil || query.RequestContext == nil || *live.RequestContext != *query.RequestContext ||
+		!strings.Contains(string(encoded), `"skill_tokens":0`) || !strings.Contains(string(encoded), `"window_tokens":15555`) || query.Summary != "saved summary" {
+		t.Fatalf("unexpected context report: %s, %v", encoded, err)
 	}
 }
 

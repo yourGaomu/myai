@@ -38,6 +38,18 @@ export function promptCacheLabel(usage?: TokenUsage) {
   return count > 0 ? `上游缓存命中 ${count}` : "上游缓存未命中（0）";
 }
 
+export function turnUsageSummary(usage?: TokenUsage) {
+  const input = usage?.prompt_tokens;
+  const output = usage?.completion_tokens;
+  const total = usage?.total_tokens ?? (input !== undefined && output !== undefined ? input + output : undefined);
+  return [
+    `输入 ${input ?? "未上报"}`,
+    `输出 ${output ?? "未上报"}`,
+    promptCacheLabel(usage),
+    `合计 ${total === undefined ? "未上报" : `${total} tokens`}`,
+  ].join(" · ");
+}
+
 export function usageBreakdown(usage?: TokenUsage) {
   if (!usage || (usage.total_tokens === undefined && usage.prompt_tokens === undefined && usage.completion_tokens === undefined)) return null;
   const total = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));

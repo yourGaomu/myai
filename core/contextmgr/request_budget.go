@@ -69,6 +69,7 @@ func (b RequestBudget) ValidateSnapshot(snapshot Snapshot) error {
 
 type TurnContext struct {
 	RuntimeInstruction string
+	SkillPromptTokens  int
 	RAGContext         string
 	EnvironmentContext string
 	PlanContext        string

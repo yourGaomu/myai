@@ -302,12 +302,23 @@ func (m *Store) SaveMessage(ctx context.Context, message repository.MessageRecor
 	if err != nil {
 		return err
 	}
-	filter := bson.M{}
+	filter := bson.D{}
 	if err = bson.Unmarshal(encoded, &filter); err != nil {
 		return err
 	}
-	// Match the complete immutable record. Same-ID retries are harmless; a
-	// differing payload fails the unique _id constraint instead of overwriting.
+	// Optional metadata omitted from BSON still participates in identity. An old
+	// payload must not match a stored row carrying receipts or request estimates.
+	if len(document.ImageReceipts) == 0 {
+		filter = append(filter, bson.E{Key: "image_receipts", Value: bson.M{"$exists": false}})
+	}
+	if document.RequestContext == nil {
+		filter = append(filter, bson.E{Key: "request_context", Value: bson.M{"$exists": false}})
+	}
+	if document.SkillPromptTokens == 0 {
+		filter = append(filter, bson.E{Key: "skill_prompt_tokens", Value: bson.M{"$exists": false}})
+	}
+	// Same-ID retries are harmless; a differing immutable payload fails the
+	// unique _id constraint instead of overwriting.
 	_, err = m.template.UpdateOne(ctx, messagesCollection, filter, bson.M{"$setOnInsert": document}, options.UpdateOne().SetUpsert(true))
 	if gomongo.IsDuplicateKeyError(err) {
 		return repository.ErrConflict

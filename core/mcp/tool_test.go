@@ -2,8 +2,60 @@ package mcp
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
+
+	llmmapper "myai/core/adapter/llm/langchaingo"
+	modelport "myai/core/port/model"
+	"myai/core/tool"
+	"myai/core/tool/local"
+	tooldef "myai/core/tool/tool"
 )
+
+func TestRegisteredToolOriginStaysOutOfModelToolDefinitions(t *testing.T) {
+	registry := tool.NewRegisterTools()
+	mcpTool := NewToolWithName(nil, "fixture", ToolInfo{Name: "original", Description: "fixture tool"}, "plain_alias", tooldef.PermissionExecute)
+	assetReader := local.NewReadAssetToolWithFiles(nil)
+	registry.RegisterSource("plugin:fixture", []tooldef.Tool{mcpTool})
+	registry.Register(assetReader)
+
+	selected := registry.LLMTools()
+	if len(selected) != 2 || !selected[0].IsBuiltinAssetReader() || selected[0].IsMCP() || !selected[1].IsMCP() || selected[1].IsBuiltinAssetReader() {
+		t.Fatalf("unexpected tool origins: %#v", selected)
+	}
+	filtered := registry.LLMToolsByPermission(func(permission tooldef.Permission) bool { return permission == tooldef.PermissionRead })
+	if len(filtered) != 1 || !filtered[0].IsBuiltinAssetReader() {
+		t.Fatalf("unexpected tool origins after permission filtering: %#v", filtered)
+	}
+
+	withoutOrigins := make([]modelport.Tool, 0, len(selected))
+	for _, definition := range selected {
+		withoutOrigins = append(withoutOrigins, modelport.Tool{Type: definition.Type, Function: definition.Function})
+	}
+	gotJSON, err := json.Marshal(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON, err := json.Marshal(withoutOrigins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotJSON) != string(wantJSON) || !reflect.DeepEqual(llmmapper.ToLLMTools(selected), llmmapper.ToLLMTools(withoutOrigins)) {
+		t.Fatalf("internal origin changed the tool definitions: %s != %s", gotJSON, wantJSON)
+	}
+
+	// The same definitions without implementation provenance must remain unknown.
+	registry.RegisterSource("mcp:lookalikes", []tooldef.Tool{unmarkedTool{assetReader}, unmarkedTool{mcpTool}})
+	registry.UnregisterSource("local")
+	registry.UnregisterSource("plugin:fixture")
+	for _, definition := range registry.LLMTools() {
+		if definition.IsMCP() || definition.IsBuiltinAssetReader() {
+			t.Fatalf("inferred origin for %q from definition or registry source name", definition.Function.Name)
+		}
+	}
+}
+
+type unmarkedTool struct{ tooldef.Tool }
 
 func TestExposedToolNameSanitizesServerAndTool(t *testing.T) {
 	got := ExposedToolName("file system", "read/path")

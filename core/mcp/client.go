@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -45,9 +44,8 @@ type Client struct {
 	httpSessionMu sync.Mutex
 	httpSessionID string
 
-	writeGate chan struct{}
-	stderrMu  sync.Mutex
-	stderr    []string
+	writeGate      chan struct{}
+	approvalDigest atomic.Pointer[string]
 
 	nextID    atomic.Int64
 	pendingMu sync.Mutex
@@ -107,20 +105,25 @@ type rpcResult struct {
 	err      error
 }
 
+// Store only the numeric classification. Server-supplied error text and data
+// must never cross the client error boundary.
 type rpcError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Code int `json:"code"`
 }
 
 func (err *rpcError) Error() string {
-	if err == nil {
-		return ""
+	return fmt.Sprintf("mcp JSON-RPC error %d", err.Code)
+}
+
+// ApprovalDigest identifies the exact declaration authorized by a successful
+// Start, including the resolved HTTP endpoint and unexpanded header templates.
+func (c *Client) ApprovalDigest() string {
+	if c != nil {
+		if digest := c.approvalDigest.Load(); digest != nil {
+			return *digest
+		}
 	}
-	if len(err.Data) == 0 {
-		return fmt.Sprintf("json-rpc error %d: %s", err.Code, err.Message)
-	}
-	return fmt.Sprintf("json-rpc error %d: %s: %s", err.Code, err.Message, string(err.Data))
+	return ""
 }
 
 func NewClient(config ServerConfig) *Client {
@@ -137,25 +140,44 @@ func NewClient(config ServerConfig) *Client {
 }
 
 func (c *Client) Start(ctx context.Context) error {
-	// 1. HTTP 服务由外部部署，本地只握手，不启动或托管短链后端进程。
-	if strings.TrimSpace(c.config.URL) != "" {
-		return c.startHTTP(ctx)
-	}
-	// 启动后必须先完成 MCP initialize 握手，成功后才能 list/call tools。
-	if c.config.Command == "" {
-		return errors.New("mcp command is empty")
-	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	c.config = NormalizeConfig(Config{Servers: []ServerConfig{c.config}}, c.config.TrustWorkspace).Servers[0]
-	declaration, err := TrustRequest(c.config, c.config.TrustWorkspace)
+	c.protocolVersion = c.config.ProtocolVersion
+	if c.config.Command == "" && c.config.URL == "" {
+		return errors.New("mcp server requires command or url")
+	}
+	declaration, endpoint, err := prepareTrustRequest(c.config, c.config.TrustWorkspace)
 	if err != nil {
-		return fmt.Errorf("prepare mcp execution trust: %w", err)
+		return err
 	}
 	if err := c.config.Trust.Authorize(ctx, declaration); err != nil {
-		return fmt.Errorf("authorize mcp stdio execution: %w", err)
+		stage := "authorize mcp stdio execution"
+		if endpoint != "" {
+			stage = "authorize mcp HTTP connection"
+		}
+		if errors.Is(err, trust.ErrUntrusted) {
+			return fmt.Errorf("%s: %w", stage, trust.ErrUntrusted)
+		}
+		return mcpStageError(stage, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if endpoint != "" {
+		err = c.startHTTP(ctx, endpoint)
+	} else {
+		err = c.startStdio(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	c.approvalDigest.Store(&declaration.Digest)
+	return nil
+}
+
+func (c *Client) startStdio(ctx context.Context) error {
 	explicitEnv, err := expandProcessEnv(c.config.Env, os.LookupEnv)
 	if err != nil {
 		return err
@@ -169,18 +191,18 @@ func (c *Client) Start(ctx context.Context) error {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		return errors.New("open mcp stdin failed")
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
-		return err
+		return errors.New("open mcp stdout failed")
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
-		return err
+		return errors.New("open mcp stderr failed")
 	}
 
 	process, err := processpolicy.Start(cmd)
@@ -188,7 +210,7 @@ func (c *Client) Start(ctx context.Context) error {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stderr.Close()
-		return err
+		return errors.New("start mcp process failed")
 	}
 
 	c.cmd = cmd
@@ -197,14 +219,15 @@ func (c *Client) Start(ctx context.Context) error {
 	c.stdin = stdin
 
 	go c.readLoop(stdout)
-	go c.logStderr(stderr)
+	// Drain stderr to keep the child running. It may contain process secrets.
+	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 	go func() {
 		defer close(c.processClosed)
 		if err := process.Wait(); err != nil {
-			c.markClosed(err)
+			c.markClosed(errors.New("mcp process exited unsuccessfully"))
 			return
 		}
-		c.markClosed(io.EOF)
+		c.markClosed(errors.New("mcp stdio connection closed"))
 	}()
 
 	if err := c.initialize(ctx); err != nil {
@@ -234,7 +257,7 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 			return tools, nil
 		}
 		if _, exists := seenCursors[nextCursor]; exists {
-			return nil, fmt.Errorf("mcp tools/list returned repeated cursor %q", nextCursor)
+			return nil, errors.New("mcp tools/list returned repeated cursor")
 		}
 		seenCursors[nextCursor] = struct{}{}
 		cursor = nextCursor
@@ -256,6 +279,19 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 	var result CallResult
 	if err := c.request(ctx, "tools/call", params, &result); err != nil {
 		return CallResult{}, err
+	}
+	if result.IsError {
+		failure := CallResult{IsError: true}
+		if c.config.Name == "short_links" && name == "begin_asset_upload" {
+			var outcome struct {
+				UploadOutcome string `json:"uploadOutcome"`
+			}
+			if json.Unmarshal(result.StructuredContent, &outcome) == nil && outcome.UploadOutcome == "not_created" {
+				// The host adapter uses this fixed classification for safe recovery.
+				failure.StructuredContent = json.RawMessage(`{"uploadOutcome":"not_created"}`)
+			}
+		}
+		return failure, nil
 	}
 	return result, nil
 }
@@ -317,7 +353,7 @@ func (c *Client) request(ctx context.Context, method string, params any, out any
 		}
 		if out != nil {
 			if err := json.Unmarshal(response.Result, out); err != nil {
-				return fmt.Errorf("decode mcp response for %s failed: %w", method, err)
+				return fmt.Errorf("decode mcp response for %s failed", method)
 			}
 		}
 		return nil
@@ -350,18 +386,18 @@ func (c *Client) request(ctx context.Context, method string, params any, out any
 			return nil
 		}
 		if err := json.Unmarshal(result.response.Result, out); err != nil {
-			return fmt.Errorf("decode mcp response for %s failed: %w", method, err)
+			return fmt.Errorf("decode mcp response for %s failed", method)
 		}
 		return nil
 	case <-ctx.Done():
 		c.removePending(id)
-		return c.withStderr(fmt.Errorf("mcp request %s failed: %w", method, ctx.Err()))
+		return fmt.Errorf("mcp request %s failed: %w", method, ctx.Err())
 	case <-c.closed:
 		c.removePending(id)
 		if c.closeErr != nil {
-			return c.withStderr(c.closeErr)
+			return c.closeErr
 		}
-		return c.withStderr(errors.New("mcp client closed"))
+		return errors.New("mcp client closed")
 	}
 }
 
@@ -398,7 +434,7 @@ func (c *Client) writeJSON(ctx context.Context, value any) error {
 
 	payload, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return errors.New("encode mcp request failed")
 	}
 	payload = append(payload, '\n')
 
@@ -424,7 +460,10 @@ func (c *Client) writeJSON(ctx context.Context, value any) error {
 	}()
 	select {
 	case err := <-writeResult:
-		return err
+		if err != nil {
+			return mcpStageError("write mcp stdin failed", err)
+		}
+		return nil
 	case <-ctx.Done():
 		_ = c.stdin.Close()
 		c.markClosed(ctx.Err())
@@ -450,7 +489,6 @@ func (c *Client) readLoop(stdout io.Reader) {
 
 		var response rpcResponse
 		if err := json.Unmarshal(line, &response); err != nil {
-			log.Printf("mcp %s ignored invalid stdout json: %v", c.config.Name, err)
 			continue
 		}
 		if len(response.ID) == 0 {
@@ -459,7 +497,6 @@ func (c *Client) readLoop(stdout io.Reader) {
 
 		id, err := parseResponseID(response.ID)
 		if err != nil {
-			log.Printf("mcp %s ignored response with unsupported id %s", c.config.Name, string(response.ID))
 			continue
 		}
 
@@ -473,55 +510,21 @@ func (c *Client) readLoop(stdout io.Reader) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		c.markClosed(err)
+		c.markClosed(errors.New("read mcp stdout failed"))
 		return
 	}
-	c.markClosed(io.EOF)
+	c.markClosed(errors.New("mcp stdio connection closed"))
 }
 
-func (c *Client) logStderr(stderr io.Reader) {
-	scanner := bufio.NewScanner(stderr)
-	scanner.Buffer(make([]byte, 0, 16*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		c.appendStderr(line)
-		log.Printf("mcp %s stderr: %s", c.config.Name, truncateLogLine(line, 1200))
+// Keep only safe stage text and known cancellation causes.
+func mcpStageError(stage string, err error) error {
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%s: %w", stage, context.Canceled)
 	}
-}
-
-func (c *Client) appendStderr(line string) {
-	c.stderrMu.Lock()
-	defer c.stderrMu.Unlock()
-
-	const maxLines = 20
-	c.stderr = append(c.stderr, line)
-	if len(c.stderr) > maxLines {
-		c.stderr = c.stderr[len(c.stderr)-maxLines:]
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%s: %w", stage, context.DeadlineExceeded)
 	}
-}
-
-func (c *Client) stderrTail() string {
-	c.stderrMu.Lock()
-	defer c.stderrMu.Unlock()
-
-	if len(c.stderr) == 0 {
-		return ""
-	}
-	return strings.Join(c.stderr, "\n")
-}
-
-func (c *Client) withStderr(err error) error {
-	if err == nil {
-		return nil
-	}
-	tail := strings.TrimSpace(c.stderrTail())
-	if tail == "" {
-		return err
-	}
-	return fmt.Errorf("%w\nmcp stderr:\n%s", err, tail)
+	return errors.New(stage)
 }
 
 func (c *Client) markClosed(err error) {
@@ -553,36 +556,6 @@ func (c *Client) contextWithTimeout(ctx context.Context) (context.Context, conte
 		ctx = context.Background()
 	}
 	return context.WithTimeout(ctx, c.timeout)
-}
-
-// TrustRequest returns the same normalized stdio declaration used at startup and
-// by the trust CLI. Env remains a template: approvals never depend on resolved
-// secret values, and the caller must authorize before expanding those templates.
-func TrustRequest(config ServerConfig, workspace string) (trust.Request, error) {
-	if strings.TrimSpace(workspace) == "" {
-		workspace = config.TrustWorkspace
-	}
-	if strings.TrimSpace(workspace) == "" {
-		return trust.Request{}, errors.New("mcp trust workspace is required")
-	}
-	normalized := NormalizeConfig(Config{Servers: []ServerConfig{config}}, workspace).Servers[0]
-	declaration := struct {
-		Name            string            `json:"name"`
-		URL             string            `json:"url"`
-		Headers         map[string]string `json:"headers"`
-		Command         string            `json:"command"`
-		Args            []string          `json:"args"`
-		Env             map[string]string `json:"env"`
-		WorkingDir      string            `json:"working_dir"`
-		Permission      string            `json:"permission"`
-		TimeoutSeconds  int               `json:"timeout_seconds"`
-		ProtocolVersion string            `json:"protocol_version"`
-		Disabled        bool              `json:"disabled"`
-		Required        bool              `json:"required"`
-	}{normalized.Name, normalized.URL, normalized.Headers, normalized.Command, normalized.Args,
-		normalized.Env, normalized.WorkingDir, normalized.Permission, normalized.TimeoutSeconds,
-		normalized.ProtocolVersion, normalized.Disabled, normalized.Required}
-	return trust.NewRequest(trust.KindMCP, workspace, workspace, declaration)
 }
 
 // Expansion is deliberately limited to ${NAME} references in explicitly declared
@@ -660,18 +633,10 @@ func decodeArguments(raw json.RawMessage) (any, error) {
 
 	var args any
 	if err := decoder.Decode(&args); err != nil {
-		return nil, fmt.Errorf("decode tool arguments failed: %w", err)
+		return nil, errors.New("decode mcp tool arguments failed")
 	}
 	if args == nil {
 		return map[string]any{}, nil
 	}
 	return args, nil
-}
-
-func truncateLogLine(text string, maxLength int) string {
-	runes := []rune(text)
-	if len(runes) <= maxLength {
-		return text
-	}
-	return string(runes[:maxLength]) + "..."
 }

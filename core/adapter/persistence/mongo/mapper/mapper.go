@@ -4,6 +4,7 @@ import (
 	"myai/core/adapter/persistence/mongo/po"
 	compaction "myai/core/domain/compaction"
 	generation "myai/core/domain/generation"
+	domainmessage "myai/core/domain/message"
 	domainmodel "myai/core/domain/model"
 	agentplan "myai/core/plan"
 	repository "myai/core/port/repository"
@@ -170,6 +171,9 @@ func MessageDocumentFromRecord(record repository.MessageRecord) po.MessageDocume
 		PromptCacheIncomplete: record.PromptCacheIncomplete,
 		Sequence:              record.Sequence,
 		CreatedAt:             record.CreatedAt,
+		ImageReceipts:         imageReceiptDocumentsFromDomain(record.ImageReceipts),
+		RequestContext:        (*po.RequestContextDocument)(record.RequestContext.Clone()),
+		SkillPromptTokens:     record.SkillPromptTokens,
 	}
 }
 
@@ -205,7 +209,32 @@ func MessageRecordFromDocument(document po.MessageDocument) repository.MessageRe
 		PromptCacheIncomplete: document.PromptCacheIncomplete,
 		Sequence:              document.Sequence,
 		CreatedAt:             document.CreatedAt,
+		ImageReceipts:         imageReceiptsFromDocuments(document.ImageReceipts),
+		RequestContext:        (*domainmessage.RequestContext)(document.RequestContext).Clone(),
+		SkillPromptTokens:     document.SkillPromptTokens,
 	}
+}
+
+func imageReceiptDocumentsFromDomain(receipts []domainmessage.ImageReceipt) []po.ImageReceiptDocument {
+	if len(receipts) == 0 {
+		return nil
+	}
+	documents := make([]po.ImageReceiptDocument, len(receipts))
+	for i, receipt := range receipts {
+		documents[i] = po.ImageReceiptDocument(receipt)
+	}
+	return documents
+}
+
+func imageReceiptsFromDocuments(documents []po.ImageReceiptDocument) []domainmessage.ImageReceipt {
+	if len(documents) == 0 {
+		return nil
+	}
+	receipts := make([]domainmessage.ImageReceipt, len(documents))
+	for i, document := range documents {
+		receipts[i] = domainmessage.ImageReceipt(document)
+	}
+	return receipts
 }
 
 func AssetDocumentFromRecord(record repository.AssetRecord) po.AssetDocument {

@@ -34,6 +34,7 @@ import (
 	"myai/core/remote/protocol"
 	"myai/core/service"
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 type mobileImageModelRegistry struct {
@@ -75,7 +76,7 @@ func TestMobileJPEGUploadPreviewAndModelRequest(t *testing.T) {
 	mcpServer := httptest.NewServer(backend)
 	t.Cleanup(mcpServer.Close)
 	manager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{
-		Name: "short_links", URL: mcpServer.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
+		Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), Name: "short_links", URL: mcpServer.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
 		Headers: map[string]string{"Authorization": "Bearer mcp-integration-secret", "X-API-Key": "integration-api-secret"},
 	}}})
 	if err := manager.RegisterAll(t.Context(), tool.NewRegisterTools()); err != nil {

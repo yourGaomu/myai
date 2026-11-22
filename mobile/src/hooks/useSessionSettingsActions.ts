@@ -92,22 +92,6 @@ export function useSessionSettingsActions({
     [sendEnvelope, sessionID, startPending, stopPending],
   );
 
-  const requestContextInfo = useCallback(() => {
-    const targetSessionID = sessionID.trim();
-    if (!targetSessionID) {
-      return;
-    }
-
-    startPending("context");
-    if (!sendEnvelope("session_context_query", {
-      request_id: newRequestID(),
-      session_id: targetSessionID,
-      payload: { session_id: targetSessionID },
-    })) {
-      stopPending("context");
-    }
-  }, [sendEnvelope, sessionID, startPending, stopPending]);
-
   const requestGenerationPreferences = useCallback(() => {
     const targetSessionID = sessionID.trim();
     if (!targetSessionID) {
@@ -197,7 +181,6 @@ export function useSessionSettingsActions({
   return {
     compactSession,
     executePlan,
-    requestContextInfo,
     requestGenerationPreferences,
     setAgentMode,
     setContextWindowK,

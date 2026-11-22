@@ -19,9 +19,11 @@ export function useRelaySender({
 }: Args) {
   return useCallback(
     (type: RelayMessage["type"], overrides: Partial<RelayMessage> = {}) => {
+      const handlesOwnErrors = type === "asset_image_preview" || type === "mcp_list" || type === "mcp_reload" ||
+        type === "session_context_query";
       const socket = socketRef.current;
       if (!socket || currentPairingRef.current !== socket.pairing) {
-        if (type !== "asset_image_preview") addErrorMessage("中继尚未就绪，请等待连接或检查配对。");
+        if (!handlesOwnErrors) addErrorMessage("中继尚未就绪，请等待连接或检查配对。");
         return false;
       }
       const { userID, deviceID, clientToken } = socket.pairing;
@@ -62,7 +64,7 @@ export function useRelaySender({
         if (enqueue) void enqueue.then((sent) => { if (!sent) rejectEnqueue(true); }, () => rejectEnqueue(false));
         return true;
       } catch {
-        if (type !== "asset_image_preview") addErrorMessage("中继连接已断开，请等待自动重连后重试。");
+        if (!handlesOwnErrors) addErrorMessage("中继连接已断开，请等待自动重连后重试。");
         return false;
       }
     },

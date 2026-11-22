@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 	"myai/core/hook"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	"myai/core/tool/local"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
@@ -52,6 +54,7 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 
 	result, err := toolservice.ExecutionService{
 		Registry: e.Registry,
+		Invoker:  builtinInvoker{},
 		Hooks:    e.Hooks,
 		Assets:   SharedAssetExtractor{},
 	}.Execute(ctx, toolcommand.Execution{
@@ -78,12 +81,38 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		promptToolResultBudgetForRequest(command, result.Calls),
 	)
 
-	return generationresult.ToolExecution{
+	var imageReads map[string]string
+	if budgetErr == nil && len(result.ImageReads()) > 0 {
+		for _, message := range result.Messages {
+			read, ok := message.FirstToolResult()
+			if !ok || read.Status != domaintool.ResultStatusSuccess || read.Truncated || read.PromptTruncated {
+				continue
+			}
+			if assetID := result.ImageReads()[read.ToolCallID]; assetID != "" {
+				if imageReads == nil {
+					imageReads = make(map[string]string)
+				}
+				imageReads[read.ToolCallID] = string(assetID)
+			}
+		}
+	}
+	return (generationresult.ToolExecution{
 		Calls:    result.Calls,
 		Messages: result.Messages,
 		Entries:  result.Entries,
 		Assets:   result.Assets,
-	}, budgetErr
+	}).WithImageReads(imageReads), budgetErr
+}
+
+type builtinInvoker struct{}
+
+func (builtinInvoker) Invoke(ctx context.Context, registered tooldef.Tool, args json.RawMessage) (domaintool.ToolOutput, tooldef.ImageAssetID, error) {
+	// A same-named tool, even one with a matching method, cannot attest a read.
+	if readAsset, ok := registered.(*local.ReadAssetTool); ok {
+		return readAsset.CallWithImageAssetID(ctx, args)
+	}
+	output, err := registered.Call(ctx, args)
+	return output, "", err
 }
 
 func (e Executor) sandboxedShell(ctx context.Context, sandboxID string) bool {
@@ -140,6 +169,7 @@ func permissionAskFromStream(stream modelport.ChatStreamHandler) toolcommand.Per
 			Arguments:           request.Arguments,
 			Permission:          request.Permission,
 			Mode:                string(request.Mode),
+			PermissionIdentity:  request.PermissionIdentity,
 			RequireFreshConsent: request.RequireFreshConsent,
 		})
 	}
