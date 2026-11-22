@@ -10,6 +10,7 @@ import (
 	"myai/core/adapter/documentparser"
 	"myai/core/imageasset"
 	"myai/core/port/files"
+	modelport "myai/core/port/model"
 	toolruntime "myai/core/tool/runtimecontext"
 	tooldef "myai/core/tool/tool"
 )
@@ -48,6 +49,10 @@ func NewReadAssetToolWithFiles(service files.Service, lookup ...files.SessionAss
 	return tool
 }
 
+func (*ReadAssetTool) ModelToolOrigin() modelport.ToolOrigin {
+	return modelport.ToolOriginBuiltinAssetReader
+}
+
 func (t *ReadAssetTool) Name() string {
 	return "read_asset"
 }
@@ -82,31 +87,36 @@ func (t *ReadAssetTool) Permission() tooldef.Permission {
 }
 
 func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
+	output, _, err := t.CallWithImageAssetID(ctx, args)
+	return output, err
+}
+
+// CallWithImageAssetID returns the ordinary output and a separate reference for
+// a successful scoped image read. Generation resolves and verifies the bytes.
+func (t *ReadAssetTool) CallWithImageAssetID(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, tooldef.ImageAssetID, error) {
 	if t.files == nil {
-		return tooldef.ToolOutput{}, errors.New("MCP files service is not configured")
+		return tooldef.ToolOutput{}, "", errors.New("MCP files service is not configured")
 	}
 	input, err := normalizeReadAssetArgs(args)
 	if err != nil {
-		return tooldef.ToolOutput{}, err
+		return tooldef.ToolOutput{}, "", err
 	}
 
 	var authorized files.Asset
 	if t.scoped {
 		execution, ok := toolruntime.CurrentExecution(ctx)
 		if !ok || strings.TrimSpace(execution.SessionID) == "" || t.lookup == nil {
-			return tooldef.ToolOutput{}, files.ErrSessionAssetUnavailable
+			return tooldef.ToolOutput{}, "", files.ErrSessionAssetUnavailable
 		}
 		authorized, err = t.lookup(ctx, execution.SessionID, input.AssetID)
+		if ctx.Err() != nil {
+			return tooldef.ToolOutput{}, "", ctx.Err()
+		}
 		if err != nil || authorized.AssetID != input.AssetID {
-			if ctx.Err() != nil {
-				return tooldef.ToolOutput{}, ctx.Err()
-			}
-			return tooldef.ToolOutput{}, files.ErrSessionAssetUnavailable
+			return tooldef.ToolOutput{}, "", files.ErrSessionAssetUnavailable
 		}
 		if imageasset.LooksLikeImage(authorized.FileName, authorized.ContentType) {
-			// The generation boundary resolves and verifies image bytes, sharing that
-			// work with the user's attachments in the same turn.
-			return readAssetImageReference(authorized, authorized.Size > input.MaxBytes)
+			return t.readAssetImageReference(authorized, authorized.Size > input.MaxBytes)
 		}
 	}
 
@@ -114,26 +124,26 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 		AssetID:  input.AssetID,
 		MaxBytes: input.MaxBytes,
 	})
+	if t.scoped && ctx.Err() != nil {
+		return tooldef.ToolOutput{}, "", ctx.Err()
+	}
 	if err != nil {
 		if !t.scoped {
-			return tooldef.ToolOutput{}, err
+			return tooldef.ToolOutput{}, "", err
 		}
-		if ctx.Err() != nil {
-			return tooldef.ToolOutput{}, ctx.Err()
-		}
-		return tooldef.ToolOutput{}, errors.New("could not read the attachment; try reattaching it")
+		return tooldef.ToolOutput{}, "", errors.New("could not read the attachment; try reattaching it")
 	}
 	asset := download.Asset
 	if t.scoped && (asset.AssetID != input.AssetID || asset.Size != authorized.Size ||
 		(authorized.BusinessID != "" && asset.BusinessID != authorized.BusinessID) ||
 		(authorized.Checksum != "" && !strings.EqualFold(asset.Checksum, authorized.Checksum))) {
-		return tooldef.ToolOutput{}, files.ErrSessionAssetUnavailable
+		return tooldef.ToolOutput{}, "", files.ErrSessionAssetUnavailable
 	}
 	if asset.AssetID == "" {
 		asset.AssetID = input.AssetID
 	}
 	if imageasset.LooksLikeImage(asset.FileName, asset.ContentType) || strings.HasPrefix(http.DetectContentType(download.Data), "image/") {
-		return readAssetImageReference(asset, download.Truncated)
+		return t.readAssetImageReference(asset, download.Truncated || (t.scoped && asset.Size > input.MaxBytes))
 	}
 
 	parsed := documentparser.Parse(ctx, documentparser.Request{
@@ -148,17 +158,22 @@ func (t *ReadAssetTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 	if download.Truncated && parsed.Message == "" {
 		parsed.Message = "The asset exceeded max_bytes, so only metadata and any downloaded prefix are available."
 	}
-	return formatReadAssetResult(asset, parsed, false)
+	output, err := formatReadAssetResult(asset, parsed, false)
+	return output, "", err
 }
 
-func readAssetImageReference(asset files.Asset, truncated bool) (tooldef.ToolOutput, error) {
+func (t *ReadAssetTool) readAssetImageReference(asset files.Asset, truncated bool) (tooldef.ToolOutput, tooldef.ImageAssetID, error) {
 	message := "This result contains only an image reference. If image content is supplied separately, use it for visual details."
 	if truncated {
 		message = "Image content was not provided: the attachment exceeds max_bytes. Try a smaller JPEG or PNG."
 	}
-	return formatReadAssetResult(asset, documentparser.Result{
+	output, err := formatReadAssetResult(asset, documentparser.Result{
 		Kind: "image", Message: message, Truncated: truncated,
 	}, !truncated)
+	if err == nil && !output.Failed() && !output.Truncated && t.scoped {
+		return output, tooldef.ImageAssetID(asset.AssetID), nil
+	}
+	return output, "", err
 }
 
 func formatReadAssetResult(asset files.Asset, parsed documentparser.Result, imageReference bool) (tooldef.ToolOutput, error) {

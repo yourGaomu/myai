@@ -66,6 +66,72 @@ func TestRegenerateSkipsTrailingEnvironmentAndPlanContext(t *testing.T) {
 	}
 }
 
+func TestDiscardRequestMetadataByExactSessionAndMessageID(t *testing.T) {
+	store := NewStore("model")
+	for _, sessionID := range []string{"session", "other"} {
+		if err := store.PutSession(sessionID, "model", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assistant := domainmessage.Assistant("answer", "reasoning", nil)
+	assistant.ID = "sample"
+	assistant.SourceID = "event"
+	assistant.RecordIDs = []string{"sample:000000"}
+	assistant.AssistantUsage.TotalTokens = 30
+	assistant.ImageReceipts = []domainmessage.ImageReceipt{{Version: 1, AssetID: "first"}, {Version: 1, AssetID: "second"}}
+	assistant.RequestContext = &domainmessage.RequestContext{Model: "model", WindowTokens: 8000}
+	assistant.SkillPromptTokens = 12
+	other := domainmessage.Clone(assistant)
+	other.ID, other.SourceID = "neighbor", "neighbor-event"
+	_, appended, err := store.AppendMessagesTo("session", assistant, other)
+	if err != nil || len(appended) != 2 {
+		t.Fatalf("append = %+v, %v", appended, err)
+	}
+	if _, _, err := store.AppendMessagesTo("other", assistant); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, change := range map[string]func(*domainmessage.Message){
+		"receipt order": func(m *domainmessage.Message) {
+			m.ImageReceipts[0], m.ImageReceipts[1] = m.ImageReceipts[1], m.ImageReceipts[0]
+		},
+		"context":      func(m *domainmessage.Message) { m.RequestContext.WindowTokens++ },
+		"skill tokens": func(m *domainmessage.Message) { m.SkillPromptTokens++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			conflicting := domainmessage.Clone(assistant)
+			change(&conflicting)
+			if _, _, err := store.AppendMessagesTo("session", conflicting); err == nil {
+				t.Fatal("same-ID message with different private metadata was accepted")
+			}
+		})
+	}
+	if _, retried, err := store.AppendMessagesTo("session", domainmessage.Clone(assistant)); err != nil || len(retried) != 0 {
+		t.Fatalf("identical retry = %+v, %v", retried, err)
+	}
+	appended[0].ImageReceipts[0].AssetID = "mutated snapshot"
+	appended[0].RequestContext.Model = "mutated snapshot"
+	store.DiscardRequestMetadata("session", []string{"sample:000000", "event", "missing"})
+	before, err := store.Snapshot("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := before.Messages[1]
+	if !reflect.DeepEqual(want.ImageReceipts, assistant.ImageReceipts) || !reflect.DeepEqual(want.RequestContext, assistant.RequestContext) {
+		t.Fatalf("metadata aliased or discarded by a nonmatching ID: %+v", want)
+	}
+	store.DiscardRequestMetadata("session", []string{"sample"})
+	want.ImageReceipts, want.RequestContext = nil, nil
+	after, _ := store.Snapshot("session")
+	if !reflect.DeepEqual(after.Messages[1], want) || !reflect.DeepEqual(after.Messages[2], before.Messages[2]) {
+		t.Fatalf("discard changed transcript evidence outside the matched request metadata: %+v", after.Messages)
+	}
+	untouched, _ := store.Snapshot("other")
+	if !reflect.DeepEqual(untouched.Messages[1].ImageReceipts, assistant.ImageReceipts) || !reflect.DeepEqual(untouched.Messages[1].RequestContext, assistant.RequestContext) {
+		t.Fatal("discard crossed the session boundary")
+	}
+}
+
 func TestStoreHydratesWithoutChangingCurrentSession(t *testing.T) {
 	store := NewStore("gpt-default")
 	if err := store.PutSessionWithModeUsage(

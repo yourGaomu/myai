@@ -172,7 +172,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			}
 			if s.hasPendingInput(command.Session) {
 				// 5.1 回答边界也属于历史，必须先保留回答，再领取下一批输入。
-				if err := s.appendMessages(runCtx, command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil)); err != nil {
+				if err := s.appendMessages(runCtx, command.Session, sampleMessage(result, nil)); err != nil {
 					return modelport.ChatResult{}, err
 				}
 				// 5. 回答边界后迁移到 next_turn，下一轮再把 queue 消息加入上下文。
@@ -204,7 +204,7 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 		}
 		messages := make([]domainmessage.Message, 0, 1+len(toolResult.Messages))
 		if len(calls) > 0 || result.Content != "" || result.Reasoning != "" {
-			messages = append(messages, domainmessage.Assistant(result.Content, result.Reasoning, calls))
+			messages = append(messages, sampleMessage(result, calls))
 		}
 		messages = append(messages, toolResult.Messages...)
 		appended, appendErr := s.appendSessionMessages(command.Session, messages...)
@@ -221,11 +221,14 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 			persistErr = s.persistMessages(runCtx, command.Session, appended)
 		}
 		if err != nil || persistErr != nil {
+			if persistErr != nil {
+				discardRequestMetadata(s.Sessions, command.Session, appended)
+			}
 			// The executed evidence already lives in memory. Stop before another
 			// sample instead of retrying a tool after a rejected durable write.
 			return modelport.ChatResult{}, errors.Join(err, persistErr)
 		}
-		images.acceptReads(calls, toolResult.Messages)
+		images.acceptReads(toolResult.ImageReads(), appended)
 		if hook := generationcommand.AfterToolRoundFrom(runCtx); hook != nil {
 			if hookErr := hook(runCtx, command.Session); hookErr != nil {
 				return modelport.ChatResult{}, hookErr
@@ -463,7 +466,7 @@ func (s AgentLoopService) continueAfterStopHook(ctx context.Context, command gen
 		return false, nil
 	}
 	// 1. Hook 要求继续时，先记录已完成回答，再追加 Hook 的补充输入。
-	if err := s.appendMessages(ctx, command.Session, domainmessage.Assistant(result.Content, result.Reasoning, nil), message); err != nil {
+	if err := s.appendMessages(ctx, command.Session, sampleMessage(result, nil), message); err != nil {
 		return false, err
 	}
 	*stopContinuations++
@@ -502,9 +505,18 @@ func (s AgentLoopService) RecordToolExecution(ctx context.Context, result genera
 	return s.recordToolExecution(ctx, result)
 }
 
+func sampleMessage(result modelport.ChatResult, calls []domainmessage.ToolCall) domainmessage.Message {
+	message := domainmessage.Assistant(result.Content, result.Reasoning, calls)
+	if result.Message != nil {
+		message.ImageReceipts = result.Message.ImageReceipts
+		message.RequestContext = result.Message.RequestContext
+	}
+	return message
+}
+
 func finalizeResult(result modelport.ChatResult, usage modelport.TokenUsage, reasoningParts []string) modelport.ChatResult {
 	// 1. 汇总供界面展示；协议回放保留最后一次采样的原始内容，避免重复推理。
-	message := domainmessage.Assistant(result.Content, result.Reasoning, result.ToolCalls)
+	message := sampleMessage(result, result.ToolCalls)
 	result.Message = &message
 	result.Usage = usage
 	result.Reasoning = strings.Join(reasoningParts, "\n")

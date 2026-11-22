@@ -1,6 +1,8 @@
 package service
 
 import (
+	"slices"
+
 	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
@@ -108,6 +110,9 @@ func messageWithRecord(message domainmessage.Message, record repository.MessageR
 	message.SourceID = record.SourceID
 	message.SourceKind = record.SourceKind
 	message.SourceTaskID = record.SourceTaskID
+	message.ImageReceipts = slices.Clone(record.ImageReceipts)
+	message.RequestContext = record.RequestContext.Clone()
+	message.SkillPromptTokens = record.SkillPromptTokens
 	message.Sequence = record.Sequence
 	message.CreatedAt = record.CreatedAt
 	return message

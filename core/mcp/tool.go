@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	domaintool "myai/core/domain/tool"
+	modelport "myai/core/port/model"
 	tooldef "myai/core/tool/tool"
 )
 
@@ -37,6 +38,10 @@ func NewToolWithName(client *Client, serverName string, info ToolInfo, exposedNa
 		inputSchema:  info.InputSchema,
 		permission:   tooldef.NormalizePermission(permission),
 	}
+}
+
+func (*Tool) ModelToolOrigin() modelport.ToolOrigin {
+	return modelport.ToolOriginMCP
 }
 
 func (t *Tool) Name() string {

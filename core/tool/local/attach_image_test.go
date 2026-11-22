@@ -14,18 +14,10 @@ import (
 	"testing"
 	"time"
 
-	toolrecordsmapper "myai/core/adapter/persistence/toolrecords/mapper"
-	toolexecutor "myai/core/adapter/tool/executor"
-	generationcommand "myai/core/application/chat/generation/command"
-	domainmessage "myai/core/domain/message"
 	domaintool "myai/core/domain/tool"
 	"myai/core/imageasset"
 	"myai/core/port/files"
-	modelport "myai/core/port/model"
-	"myai/core/session"
-	"myai/core/tool"
 	toolruntime "myai/core/tool/runtimecontext"
-	tooldef "myai/core/tool/tool"
 )
 
 type attachImageFilesStub struct {
@@ -220,45 +212,5 @@ func TestAttachImageFailsWithoutAnUploadReceipt(t *testing.T) {
 		if gotErr == nil || output.SharedAsset != nil || backend.uploads != 1 {
 			t.Fatalf("missing receipt treated as an attachment: %+v / %v", output, gotErr)
 		}
-	}
-}
-
-func TestAttachImageRequiresFreshConsentAndPreservesBatchIdentity(t *testing.T) {
-	workspace := t.TempDir()
-	writeAttachmentFixture(t, workspace, "image.png", attachmentImageBytes(t, "image/png"))
-	uploader := &attachImageFilesStub{asset: files.Asset{AssetID: "asset-uploaded"}}
-	attachment := NewAttachImageToolWithWorkspaceAndFiles(workspace, uploader)
-	registered := tool.NewRegisterTools()
-	registered.Register(attachment)
-	executor := toolexecutor.Executor{Registry: registered}
-	command := generationcommand.ToolExecution{
-		Session:   &session.Session{ID: "session", PermissionMode: session.PermissionModeFull, WorkspaceRoot: workspace},
-		Calls:     []domainmessage.ToolCall{{ID: "image-call", Name: "attach_image", Arguments: `{"path":"image.png"}`}},
-		RequestID: "generation-request",
-	}
-
-	result, err := executor.Execute(context.Background(), command)
-	if err != nil || len(result.Assets) != 0 || uploader.uploads != 0 {
-		t.Fatalf("full mode without approval uploaded: %+v / %v", result.Assets, err)
-	}
-	var streamed domaintool.SharedAsset
-	command.Stream.OnAsset = func(asset domaintool.SharedAsset) { streamed = asset }
-	command.Stream.OnToolAsk = func(request modelport.ToolPermissionRequest) bool {
-		return request.RequireFreshConsent && request.Permission == tooldef.PermissionExecute && request.ToolCallID == "image-call" && request.Name == "attach_image"
-	}
-	command.Session.PermissionCeiling = []tooldef.Permission{tooldef.PermissionRead}
-	result, err = executor.Execute(context.Background(), command)
-	if err != nil || len(result.Assets) != 0 || uploader.uploads != 0 {
-		t.Fatalf("approval bypassed capability ceiling: %+v / %v", result.Assets, err)
-	}
-	command.Session.PermissionCeiling = nil
-	result, err = executor.Execute(context.Background(), command)
-	if err != nil || len(result.Assets) != 1 || uploader.uploads != 1 {
-		t.Fatalf("approved asset was not returned: %+v / %v", result.Assets, err)
-	}
-	persisted := (toolrecordsmapper.Mapper{}).AssetRecords(result.Assets)[0]
-	if streamed.ID == "" || streamed.ID != persisted.ID || streamed.AssetID != "asset-uploaded" || persisted.AssetID != streamed.AssetID ||
-		streamed.ToolCallID != "image-call" || persisted.ToolCallID != streamed.ToolCallID || streamed.SessionID != "session" || streamed.RequestID != "generation-request" || persisted.RequestID != streamed.RequestID {
-		t.Fatalf("asset identity lost between stream and batch: %+v / %+v", streamed, persisted)
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	runtimecommand "myai/core/application/runtime/command"
 	runtimeport "myai/core/application/runtime/port"
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 )
 
@@ -62,6 +63,12 @@ func NewRuntimeInstructionBuilder(skillPrompts runtimeport.SkillPromptProvider) 
 }
 
 func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecommand.InstructionRequest) string {
+	text, _ := b.BuildWithAccounting(ctx, request)
+	return text
+}
+
+// BuildWithAccounting estimates only the Skill text selected for this prompt.
+func (b RuntimeInstructionBuilder) BuildWithAccounting(ctx context.Context, request runtimecommand.InstructionRequest) (text string, skillPromptTokens int) {
 	skillPrompt := ""
 	if b.skillPrompts != nil {
 		skillPrompt = strings.TrimSpace(b.skillPrompts.PromptForInput(ctx, request.Input))
@@ -81,7 +88,7 @@ func (b RuntimeInstructionBuilder) Build(ctx context.Context, request runtimecom
 		parts = append(parts, SessionStylePromptPrefix+"\n"+styleInstruction)
 	}
 	if len(parts) == 0 {
-		return ""
+		return "", 0
 	}
-	return RuntimeTurnBoundaryPrompt + "\n\n" + strings.Join(parts, "\n\n")
+	return RuntimeTurnBoundaryPrompt + "\n\n" + strings.Join(parts, "\n\n"), contextmgr.EstimateTextTokens(skillPrompt)
 }

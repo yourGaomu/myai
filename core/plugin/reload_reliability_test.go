@@ -48,6 +48,15 @@ func TestPluginNamespaceAndFailedReloadPreserveOtherMCP(t *testing.T) {
 	if len(registry.SourceTools("mcp:echo")) != 1 || len(registry.SourceTools("plugin:echo")) != 1 {
 		t.Fatal("plugin overwrote MCP source")
 	}
+	modelTools := registry.LLMTools()
+	if len(modelTools) != 2 {
+		t.Fatalf("expected direct and plugin MCP definitions, got %d", len(modelTools))
+	}
+	for _, modelTool := range modelTools {
+		if !modelTool.IsMCP() || modelTool.IsBuiltinAssetReader() {
+			t.Fatalf("MCP provenance missing after registration for %q", modelTool.Function.Name)
+		}
+	}
 	old := registry.SourceTools("plugin:echo")[0]
 	if err := os.WriteFile(path, []byte("{"), 0644); err != nil {
 		t.Fatal(err)

@@ -53,6 +53,40 @@ func TestRequestSnapshotFiltersLegacyDynamicStateWithoutChangingSources(t *testi
 	}
 }
 
+func TestRequestProjectionPreservesSkillAccountingOnExistingRuntimeMessage(t *testing.T) {
+	const runtimeText = "active runtime instruction"
+	history := []domainmessage.Message{
+		domainmessage.Text(domainmessage.RoleSystem, "fixed rules"),
+		domainmessage.RuntimeInstruction("old instruction"),
+		domainmessage.Text(domainmessage.RoleUser, "old input"),
+		domainmessage.Text(domainmessage.RoleAssistant, "old answer"),
+		domainmessage.RuntimeInstruction(runtimeText),
+		domainmessage.Text(domainmessage.RoleUser, "current input"),
+	}
+	history[1].SkillPromptTokens = 7
+	history[4].SkillPromptTokens = 3
+	options := RequestOptions{
+		Budget: NewRequestBudget(16000, 0, 0),
+		TurnContext: TurnContext{
+			RuntimeInstruction: runtimeText,
+			SkillPromptTokens:  history[4].SkillPromptTokens,
+		},
+	}
+	projected := BuildSnapshotForRequest(history, compaction.Checkpoint{}, 0, options)
+	options.TurnContext.SkillPromptTokens = 0
+	unattributed := BuildSnapshotForRequest(history, compaction.Checkpoint{}, 0, options)
+	if len(projected.Messages) != 5 || !projected.Messages[3].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || projected.Messages[3].SkillPromptTokens != 3 {
+		t.Fatalf("expected the active runtime message to carry its Skill estimate: %#v", projected.Messages)
+	}
+	projected.Messages[3].SkillPromptTokens = 0
+	if !reflect.DeepEqual(projected, unattributed) {
+		t.Fatal("Skill accounting changed the request projection or its total estimate")
+	}
+	if got := (TurnContext{RuntimeInstruction: domainmessage.RuntimeTurnBoundaryPrompt, SkillPromptTokens: 3}).Messages(); len(got) != 0 {
+		t.Fatalf("expected a legacy boundary-only prompt to remain omitted: %#v", got)
+	}
+}
+
 func TestRequestBudgetUsesExactModelWindowAndAllReservations(t *testing.T) {
 	for _, test := range []struct{ session, model, want int }{
 		{0, 200000, 200000}, {128, 32768, 32768}, {16, 200000, 16000}, {0, 0, 16000}, {128, 0, 128000},

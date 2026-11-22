@@ -8,18 +8,56 @@ import (
 	"myai/core/port/repository"
 )
 
-// Keep the v1 field names and order unchanged when the usage flags are false:
-// both the whole batch and individual message bytes participate in deduplication.
+// Keep legacy v1 field names and order when optional metadata is absent.
+// Both the whole batch and individual message bytes participate in deduplication.
 // The shallow fields override the corresponding promoted fields for JSON.
 type messageRecord = repository.MessageRecord
 type messageDocument struct {
 	messageRecord
-	PromptCacheReported   bool `json:",omitempty"`
-	PromptCacheIncomplete bool `json:",omitempty"`
+	PromptCacheReported   bool                    `json:",omitempty"`
+	PromptCacheIncomplete bool                    `json:",omitempty"`
+	ImageReceipts         []imageReceiptDocument  `json:",omitempty"`
+	RequestContext        *requestContextDocument `json:",omitempty"`
+	SkillPromptTokens     int                     `json:",omitempty"`
+}
+
+type imageReceiptDocument struct {
+	Version         int
+	AssetID         string
+	SHA256          string
+	MIMEType        string
+	SourceMessageID string
+	AnchorMessageID string
+	ToolCallID      string `json:",omitempty"`
+}
+
+type requestContextDocument struct {
+	Model               string
+	WindowTokens        int
+	MessageTokens       int
+	SystemTokens        int
+	SkillTokens         int
+	MCPToolTokens       int
+	OtherToolTokens     int
+	OtherTokens         int
+	OutputReserveTokens int
+	SafetyReserveTokens int
 }
 
 func Message(record repository.MessageRecord) messageDocument {
-	return messageDocument{record, record.PromptCacheReported, record.PromptCacheIncomplete}
+	document := messageDocument{
+		messageRecord: record, PromptCacheReported: record.PromptCacheReported,
+		PromptCacheIncomplete: record.PromptCacheIncomplete,
+		RequestContext:        (*requestContextDocument)(record.RequestContext),
+		SkillPromptTokens:     record.SkillPromptTokens,
+	}
+	if len(record.ImageReceipts) > 0 {
+		document.ImageReceipts = make([]imageReceiptDocument, len(record.ImageReceipts))
+		for i, receipt := range record.ImageReceipts {
+			document.ImageReceipts[i] = imageReceiptDocument(receipt)
+		}
+	}
+	return document
 }
 
 type tokenUsageRecord = repository.TokenUsageRecord

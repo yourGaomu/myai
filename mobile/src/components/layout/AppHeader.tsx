@@ -17,10 +17,12 @@ type Props = {
   activity: AgentActivity;
   busy: boolean;
   connected: boolean;
+  contextUsage?: string;
   deviceID: string;
   emptyHome: boolean;
   nearHeader: boolean;
   onNewSession: () => void;
+  onOpenContext: () => void;
   onOpenMenu: () => void;
   onOpenSession: () => void;
   planMode: boolean;
@@ -50,10 +52,12 @@ export function AppHeader({
   activity,
   busy,
   connected,
+  contextUsage,
   deviceID,
   emptyHome,
   nearHeader,
   onNewSession,
+  onOpenContext,
   onOpenMenu,
   onOpenSession,
   planMode,
@@ -154,6 +158,18 @@ export function AppHeader({
         </Animated.View>
 
         <View pointerEvents="box-none" style={styles.rightCluster}>
+          {contextUsage !== undefined ? (
+            <Pressable
+              accessibilityHint="打开上下文详情"
+              accessibilityLabel={`上下文用量 ${contextUsage}`}
+              accessibilityRole="button"
+              onPress={onOpenContext}
+              style={({ pressed }) => [styles.contextPill, pressed && styles.pressed]}
+            >
+              <Feather color={palette.ink2} name="pie-chart" size={13} />
+              <Text adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={1} style={styles.contextText}>{contextUsage}</Text>
+            </Pressable>
+          ) : null}
           <HeaderIconButton accessibilityLabel="新对话" glassy icon="edit" onPress={onNewSession} />
         </View>
       </View>
@@ -178,6 +194,7 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       alignItems: "center",
       flex: 1,
       justifyContent: "center",
+      minWidth: 0,
       paddingHorizontal: 8,
     },
     rightCluster: {
@@ -185,6 +202,21 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       flexDirection: "row",
       gap: 6,
     },
+    contextPill: {
+      alignItems: "center",
+      backgroundColor: palette.floatingGlass,
+      borderColor: palette.floatingGlassBorder,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 5,
+      height: 42,
+      justifyContent: "center",
+      maxWidth: 124,
+      paddingHorizontal: 9,
+      ...shadow.card,
+    },
+    contextText: { color: palette.ink1, flexShrink: 1, fontSize: 11, fontWeight: weight.semibold },
     homePill: {
       alignItems: "center",
       backgroundColor: palette.floatingGlass,
@@ -194,13 +226,15 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
       flexDirection: "row",
       gap: 7,
       marginTop: 4,
-      maxWidth: 210,
+      maxWidth: "100%",
+      minWidth: 0,
       minHeight: 34,
       paddingHorizontal: 12,
       ...shadow.card,
     },
     homePillText: {
       color: palette.ink1,
+      flexShrink: 1,
       fontSize: font.caption,
       fontWeight: weight.semibold,
     },

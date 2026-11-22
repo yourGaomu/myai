@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -26,6 +26,7 @@ import { AgentRunTimeline } from "./AgentRunTimeline";
 import { AgentTurnCard } from "./AgentTurnCard";
 import { AssistantLoadingBubble } from "./AssistantLoadingBubble";
 import { ChatEmptyState } from "./ChatEmptyState";
+import { ChatJumpNav, chatJumpRailClearance, type ChatJumpAnchor } from "./ChatJumpNav";
 import { InlinePlanCard } from "./InlinePlanCard";
 import { MessageBubble } from "./MessageBubble";
 import { ToolActivityGroup } from "./ToolActivityGroup";
@@ -66,7 +67,11 @@ type Props = {
   workspaceChanges?: ChangeEntry[];
 };
 
-export function ChatPanel({
+export function ChatPanel(props: Props) {
+  return <SessionChatPanel key={props.sessionID} {...props} />;
+}
+
+function SessionChatPanel({
   activeAssistantID,
   activePlan,
   activitySlot = "thinking",
@@ -103,6 +108,13 @@ export function ChatPanel({
   const styles = useThemedStyles(makeStyles);
 
   const renderItems = useMemo(() => buildChatTurns(messages, runs, assets), [assets, messages, runs]);
+  const jumpAnchors = useMemo(() => userMessageAnchors(renderItems), [renderItems]);
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const rowLayoutsRef = useRef(new Map<string, { y: number; row: View }>());
+  const pendingJumpRef = useRef<{ id: string; measuring?: boolean } | null>(null);
+  const reviewingHistoryRef = useRef(false);
+  const sessionScrollRef = useRef<ScrollView | null>(null);
+  const topClearanceRef = useRef(topClearance);
   const [viewport, setViewport] = useState({ offset: 0, height: 0 });
   const followTailRef = useRef(true);
   const lastViewportHeightRef = useRef<number>(0);
@@ -124,23 +136,94 @@ export function ChatPanel({
     ? latestRegeneratableTurnID(renderItems)
     : undefined;
 
-  const scrollToTail = useCallback(
-    (animated = true, force = false) => {
-      requestAnimationFrame(() => {
-        if (force || followTailRef.current) {
-          chatScrollRef.current?.scrollToEnd({ animated });
-        }
-      });
-    },
-    [chatScrollRef],
-  );
+  const showJumpNav = jumpAnchors.length >= 2;
+  const setScrollView = useCallback((scrollView: ScrollView | null) => {
+    sessionScrollRef.current = scrollView;
+    chatScrollRef.current = scrollView;
+  }, [chatScrollRef]);
 
-  useEffect(() => {
-    followTailRef.current = true;
-    setShowBackToBottom(false);
-    nearHeaderRef.current = false;
-    onNearHeaderChange?.(false);
-  }, [onNearHeaderChange, sessionID]);
+  const scrollToTail = useCallback((animated = true, force = false) => {
+    requestAnimationFrame(() => {
+      if (!pendingJumpRef.current && !reviewingHistoryRef.current && (force || followTailRef.current)) {
+        sessionScrollRef.current?.scrollToEnd({ animated });
+      }
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    onNearHeaderChange?.(nearHeaderRef.current);
+    onScrolledChange?.(scrolledRef.current);
+  }, [onNearHeaderChange, onScrolledChange]);
+
+  useLayoutEffect(() => {
+    topClearanceRef.current = topClearance;
+  }, [topClearance]);
+
+  useLayoutEffect(() => {
+    const ids = new Set(jumpAnchors.map(({ id }) => id));
+    for (const id of rowLayoutsRef.current.keys()) {
+      if (!ids.has(id)) rowLayoutsRef.current.delete(id);
+    }
+    if (pendingJumpRef.current && (!showJumpNav || !ids.has(pendingJumpRef.current.id))) {
+      pendingJumpRef.current = null;
+      setShowBackToBottom(!followTailRef.current);
+      if (followTailRef.current) scrollToTail();
+    }
+    if (!showJumpNav) setJumpOpen(false);
+  }, [jumpAnchors, scrollToTail, showJumpNav]);
+
+  const tryPendingJump = useCallback(() => {
+    const jump = pendingJumpRef.current;
+    const scrollView = sessionScrollRef.current;
+    if (!jump || jump.measuring || !scrollView) return;
+    const layout = rowLayoutsRef.current.get(jump.id);
+    if (!layout) return;
+
+    const finishJump = (y: number) => {
+      if (sessionScrollRef.current !== scrollView || pendingJumpRef.current !== jump) return;
+      jump.measuring = false;
+      if (!Number.isFinite(y) || rowLayoutsRef.current.get(jump.id)?.row !== layout.row) return;
+      pendingJumpRef.current = null;
+      followTailRef.current = false;
+      reviewingHistoryRef.current = true;
+      // A single scroll avoids intermediate near-bottom events while jumping into history.
+      scrollView.scrollTo({ y: Math.max(0, y - topClearanceRef.current), animated: false });
+    };
+
+    if (Platform.OS === "web") {
+      // Web onLayout observes size, so preceding rows can move this row without a new event.
+      const content = scrollView.getInnerViewNode();
+      if (!content) return;
+      jump.measuring = true;
+      layout.row.measureLayout(content, (_x, y) => finishJump(y), () => { jump.measuring = false; });
+    } else {
+      finishJump(layout.y);
+    }
+  }, []);
+
+  const rememberUserRow = useCallback((id: string, y: number, row: View) => {
+    if (!sessionScrollRef.current || !Number.isFinite(y)) return;
+    const oldPosition = rowLayoutsRef.current.get(id);
+    rowLayoutsRef.current.set(id, { y, row });
+    const jump = pendingJumpRef.current;
+    if (jump?.id !== id) return;
+    // A replacement row invalidates an async measurement of the old host view.
+    if (jump.measuring && oldPosition?.row !== row) pendingJumpRef.current = { id };
+    tryPendingJump();
+  }, [tryPendingJump]);
+
+  const jumpToMessage = (id: string) => {
+    if (!showJumpNav || !jumpAnchors.some((anchor) => anchor.id === id)) return;
+    pendingJumpRef.current = { id };
+    setJumpOpen(false);
+    setShowBackToBottom(true);
+    tryPendingJump();
+  };
+
+  const resumeManualScroll = () => {
+    pendingJumpRef.current = null;
+    reviewingHistoryRef.current = false;
+  };
 
   useEffect(() => {
     if (isEmpty && nearHeaderRef.current) {
@@ -165,16 +248,29 @@ export function ChatPanel({
     };
   }, [scrollToTail]);
 
+  const backToBottomLabel = pendingQuestions.length > 0 ? "查看待确认" : "回到底部";
+  const webScrollHandlers = Platform.OS === "web" ? {
+    onKeyDown: (event: { key: string; target: unknown; currentTarget: unknown }) => {
+      if (event.target === event.currentTarget && ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp", " "].includes(event.key)) {
+        resumeManualScroll();
+      }
+    },
+    onWheel: resumeManualScroll,
+  } : {};
+
   return (
     <View style={styles.chatContainer}>
       <ScrollView
+        {...webScrollHandlers}
         contentContainerStyle={[
           styles.messages,
           { paddingTop: isEmpty ? Math.max(40, Math.round(topClearance * 0.72)) : topClearance },
+          showJumpNav && styles.messagesWithJumpRail,
           isEmpty && styles.messagesEmpty,
         ]}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => {
+          tryPendingJump();
           if (followTailRef.current) {
             scrollToTail(true);
           }
@@ -189,16 +285,17 @@ export function ChatPanel({
           }
           lastViewportHeightRef.current = currentHeight;
         }}
+        onScrollBeginDrag={resumeManualScroll}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
           const offset = contentOffset.y;
           const height = layoutMeasurement.height;
           setViewport((current) => current.offset === offset && current.height === height ? current : { offset, height });
-          const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-          followTailRef.current = distanceFromBottom <= 44;
-
-          const awayFromBottom = !isEmpty && distanceFromBottom > 120;
-          setShowBackToBottom(awayFromBottom);
+          const distanceFromBottom = contentSize.height - (offset + height);
+          if (!pendingJumpRef.current && !reviewingHistoryRef.current) {
+            followTailRef.current = distanceFromBottom <= 44;
+            setShowBackToBottom(!isEmpty && distanceFromBottom > 120);
+          }
 
           const scrolled = contentOffset.y > 4;
           if (scrolled !== scrolledRef.current) {
@@ -213,7 +310,7 @@ export function ChatPanel({
             onNearHeaderChange?.(near);
           }
         }}
-        ref={chatScrollRef}
+        ref={setScrollView}
         scrollEventThrottle={48}
         showsVerticalScrollIndicator={false}
         style={styles.messagesScroll}
@@ -239,7 +336,7 @@ export function ChatPanel({
             {renderItems.map((item) => {
               if (item.type === "agent_turn") {
                 return (
-                  <PreviewRow key={JSON.stringify([sessionID, item.id])} viewport={viewport}>
+                  <PreviewRow key={item.id} viewport={viewport}>
                     <AgentTurnCard
                       buttonFeedback={buttonFeedback}
                       catalog={assets}
@@ -263,7 +360,12 @@ export function ChatPanel({
                 );
               }
               return (
-                <PreviewRow key={JSON.stringify([sessionID, item.id])} viewport={viewport}>
+                <PreviewRow
+                  key={item.id}
+                  onUserLayout={item.type === "user_turn" ? rememberUserRow : undefined}
+                  rowID={item.id}
+                  viewport={viewport}
+                >
                   <MessageBubble
                     buttonFeedback={buttonFeedback}
                     catalog={assets}
@@ -302,11 +404,25 @@ export function ChatPanel({
         )}
       </ScrollView>
 
-      {showBackToBottom ? (
+      {showJumpNav ? (
+        <ChatJumpNav
+          anchors={jumpAnchors}
+          buttonFeedback={buttonFeedback}
+          onJump={jumpToMessage}
+          onToggle={() => setJumpOpen((open) => !open)}
+          open={jumpOpen}
+          topClearance={topClearance}
+          viewportHeight={viewport.height}
+        />
+      ) : null}
+
+      {!isEmpty && showBackToBottom ? (
         <Pressable
-          accessibilityLabel="回到底部"
+          accessibilityLabel={backToBottomLabel}
           accessibilityRole="button"
           onPress={() => {
+            resumeManualScroll();
+            setJumpOpen(false);
             followTailRef.current = true;
             setShowBackToBottom(false);
             scrollToTail(true, true);
@@ -316,7 +432,7 @@ export function ChatPanel({
           {hasRunningStream ? <View style={styles.scrollBottomPulse} /> : null}
           <Feather color={palette.ink1} name="arrow-down" size={15} />
           <Text style={styles.scrollBottomText}>
-            {pendingQuestions.length > 0 ? "查看待确认" : "回到底部"}
+            {backToBottomLabel}
           </Text>
         </Pressable>
       ) : null}
@@ -324,15 +440,22 @@ export function ChatPanel({
   );
 }
 
-function PreviewRow({ children, viewport }: { children: ReactNode; viewport: { offset: number; height: number } }) {
+function PreviewRow({ children, onUserLayout, rowID, viewport }: {
+  children: ReactNode;
+  onUserLayout?: (id: string, y: number, row: View) => void;
+  rowID?: string;
+  viewport: { offset: number; height: number };
+}) {
+  const rowRef = useRef<View | null>(null);
   const [layout, setLayout] = useState<{ y: number; height: number } | null>(null);
   const overscan = 160;
   const visible = Boolean(layout && viewport.height > 0 &&
     layout.y + layout.height >= viewport.offset - overscan &&
     layout.y <= viewport.offset + viewport.height + overscan);
   return (
-    <View onLayout={({ nativeEvent: { layout: next } }) => {
+    <View ref={onUserLayout ? rowRef : undefined} collapsable={onUserLayout ? false : undefined} onLayout={({ nativeEvent: { layout: next } }) => {
       setLayout((current) => current?.y === next.y && current.height === next.height ? current : next);
+      if (rowID !== undefined && rowRef.current) onUserLayout?.(rowID, next.y, rowRef.current);
     }}>
       <AssetPreviewVisibleContext.Provider value={visible}>{children}</AssetPreviewVisibleContext.Provider>
     </View>
@@ -450,6 +573,19 @@ function lastIndex<T>(items: T[], matches: (item: T) => boolean) {
   return -1;
 }
 
+function userMessageAnchors(items: ChatRenderItem[]): ChatJumpAnchor[] {
+  const anchors: ChatJumpAnchor[] = [];
+  for (const item of items) {
+    if (item.type !== "user_turn") continue;
+    const { attachments, text } = item.message;
+    const attachment = attachments?.[0];
+    const attachmentName = attachment?.kind === "uploaded_asset" ? attachment.file_name : attachment?.name;
+    const title = (text || attachmentName || "").replace(/\s+/g, " ").trim();
+    anchors.push({ id: item.id, index: anchors.length + 1, title: title || "空消息" });
+  }
+  return anchors;
+}
+
 const makeStyles = ({ font, palette, shadow }: ReturnType<typeof useAppTheme>) =>
   StyleSheet.create({
     chatContainer: {
@@ -465,6 +601,9 @@ const makeStyles = ({ font, palette, shadow }: ReturnType<typeof useAppTheme>) =
       position: "relative",
       paddingBottom: 22,
       paddingHorizontal: space.xl,
+    },
+    messagesWithJumpRail: {
+      paddingRight: chatJumpRailClearance,
     },
     messagesEmpty: {
       flexGrow: 1,

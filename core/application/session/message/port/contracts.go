@@ -35,6 +35,11 @@ type PlanningRuntimeInstructionProvider interface {
 	PromptForMode(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) string
 }
 
+// AccountingRuntimeInstructionProvider optionally reports the Skill portion of a runtime prompt.
+type AccountingRuntimeInstructionProvider interface {
+	PromptForModeWithAccounting(ctx context.Context, current *session.Session, input string, forceChatMode bool, forceAutonomousPlanning bool) (text string, skillPromptTokens int)
+}
+
 type RegenerationPersistence interface {
 	PersistRegeneratedSession(ctx context.Context, current *session.Session) error
 }

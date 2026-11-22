@@ -1,6 +1,7 @@
 package mapper
 
 import (
+	"slices"
 	"time"
 
 	uuidadapter "myai/core/adapter/id/uuid"
@@ -22,12 +23,8 @@ type Mapper struct {
 }
 
 func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, createdAt time.Time) repository.MessageRecord {
-	id := m.newID()
-	if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, command.Input, command.SyntheticReason); ok {
-		id = message.HistoryRecordID(0, 1)
-	}
-	return repository.MessageRecord{
-		ID:              id,
+	record := repository.MessageRecord{
+		ID:              m.newID(),
 		SessionID:       command.SessionID,
 		Role:            repository.RoleUser,
 		Content:         command.Input,
@@ -35,6 +32,11 @@ func (m Mapper) UserMessage(command generationcommand.PersistUserMessage, create
 		Sequence:        messageSequence(createdAt),
 		CreatedAt:       createdAt,
 	}
+	if message, ok := latestSnapshotMessage(command.SessionSnapshot, domainmessage.RoleUser, command.Input, command.SyntheticReason); ok {
+		record.ID = message.HistoryRecordID(0, 1)
+		copyPrivateMetadata(&record, message)
+	}
+	return record
 }
 
 func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt time.Time) []repository.MessageRecord {
@@ -53,18 +55,19 @@ func (m Mapper) UserTurn(command generationcommand.PersistUserMessage, createdAt
 		})
 	}
 	if runtimeMessage := domainmessage.RuntimeInstruction(command.RuntimeInstruction); runtimeMessage.IsSynthetic() {
-		id := m.newID()
-		if message, ok := latestSnapshotMessage(command.SessionSnapshot, runtimeMessage.Role, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
-			id = message.HistoryRecordID(0, 1)
-		}
-		records = append(records, repository.MessageRecord{
-			ID:              id,
+		record := repository.MessageRecord{
+			ID:              m.newID(),
 			SessionID:       command.SessionID,
 			Role:            string(runtimeMessage.Role),
 			Content:         runtimeMessage.Text(),
 			SyntheticReason: string(runtimeMessage.SyntheticReason),
 			CreatedAt:       createdAt,
-		})
+		}
+		if message, ok := latestSnapshotMessage(command.SessionSnapshot, runtimeMessage.Role, runtimeMessage.Text(), runtimeMessage.SyntheticReason); ok {
+			record.ID = message.HistoryRecordID(0, 1)
+			copyPrivateMetadata(&record, message)
+		}
+		records = append(records, record)
 	}
 	records = append(records, m.UserMessage(command, createdAt))
 	for index := range records {
@@ -224,6 +227,10 @@ func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Me
 			mapped[partIndex].SourceID = message.SourceID
 			mapped[partIndex].SourceKind = message.SourceKind
 			mapped[partIndex].SourceTaskID = message.SourceTaskID
+			// Private metadata belongs to the message, even when its first row is a tool call.
+			if partIndex == 0 {
+				copyPrivateMetadata(&mapped[partIndex], message)
+			}
 			if mapped[partIndex].Sequence <= 0 {
 				mapped[partIndex].Sequence = messageSequence(createdAt)
 			}
@@ -231,6 +238,12 @@ func (m Mapper) recordsForMessages(sessionID string, messages []domainmessage.Me
 		}
 	}
 	return records
+}
+
+func copyPrivateMetadata(record *repository.MessageRecord, message domainmessage.Message) {
+	record.ImageReceipts = slices.Clone(message.ImageReceipts)
+	record.RequestContext = message.RequestContext.Clone()
+	record.SkillPromptTokens = message.SkillPromptTokens
 }
 
 func latestSnapshotMessage(snapshot *session.Session, role domainmessage.Role, content string, reason domainmessage.SyntheticReason) (domainmessage.Message, bool) {

@@ -42,6 +42,7 @@ type Info struct {
 	SummaryHash       string
 	PrefixHash        string
 	Checkpoint        *compaction.Checkpoint
+	RequestContext    *domainmessage.RequestContext
 }
 
 type Snapshot struct {

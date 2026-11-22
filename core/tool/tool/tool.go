@@ -9,6 +9,9 @@ import (
 
 type ToolOutput = domaintool.ToolOutput
 
+// ImageAssetID identifies a session-authorized image read in an internal execution result.
+type ImageAssetID string
+
 func SuccessOutput(content string) ToolOutput {
 	return domaintool.SuccessOutput(content)
 }

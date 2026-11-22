@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -124,7 +125,7 @@ func TestAssistantTurnUsesCommittedRowsAndRawReasoning(t *testing.T) {
 				t.Fatalf("durable rows differ from live rows: durable=%+v live=%+v", prepared, live)
 			}
 			for index := range prepared {
-				if prepared[index] != live[index] {
+				if !reflect.DeepEqual(prepared[index], live[index]) {
 					t.Fatalf("durable row differs from live row: durable=%+v live=%+v", prepared[index], live[index])
 				}
 			}
@@ -157,6 +158,31 @@ func TestMapperPersistsRAGContextAsEvidenceUserFragment(t *testing.T) {
 	}, time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC))
 	if len(records) != 2 || records[0].Role != repository.RoleUser || records[0].SyntheticReason != string(domainmessage.SyntheticReasonRAGContext) {
 		t.Fatalf("expected RAG context as synthetic user evidence, got %#v", records)
+	}
+}
+
+func TestUserTurnPersistsRuntimeSkillProvenance(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	runtime := domainmessage.RuntimeInstruction("skill rules")
+	runtime.ID = "runtime"
+	runtime.SkillPromptTokens = 21
+	user := domainmessage.Text(domainmessage.RoleUser, "question")
+	user.ID = "user"
+	messages := []domainmessage.Message{runtime, user}
+	command := generationcommand.PersistUserMessage{
+		SessionID: "session", Input: user.Text(), RuntimeInstruction: "skill rules",
+		AppendedMessages: messages, SessionSnapshot: &session.Session{Messages: messages},
+	}
+	mapper := Mapper{}
+	for _, useAppendedMessages := range []bool{true, false} {
+		if !useAppendedMessages {
+			command.AppendedMessages = nil
+		}
+		records := mapper.UserTurn(command, now)
+		if len(records) != 2 || records[0].ID != runtime.ID || records[0].SkillPromptTokens != runtime.SkillPromptTokens ||
+			records[1].ID != user.ID || records[1].SkillPromptTokens != 0 {
+			t.Fatalf("appended messages=%t, rows=%+v", useAppendedMessages, records)
+		}
 	}
 }
 

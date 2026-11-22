@@ -37,6 +37,7 @@ func (s AgentLoopService) prepareSnapshot(ctx context.Context, command generatio
 		switch message.SyntheticReason {
 		case domainmessage.SyntheticReasonRuntimeInstruction:
 			turn.RuntimeInstruction, _ = message.RuntimeInstructionText()
+			turn.SkillPromptTokens = message.SkillPromptTokens
 		case domainmessage.SyntheticReasonRAGContext:
 			turn.RAGContext = strings.TrimSpace(strings.TrimPrefix(message.Text(), domainmessage.RAGContextPrefix))
 		}
@@ -144,6 +145,14 @@ func (s AgentLoopService) generateSample(ctx context.Context, command generation
 	if err != nil {
 		return modelport.ChatResult{}, contextmgr.Snapshot{}, err
 	}
+	images.replayReads = false
+	for _, tool := range s.toolsForSession(command.Session, command.ForceChatMode) {
+		if tool.IsBuiltinAssetReader() {
+			images.replayReads = true
+			break
+		}
+	}
+	var effectiveBudget contextmgr.RequestBudget
 	build := func(budget contextmgr.RequestBudget) (modelport.GenerateRequest, contextmgr.Snapshot, int, error) {
 		snapshot, err := s.prepareSnapshot(ctx, command, budget)
 		if err != nil {
@@ -154,13 +163,26 @@ func (s AgentLoopService) generateSample(ctx context.Context, command generation
 		}
 		request := modelport.GenerateRequest{Messages: snapshot.Messages, Tools: tools, Stream: command.Stream, Settings: command.Settings}
 		imageTokens, err := s.addRequestImages(ctx, command.Session.ID, command.Model, images, snapshot, command.Session.Messages, budget, &request)
+		if err == nil {
+			effectiveBudget = budget
+		}
 		return request, snapshot, imageTokens, err
+	}
+	generate := func(request modelport.GenerateRequest, imageTokens int) (modelport.ChatResult, error) {
+		result, err := command.Model.Generate(ctx, request)
+		if err == nil {
+			message := domainmessage.Assistant(result.Content, result.Reasoning, result.ToolCalls)
+			message.ImageReceipts = images.projected
+			message.RequestContext = estimateRequestContext(command.Session.Model, effectiveBudget, request, imageTokens)
+			result.Message = &message
+		}
+		return result, err
 	}
 	request, snapshot, imageTokens, err := build(budget)
 	if err != nil {
 		return modelport.ChatResult{}, snapshot, err
 	}
-	result, err := command.Model.Generate(ctx, request)
+	result, err := generate(request, imageTokens)
 	if !modelport.IsContextWindowExceeded(err) || retried == nil || *retried {
 		return result, snapshot, err
 	}
@@ -180,8 +202,48 @@ func (s AgentLoopService) generateSample(ctx context.Context, command generation
 	if contextmgr.EstimateMessagesTokens(retry.Messages)+retryImageTokens >= requestTokens {
 		return result, snapshot, err
 	}
-	result, err = command.Model.Generate(ctx, retry)
+	result, err = generate(retry, retryImageTokens)
 	return result, rebuilt, err
+}
+
+func estimateRequestContext(model string, budget contextmgr.RequestBudget, request modelport.GenerateRequest, imageTokens int) *domainmessage.RequestContext {
+	info := &domainmessage.RequestContext{
+		Model: model, WindowTokens: budget.WindowTokens,
+		OutputReserveTokens: budget.OutputTokens, SafetyReserveTokens: budget.SafetyTokens,
+		OtherTokens: imageTokens,
+	}
+	for _, message := range request.Messages {
+		tokens := contextmgr.EstimateMessagesTokens([]domainmessage.Message{message})
+		switch {
+		case message.SyntheticReason == domainmessage.SyntheticReasonSkillInstruction:
+			info.SkillTokens += tokens
+		case message.Role == domainmessage.RoleSystem:
+			info.SystemTokens += tokens
+		case !message.IsSynthetic() || message.SyntheticReason == domainmessage.SyntheticReasonCompactionSummary:
+			info.MessageTokens += tokens
+		default:
+			skillTokens := min(max(0, message.SkillPromptTokens), tokens)
+			info.SkillTokens += skillTokens
+			info.OtherTokens += tokens - skillTokens
+		}
+	}
+	// Partition the one budgeted schema estimate without counting JSON array
+	// framing twice. Round down the MCP share, leaving the remainder to other tools.
+	var mcpBytes, totalBytes int
+	for _, tool := range request.Tools {
+		encoded, err := json.Marshal(tool)
+		if err == nil {
+			totalBytes += len(encoded)
+			if tool.IsMCP() {
+				mcpBytes += len(encoded)
+			}
+		}
+	}
+	if totalBytes > 0 {
+		info.MCPToolTokens = int(int64(budget.ToolTokens) * int64(mcpBytes) / int64(totalBytes))
+	}
+	info.OtherToolTokens = budget.ToolTokens - info.MCPToolTokens
+	return info
 }
 
 func estimateToolTokens(tools []modelport.Tool) (int, error) {

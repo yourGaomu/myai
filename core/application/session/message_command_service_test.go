@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	memorysession "myai/core/adapter/session/memory"
+	runtimeservice "myai/core/application/runtime/service"
+	"myai/core/contextmgr"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
 	"myai/core/session"
@@ -69,6 +71,41 @@ func TestMessageCommandServiceAppendsRuntimeInstructionBeforeUser(t *testing.T) 
 		t.Fatalf("unexpected user message: %#v", result.Session.Messages[2])
 	}
 }
+
+func TestMessageCommandServiceCarriesSkillAccountingOnRuntimeMessage(t *testing.T) {
+	memory := memorysession.NewStore("gpt-5")
+	if err := memory.PutSessionWithOptions("session-1", "gpt-5", session.PermissionModeAsk, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	const skill = "Cuenta 文 included here"
+	service := newMessageCommandService(memory)
+	service.RuntimeInstructions = runtimeservice.NewSessionPromptProvider(messageSkillPrompt(skill))
+
+	result, err := service.AppendUserMessage(t.Context(), AppendUserMessageCommand{
+		SessionID: "session-1", Input: "implement a feature", RAGContext: "evidence", ForceAutonomousPlanning: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := runtimeservice.RuntimeTurnBoundaryPrompt + "\n\n" + runtimeservice.AutonomousPlanPrompt + "\n\n" + skill
+	if len(result.AppendedMessages) != 3 || result.RuntimeInstruction != want {
+		t.Fatalf("unexpected appended turn: %#v", result.AppendedMessages)
+	}
+	rag, runtime, user := result.AppendedMessages[0], result.AppendedMessages[1], result.AppendedMessages[2]
+	if !rag.IsSyntheticReason(domainmessage.SyntheticReasonRAGContext) || rag.SkillPromptTokens != 0 || user.SkillPromptTokens != 0 || user.Text() != "implement a feature" {
+		t.Fatalf("unexpected surrounding messages: %#v", result.AppendedMessages)
+	}
+	if runtime.Text() != domainmessage.RuntimeInstruction(want).Text() || runtime.SkillPromptTokens != contextmgr.EstimateTextTokens(skill) {
+		t.Fatalf("unexpected runtime message: %#v", runtime)
+	}
+	if got := result.Session.Messages[2].SkillPromptTokens; got != runtime.SkillPromptTokens {
+		t.Fatalf("session snapshot has %d skill tokens, want %d", got, runtime.SkillPromptTokens)
+	}
+}
+
+type messageSkillPrompt string
+
+func (p messageSkillPrompt) PromptForInput(context.Context, string) string { return string(p) }
 
 func TestMessageCommandServiceDeduplicatesOnlyMatchingSourceID(t *testing.T) {
 	memory := memorysession.NewStore("gpt-5")

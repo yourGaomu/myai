@@ -3,6 +3,7 @@ package memory
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 
@@ -227,11 +228,33 @@ func (sm *Store) AppendMessagesTo(sessionID string, messages ...domainmessage.Me
 	return domainsession.Clone(current), domainmessage.CloneAll(current.Messages[start:]), nil
 }
 
+// DiscardRequestMetadata clears private sampling metadata when durable acceptance fails.
+func (sm *Store) DiscardRequestMetadata(sessionID string, messageIDs []string) {
+	if len(messageIDs) == 0 {
+		return
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	current, err := sm.sessionByIDLocked(sessionID)
+	if err != nil {
+		return
+	}
+	for i := range current.Messages {
+		message := &current.Messages[i]
+		if message.ID != "" && slices.Contains(messageIDs, message.ID) {
+			message.ImageReceipts = nil
+			message.RequestContext = nil
+		}
+	}
+}
+
 func sameMessagePayload(left, right domainmessage.Message) bool {
 	return left.Role == right.Role && left.Reasoning == right.Reasoning &&
 		left.SyntheticReason == right.SyntheticReason && left.SourceID == right.SourceID &&
 		left.SourceKind == right.SourceKind && left.SourceTaskID == right.SourceTaskID &&
-		reflect.DeepEqual(left.Parts, right.Parts)
+		left.SkillPromptTokens == right.SkillPromptTokens && slices.Equal(left.ImageReceipts, right.ImageReceipts) &&
+		reflect.DeepEqual(left.RequestContext, right.RequestContext) && reflect.DeepEqual(left.Parts, right.Parts)
 }
 
 func (sm *Store) AddAssistantMessage(content string) error {

@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import type { ContextInfo, ModelSummary, SessionSummary } from "../../protocol";
 import type { SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import { modelDisplayName, modelProviderLabel, normalizePermission } from "../../utils/session";
-import { formatTokenCount } from "../../utils/tokenUsage";
+import { describeSessionContext, formatContextUsage } from "../../utils/sessionContext";
 import { fontFamily, font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { BottomSheet } from "../common/BottomSheet";
@@ -17,6 +17,9 @@ type Props = {
   connected: boolean;
   connectionLabel: string;
   context?: ContextInfo;
+  contextFirst: boolean;
+  pendingContext: boolean;
+  sessionID: string;
   currentModelID: string;
   models: ModelSummary[];
   onClose: () => void;
@@ -51,14 +54,13 @@ const permissionHints: Record<SessionPermissionMode, string> = {
 export function SessionSheet(props: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
-  const { activeSession, context, visible } = props;
-  const hasSession = Boolean(activeSession?.id);
+  const { activeSession, context, sessionID, visible } = props;
+  const hasSession = Boolean(sessionID);
   const mode: SessionAgentMode = activeSession?.agent_mode === "plan" ? "plan" : "chat";
   const permission = normalizePermission(activeSession?.permission_mode);
   const models = props.models.filter((model) => model.enabled !== false);
-  const windowK = context?.window_k || activeSession?.context_window_k || 0;
-  const used = context?.selected_tokens ?? activeSession?.last_usage?.prompt_tokens;
-  const ratio = windowK && used ? Math.min(1, used / (windowK * 1000)) : 0;
+  const { sample, categories, used, window, snapshotUsed, snapshotWindow } = describeSessionContext(context, activeSession?.context_window_k);
+  const ratio = window && used !== undefined ? Math.min(1, used / window) : 0;
   const settingsDisabled = !hasSession || !props.connected || props.pendingSettings;
   const { connected } = props;
   const requestContextRef = useRef(props.onRequestContext);
@@ -68,7 +70,59 @@ export function SessionSheet(props: Props) {
     if (visible && connected && hasSession) {
       requestContextRef.current();
     }
-  }, [connected, hasSession, visible]);
+  }, [connected, sessionID, visible]);
+
+  const contextDetails = hasSession ? (
+    <>
+      <Text accessibilityRole="header" style={styles.label}>上下文</Text>
+      <View style={[styles.group, styles.context]}>
+        <View style={styles.contextRow}>
+          <Text style={styles.contextTitle}>{sample ? "最近一次成功的模型请求" : "当前会话快照"}</Text>
+          <Pressable accessibilityRole="button" disabled={settingsDisabled} hitSlop={6} onPress={props.onCompact} style={settingsDisabled && styles.dimmed}>
+            <Text style={styles.link}>压缩上下文</Text>
+          </Pressable>
+        </View>
+        {sample?.model ? <Text style={styles.contextNote}>{sample.model}</Text> : null}
+        <Text style={styles.contextValue}>估算输入 / 窗口（令牌）  {formatContextUsage(used, window, true)}</Text>
+        <ShimmerProgressBar
+          active={ratio >= 0.8}
+          height={6}
+          progress={Math.round(ratio * 100)}
+          tone={ratio >= 0.8 ? "warn" : "brand"}
+        />
+        {sample ? (
+          <>
+            <View style={styles.contextBreakdown}>
+              {categories.map(({ label, tokens }) => (
+                <View key={label} style={styles.contextLine}>
+                  <Text style={styles.contextNote}>{label}</Text>
+                  <Text style={styles.contextValue}>{tokens.toLocaleString()}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.contextBreakdown}>
+              <View style={styles.contextLine}>
+                <Text style={styles.contextNote}>输出预留</Text>
+                <Text style={styles.contextValue}>{sample.output_reserve_tokens.toLocaleString()}</Text>
+              </View>
+              <View style={styles.contextLine}>
+                <Text style={styles.contextNote}>安全余量</Text>
+                <Text style={styles.contextValue}>{sample.safety_reserve_tokens.toLocaleString()}</Text>
+              </View>
+            </View>
+            <Text style={styles.contextNote}>输入为本地估算（含图片和工具定义）。两项预留占用窗口容量，单独列出。</Text>
+            {snapshotUsed !== undefined ? (
+              <Text style={styles.contextNote}>当前会话快照（估算）  {formatContextUsage(snapshotUsed, snapshotWindow, true)}</Text>
+            ) : null}
+          </>
+        ) : (
+          <Text style={styles.contextNote}>
+            {props.pendingContext ? "正在读取上下文…" : "暂无最近一次模型请求的分类及预留数据。用量采用会话快照的本地估算。"}
+          </Text>
+        )}
+      </View>
+    </>
+  ) : null;
 
   return (
     <BottomSheet accessibilityLabel="会话设置" onDismiss={props.onClose} visible={visible}>
@@ -88,6 +142,8 @@ export function SessionSheet(props: Props) {
           </Pressable>
         </View>
       ) : null}
+
+      {props.contextFirst ? contextDetails : null}
 
       <Text style={styles.label}>模型</Text>
       <View style={styles.group}>
@@ -152,23 +208,7 @@ export function SessionSheet(props: Props) {
       </View>
       <Text style={[styles.hint, permission === "full" && styles.hintWarn]}>{permissionHints[permission]}</Text>
 
-      <Text style={styles.label}>上下文</Text>
-      <View style={[styles.group, styles.context]}>
-        <View style={styles.contextRow}>
-          <Text style={styles.contextValue}>
-            {used !== undefined ? formatTokenCount(used) : "—"} / {windowK ? `${windowK}K` : "—"}
-          </Text>
-          <Pressable accessibilityRole="button" disabled={settingsDisabled} hitSlop={6} onPress={props.onCompact} style={settingsDisabled && styles.dimmed}>
-            <Text style={styles.link}>压缩上下文</Text>
-          </Pressable>
-        </View>
-        <ShimmerProgressBar
-          active={ratio >= 0.8}
-          height={6}
-          progress={Math.round(ratio * 100)}
-          tone={ratio >= 0.8 ? "warn" : "brand"}
-        />
-      </View>
+      {!props.contextFirst ? contextDetails : null}
     </BottomSheet>
   );
 }
@@ -213,8 +253,10 @@ const makeStyles = ({ palette }: AppTheme) =>
     hintWarn: { color: palette.warn },
     context: { gap: 12, padding: 14 },
     contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
-    bar: { backgroundColor: palette.hairlineStrong, borderRadius: radius.xs, height: 6, overflow: "hidden" },
-    barFill: { backgroundColor: palette.brand, borderRadius: radius.xs, height: "100%" },
-    contextValue: { color: palette.ink2, flexShrink: 1, fontFamily: fontFamily.mono, fontSize: font.caption, maxWidth: "100%" },
+    contextLine: { alignItems: "baseline", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+    contextBreakdown: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 5, paddingTop: 8 },
+    contextNote: { color: palette.ink3, fontSize: font.caption },
+    contextTitle: { color: palette.ink1, flexShrink: 1, fontSize: font.label, fontWeight: weight.semibold },
+    contextValue: { color: palette.ink2, flexShrink: 1, fontFamily: fontFamily.mono, fontSize: font.caption },
     link: { color: palette.brandLight, fontSize: font.label, fontWeight: weight.medium },
   });

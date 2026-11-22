@@ -28,7 +28,9 @@ const (
 // turnImages holds bounded, lazy state for one Run only. It is never stored in
 // a session, snapshot, or execution context (which may reach hooks/subagents).
 type turnImages struct {
-	reads        map[string]string // call ID -> asset ID from an actually executed read_asset
+	reads        map[string]map[string]string // assigned result message ID -> trusted call ID -> asset ID
+	projected    []domainmessage.ImageReceipt
+	replayReads  bool
 	assets       map[string]*resolvedImage
 	downloaded   int
 	downloadSize int
@@ -41,56 +43,42 @@ type resolvedImage struct {
 	asset   files.Asset
 	image   modelport.InputImage
 	tokens  int
+	sha256  string
 	problem string
 }
 
 type visionCandidate struct {
 	attachedAssetRef
 	messageIndex int
+	sourceID     string
+	anchorID     string
+	callID       string
+	sha256       string
+	mimeType     string
 	toolResult   bool
 }
 
-func (turn *turnImages) acceptReads(calls []domainmessage.ToolCall, messages []domainmessage.Message) {
-	assets := make(map[string]string)
-	for _, call := range calls {
-		if id := readAssetCallID(call); id != "" {
-			assets[call.ID] = id
-		}
-	}
-	if len(assets) == 0 {
-		return
-	}
+func (turn *turnImages) acceptReads(reads map[string]string, messages []domainmessage.Message) {
 	for _, message := range messages {
-		if message.Role != domainmessage.RoleTool {
+		if message.Role != domainmessage.RoleTool || message.ID == "" {
 			continue
 		}
 		for _, part := range message.Parts {
 			result := part.ToolResult
-			if part.Type != domainmessage.PartToolResult || result == nil {
+			if result == nil || result.Name != "read_asset" || result.Status != domaintool.ResultStatusSuccess || result.Truncated {
 				continue
 			}
-			if id := assets[result.ToolCallID]; id != "" && isImageReadResult(result, id) {
+			if id := reads[result.ToolCallID]; files.IsSessionAssetID(id) {
 				if turn.reads == nil {
-					turn.reads = make(map[string]string)
+					turn.reads = make(map[string]map[string]string)
 				}
-				turn.reads[result.ToolCallID] = id
+				if turn.reads[message.ID] == nil {
+					turn.reads[message.ID] = make(map[string]string)
+				}
+				turn.reads[message.ID][result.ToolCallID] = id
 			}
 		}
 	}
-}
-
-func isImageReadResult(result *domainmessage.ToolResult, assetID string) bool {
-	if result.Name != "read_asset" || result.Status != domaintool.ResultStatusSuccess || result.Truncated {
-		return false
-	}
-	content := result.Content
-	if result.PromptTruncated {
-		content = result.FullContent
-	}
-	var reference map[string]any
-	return len(content) <= 4096 && json.Unmarshal([]byte(content), &reference) == nil &&
-		reference["asset_id"] == assetID && reference["image_reference"] == true &&
-		(reference["truncated"] == nil || reference["truncated"] == false)
 }
 
 func readAssetCallID(call domainmessage.ToolCall) string {
@@ -110,7 +98,7 @@ func readAssetCallID(call domainmessage.ToolCall) string {
 }
 
 func (turn *turnImages) selectedToolImages(messages []domainmessage.Message) []visionCandidate {
-	if len(turn.reads) == 0 {
+	if len(turn.reads) == 0 && !turn.replayReads {
 		return nil
 	}
 	var selected []visionCandidate
@@ -119,34 +107,99 @@ func (turn *turnImages) selectedToolImages(messages []domainmessage.Message) []v
 		if message.Role != domainmessage.RoleAssistant || !message.HasToolCall() {
 			continue
 		}
-		// prepareSnapshot already verified complete pairs. Find the last result
-		// of the whole batch before inserting any request-only user content.
+		// The snapshot already verifies complete pairs. Attach after the last
+		// result of the entire batch, not in the middle of parallel results.
 		end := index
-		batch := make(map[string]string)
+		sources := make(map[string]string)
 		for end+1 < len(messages) && messages[end+1].Role == domainmessage.RoleTool {
 			end++
-			for _, part := range messages[end].Parts {
-				if part.Type != domainmessage.PartToolResult || part.ToolResult == nil {
-					continue
-				}
-				result := part.ToolResult
-				if id := turn.reads[result.ToolCallID]; id != "" && isImageReadResult(result, id) {
-					batch[result.ToolCallID] = id
-				}
+			if result, ok := messages[end].FirstToolResult(); ok && result.Status == domaintool.ResultStatusSuccess && !result.Truncated && result.Name == "read_asset" {
+				sources[result.ToolCallID] = messages[end].ID
 			}
 		}
 		for _, part := range message.Parts {
-			if part.Type != domainmessage.PartToolCall || part.ToolCall == nil {
+			if part.ToolCall == nil {
 				continue
 			}
 			call := *part.ToolCall
-			if id := batch[call.ID]; id != "" && id == readAssetCallID(call) {
-				selected = append(selected, visionCandidate{attachedAssetRef: attachedAssetRef{id: id, imageHint: true}, messageIndex: end, toolResult: true})
+			id, source := readAssetCallID(call), sources[call.ID]
+			if id == "" || source == "" || messages[end].ID == "" || !turn.replayReads && turn.reads[source][call.ID] != id {
+				continue
 			}
+			selected = append(selected, visionCandidate{attachedAssetRef: attachedAssetRef{id: id, imageHint: true}, messageIndex: end, sourceID: source, anchorID: messages[end].ID, callID: call.ID, toolResult: true})
 		}
 		index = end
 	}
 	return selected
+}
+
+const imageReceiptVersion = 1
+
+type imageOccurrence struct{ asset, source, anchor, call string }
+
+func (candidate visionCandidate) occurrence() imageOccurrence {
+	return imageOccurrence{candidate.id, candidate.sourceID, candidate.anchorID, candidate.callID}
+}
+
+func (turn *turnImages) imageCandidates(messages, transcript []domainmessage.Message) ([]visionCandidate, bool) {
+	recent, older, limited := selectedUserAttachments(messages, transcript, turn.resumingSyntheticInput)
+	tools := turn.selectedToolImages(messages)
+	possible := make(map[imageOccurrence]visionCandidate)
+	for _, group := range [][]visionCandidate{recent, older, tools} {
+		for _, candidate := range group {
+			if candidate.sourceID != "" {
+				possible[candidate.occurrence()] = candidate
+			}
+		}
+	}
+	// Receipts are only on assistant outputs of successful samples. Scan in
+	// transcript order so a later mention cannot move an already sent image.
+	var candidates []visionCandidate
+	pinned := make(map[string]bool)
+	for index, message := range messages {
+		if message.Role != domainmessage.RoleAssistant || len(pinned) >= maxVisionReferences {
+			continue
+		}
+		for _, receipt := range message.ImageReceipts {
+			if len(pinned) >= maxVisionReferences {
+				limited = true
+				break
+			}
+			key := imageOccurrence{receipt.AssetID, receipt.SourceMessageID, receipt.AnchorMessageID, receipt.ToolCallID}
+			candidate, ok := possible[key]
+			if !ok || candidate.messageIndex >= index || pinned[candidate.id] || receipt.Version != imageReceiptVersion ||
+				len(receipt.SHA256) != sha256.Size*2 || (receipt.MIMEType != "image/jpeg" && receipt.MIMEType != "image/png") {
+				continue
+			}
+			candidate.sha256, candidate.mimeType = receipt.SHA256, receipt.MIMEType
+			candidate.imageHint = true
+			candidates = append(candidates, candidate)
+			pinned[candidate.id] = true
+		}
+	}
+	// Keep explicit attachment placement for assets never presented before.
+	// A historical tool exchange without a receipt cannot create a candidate.
+	readIDs := make(map[string]bool)
+	for _, candidate := range tools {
+		if turn.reads[candidate.sourceID][candidate.callID] == candidate.id {
+			readIDs[candidate.id] = true
+		}
+	}
+	explicit := make(map[string]bool)
+	for _, group := range [][]visionCandidate{recent, older} {
+		for index := range group {
+			candidate := &group[index]
+			candidate.imageHint = candidate.imageHint || readIDs[candidate.id]
+			explicit[candidate.id] = true
+		}
+	}
+	candidates = append(candidates, recent...)
+	for _, candidate := range tools {
+		if turn.reads[candidate.sourceID][candidate.callID] == candidate.id && !explicit[candidate.id] {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return append(candidates, older...), limited
 }
 
 func selectedUserAttachments(messages, transcript []domainmessage.Message, resumingSyntheticInput bool) (recent, older []visionCandidate, limited bool) {
@@ -200,7 +253,7 @@ func selectedUserAttachments(messages, transcript []domainmessage.Message, resum
 			if len(recent)+len(older) == maxVisionReferences {
 				return recent, older, true
 			}
-			candidate := visionCandidate{attachedAssetRef: ref, messageIndex: index}
+			candidate := visionCandidate{attachedAssetRef: ref, messageIndex: index, sourceID: message.ID, anchorID: message.ID}
 			if isLatest {
 				recent = append(recent, candidate)
 			} else {
@@ -212,28 +265,16 @@ func selectedUserAttachments(messages, transcript []domainmessage.Message, resum
 }
 
 func (s AgentLoopService) addRequestImages(ctx context.Context, sessionID string, model modelport.ChatModelPort, turn *turnImages, snapshot contextmgr.Snapshot, transcript []domainmessage.Message, budget contextmgr.RequestBudget, request *modelport.GenerateRequest) (int, error) {
-	recent, older, limited := selectedUserAttachments(snapshot.Messages, transcript, turn.resumingSyntheticInput)
-	toolImages := turn.selectedToolImages(snapshot.Messages)
-	if len(recent)+len(older)+len(toolImages) == 0 && !limited {
+	turn.projected = nil
+	candidates, limited := turn.imageCandidates(snapshot.Messages, transcript)
+	if len(candidates) == 0 && !limited {
 		return 0, nil
 	}
 	modelSupport, ok := model.(modelport.ImageInputSupport)
 	compatible := ok && modelSupport.SupportsImageInput()
-	// Prefer an explicit user attachment's location even if read_asset returned
-	// the same asset in this turn. Keep recent user input ahead of older history.
-	locations := make(map[string]visionCandidate)
-	for _, candidate := range append(recent, older...) {
-		if _, exists := locations[candidate.id]; !exists {
-			locations[candidate.id] = candidate
-		}
-	}
-	candidates := append(recent, toolImages...)
-	candidates = append(candidates, older...)
 	imageHints := make(map[string]bool)
 	for _, candidate := range candidates {
-		if candidate.imageHint {
-			imageHints[candidate.id] = true
-		}
+		imageHints[candidate.id] = imageHints[candidate.id] || candidate.imageHint
 	}
 	seen := make(map[string]bool)
 	var omitted imageOmissions
@@ -257,9 +298,6 @@ func (s AgentLoopService) addRequestImages(ctx context.Context, sessionID string
 			break
 		}
 		seen[candidate.id] = true
-		if direct, exists := locations[candidate.id]; exists && candidate.toolResult {
-			candidate = direct
-		}
 		asset := s.lookupImageAsset(ctx, sessionID, candidate.id, turn)
 		if err := ctx.Err(); err != nil {
 			return 0, err
@@ -288,6 +326,9 @@ func (s AgentLoopService) addRequestImages(ctx context.Context, sessionID string
 				return 0, err
 			}
 			problem = asset.problem
+			if problem == "" && candidate.sha256 != "" && (asset.sha256 != candidate.sha256 || asset.image.MIMEType != candidate.mimeType) {
+				problem = "the image no longer matches the previously supplied attachment"
+			}
 			if problem == "" && asset.tokens+captionTokens > remaining-reserve {
 				problem = "the model context has insufficient space; try a smaller image or a larger context"
 			}
@@ -298,14 +339,14 @@ func (s AgentLoopService) addRequestImages(ctx context.Context, sessionID string
 		}
 		remaining -= asset.tokens + captionTokens
 		imageTokens += asset.tokens
-		selected = append(selected, projectedImage{candidate: candidate, image: asset.image, caption: caption})
+		selected = append(selected, projectedImage{candidate: candidate, image: asset.image, caption: caption, sha256: asset.sha256})
 	}
 	feedback, err := omitted.feedback(remaining + budget.SafetyTokens)
 	if err != nil {
 		return 0, err
 	}
 	if len(selected) > 0 || feedback.IsSynthetic() {
-		applyImageProjection(request, selected, feedback)
+		turn.projected = applyImageProjection(request, selected, feedback)
 	}
 	return imageTokens, nil
 }
@@ -374,22 +415,29 @@ func (s AgentLoopService) loadImage(ctx context.Context, turn *turnImages, item 
 	width, height := decoded.Bounds().Dx(), decoded.Bounds().Dy()
 	item.tokens = imageBaseTokens + imageTileTokens*((width+imageTileSide-1)/imageTileSide)*((height+imageTileSide-1)/imageTileSide)
 	item.image = modelport.NewInputImage(mimeType, object.Data)
+	item.sha256 = imageChecksum(object.Data)
+}
+
+func imageChecksum(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func matchesImageChecksum(data []byte, want string) bool {
-	sum := sha256.Sum256(data)
-	return strings.EqualFold(hex.EncodeToString(sum[:]), want)
+	return strings.EqualFold(imageChecksum(data), want)
 }
 
 type projectedImage struct {
 	candidate visionCandidate
 	image     modelport.InputImage
 	caption   domainmessage.Message
+	sha256    string
 }
 
-func applyImageProjection(request *modelport.GenerateRequest, selected []projectedImage, feedback domainmessage.Message) {
+func applyImageProjection(request *modelport.GenerateRequest, selected []projectedImage, feedback domainmessage.Message) []domainmessage.ImageReceipt {
 	messages := make([]domainmessage.Message, 0, len(request.Messages)+len(selected)+1)
 	images := make([]modelport.InputImage, 0, len(selected))
+	var receipts []domainmessage.ImageReceipt
 	for index, message := range request.Messages {
 		messages = append(messages, message)
 		userIndex := len(messages) - 1
@@ -404,12 +452,19 @@ func applyImageProjection(request *modelport.GenerateRequest, selected []project
 				image.MessageIndex = len(messages) - 1
 			}
 			images = append(images, image)
+			if item.candidate.sourceID != "" {
+				receipts = append(receipts, domainmessage.ImageReceipt{
+					Version: imageReceiptVersion, AssetID: item.candidate.id, SHA256: item.sha256, MIMEType: image.MIMEType,
+					SourceMessageID: item.candidate.sourceID, AnchorMessageID: item.candidate.anchorID, ToolCallID: item.candidate.callID,
+				})
+			}
 		}
 	}
 	if feedback.IsSynthetic() {
 		messages = append(messages, feedback)
 	}
 	request.Messages, request.Images = messages, images
+	return receipts
 }
 
 type imageOmissions struct {

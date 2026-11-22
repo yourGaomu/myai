@@ -807,6 +807,21 @@ type ContextInfo struct {
 	PrefixHash        string                `json:"prefix_hash,omitempty"`
 	Summary           string                `json:"summary,omitempty"`
 	Checkpoint        *CompactionCheckpoint `json:"checkpoint,omitempty"`
+	RequestContext    *RequestContext       `json:"request_context,omitempty"`
+}
+
+// RequestContext estimates the assembled input of a single model sample.
+type RequestContext struct {
+	Model               string `json:"model"`
+	WindowTokens        int    `json:"window_tokens"`
+	MessageTokens       int    `json:"message_tokens"`
+	SystemTokens        int    `json:"system_tokens"`
+	SkillTokens         int    `json:"skill_tokens"`
+	MCPToolTokens       int    `json:"mcp_tool_tokens"`
+	OtherToolTokens     int    `json:"other_tool_tokens"`
+	OtherTokens         int    `json:"other_tokens"`
+	OutputReserveTokens int    `json:"output_reserve_tokens"`
+	SafetyReserveTokens int    `json:"safety_reserve_tokens"`
 }
 
 type CompactionSummary struct {

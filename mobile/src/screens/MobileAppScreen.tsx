@@ -46,6 +46,7 @@ import { useRemoteMessageHandler } from "../hooks/useRemoteMessageHandler";
 import { useRemoteRuntimeRefs } from "../hooks/useRemoteRuntimeRefs";
 import { useRelaySender } from "../hooks/useRelaySender";
 import { useRemoteRequests } from "../hooks/useRemoteRequests";
+import { useSessionContext } from "../hooks/useSessionContext";
 import { useSessionModelActions } from "../hooks/useSessionModelActions";
 import { useSessionModelState } from "../hooks/useSessionModelState";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
@@ -64,6 +65,7 @@ import { agentActivity } from "../utils/agentActivity";
 import { newRequestID } from "../utils/ids";
 import { formatBytes } from "../utils/format";
 import { activityToMotionSlot } from "../utils/motionRegistry";
+import { describeSessionContext, formatContextUsage } from "../utils/sessionContext";
 import { modelDisplayName, permissionLabel } from "../utils/session";
 import { baseName, dirName, toolTarget } from "../utils/toolDisplay";
 
@@ -159,14 +161,13 @@ function PairedWorkspace({
   } = useMobileUiState();
   const {
     clearModels,
-    clearSessions,
+    clearSessions: clearSessionModels,
     currentModelID,
     deletedSessions,
     modelMessage,
     modelMessageError,
     models,
     sessionCompacts,
-    sessionContexts,
     sessions,
     setCurrentModelID,
     setDeletedSessions,
@@ -174,7 +175,6 @@ function PairedWorkspace({
     setModelMessageError,
     setModels,
     setSessionCompact,
-    setSessionContext,
     setSessions,
   } = useSessionModelState();
   const {
@@ -316,6 +316,7 @@ function PairedWorkspace({
   const [drawerVisible, setDrawerVisible] = useState(false);
   // 新版布局的页面级状态：会话设置弹层、对话是否滚动（顶栏分隔线）、权限确认是否收起、设置详情页、文件预览
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
+  const [sessionSheetContextFirst, setSessionSheetContextFirst] = useState(false);
   const [chatScrolled, setChatScrolled] = useState(false);
   const [chatNearHeader, setChatNearHeader] = useState(false);
   const [confirmRevertFile, setConfirmRevertFile] = useState(false);
@@ -406,6 +407,27 @@ function PairedWorkspace({
     sessionIDRef,
     socketRef,
   });
+  const {
+    clearSessionContexts,
+    handleContextMessage,
+    pendingContextSessionID,
+    removeSessionContext,
+    requestContextInfo,
+    resetContextQuery,
+    sessionContexts,
+    setSessionContext,
+  } = useSessionContext({ relayScopeRef, sessionID, sessionIDRef, sendEnvelope });
+  const clearSessions = useCallback(() => {
+    clearSessionModels();
+    clearSessionContexts();
+  }, [clearSessionModels, clearSessionContexts]);
+  const activeContext = sessionContexts[sessionID];
+  const contextPending = Boolean(sessionID) && pendingContextSessionID === sessionID;
+
+  useEffect(() => {
+    if (connected && viewMode === "chat" && sessionID) requestContextInfo();
+  }, [connected, requestContextInfo, sessionID, viewMode]);
+
   const { uploadMobileAsset, handleAssetUploadMessage, disconnectAssetUploads, reconnectAssetUploads } = useAssetUpload({
     sendEnvelope,
     relayScopeRef,
@@ -681,7 +703,6 @@ function PairedWorkspace({
   const {
     compactSession,
     executePlan,
-    requestContextInfo,
     requestGenerationPreferences,
     setAgentMode,
     setContextWindowK,
@@ -815,6 +836,7 @@ function PairedWorkspace({
     historySessionIDRef,
     pendingHistorySessionIDRef,
     relayScopeRef,
+    removeSessionContext,
     requestAssets,
     requestChanges,
     requestFiles,
@@ -1004,17 +1026,18 @@ function PairedWorkspace({
     syncPreviewConnection();
     questionSyncRef.current = null;
     resetRemoteQueries();
+    resetContextQuery();
     disconnectModelDelete();
     disconnectFileUpload();
     disconnectKnowledgeUploads();
     disconnectAssetUploads();
     stopPending("pause");
-  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetRemoteQueries, stopPending, syncPreviewConnection]);
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
 
   const dispatchRelayMessage = useCallback((message: RelayMessage) => {
-    if (handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
+    if (handleContextMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
     handleRemoteMessage(message);
-  }, [handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
+  }, [handleContextMessage, handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
   useLayoutEffect(() => {
     onEnqueueFailureRef.current = dispatchRelayMessage;
   }, [dispatchRelayMessage]);
@@ -1190,6 +1213,12 @@ function PairedWorkspace({
 
   const openSessionSheet = useCallback(() => {
     sessionFromPermissionRef.current = false;
+    setSessionSheetContextFirst(false);
+    setSessionSheetVisible(true);
+  }, []);
+  const openContextSheet = useCallback(() => {
+    sessionFromPermissionRef.current = false;
+    setSessionSheetContextFirst(true);
     setSessionSheetVisible(true);
   }, []);
   const closeSessionSheet = useCallback(() => {
@@ -1235,15 +1264,18 @@ function PairedWorkspace({
   );
   let header: ReactNode;
   if (viewMode === "chat") {
+    const { used, window } = describeSessionContext(activeContext, activeSession?.context_window_k);
     header = (
       <AppHeader
         activity={currentActivity}
         busy={chatBusy}
         connected={connected}
+        contextUsage={sessionID ? formatContextUsage(used, window) : undefined}
         deviceID={deviceID}
         emptyHome={isEmptyHome}
         nearHeader={chatNearHeader}
         onNewSession={startNewSession}
+        onOpenContext={openContextSheet}
         onOpenMenu={() => setDrawerVisible(true)}
         onOpenSession={openSessionSheet}
         planMode={planMode}
@@ -1440,7 +1472,7 @@ function PairedWorkspace({
         common={{
           buttonFeedback,
           clientToken,
-          pendingActions,
+          pendingActions: { ...pendingActions, context: contextPending },
           viewMode,
         }}
         files={{
@@ -1535,7 +1567,7 @@ function PairedWorkspace({
           pairedRelayURL: pairing.relayURL,
           pairingError,
           pairingPending,
-          context: sessionContexts[sessionID],
+          context: activeContext,
           generation: generationPreferences,
           generationStatus,
           intentConfig,
@@ -1723,6 +1755,7 @@ function PairedWorkspace({
         onOpenPolicy={() => {
           setMinimizedPermissionID(pendingPermission?.approvalID || "");
           sessionFromPermissionRef.current = true;
+          setSessionSheetContextFirst(false);
           setSessionSheetVisible(true);
         }}
         permission={pendingPermission}
@@ -1750,7 +1783,8 @@ function PairedWorkspace({
         activeSession={activeSession}
         connected={connected}
         connectionLabel={connectionLabel}
-        context={sessionContexts[sessionID]}
+        context={activeContext}
+        contextFirst={sessionSheetContextFirst}
         currentModelID={currentModelID}
         models={models}
         onClose={closeSessionSheet}
@@ -1760,8 +1794,10 @@ function PairedWorkspace({
         onSetAgentMode={setAgentMode}
         onSetPermissionMode={setPermissionMode}
         onSwitchModel={switchModel}
+        pendingContext={contextPending}
         pendingModels={pendingActions.models}
         pendingSettings={pendingActions.settings}
+        sessionID={sessionID}
         visible={sessionSheetVisible}
       />
     </MobileScreenShell>
