@@ -169,6 +169,7 @@ func permissionAskFromStream(stream modelport.ChatStreamHandler) toolcommand.Per
 			Arguments:           request.Arguments,
 			Permission:          request.Permission,
 			Mode:                string(request.Mode),
+			PermissionIdentity:  request.PermissionIdentity,
 			RequireFreshConsent: request.RequireFreshConsent,
 		})
 	}

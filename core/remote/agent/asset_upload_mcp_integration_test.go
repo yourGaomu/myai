@@ -29,7 +29,17 @@ import (
 	"myai/core/port/files"
 	"myai/core/remote/protocol"
 	"myai/core/tool"
+	"myai/core/trust"
 )
+
+type ingestAttachmentLookup struct {
+	ChatFacade
+	lookup files.SessionAssetLookup
+}
+
+func (c ingestAttachmentLookup) LookupSessionAsset(ctx context.Context, sessionID, assetID string) (files.Asset, error) {
+	return c.lookup(ctx, sessionID, assetID)
+}
 
 const integrationAssetID = "ast_mobile_integration"
 
@@ -294,6 +304,7 @@ func TestAgentMobileUploadMCPAndKnowledgeAssetIDIntegration(t *testing.T) {
 	registry := tool.NewRegisterTools()
 	manager := mcp.NewManager(mcp.Config{Servers: []mcp.ServerConfig{{
 		Name: "short_links", URL: mcpServer.URL + "/api/mcp", Required: true, TimeoutSeconds: 5,
+		Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(),
 		Headers: map[string]string{"Authorization": "Bearer mcp-integration-secret", "X-API-Key": "integration-api-secret"},
 	}}})
 	if err := manager.RegisterAll(context.Background(), registry); err != nil {
@@ -310,11 +321,20 @@ func TestAgentMobileUploadMCPAndKnowledgeAssetIDIntegration(t *testing.T) {
 		asset            files.Asset
 	}
 	recorded := make(chan recordedAsset, 2)
-	a := New(Config{UserID: "user", DeviceID: "device"}, nil, nil, nil, knowledge, nil, nil, nil, nil, nil, nil,
+	var attached atomic.Pointer[files.Asset]
+	lookup := ingestAttachmentLookup{lookup: func(_ context.Context, sessionID, assetID string) (files.Asset, error) {
+		pending := attached.Load()
+		if pending != nil && sessionID == "session" && assetID == pending.AssetID {
+			return *pending, nil
+		}
+		return files.Asset{}, files.ErrSessionAssetUnavailable
+	}}
+	a := New(Config{UserID: "user", DeviceID: "device"}, lookup, nil, nil, knowledge, nil, nil, nil, nil, nil, nil,
 		WithFileService(fileService), WithFileUploadAdmission(testUploadAdmission), WithFileAssetRecorder(func(_ context.Context, session, request string, epoch uint64, asset files.Asset) error {
 			if epoch != 7 {
 				t.Error("recorder lost begin admission epoch")
 			}
+			attached.Store(&asset)
 			recorded <- recordedAsset{session, request, asset}
 			return nil
 		}))
@@ -373,6 +393,32 @@ func TestAgentMobileUploadMCPAndKnowledgeAssetIDIntegration(t *testing.T) {
 	case <-recorded:
 		t.Fatal("complete retry duplicated the recorder callback")
 	default:
+	}
+	for _, deniedCase := range []struct{ request, user, session, asset string }{
+		{"ingest-other-session", "user", "other-session", uploadedAssetID},
+		{"ingest-unattached", "user", "session", "ast_unattached"},
+		{"ingest-missing-session", "user", "", uploadedAssetID},
+		{"ingest-missing-pair", "", "session", uploadedAssetID},
+	} {
+		message, err := protocol.NewMessage(protocol.TypeKnowledgeDocumentIngest, deniedCase.request, deniedCase.user, "device", deniedCase.session, protocol.KnowledgeDocumentIngestPayload{
+			KnowledgeBaseID: "kb_mobile", AssetID: deniedCase.asset,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		message.ClientToken = "paired-client"
+		if err := conn.WriteJSON(message); err != nil {
+			t.Fatal(err)
+		}
+		if reply := readUploadAgentMessage(t, conn); reply.Type != protocol.TypeError || reply.RequestID != deniedCase.request {
+			t.Fatalf("admission returned %s for %s", reply.Type, deniedCase.request)
+		}
+	}
+	backend.mu.Lock()
+	downloadCalls := backend.calls["get_asset_download_url"]
+	backend.mu.Unlock()
+	if objectCalls.Load() != 0 || downloadCalls != 0 || len(knowledge.commands) != 0 {
+		t.Fatal("denied ingest reached the document source")
 	}
 	writeUploadAgentMessage(t, conn, protocol.TypeKnowledgeDocumentIngest, "mobile-ingest", protocol.KnowledgeDocumentIngestPayload{
 		KnowledgeBaseID: "kb_mobile", AssetID: uploadedAssetID,

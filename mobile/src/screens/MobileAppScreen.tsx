@@ -200,11 +200,6 @@ function PairedWorkspace({
     plugins,
   } = usePluginState();
   const {
-    applyMCPError,
-    applyMCPReload,
-    mcpMessage,
-  } = useMCPState();
-  const {
     assets,
     clearAssets,
     setAssets,
@@ -428,6 +423,20 @@ function PairedWorkspace({
     if (connected && viewMode === "chat" && sessionID) requestContextInfo();
   }, [connected, requestContextInfo, sessionID, viewMode]);
 
+  const {
+    inventory: mcpInventory,
+    reloading: mcpReloading,
+    reloadMessage: mcpMessage,
+    refresh: requestMCPInventory,
+    reload: reloadMCP,
+    handleDisconnect: disconnectMCP,
+    handleMessage: handleMCPMessage,
+  } = useMCPState({ relayScopeRef, sendEnvelope });
+
+  useEffect(() => {
+    if (viewMode === "settings" && settingsSection === "plugin") requestMCPInventory();
+  }, [requestMCPInventory, settingsSection, viewMode]);
+
   const { uploadMobileAsset, handleAssetUploadMessage, disconnectAssetUploads, reconnectAssetUploads } = useAssetUpload({
     sendEnvelope,
     relayScopeRef,
@@ -584,7 +593,6 @@ function PairedWorkspace({
     requestModels,
     requestPlugins,
     reloadPlugins,
-    reloadMCP,
     reloadSkills,
     requestDeletedSessions,
     requestSkills,
@@ -930,9 +938,6 @@ function PairedWorkspace({
     applyModelSwitch,
     applySkillList,
     applyPluginList,
-    applyMCPReload,
-    applyMCPError,
-    isMCPOperationPending: pendingActions.mcp,
     applySubagentDefinitionList,
     applySubagentDefinitionMutation,
     applySubagentTaskList,
@@ -1019,25 +1024,27 @@ function PairedWorkspace({
     reconnectAssetUploads();
     reconnectKnowledgeUploads();
     requestUserQuestionSync();
+    requestMCPInventory();
     refreshAllRemoteState();
-  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestUserQuestionSync, syncPreviewConnection]);
+  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestMCPInventory, requestUserQuestionSync, syncPreviewConnection]);
 
   const handleDisconnected = useCallback(() => {
     syncPreviewConnection();
     questionSyncRef.current = null;
     resetRemoteQueries();
     resetContextQuery();
+    disconnectMCP();
     disconnectModelDelete();
     disconnectFileUpload();
     disconnectKnowledgeUploads();
     disconnectAssetUploads();
     stopPending("pause");
-  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectModelDelete, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectMCP, disconnectModelDelete, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
 
   const dispatchRelayMessage = useCallback((message: RelayMessage) => {
-    if (handleContextMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
+    if (handleContextMessage(message) || handleMCPMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
     handleRemoteMessage(message);
-  }, [handleContextMessage, handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
+  }, [handleContextMessage, handleMCPMessage, handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
   useLayoutEffect(() => {
     onEnqueueFailureRef.current = dispatchRelayMessage;
   }, [dispatchRelayMessage]);
@@ -1628,8 +1635,10 @@ function PairedWorkspace({
           onReloadSkills: reloadSkills,
           onRefreshPlugins: requestPlugins,
           onReloadPlugins: reloadPlugins,
+          onRefreshMCPInventory: requestMCPInventory,
+          mcpInventory,
           reloadMCP,
-          mcpReloading: pendingActions.mcp,
+          mcpReloading,
           mcpMessage,
           onSetPluginEnabled: setPluginEnabled,
           onRelayURLChange,

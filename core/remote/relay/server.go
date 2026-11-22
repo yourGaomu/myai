@@ -414,7 +414,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		return s.forwardAssetImagePreview(message)
 	case protocol.TypeAssetUploadResult:
 		return s.forwardToClient(message)
-	case protocol.TypeUserQuestionListResult:
+	case protocol.TypeUserQuestionListResult, protocol.TypeMCPListResult:
 		return s.forwardToClient(message)
 	case protocol.TypeAssistantDelta, protocol.TypeAssistantDone, protocol.TypeAgentRunStarted, protocol.TypeAgentRunEvent, protocol.TypeAgentRunCompleted, protocol.TypeAgentRunListResult, protocol.TypeToolCall, protocol.TypeToolResult, protocol.TypePermissionAsk, protocol.TypeSessionListResult, protocol.TypeSessionChanged, protocol.TypeSessionDeleteResult, protocol.TypeSessionRestoreResult, protocol.TypeSessionHistoryResult, protocol.TypeSessionHistoryMetaResult, protocol.TypeSessionHistoryDeltaResult, protocol.TypeSessionPermissionSetResult, protocol.TypeSessionModeSetResult, protocol.TypeSessionPlanExecuteUpdate, protocol.TypeSessionPlanExecuteResult, protocol.TypeSessionContextQueryResult, protocol.TypeSessionContextSetResult, protocol.TypeSessionRAGSetResult, protocol.TypeSessionGenerationQueryResult, protocol.TypeSessionGenerationSetResult, protocol.TypeSessionStyleSetResult, protocol.TypeSessionCompactResult, protocol.TypeSessionPauseResult, protocol.TypeModelListResult, protocol.TypeModelSwitchResult, protocol.TypeModelConfigAddResult, protocol.TypeModelConfigTestResult, protocol.TypeModelConfigMutationResult, protocol.TypeSkillListResult, protocol.TypeSkillReloadResult, protocol.TypePluginListResult, protocol.TypePluginReloadResult, protocol.TypePluginMutationResult, protocol.TypeMCPReloadResult, protocol.TypeAssetListResult, protocol.TypeKnowledgeCatalogListResult, protocol.TypeKnowledgeCatalogMutationResult, protocol.TypeKnowledgeDocumentListResult, protocol.TypeKnowledgeDocumentMutationResult, protocol.TypeKnowledgeProfileListResult, protocol.TypeKnowledgeSearchPreviewResult, protocol.TypeAIMemoryListResult, protocol.TypeAIMemoryMutationResult, protocol.TypeAIMemoryCandidateListResult, protocol.TypeAIMemoryCandidateMutationResult, protocol.TypeAIMemoryExtractionJobListResult, protocol.TypeAIMemoryExtractionJobRetryResult, protocol.TypeAIMemoryDreamRunResult, protocol.TypeAIMemoryDreamListResult, protocol.TypeSubagentDefinitionListResult, protocol.TypeSubagentDefinitionMutationResult, protocol.TypeSubagentTaskListResult, protocol.TypeSubagentTaskWaitResult, protocol.TypeSubagentTaskResult, protocol.TypeSubagentTaskResumeResult, protocol.TypeFileListResult, protocol.TypeFileReadResult, protocol.TypeChangesListResult, protocol.TypeChangeDiffResult, protocol.TypeChangeRevertResult, protocol.TypeHistoryListResult, protocol.TypeHistoryDiffResult, protocol.TypeHistoryRevertResult:
 		return s.forwardToClient(message)
@@ -453,7 +453,7 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 			return fmt.Errorf("user question reply is not authorized for this request")
 		}
 		return s.forwardToAgent(message)
-	case protocol.TypeUserQuestionList:
+	case protocol.TypeUserQuestionList, protocol.TypeMCPList:
 		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
 			return err
 		}
@@ -665,6 +665,8 @@ func isTerminalResponseForRequest(requestType protocol.MessageType, responseType
 		return responseType == protocol.TypePluginListResult
 	case protocol.TypePluginReload:
 		return responseType == protocol.TypePluginReloadResult
+	case protocol.TypeMCPList:
+		return responseType == protocol.TypeMCPListResult
 	case protocol.TypeMCPReload:
 		return responseType == protocol.TypeMCPReloadResult
 	case protocol.TypePluginEnable, protocol.TypePluginDisable:

@@ -109,6 +109,8 @@ const (
 	TypePluginEnable                     MessageType = "plugin_enable"
 	TypePluginDisable                    MessageType = "plugin_disable"
 	TypePluginMutationResult             MessageType = "plugin_mutation_result"
+	TypeMCPList                          MessageType = "mcp_list"
+	TypeMCPListResult                    MessageType = "mcp_list_result"
 	TypeMCPReload                        MessageType = "mcp_reload"
 	TypeMCPReloadResult                  MessageType = "mcp_reload_result"
 	TypeAssetList                        MessageType = "asset_list"
@@ -1052,6 +1054,19 @@ type SkillListResultPayload struct {
 }
 
 type PluginListPayload struct{}
+
+type MCPListPayload struct{}
+
+type MCPServerSummary struct {
+	Name               string `json:"name"`
+	State              string `json:"state"`
+	InventoryToolCount int    `json:"inventory_tool_count"`
+	ExposedToolCount   int    `json:"exposed_tool_count"`
+}
+
+type MCPListResultPayload struct {
+	Servers []MCPServerSummary `json:"servers"`
+}
 
 type MCPReloadPayload struct{}
 

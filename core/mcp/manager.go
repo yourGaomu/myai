@@ -27,8 +27,46 @@ type Manager struct {
 }
 
 type serverRuntime struct {
-	client *Client
-	tools  map[string]struct{}
+	client           *Client
+	tools            map[string]struct{}
+	exposedToolCount int
+}
+
+type ServerState string
+
+const (
+	ServerLoaded      ServerState = "loaded"
+	ServerDisabled    ServerState = "disabled"
+	ServerUnavailable ServerState = "unavailable"
+)
+
+// ServerStatus describes the published catalog without probing the remote service.
+type ServerStatus struct {
+	Name               string
+	State              ServerState
+	InventoryToolCount int
+	ExposedToolCount   int
+}
+
+func (m *Manager) ServerStatuses() []ServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	statuses := make([]ServerStatus, 0, len(m.config.Servers))
+	for _, server := range m.config.Servers {
+		status := ServerStatus{Name: strings.TrimSpace(server.Name), State: ServerUnavailable}
+		switch {
+		case server.Disabled:
+			status.State = ServerDisabled
+		case m.servers[status.Name] != nil:
+			runtime := m.servers[status.Name]
+			status.State = ServerLoaded
+			status.InventoryToolCount = len(runtime.tools)
+			status.ExposedToolCount = runtime.exposedToolCount
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 func NewManager(config Config) *Manager {
@@ -145,8 +183,9 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 				continue
 			}
 			exposedName := uniqueToolName(ExposedToolName(server.Name, info.Name), usedNames)
-			wrapped = append(wrapped, NewToolWithName(client, server.Name, info, exposedName, server.toolPermission()))
+			wrapped = append(wrapped, NewToolWithName(client, server.Name, info, exposedName, server.toolPermission()).WithPermissionSource(prefix+strings.TrimSpace(server.Name)))
 		}
+		runtime.exposedToolCount = len(wrapped)
 		candidateServers[strings.TrimSpace(server.Name)] = runtime
 
 		source := prefix + strings.TrimSpace(server.Name)

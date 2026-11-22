@@ -456,6 +456,9 @@ func (s *Server) clientPeerForMessage(message protocol.Message, expected *client
 	if client.RequestType == protocol.TypeAssetImagePreview {
 		return nil, nil, false // A preview is tied to its original socket.
 	}
+	if message.Type == protocol.TypeMCPListResult && client.RequestType != protocol.TypeMCPList {
+		return nil, nil, false
+	}
 	if message.UserID != "" && client.UserID != message.UserID || message.DeviceID != "" && client.DeviceID != message.DeviceID {
 		return nil, nil, false
 	}

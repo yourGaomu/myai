@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,6 +192,12 @@ func (Mapper) HookConfig(workspace string, properties HookProperties) hook.Confi
 }
 
 func (Mapper) MCPConfig(workspace string, properties MCPProperties) mcp.Config {
+	if workspace == "" {
+		workspace = "."
+	}
+	if absolute, err := filepath.Abs(workspace); err == nil {
+		workspace = absolute
+	}
 	servers := make([]mcp.ServerConfig, 0, len(properties.Servers))
 	for _, server := range properties.Servers {
 		servers = append(servers, mcp.ServerConfig{

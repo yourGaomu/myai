@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "myai/core/config"
+	"myai/core/mcp"
 	"myai/core/trust"
 )
 
@@ -137,5 +139,70 @@ func TestTrustCLIRequiresCurrentFullDigest(t *testing.T) {
 	}
 	if _, err := executeTrustForTest(t, store, "approve", "--kind", "hook", "--workspace", workspace, "--config", path, "--id", requests[0].Digest); err == nil {
 		t.Fatal("stale digest approved changed command")
+	}
+}
+
+func TestMCPTrustCLIUsesStartupPathAndEffectiveDeclarations(t *testing.T) {
+	deployment := t.TempDir()
+	workspace := t.TempDir()
+	t.Chdir(deployment)
+	if err := os.Mkdir("resource", 0700); err != nil {
+		t.Fatal(err)
+	}
+	const declarations = `mcp:
+  servers:
+    - name: explicit
+      url: ${MYAI_TEST_EXPLICIT_ENDPOINT}
+      headers:
+        Authorization: "${MYAI_TEST_UNSET_HEADER}"
+short_links:
+  mcp_url: https://yaml.example.test/api/mcp
+`
+	t.Setenv("MCP_SERVERS", "")
+	t.Setenv("MYAI_TEST_EXPLICIT_ENDPOINT", "https://explicit.example.test/api/mcp?key=fixture-private-marker")
+	t.Setenv("MYAI_TEST_UNSET_HEADER", "")
+	t.Setenv("SHORT_LINKS_MCP_URL", "https://auto.example.test/api/mcp")
+	t.Setenv("SHORT_LINKS_API_KEY", "")
+	path := filepath.Join(deployment, "resource", "application.yaml")
+	if err := os.WriteFile(path, []byte(declarations), 0600); err != nil {
+		t.Fatal(err)
+	}
+	properties, err := (appconfig.ViperLoader{}).Load(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := (appconfig.Mapper{}).MCPConfig(workspace, properties.MCP).Servers
+	if len(servers) != 2 || servers[1].Name != "short_links" || servers[1].URL != "https://auto.example.test/api/mcp" {
+		t.Fatalf("unexpected startup declaration inventory: %#v", servers)
+	}
+	store := trust.NewStore(filepath.Join(t.TempDir(), "trust.json"))
+	output, err := executeTrustForTest(t, store, "mcp", "list", "--workspace", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output, "fixture-private-marker") || strings.Contains(output, "example.test") || strings.Contains(output, "MYAI_TEST_UNSET_HEADER") {
+		t.Fatalf("review leaked declaration values: %s", output)
+	}
+	for _, server := range servers {
+		request, err := mcp.TrustRequest(server, workspace)
+		if err != nil || !strings.Contains(output, request.Digest) {
+			t.Fatalf("CLI and startup digests differ for %s: %v", server.Name, err)
+		}
+		if _, err := executeTrustForTest(t, store, "mcp", "approve", "--workspace", workspace, "--config", "resource/application.yaml", "--id", request.Digest); err != nil {
+			t.Fatal(err)
+		}
+		if approved, err := store.Trusted(request); err != nil || !approved {
+			t.Fatalf("startup declaration is not approved: %v", err)
+		}
+	}
+	// Unrelated application settings cannot prevent declaration review or reload.
+	if err := os.WriteFile(path, []byte(declarations+"rag:\n  embedding:\n    models: invalid-fixture-field\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (appconfig.ViperLoader{}).Load(workspace); err == nil {
+		t.Fatal("expected unrelated application decode error")
+	}
+	if _, err := executeTrustForTest(t, store, "mcp", "list", "--workspace", workspace); err != nil {
+		t.Fatalf("MCP-only declaration review failed: %v", err)
 	}
 }

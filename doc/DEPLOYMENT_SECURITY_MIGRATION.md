@@ -92,9 +92,9 @@ docker run --rm --network none --user 0:0 --entrypoint /bin/sh \
 
 History 路径中的 hash 是 `hex(SHA256(strings.ToLower(filepath.Clean(absoluteWorkspace)))[:16])`。旧、新容器都使用同一个 `/workspace` 时，目录 hash 不变，迁移整个 `workspaces` 即可；修改宿主 bind mount 的来源不会改变容器路径，但必须确保仍然是同一个工作区的数据。SQLite 表中也保存 workspace 绝对路径；如果从宿主原生 CLI 路径、另一个容器路径或不同 symlink 解析结果迁入，不能只重命名 hash 目录。当前没有自动重写数据库 workspace 字段的迁移命令：保留旧备份与旧路径，或由维护者设计并验证数据库迁移后再使用新路径。
 
-## 3. 审阅并批准 hook、plugin 与 stdio MCP
+## 3. 审阅并批准 hook、plugin 与 MCP
 
-用户批准记录位于工作区之外的 `/home/myai/.config/myai/trust.json`，由 `agent-user-config` 卷保留。首次部署没有批准记录；声明内容、路径或工作区改变后仍需重新审阅。HTTP MCP 不执行本地命令，不在 stdio MCP 的执行批准列表中。
+用户批准记录位于工作区之外的 `/home/myai/.config/myai/trust.json`，由 `agent-user-config` 卷保留。首次部署没有批准记录。stdio MCP 在启动子进程前要求批准，HTTP MCP（包含自动配置的 `short_links`）在读取请求头引用的环境值或建立连接前要求批准。更改工作区、声明或解析后的 HTTP 端点时需重新审阅。仅轮换请求头引用的环境值时，原批准继续有效。
 
 下面的 `trust list` 仅列出类型、状态、完整 SHA256 和声明路径，不执行声明，也不显示参数或环境变量的值。维护者仍需在本地安全审阅实际声明文件。
 
@@ -107,7 +107,7 @@ compose_prod run --rm --no-deps agent trust mcp list \
   --workspace /workspace --config /app/resource/application.yaml
 ```
 
-若 `PLUGIN_ROOT` 改过，`--root` 必须与 Agent 实际使用的目录一致。批准只针对已人工审阅的完整 ID；不要自动批准 `list` 返回的全部声明。
+若 `PLUGIN_ROOT` 改过，`--root` 必须与 Agent 实际使用的目录一致。MCP 审阅使用 Agent 的同一份配置及端点环境变量。`--workspace` 指定批准归属的工作区。MCP 的相对 `--config` 从当前目录解析，省略时使用 Agent 启动的默认路径 `./resource/application.yaml`。批准只针对已人工审阅的完整 ID。
 
 ```sh
 reviewed_digest=replace-with-the-reviewed-full-sha256

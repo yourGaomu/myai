@@ -86,41 +86,83 @@ func NewRequest(kind Kind, workspace, path string, declaration any) (Request, er
 	return request, nil
 }
 
-func (p *Policy) Authorize(ctx context.Context, request Request) error {
+// Grant records the authorization used to start a particular runtime. Its zero
+// value denies access. Store-backed grants recheck the exact approved digest.
+type Grant struct {
+	allowed bool
+	store   *Store
+	request Request
+}
+
+// Check revalidates a grant without requesting or persisting new approval.
+func (g Grant) Check(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if p != nil && p.Allow {
+	if !g.allowed {
+		return ErrUntrusted
+	}
+	if g.store == nil {
 		return nil
+	}
+	approved, err := g.store.Trusted(g.request)
+	if err != nil {
+		return err
+	}
+	if !approved {
+		return ErrUntrusted
+	}
+	return ctx.Err()
+}
+
+func (p *Policy) Authorize(ctx context.Context, request Request) error {
+	_, err := p.AuthorizeWithGrant(ctx, request)
+	return err
+}
+
+// AuthorizeWithGrant returns the effective approval for a long-lived runtime.
+// Built-in authorization and non-persistent confirmation are runtime-scoped.
+func (p *Policy) AuthorizeWithGrant(ctx context.Context, request Request) (Grant, error) {
+	if err := ctx.Err(); err != nil {
+		return Grant{}, err
+	}
+	if p != nil && p.Allow {
+		return Grant{allowed: true}, nil
 	}
 	store, err := p.approvalStore()
 	if err != nil {
-		return err
+		return Grant{}, err
 	}
-	approved, err := store.Trusted(request)
+	scope := request
+	scope.Declaration = nil
+	stored := Grant{allowed: true, store: store, request: scope}
+	approved, err := store.Trusted(scope)
 	if err != nil {
-		return err
+		return Grant{}, err
 	}
 	if approved {
-		return nil
+		return stored, nil
 	}
 	if p == nil || p.Confirm == nil {
-		return ErrUntrusted
+		return Grant{}, ErrUntrusted
 	}
 	approval, err := p.Confirm(ctx, request)
 	if err != nil {
-		return err
+		return Grant{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return Grant{}, err
 	}
 	if !approval.Allowed {
-		return ErrUntrusted
+		return Grant{}, ErrUntrusted
 	}
 	if approval.Persist {
-		return store.Approve(request)
+		if err := store.Approve(scope); err != nil {
+			return Grant{}, err
+		}
+		return stored, nil
 	}
-	return nil
+	return Grant{allowed: true}, nil
 }
 
 func (p *Policy) approvalStore() (*Store, error) {

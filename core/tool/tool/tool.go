@@ -40,6 +40,12 @@ type ExplicitApproval interface {
 	RequiresExplicitApproval() bool
 }
 
+// PermissionIdentity identifies the resolved external tool independently of its exposed name.
+// An empty identity means permission cannot be remembered for this tool.
+type PermissionIdentity interface {
+	PermissionIdentity() string
+}
+
 // SandboxedShell attests that this shell invocation will use an OS sandbox.
 // A copied workspace or a nonempty workspace identifier is not sufficient.
 type SandboxedShell interface {

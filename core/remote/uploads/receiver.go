@@ -107,6 +107,8 @@ type upload struct {
 	terminalAt     time.Time
 	reserved       bool
 	cancelled      bool
+	backendPending bool
+	cancellation   *Completion
 	asset          *files.Asset
 	recorded       bool
 	requestID      string
@@ -119,22 +121,23 @@ type upload struct {
 // is reserved using declared sizes before a file is created. Backend work never
 // runs under the receiver lock, and at most eight completion workers may run.
 type Receiver struct {
-	mu        sync.Mutex
-	service   files.Service
-	recorder  Recorder
-	config    Config
-	uploads   map[string]*upload
-	keys      map[idempotencyKey]string
-	dir       string
-	active    int
-	reserved  int64
-	workers   int
-	closed    bool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	mu            sync.Mutex
+	service       files.Service
+	recorder      Recorder
+	config        Config
+	uploads       map[string]*upload
+	keys          map[idempotencyKey]string
+	dir           string
+	active        int
+	reserved      int64
+	workers       int
+	cancelWorkers int
+	closed        bool
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 func New(service files.Service, recorder Recorder, config Config) *Receiver {
@@ -221,6 +224,9 @@ func (r *Receiver) Begin(ctx context.Context, owner Owner, metadata Metadata) (R
 		}
 		previous.lastActivity = time.Now()
 		return resultFor(previous), nil
+	}
+	if len(r.uploads) >= maxReceipts+MaxActiveGlobal {
+		return Result{}, errors.New("file upload recovery table is full; retry an existing cancellation first")
 	}
 	ownerActive, globalActive := r.activeCountsLocked(owner)
 	if ownerActive >= MaxActiveOwner || globalActive >= MaxActiveGlobal || metadata.Size > MaxDiskBytes-r.reserved {
@@ -409,11 +415,14 @@ func (r *Receiver) Complete(ctx context.Context, owner Owner, id, requestID stri
 		close(completion.done)
 		return completion, nil
 	}
-	if u.completion != nil {
-		return u.completion, nil
+	if u.cancellation != nil {
+		return nil, errors.New("upload cancellation is in progress; retry shortly")
 	}
 	if u.cancelled && u.asset == nil {
 		return nil, errors.New("upload was cancelled")
+	}
+	if u.completion != nil {
+		return u.completion, nil
 	}
 	if u.offset != u.metadata.Size {
 		return nil, errors.New("upload is incomplete")
@@ -432,6 +441,9 @@ func (r *Receiver) Complete(ctx context.Context, owner Owner, id, requestID stri
 	}
 	workerCtx, cancel := context.WithTimeout(ctx, r.config.CompletionTimeout)
 	stop := context.AfterFunc(r.ctx, cancel)
+	if u.asset == nil {
+		_, u.backendPending = r.service.(files.UploadCanceller)
+	}
 	u.cancelWorker = cancel
 	u.lastActivity = time.Now()
 	completion := &Completion{done: make(chan struct{})}
@@ -474,6 +486,7 @@ func (r *Receiver) finish(ctx context.Context, u *upload, completion *Completion
 			// Preserve successful backend receipts even if a disconnect/cancel
 			// raced with the backend response. Recorder retries never reupload.
 			u.cancelled = false
+			u.backendPending = false
 			r.mu.Unlock()
 		}
 	}
@@ -508,18 +521,87 @@ func (r *Receiver) Cancel(ctx context.Context, owner Owner, id string) (Result, 
 		return Result{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.pruneLocked(time.Now())
 	u, err := r.findLocked(owner, id)
 	if err != nil {
+		r.mu.Unlock()
 		return Result{}, err
 	}
-	// A committed backend upload cannot be undone through this port. Keep it
-	// for recorder retries, but expose its receipt only after recording succeeds.
+	if u.cancellation != nil {
+		pending := u.cancellation
+		r.mu.Unlock()
+		return pending.Wait(ctx)
+	}
 	if u.asset == nil {
 		r.cancelLocked(u)
 	}
-	return resultFor(u), nil
+	if !u.backendPending && (u.asset != nil || u.completion == nil) {
+		result := resultFor(u)
+		r.mu.Unlock()
+		return result, nil
+	}
+	pending := r.startCancellationLocked(u)
+	r.mu.Unlock()
+	if pending == nil {
+		return Result{}, errors.New("too many upload cancellations in progress; retry cancellation")
+	}
+	return pending.Wait(ctx)
+}
+
+func (r *Receiver) startCancellationLocked(u *upload) *Completion {
+	if r.closed || r.cancelWorkers >= MaxActiveGlobal || u.cancellation != nil {
+		return nil
+	}
+	pending := &Completion{done: make(chan struct{})}
+	u.cancellation = pending
+	r.cancelWorkers++
+	r.wg.Add(1)
+	go r.finishCancellation(u, u.completion, pending)
+	return pending
+}
+
+func (r *Receiver) finishCancellation(u *upload, worker, pending *Completion) {
+	defer r.wg.Done()
+	if worker != nil {
+		<-worker.done
+	}
+	ctx, cancel := context.WithTimeout(r.ctx, r.config.CompletionTimeout)
+	defer cancel()
+	r.mu.Lock()
+	asset, needsCancel := u.asset, u.backendPending
+	r.mu.Unlock()
+	var err error
+	if needsCancel {
+		var committed files.Asset
+		committed, err = r.service.(files.UploadCanceller).CancelUpload(ctx, u.backendKey)
+		if err == nil && committed.AssetID != "" {
+			asset = &committed
+		}
+	}
+	if err == nil && asset != nil {
+		r.mu.Lock()
+		u.asset, u.cancelled = asset, false
+		retryRecord := !u.recorded
+		r.mu.Unlock()
+		if retryRecord && r.recorder != nil {
+			err = r.recorder(ctx, u.owner.SessionID, u.requestID, u.metadata.SessionEpoch, *asset)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err == nil || asset != nil {
+		u.backendPending = false
+		u.terminalAt = time.Now()
+		if asset != nil && err == nil {
+			u.recorded = true
+		}
+	}
+	r.releaseFileLocked(u)
+	u.cancellation = nil
+	r.cancelWorkers--
+	pending.result, pending.err = resultFor(u), err
+	close(pending.done)
+	r.pruneLocked(time.Now())
 }
 
 func (r *Receiver) disconnect(id string, owner Owner) {
@@ -586,7 +668,7 @@ func (r *Receiver) pruneLocked(now time.Time) {
 		if u.reserved && u.asset == nil && now.Sub(u.lastActivity) >= r.config.UploadTTL && !u.cancelled {
 			r.cancelLocked(u)
 		}
-		if !u.reserved && u.completion == nil && !u.terminalAt.IsZero() && now.Sub(u.terminalAt) >= r.config.ReceiptTTL {
+		if !u.reserved && u.completion == nil && u.cancellation == nil && !u.backendPending && !u.terminalAt.IsZero() && now.Sub(u.terminalAt) >= r.config.ReceiptTTL {
 			delete(r.uploads, id)
 			delete(r.keys, idempotencyKey{Owner: u.owner, Key: u.metadata.IdempotencyKey})
 		}
@@ -595,7 +677,8 @@ func (r *Receiver) pruneLocked(now time.Time) {
 	for len(r.uploads)-r.active > maxReceipts {
 		var oldest *upload
 		for _, u := range r.uploads {
-			if !u.reserved && u.completion == nil && (oldest == nil || u.terminalAt.Before(oldest.terminalAt)) {
+			if !u.reserved && u.completion == nil && u.cancellation == nil && !u.backendPending && !u.terminalAt.IsZero() &&
+				(oldest == nil || u.terminalAt.Before(oldest.terminalAt)) {
 				oldest = u
 			}
 		}

@@ -162,7 +162,10 @@ func safeError(operation string, err error) error {
 	return fmt.Errorf("%s failed", operation)
 }
 
-type callFailure struct{ uncertain bool }
+type callFailure struct {
+	uncertain  bool
+	notCreated bool
+}
 
 func (e *callFailure) Error() string { return "short_links MCP tool call failed" }
 
@@ -182,7 +185,11 @@ func call(ctx context.Context, lease *mcp.ServerLease, name string, args any, ou
 		return &callFailure{uncertain: true}
 	}
 	if result.IsError {
-		return &callFailure{}
+		var outcome struct {
+			UploadOutcome string `json:"uploadOutcome"`
+		}
+		notCreated := name == "begin_asset_upload" && json.Unmarshal(result.StructuredContent, &outcome) == nil && outcome.UploadOutcome == "not_created"
+		return &callFailure{notCreated: notCreated}
 	}
 	raw := bytes.TrimSpace(result.StructuredContent)
 	if len(raw) < 2 || raw[0] != '{' || !json.Valid(raw) || json.Unmarshal(raw, out) != nil {

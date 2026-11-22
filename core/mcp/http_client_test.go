@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"myai/core/tool"
+	"myai/core/trust"
 )
 
 func shortLinksMCPHandler(t *testing.T, sse, stateful bool) http.HandlerFunc {
@@ -79,7 +80,7 @@ func TestHTTPShortLinksRegistrationCallAndReload(t *testing.T) {
 			t.Setenv("TEST_SHORT_LINKS_KEY", "test-key")
 			server := httptest.NewServer(shortLinksMCPHandler(t, mode.sse, mode.stateful))
 			defer server.Close()
-			config := NormalizeConfig(Config{Servers: []ServerConfig{{Name: "short_links", URL: server.URL + "/api/mcp", Headers: map[string]string{"X-API-Key": "${TEST_SHORT_LINKS_KEY}"}, Permission: "write", Required: true}}}, "")
+			config := NormalizeConfig(Config{Servers: []ServerConfig{{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), Name: "short_links", URL: server.URL + "/api/mcp", Headers: map[string]string{"X-API-Key": "${TEST_SHORT_LINKS_KEY}"}, Permission: "write", Required: true}}}, "")
 			registry := tool.NewRegisterTools()
 			manager := NewManager(config)
 			if err := manager.RegisterAll(context.Background(), registry); err != nil {
@@ -121,6 +122,7 @@ func TestHTTPShortLinksRegistrationCallAndReload(t *testing.T) {
 }
 
 func TestHTTPRejectsUnsafeConfigAndMissingEnvironment(t *testing.T) {
+	t.Setenv("MYAI_TEST_MISSING_MCP_ENV", "")
 	for _, config := range []ServerConfig{
 		{URL: "file:///tmp/mcp"},
 		{URL: "https://user:password@example.test/api/mcp"},
@@ -130,6 +132,8 @@ func TestHTTPRejectsUnsafeConfigAndMissingEnvironment(t *testing.T) {
 		{URL: "https://example.test/api/mcp", Headers: map[string]string{"Mcp-Session-Id": "override"}},
 		{URL: "https://example.test/api/mcp", Headers: map[string]string{"X-API-Key": "key\ninjected"}},
 	} {
+		config.Trust = &trust.Policy{Allow: true}
+		config.TrustWorkspace = t.TempDir()
 		client := NewClient(config)
 		if err := client.Start(context.Background()); err == nil {
 			client.Close()
@@ -150,7 +154,7 @@ func TestHTTPDoesNotFollowRedirectsOrRetrySideEffects(t *testing.T) {
 		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
 	defer source.Close()
-	client := NewClient(ServerConfig{URL: source.URL, Headers: map[string]string{"X-API-Key": "private-key"}})
+	client := NewClient(ServerConfig{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), URL: source.URL, Headers: map[string]string{"X-API-Key": "private-key"}})
 	if err := client.Start(context.Background()); err == nil {
 		t.Fatal("unexpectedly followed MCP redirect")
 	}
@@ -171,7 +175,7 @@ func TestHTTPValidatesResponsesAndDoesNotLogErrorBody(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, body)
 		}))
-		client := NewClient(ServerConfig{URL: server.URL})
+		client := NewClient(ServerConfig{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), URL: server.URL})
 		if err := client.Start(context.Background()); err == nil {
 			client.Close()
 			t.Error("invalid MCP response was accepted")
@@ -183,7 +187,7 @@ func TestHTTPValidatesResponsesAndDoesNotLogErrorBody(t *testing.T) {
 		fmt.Fprint(w, "private-api-key")
 	}))
 	defer server.Close()
-	client := NewClient(ServerConfig{URL: server.URL})
+	client := NewClient(ServerConfig{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), URL: server.URL})
 	err := client.Start(context.Background())
 	if err == nil || strings.Contains(err.Error(), "private-api-key") || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("unexpected HTTP error: %v", err)
@@ -210,7 +214,7 @@ func TestHTTPDeadlineAndCloseCancelInFlightRequests(t *testing.T) {
 			}))
 			defer server.Close()
 			defer close(release)
-			client := NewClient(ServerConfig{URL: server.URL + "/api/mcp", Headers: map[string]string{"X-API-Key": "test-key"}})
+			client := NewClient(ServerConfig{Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(), URL: server.URL + "/api/mcp", Headers: map[string]string{"X-API-Key": "test-key"}})
 			if err := client.Start(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -234,5 +238,120 @@ func TestHTTPDeadlineAndCloseCancelInFlightRequests(t *testing.T) {
 				t.Fatal("HTTP request was not cancelled promptly")
 			}
 		})
+	}
+}
+
+func TestHTTPApprovalBindsEndpointAndPrecedesHeaderLookup(t *testing.T) {
+	var firstCalls, secondCalls atomic.Int64
+	fixture := func(calls *atomic.Int64) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if r.Header.Get("X-Test-Value") == "" {
+				t.Error("missing fixture header")
+			}
+			var request rpcRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			if request.ID == 0 {
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{}}`, request.ID)
+		}))
+	}
+	first, second := fixture(&firstCalls), fixture(&secondCalls)
+	defer first.Close()
+	defer second.Close()
+	t.Setenv("MYAI_TEST_MCP_ENDPOINT", first.URL)
+	t.Setenv("MYAI_TEST_MCP_HEADER", "")
+	workspace := t.TempDir()
+	store := trust.NewStore(t.TempDir() + "/approvals.json")
+	config := ServerConfig{Name: "fixture", URL: "${MYAI_TEST_MCP_ENDPOINT}", Headers: map[string]string{"X-Test-Value": "${MYAI_TEST_MCP_HEADER}"}, TrustWorkspace: workspace, Trust: &trust.Policy{Store: store}}
+	request, err := TrustRequest(config, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied := NewClient(config)
+	if err := denied.Start(context.Background()); !errors.Is(err, trust.ErrUntrusted) || denied.ApprovalDigest() != "" || firstCalls.Load() != 0 {
+		t.Fatalf("unapproved endpoint produced requests or the wrong error: %v", err)
+	}
+	config.Trust = &trust.Policy{Store: store, Confirm: func(_ context.Context, candidate trust.Request) (trust.Approval, error) {
+		if candidate.Digest != request.Digest || firstCalls.Load() != 0 {
+			t.Fatal("runtime must request the reviewed digest before connecting")
+		}
+		t.Setenv("MYAI_TEST_MCP_ENDPOINT", second.URL)
+		t.Setenv("MYAI_TEST_MCP_HEADER", "fixture-value")
+		return trust.Approval{Allowed: true, Persist: true}, nil
+	}}
+	client := NewClient(config)
+	if err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if client.ApprovalDigest() != request.Digest || firstCalls.Load() != 2 || secondCalls.Load() != 0 {
+		t.Fatal("connection did not use the approved endpoint snapshot")
+	}
+	config.Trust = &trust.Policy{Store: store}
+	if err := NewClient(config).Start(context.Background()); !errors.Is(err, trust.ErrUntrusted) || secondCalls.Load() != 0 {
+		t.Fatalf("changed endpoint inherited approval: %v", err)
+	}
+	t.Setenv("MYAI_TEST_MCP_ENDPOINT", first.URL)
+	t.Setenv("MYAI_TEST_MCP_HEADER", "rotated-fixture-value")
+	rotated := NewClient(config)
+	if err := rotated.Start(context.Background()); err != nil {
+		t.Fatalf("header value rotation invalidated approval: %v", err)
+	}
+	defer rotated.Close()
+	if rotated.ApprovalDigest() != request.Digest {
+		t.Fatal("rotated value changed the approval digest")
+	}
+	config.Headers = map[string]string{"X-Test-Other": "${MYAI_TEST_MCP_HEADER}"}
+	if err := NewClient(config).Start(context.Background()); !errors.Is(err, trust.ErrUntrusted) {
+		t.Fatalf("changed header declaration inherited approval: %v", err)
+	}
+}
+
+func TestHTTPToolFailuresHideErrorContent(t *testing.T) {
+	const marker = "fixture-private-message"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if request.ID == 0 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch request.Method {
+		case "initialize":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{}}`, request.ID)
+		case "tools/list":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32603,"message":%q,"data":{"details":%q}}}`, request.ID, marker, marker)
+		case "tools/call":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"isError":true,"content":[{"type":"text","text":%q}],"structuredContent":{"details":%q}}}`, request.ID, marker, marker)
+		}
+	}))
+	defer server.Close()
+	client := NewClient(ServerConfig{URL: server.URL, Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir()})
+	if err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.ListTools(context.Background()); err == nil || err.Error() != "mcp JSON-RPC error -32603" {
+		t.Fatalf("unexpected JSON-RPC error: %v", err)
+	}
+	result, err := client.CallTool(context.Background(), "fixture", nil)
+	if err != nil || !result.IsError || len(result.Content) != 0 || len(result.StructuredContent) != 0 {
+		t.Fatalf("unexpected raw tool failure result: %+v, %v", result, err)
+	}
+	wrapper := &Tool{client: client, originalName: "fixture"}
+	output, err := wrapper.Call(context.Background(), nil)
+	if err != nil || strings.Contains(fmt.Sprintf("%+v", output), marker) || !strings.Contains(fmt.Sprintf("%+v", output), "mcp tool returned an error") {
+		t.Fatalf("unexpected wrapped tool failure result: %+v, %v", output, err)
 	}
 }

@@ -91,6 +91,30 @@ func (a *Agent) handlePluginReload(ctx context.Context, conn *websocket.Conn, me
 	return a.writeRemoteMessage(conn, protocol.TypePluginReloadResult, message.RequestID, message.SessionID, payload)
 }
 
+func (a *Agent) handleMCPList(conn *websocket.Conn, message protocol.Message) error {
+	if _, err := protocol.DecodePayload[protocol.MCPListPayload](message); err != nil {
+		return fmt.Errorf("invalid mcp list request")
+	}
+	reader, ok := a.mcpManager.(mcpStatusReader)
+	if !ok {
+		return fmt.Errorf("mcp inventory is unavailable")
+	}
+	statuses, err := reader.MCPServerStatuses()
+	if err != nil {
+		return fmt.Errorf("mcp inventory is unavailable")
+	}
+	servers := make([]protocol.MCPServerSummary, 0, len(statuses))
+	for _, status := range statuses {
+		servers = append(servers, protocol.MCPServerSummary{
+			Name:               status.Name,
+			State:              string(status.State),
+			InventoryToolCount: status.InventoryToolCount,
+			ExposedToolCount:   status.ExposedToolCount,
+		})
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeMCPListResult, message.RequestID, message.SessionID, protocol.MCPListResultPayload{Servers: servers})
+}
+
 func (a *Agent) handleMCPReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	if _, err := protocol.DecodePayload[protocol.MCPReloadPayload](message); err != nil {
 		return fmt.Errorf("decode mcp reload failed: %w", err)
@@ -175,7 +199,9 @@ func mapPluginInfos(items []pluginruntime.Info) []protocol.PluginInfo {
 }
 
 func optionalInt(value *int) int {
-	if value == nil { return 0 }
+	if value == nil {
+		return 0
+	}
 	return *value
 }
 
@@ -195,17 +221,17 @@ func (a *Agent) handleModelConfigAdd(ctx context.Context, conn *websocket.Conn, 
 	a.requestMu.Lock()
 	defer a.requestMu.Unlock()
 	if err := a.chatService.AddModelConfig(ctx, modelcommand.AddConfig{
-		ID:        payload.ID,
-		Name:      payload.Name,
-		Provider:  payload.Provider,
-		Protocol:  domainmodel.Protocol(payload.Protocol),
-		AuthType:  domainmodel.AuthType(payload.AuthType),
-		BaseURL:   payload.BaseURL,
-		APIKey:    payload.APIKey,
-		ModelName: payload.ModelName,
+		ID:                  payload.ID,
+		Name:                payload.Name,
+		Provider:            payload.Provider,
+		Protocol:            domainmodel.Protocol(payload.Protocol),
+		AuthType:            domainmodel.AuthType(payload.AuthType),
+		BaseURL:             payload.BaseURL,
+		APIKey:              payload.APIKey,
+		ModelName:           payload.ModelName,
 		ContextWindowTokens: optionalInt(payload.ContextWindowTokens),
-		MaxOutputTokens: optionalInt(payload.MaxOutputTokens),
-		IsDefault: payload.IsDefault,
+		MaxOutputTokens:     optionalInt(payload.MaxOutputTokens),
+		IsDefault:           payload.IsDefault,
 		DefaultGenerationSettings: generation.Settings{
 			Temperature:     payload.Defaults.Temperature,
 			TopP:            payload.Defaults.TopP,
@@ -239,16 +265,16 @@ func (a *Agent) handleModelConfigTest(ctx context.Context, conn *websocket.Conn,
 	a.requestMu.Lock()
 	defer a.requestMu.Unlock()
 	latency, err := a.chatService.TestModelConfig(ctx, modelcommand.AddConfig{
-		ID:        payload.ID,
-		Name:      payload.Name,
-		Provider:  payload.Provider,
-		Protocol:  domainmodel.Protocol(payload.Protocol),
-		AuthType:  domainmodel.AuthType(payload.AuthType),
-		BaseURL:   payload.BaseURL,
-		APIKey:    payload.APIKey,
-		ModelName: payload.ModelName,
+		ID:                  payload.ID,
+		Name:                payload.Name,
+		Provider:            payload.Provider,
+		Protocol:            domainmodel.Protocol(payload.Protocol),
+		AuthType:            domainmodel.AuthType(payload.AuthType),
+		BaseURL:             payload.BaseURL,
+		APIKey:              payload.APIKey,
+		ModelName:           payload.ModelName,
 		ContextWindowTokens: optionalInt(payload.ContextWindowTokens),
-		MaxOutputTokens: optionalInt(payload.MaxOutputTokens),
+		MaxOutputTokens:     optionalInt(payload.MaxOutputTokens),
 		DefaultGenerationSettings: generation.Settings{
 			Temperature:     payload.Defaults.Temperature,
 			TopP:            payload.Defaults.TopP,

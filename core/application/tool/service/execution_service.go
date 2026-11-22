@@ -246,6 +246,12 @@ func (s ExecutionService) executeOne(ctx context.Context, command toolcommand.Ex
 		baseAsk := ask
 		ask = func(request toolcommand.PermissionRequest) bool {
 			request.ToolCallID = call.ID
+			if external, ok := registeredTool.(tooldef.PermissionIdentity); ok {
+				request.PermissionIdentity = external.PermissionIdentity()
+				if request.PermissionIdentity == "" {
+					request.RequireFreshConsent = true
+				}
+			}
 			return baseAsk(request)
 		}
 	}

@@ -13,6 +13,8 @@ type ToolPermissionRequest struct {
 	Arguments  string
 	Permission tooldef.Permission
 	Mode       string
+	// PermissionIdentity is an internal approval key for the resolved external tool.
+	PermissionIdentity string
 	// RequireFreshConsent is set by the execution policy, not by the model or approver.
 	RequireFreshConsent bool
 }

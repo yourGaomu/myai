@@ -1,10 +1,16 @@
 package agent
 
-import "context"
+import (
+	"context"
 
-// MCPManagerFacade exposes only the atomic configuration reload needed by the
-// remote transport. The Application owns config loading and tool registry
-// wiring; the relay never receives those implementation details.
+	"myai/core/mcp"
+)
+
+// MCPManagerFacade delegates reload to the Application, which owns the configuration and registry.
 type MCPManagerFacade interface {
 	ReloadMCP(context.Context) error
+}
+
+type mcpStatusReader interface {
+	MCPServerStatuses() ([]mcp.ServerStatus, error)
 }

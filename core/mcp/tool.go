@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,7 @@ type Tool struct {
 	description  string
 	inputSchema  json.RawMessage
 	permission   tooldef.Permission
+	permissionSource string
 }
 
 func NewToolWithName(client *Client, serverName string, info ToolInfo, exposedName string, permission tooldef.Permission) *Tool {
@@ -38,6 +41,29 @@ func NewToolWithName(client *Client, serverName string, info ToolInfo, exposedNa
 		inputSchema:  info.InputSchema,
 		permission:   tooldef.NormalizePermission(permission),
 	}
+}
+
+// WithPermissionSource sets the registry source before publishing this tool.
+func (t *Tool) WithPermissionSource(source string) *Tool {
+	t.permissionSource = source
+	return t
+}
+
+func (t *Tool) PermissionIdentity() string {
+	if t.client == nil {
+		return ""
+	}
+	declaration := t.client.ApprovalDigest()
+	if declaration == "" {
+		return ""
+	}
+	source := t.permissionSource
+	if source == "" {
+		source = "mcp:" + strings.TrimSpace(t.serverName)
+	}
+	material, _ := json.Marshal([4]string{source, declaration, t.originalName, string(t.permission)})
+	sum := sha256.Sum256(material)
+	return hex.EncodeToString(sum[:])
 }
 
 func (*Tool) ModelToolOrigin() modelport.ToolOrigin {
@@ -127,14 +153,10 @@ func (t *Tool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutp
 		}
 	}
 
-	output := formatCallResult(result)
 	if result.IsError {
-		if output == "" {
-			output = "mcp tool returned an error"
-		}
-		return tooldef.FailedOutput(domaintool.ResultStatusFailed, "mcp_tool_error", output), nil
+		return tooldef.FailedOutput(domaintool.ResultStatusFailed, "mcp_tool_error", "mcp tool returned an error"), nil
 	}
-	return tooldef.SuccessOutput(output), nil
+	return tooldef.SuccessOutput(formatCallResult(result)), nil
 }
 
 func ExposedToolName(serverName string, toolName string) string {

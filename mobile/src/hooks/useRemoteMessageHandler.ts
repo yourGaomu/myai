@@ -39,7 +39,6 @@ import type {
   ModelConfigMutationResultPayload,
   ModelConfigTestResultPayload,
   ModelSwitchResultPayload,
-  MCPReloadResultPayload,
   PluginListResultPayload,
   PluginMutationResultPayload,
   PermissionAskPayload,
@@ -153,9 +152,6 @@ type Args = {
   applySessionGenerationError: (message: string) => void;
   applySkillList: (payload?: SkillListResultPayload) => void;
   applyPluginList: (payload?: PluginListResultPayload | PluginMutationResultPayload) => void;
-  applyMCPReload: (payload?: MCPReloadResultPayload) => void;
-  applyMCPError: (message: string) => void;
-  isMCPOperationPending: boolean;
   applySubagentDefinitionList: (payload?: SubagentDefinitionListResultPayload) => void;
   applySubagentDefinitionMutation: (payload?: SubagentDefinitionMutationResultPayload) => void;
   applySubagentTaskList: (payload?: SubagentTaskListResultPayload) => void;
@@ -303,9 +299,6 @@ export function useRemoteMessageHandler({
   applySessionGenerationError,
   applySkillList,
   applyPluginList,
-  applyMCPReload,
-  applyMCPError,
-  isMCPOperationPending,
   applySubagentDefinitionList,
   applySubagentDefinitionMutation,
   applySubagentTaskList,
@@ -988,10 +981,6 @@ export function useRemoteMessageHandler({
           stopPending("plugins");
           applyPluginList(message.payload as PluginListResultPayload | PluginMutationResultPayload | undefined);
           break;
-        case "mcp_reload_result":
-          stopPending("mcp");
-          applyMCPReload(message.payload as MCPReloadResultPayload | undefined);
-          break;
         case "asset_list_result":
           if (!acceptAssetList(message)) break;
           stopPending("assets");
@@ -1181,7 +1170,6 @@ export function useRemoteMessageHandler({
           if (action === "generation" && isGenerationOperationPending) applySessionGenerationError(text);
           if ((action === "knowledge" || type === "session_rag_set") && isKnowledgeOperationPending) applyKnowledgeError(text);
           if (action === "memory" && isMemoryOperationPending) applyAIMemoryError(text);
-          if (action === "mcp" && isMCPOperationPending) applyMCPError(text);
           if (type === "session_pause" && requestID) forgetRequest(requestID);
           addErrorMessage(sessionID, text);
           break;
@@ -1252,9 +1240,6 @@ export function useRemoteMessageHandler({
       applySessionGenerationError,
       applySkillList,
       applyPluginList,
-      applyMCPReload,
-      applyMCPError,
-      isMCPOperationPending,
       applySubagentDefinitionList,
       applySubagentDefinitionMutation,
       applySubagentTaskList,
@@ -1339,7 +1324,6 @@ function pendingActionForError(type: RelayMessage["type"]): PendingAction | unde
   if (type.startsWith("model_")) return "models";
   if (type.startsWith("skill_")) return "skills";
   if (type.startsWith("plugin_")) return "plugins";
-  if (type.startsWith("mcp_")) return "mcp";
   if (type === "asset_list") return "assets";
   if (type.startsWith("file_")) return "files";
   if (type === "changes_list") return "changes";

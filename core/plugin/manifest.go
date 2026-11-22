@@ -1,9 +1,11 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -118,6 +120,10 @@ func loadManifest(directory string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	return decodeManifest(path, raw)
+}
+
+func decodeManifest(path string, raw []byte) (Manifest, error) {
 	var manifest Manifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decode %s: %w", path, err)
@@ -127,6 +133,77 @@ func loadManifest(directory string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("validate %s: %w", path, err)
 	}
 	return manifest, nil
+}
+
+// Read only the regular manifest that an update would replace. In particular,
+// renaming over a symlink would update a different file than the one parsed.
+func readManifestForUpdate(path string) ([]byte, os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, errors.New("plugin manifest must be a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !os.SameFile(info, opened) {
+		return nil, nil, errors.New("plugin manifest changed during update")
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxManifestBytes+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(raw) > maxManifestBytes {
+		return nil, nil, fmt.Errorf("plugin manifest exceeds %d bytes", maxManifestBytes)
+	}
+	return raw, info, nil
+}
+
+func replaceManifest(path string, original, replacement []byte) error {
+	if len(replacement) > maxManifestBytes {
+		return fmt.Errorf("plugin manifest exceeds %d bytes", maxManifestBytes)
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".plugin-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	current, info, err := readManifestForUpdate(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, original) {
+		return errors.New("plugin manifest changed during update")
+	}
+	if err := file.Chmod(info.Mode().Perm()); err != nil {
+		return err
+	}
+	if _, err := file.Write(replacement); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	current, latest, err := readManifestForUpdate(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, latest) || !bytes.Equal(current, original) {
+		return errors.New("plugin manifest changed during update")
+	}
+	return os.Rename(file.Name(), path)
 }
 
 func (manifest Manifest) enabled() bool {

@@ -36,6 +36,7 @@ import type {
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
+import type { MCPInventory } from "../../hooks/useMCPState";
 import { shortID } from "../../utils/ids";
 import type { ModelDeleteFeedback } from "../../utils/modelDelete";
 import { websocketURL } from "../../utils/relay";
@@ -115,6 +116,8 @@ type Props = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
+  onRefreshMCPInventory: () => void;
+  mcpInventory: MCPInventory;
   reloadMCP: () => void;
   mcpReloading: boolean;
   mcpMessage: string;
@@ -168,6 +171,26 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "对话", mode: "chat", meta: "正常对话与执行" },
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
+const mcpServerStateLabels = { loaded: "已加载", disabled: "已禁用", unavailable: "不可用" };
+const mcpInventoryMessages: Partial<Record<MCPInventory["status"], string>> = {
+  loading: "正在获取 MCP 服务列表…",
+  unsupported: "当前中继或电脑端 Agent 版本不支持查看 MCP 列表。",
+  timeout: "MCP 列表请求超时。请确认电脑端 Agent 在线且支持此功能，然后刷新。",
+  error: "无法获取 MCP 列表，请检查电脑端 Agent 后刷新。",
+};
+
+function mcpInventoryStatusText({ servers, status }: MCPInventory, connected: boolean) {
+  if (!connected) return servers === null
+    ? "连接中继后可查看 MCP 服务列表。"
+    : "中继未连接，显示上次获取的 MCP 列表。";
+  if (status !== "ready" && servers !== null) {
+    const feedback = mcpInventoryMessages[status];
+    return feedback ? `${feedback} 显示上次获取的列表。` : "显示上次获取的 MCP 列表。";
+  }
+  if (status === "ready" && servers?.length === 0) return "没有已配置的 MCP 服务。";
+  return mcpInventoryMessages[status];
+}
+
 const contextPresets = [8, 16, 32, 64, 128];
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
 
@@ -306,6 +329,8 @@ export function SettingsPanel({
   onRefreshSubagents,
   onUpdateSubagentDefinition,
   pendingActions,
+  onRefreshMCPInventory,
+  mcpInventory,
   reloadMCP,
   mcpReloading,
   mcpMessage,
@@ -1121,9 +1146,9 @@ export function SettingsPanel({
             <ButtonContent color={palette.ink1} loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
           </Pressable>
           <Pressable
-            disabled={!clientToken || mcpReloading}
+            disabled={!connected || mcpReloading}
             onPress={reloadMCP}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpReloading) && styles.disabledButton], pressed)}
           >
             <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
           </Pressable>
@@ -1131,6 +1156,7 @@ export function SettingsPanel({
       </View>
 
       {skillMessage ? <EmptyBox text={skillMessage} /> : null}
+      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
 
       {skills.length > 0 ? (
         <View style={styles.skillList}>
@@ -1160,32 +1186,52 @@ export function SettingsPanel({
     </View>
   );
 
+  const mcpInventoryFeedback = mcpInventoryStatusText(mcpInventory, connected);
   const pluginSection = (
     <View style={styles.sectionStack}>
       <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
         <IconBox label="MCP" />
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>MCP 运行时</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>
-            模型上下文协议服务与动态工具安全重载
-          </Text>
+          <Text numberOfLines={2} style={styles.settingMeta}>服务状态与工具数量</Text>
         </View>
-        <Pressable
-          accessibilityLabel="重载 MCP"
-          disabled={!clientToken || mcpReloading}
-          onPress={reloadMCP}
-          style={({ pressed }) =>
-            buttonFeedback(
-              [styles.secondaryButton, (!clientToken || mcpReloading) && styles.disabledButton],
-              pressed,
-            )
-          }
-        >
-          <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
-        </Pressable>
+        <View style={styles.rowCompact}>
+          <Pressable
+            accessibilityLabel="刷新 MCP 列表"
+            disabled={!connected || mcpInventory.status === "loading"}
+            onPress={onRefreshMCPInventory}
+            style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpInventory.status === "loading") && styles.disabledButton], pressed)}
+          >
+            <ButtonContent color={palette.ink1} loading={mcpInventory.status === "loading"} text={mcpInventory.status === "loading" ? "刷新中" : "刷新列表"} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="重载 MCP"
+            disabled={!connected || mcpReloading}
+            onPress={reloadMCP}
+            style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!connected || mcpReloading) && styles.disabledButton], pressed)}
+          >
+            <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+          </Pressable>
+        </View>
       </View>
 
       {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
+      {mcpInventoryFeedback ? <EmptyBox text={mcpInventoryFeedback} /> : null}
+      {mcpInventory.servers?.length ? (
+        <View style={styles.skillList}>
+          {mcpInventory.servers.map((server) => (
+            <View key={server.name} style={styles.skillCard}>
+              <View style={styles.skillHeader}>
+                <Text style={[styles.flex, styles.skillName]}>{server.name}</Text>
+                <Text style={styles.skillBadge}>{mcpServerStateLabels[server.state]}</Text>
+              </View>
+              <Text style={styles.settingMeta}>
+                {`库存工具 ${server.inventory_tool_count} 个 · 暴露工具 ${server.exposed_tool_count} 个`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <PluginPanel
         buttonFeedback={buttonFeedback}
@@ -1644,11 +1690,11 @@ export function SettingsPanel({
           <ButtonContent color={palette.ink1} loading={pendingActions.skills} text="刷新技能" />
         </Pressable>
         <Pressable
-          disabled={!clientToken || mcpReloading}
+          disabled={!connected || mcpReloading}
           onPress={reloadMCP}
-          style={({ pressed }) => buttonFeedback([styles.settingAction, (!clientToken || mcpReloading) && styles.disabledButton], pressed)}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpReloading) && styles.disabledButton], pressed)}
         >
-          <ButtonContent color={palette.ink1} loading={mcpReloading} text="重载 MCP" />
+          <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
         </Pressable>
         <Pressable
           disabled={pendingActions.sessions}
@@ -1658,6 +1704,7 @@ export function SettingsPanel({
           <ButtonContent color={palette.ink1} loading={pendingActions.sessions} text="刷新会话" />
         </Pressable>
       </View>
+      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
     </View>
   );
 

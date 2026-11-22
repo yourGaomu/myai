@@ -44,7 +44,7 @@ type Manager struct {
 	mu       sync.RWMutex
 	registry *tool.RegisterTools
 	infos    map[string]Info
-	runtimes map[string]*mcp.Manager
+	runtimes map[string]*pluginRuntime
 }
 
 type Option func(*Manager)
@@ -66,7 +66,7 @@ func NewManager(root string, options ...Option) *Manager {
 		root:      filepath.Clean(root),
 		workspace: filepath.Dir(filepath.Clean(root)),
 		infos:     make(map[string]Info),
-		runtimes:  make(map[string]*mcp.Manager),
+		runtimes:  make(map[string]*pluginRuntime),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -100,7 +100,7 @@ func (manager *Manager) Load(ctx context.Context, registry *tool.RegisterTools) 
 	return manager.load(ctx, registry)
 }
 
-func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) error {
+func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) (loadErr error) {
 	if manager == nil {
 		return errors.New("plugin manager is nil")
 	}
@@ -112,12 +112,30 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 	}
 
 	manager.mu.RLock()
-	reloading := manager.registry != nil
-	oldRuntimes := make(map[string]*mcp.Manager, len(manager.runtimes))
+	previousRegistry := manager.registry
+	manager.mu.RUnlock()
+	if previousRegistry != nil && previousRegistry != registry {
+		return errors.New("plugin reload requires the existing tool registry")
+	}
+	// Withdraw revoked/disabled runtimes independently of the candidate build.
+	// An unrelated discovery or startup error must not roll back withdrawal.
+	if err := manager.withdrawUnavailable(ctx, registry); err != nil {
+		return err
+	}
+	defer func() {
+		if loadErr != nil && ctx.Err() == nil {
+			// A revocation or disable can arrive during a slow candidate startup.
+			_ = manager.withdrawUnavailable(ctx, registry)
+		}
+	}()
+
+	reloading := previousRegistry != nil
+	manager.mu.RLock()
+	oldRuntimes := make(map[string]*pluginRuntime, len(manager.runtimes))
 	oldSources := make([]string, 0)
 	for id, runtime := range manager.runtimes {
 		oldRuntimes[id] = runtime
-		oldSources = append(oldSources, runtime.Sources()...)
+		oldSources = append(oldSources, runtime.manager.Sources()...)
 	}
 	manager.mu.RUnlock()
 	oldSourceSet := make(map[string]bool, len(oldSources))
@@ -125,29 +143,16 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 		oldSourceSet[source] = true
 	}
 	candidateRegistry := registry.CloneExcludingSources(oldSourceSet)
-	candidateRuntimes := make(map[string]*mcp.Manager)
+	candidateRuntimes := make(map[string]*pluginRuntime)
 	candidateInfos := make(map[string]Info)
-	cleanupCandidates := func() {
-		for _, runtime := range candidateRuntimes {
-			_ = runtime.Close()
-		}
-	}
+	cleanupCandidates := func() { _ = closeRuntimes(candidateRuntimes) }
 
 	entries, err := os.ReadDir(manager.root)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		releaseTurn := registry.BeginReload()
-		registry.ReplaceSources(candidateRegistry, oldSources, nil)
-		manager.mu.Lock()
-		manager.registry = registry
-		manager.infos = candidateInfos
-		manager.runtimes = candidateRuntimes
-		manager.mu.Unlock()
-		registry.Retire(func() { _ = closeRuntimes(oldRuntimes) })
-		releaseTurn()
-		return nil
+		return manager.publish(ctx, registry, candidateRegistry, oldSources, oldRuntimes, candidateInfos, candidateRuntimes)
 	}
 	if err != nil {
 		return fmt.Errorf("scan plugin root %s: %w", manager.root, err)
@@ -193,7 +198,8 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 			cleanupCandidates()
 			return err
 		}
-		if err := manager.trustPolicy.Authorize(ctx, request); err != nil {
+		grant, err := manager.trustPolicy.AuthorizeWithGrant(ctx, request)
+		if err != nil {
 			if ctx.Err() != nil {
 				cleanupCandidates()
 				return ctx.Err()
@@ -235,19 +241,52 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 			log.Printf("warning: local plugin %s failed to load: %v", manifest.ID, err)
 			continue
 		}
-		candidateRuntimes[manifest.ID] = runtime
-		candidateInfos[manifest.ID] = Info{Manifest: manifest, Directory: directory, Status: StatusLoaded, TrustRequest: request}
+		info := Info{Manifest: manifest, Directory: directory, Status: StatusLoaded, TrustRequest: request}
+		access := &pluginAccess{}
+		if old := oldRuntimes[manifest.ID]; old != nil && old.info.Directory == directory {
+			access = old.access
+		}
+		guarded := &pluginRuntime{manager: runtime, info: info, grant: grant, access: access}
+		guarded.guardTools(candidateRegistry)
+		candidateRuntimes[manifest.ID] = guarded
+		candidateInfos[manifest.ID] = info
 		log.Printf("plugin %s loaded from %s", manifest.ID, directory)
 	}
-	candidateSources := make([]string, 0)
-	for _, runtime := range candidateRuntimes {
-		candidateSources = append(candidateSources, runtime.Sources()...)
+	// Approvals can change during tool discovery. Do not publish a runtime that
+	// has already lost the grant used to start it.
+	for id, runtime := range candidateRuntimes {
+		if err := runtime.checkGrant(ctx); err != nil {
+			if ctx.Err() != nil {
+				cleanupCandidates()
+				return ctx.Err()
+			}
+			candidateRegistry.UnregisterSources(runtime.manager.Sources())
+			_ = runtime.close()
+			delete(candidateRuntimes, id)
+			candidateInfos[id] = untrustedInfo(runtime.info, err)
+		}
 	}
-	releaseTurn := registry.BeginReload()
-	if err := ctx.Err(); err != nil {
-		releaseTurn()
+	if err := manager.publish(ctx, registry, candidateRegistry, oldSources, oldRuntimes, candidateInfos, candidateRuntimes); err != nil {
 		cleanupCandidates()
 		return err
+	}
+	return nil
+}
+
+func (manager *Manager) publish(ctx context.Context, registry, candidateRegistry *tool.RegisterTools, oldSources []string, oldRuntimes map[string]*pluginRuntime, candidateInfos map[string]Info, candidateRuntimes map[string]*pluginRuntime) error {
+	candidateSources := make([]string, 0)
+	for _, runtime := range candidateRuntimes {
+		candidateSources = append(candidateSources, runtime.manager.Sources()...)
+	}
+	releaseTurn := registry.BeginReload()
+	defer releaseTurn()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for id, old := range oldRuntimes {
+		if fresh := candidateRuntimes[id]; fresh == nil || fresh.access != old.access {
+			old.access.stop(accessUnavailable)
+		}
 	}
 	registry.ReplaceSources(candidateRegistry, oldSources, candidateSources)
 	manager.mu.Lock()
@@ -256,25 +295,82 @@ func (manager *Manager) load(ctx context.Context, registry *tool.RegisterTools) 
 	manager.runtimes = candidateRuntimes
 	manager.mu.Unlock()
 	registry.Retire(func() { _ = closeRuntimes(oldRuntimes) })
-	releaseTurn()
 	return nil
+}
+
+func untrustedInfo(info Info, err error) Info {
+	info.Status = StatusUntrusted
+	info.Error = err.Error()
+	return info
+}
+
+func disabledInfo(manifest Manifest, directory string) Info {
+	return Info{Manifest: manifest, Directory: directory, Status: StatusDisabled}
+}
+
+// withdrawUnavailable runs with operationMu held. It consults the approval
+// used by each running plugin, regardless of what the proposed manifest says.
+func (manager *Manager) withdrawUnavailable(ctx context.Context, registry *tool.RegisterTools) error {
+	unavailable := make(map[string]Info)
+	for id, runtime := range manager.runtimes {
+		// A malformed edit to a live declaration is a reload failure. A valid
+		// explicit disable can be applied without loading anything else.
+		if manifest, err := loadManifest(runtime.info.Directory); err == nil && manifest.ID == id && !manifest.enabled() {
+			unavailable[id] = disabledInfo(manifest, runtime.info.Directory)
+			continue
+		}
+		if err := runtime.checkGrant(ctx); err != nil {
+			if ctx.Err() != nil {
+				manager.withdraw(registry, unavailable)
+				return ctx.Err()
+			}
+			unavailable[id] = untrustedInfo(runtime.info, err)
+		}
+	}
+	manager.withdraw(registry, unavailable)
+	return ctx.Err()
+}
+
+// withdraw publishes just the affected sources and blocks new calls through
+// their older snapshots, leaving all other runtimes in place.
+func (manager *Manager) withdraw(registry *tool.RegisterTools, infos map[string]Info) {
+	if len(infos) == 0 {
+		return
+	}
+	releaseTurn := registry.BeginReload()
+	defer releaseTurn()
+	manager.mu.Lock()
+	retired := make(map[string]*pluginRuntime, len(infos))
+	var sources []string
+	for id, info := range infos {
+		if runtime := manager.runtimes[id]; runtime != nil {
+			state := accessUnavailable
+			if info.Status == StatusUntrusted {
+				state = accessRevoked
+			}
+			runtime.access.stop(state)
+			sources = append(sources, runtime.manager.Sources()...)
+			retired[id] = runtime
+			delete(manager.runtimes, id)
+		}
+		manager.infos[id] = info
+	}
+	registry.UnregisterSources(sources)
+	manager.mu.Unlock()
+	registry.Retire(func() { _ = closeRuntimes(retired) })
 }
 
 func (manager *Manager) Reload(ctx context.Context) error {
 	if manager == nil {
 		return errors.New("plugin manager is nil")
 	}
-	manager.mu.RLock()
-	registry := manager.registry
-	manager.mu.RUnlock()
-	if registry == nil {
-		return errors.New("plugin tool registry is nil")
-	}
-	return manager.Load(ctx, registry)
+	manager.operationMu.Lock()
+	defer manager.operationMu.Unlock()
+	return manager.load(ctx, manager.registry)
 }
 
-// SetEnabled persists a plugin's enabled flag and reloads the plugin set so
-// the tool registry and external MCP processes immediately match the manifest.
+// SetEnabled persists a plugin's enabled flag. Disable is a standalone
+// withdrawal, while enable must pass the candidate reload before publication.
 func (manager *Manager) SetEnabled(ctx context.Context, id string, enabled bool) error {
 	if manager == nil {
 		return errors.New("plugin manager is nil")
@@ -296,40 +392,44 @@ func (manager *Manager) SetEnabled(ctx context.Context, id string, enabled bool)
 	if registry == nil {
 		return errors.New("plugin tool registry is nil")
 	}
-	manifest, err := loadManifest(info.Directory)
-	if err != nil {
-		return fmt.Errorf("load plugin %s manifest failed: %w", id, err)
-	}
-	manifest.Enabled = &enabled
 	manifestPath := filepath.Join(info.Directory, ManifestFileName)
-	// Preserve extension fields (for example future capabilities/skills/hooks)
-	// while changing only the lifecycle flag.
-	original, err := os.ReadFile(manifestPath)
+	original, _, err := readManifestForUpdate(manifestPath)
 	if err != nil {
 		return fmt.Errorf("read plugin %s manifest failed: %w", id, err)
 	}
+	manifest, err := decodeManifest(manifestPath, original)
+	if err != nil {
+		return fmt.Errorf("load plugin %s manifest failed: %w", id, err)
+	}
+	if manifest.ID != id {
+		return fmt.Errorf("plugin %s manifest no longer declares the requested id", id)
+	}
+	manifest.Enabled = &enabled
+	// Preserve extension fields while changing only the lifecycle flag.
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(original, &fields); err != nil {
 		return fmt.Errorf("decode plugin %s manifest for update failed: %w", id, err)
 	}
-	encodedEnabled, err := json.Marshal(enabled)
-	if err != nil {
-		return fmt.Errorf("encode plugin %s enabled flag failed: %w", id, err)
+	if enabled {
+		fields["enabled"] = json.RawMessage("true")
+	} else {
+		fields["enabled"] = json.RawMessage("false")
 	}
-	fields["enabled"] = encodedEnabled
 	raw, err := json.MarshalIndent(fields, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode plugin %s manifest update failed: %w", id, err)
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+	if err := replaceManifest(manifestPath, original, raw); err != nil {
 		return fmt.Errorf("persist plugin %s manifest failed: %w", id, err)
 	}
+	if !enabled {
+		manager.withdraw(registry, map[string]Info{id: disabledInfo(manifest, info.Directory)})
+		return nil
+	}
 	if err := manager.load(ctx, registry); err != nil {
-		// The manifest is a user-facing source of truth. If the candidate reload
-		// fails, restore it so a later reload does not silently apply a state that
-		// was never successfully activated.
-		if restoreErr := os.WriteFile(manifestPath, original, 0o644); restoreErr != nil {
+		// Roll back a failed enable, preserving any external edits made since.
+		if restoreErr := replaceManifest(manifestPath, raw, original); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("restore plugin manifest: %w", restoreErr))
 		}
 		return err
@@ -362,16 +462,14 @@ func (manager *Manager) Close() error {
 	manager.operationMu.Lock()
 	defer manager.operationMu.Unlock()
 	manager.mu.Lock()
-	runtimes := make(map[string]*mcp.Manager, len(manager.runtimes))
-	for id, runtime := range manager.runtimes {
-		runtimes[id] = runtime
-	}
+	runtimes := manager.runtimes
 	sources := make([]string, 0)
 	for _, runtime := range runtimes {
-		sources = append(sources, runtime.Sources()...)
+		runtime.access.stop(accessUnavailable)
+		sources = append(sources, runtime.manager.Sources()...)
 	}
 	registry := manager.registry
-	manager.runtimes = make(map[string]*mcp.Manager)
+	manager.runtimes = make(map[string]*pluginRuntime)
 	manager.infos = make(map[string]Info)
 	manager.registry = nil
 	manager.mu.Unlock()
@@ -385,17 +483,11 @@ func (manager *Manager) Close() error {
 	return closeRuntimes(runtimes)
 }
 
-func closeRuntimes(runtimes map[string]*mcp.Manager) error {
-	items := make([]*mcp.Manager, 0, len(runtimes))
-	for _, runtime := range runtimes {
-		items = append(items, runtime)
-	}
+func closeRuntimes(runtimes map[string]*pluginRuntime) error {
 	var closeErrors []error
-	for index := len(items) - 1; index >= 0; index-- {
-		if runtime := items[index]; runtime != nil {
-			if err := runtime.Close(); err != nil {
-				closeErrors = append(closeErrors, err)
-			}
+	for _, runtime := range runtimes {
+		if err := runtime.close(); err != nil {
+			closeErrors = append(closeErrors, err)
 		}
 	}
 	return errors.Join(closeErrors...)
