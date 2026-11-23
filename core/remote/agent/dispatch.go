@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+
+	"myai/core/port/files"
 	"myai/core/remote/protocol"
 )
 
@@ -153,6 +155,17 @@ func (a *Agent) writeHandlerError(conn *websocket.Conn, message protocol.Message
 		ApprovalID  string               `json:"approval_id,omitempty"`
 		QuestionID  string               `json:"question_id,omitempty"`
 	}{ErrorPayload: protocol.ErrorPayload{Message: err.Error()}, RequestType: message.Type}
+	if protocol.IsAssetUploadRequest(message.Type) {
+		switch {
+		case errors.Is(err, files.ErrUploadServiceUnavailable):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadServiceUnavailable.Error(), Code: protocol.UploadErrorServiceUnavailable}
+		case errors.Is(err, files.ErrUploadMissingTool):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadMissingTool.Error(), Code: protocol.UploadErrorMissingTool}
+		case errors.Is(err, files.ErrUploadUpstreamFailure):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadUpstreamFailure.Error(), Code: protocol.UploadErrorUpstreamFailure}
+		}
+		return a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, payload)
+	}
 	var identity struct {
 		ApprovalID string `json:"approval_id"`
 		QuestionID string `json:"question_id"`

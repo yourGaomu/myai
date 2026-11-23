@@ -15,6 +15,7 @@ import { CacheUsageMeter } from "../chat/TurnTokenUsage";
 
 type Props = {
   activeSession?: SessionSummary;
+  canRename: boolean;
   connected: boolean;
   connectionLabel: string;
   context?: ContextInfo;
@@ -133,15 +134,25 @@ export function SessionSheet(props: Props) {
     <BottomSheet accessibilityLabel="会话设置" onDismiss={props.onClose} visible={visible}>
       <View style={styles.head}>
         <Text numberOfLines={1} style={styles.title}>{activeSession?.title?.trim() || "新对话"}</Text>
-        {props.onRename ? (
-          <Pressable accessibilityLabel="重命名对话" accessibilityRole="button" onPress={props.onRename} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
-            <Feather color={palette.ink2} name="edit-2" size={17} />
-          </Pressable>
-        ) : null}
         <Pressable accessibilityLabel="关闭" hitSlop={8} onPress={props.onClose} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
           <Feather color={palette.ink2} name="x" size={20} />
         </Pressable>
       </View>
+      {props.onRename ? (
+        <View style={styles.renameRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !props.canRename }}
+            disabled={!props.canRename}
+            onPress={props.onRename}
+            style={({ pressed }) => [styles.renameButton, !props.canRename && styles.dimmed, pressed && styles.pressed]}
+          >
+            <Feather color={palette.brandLight} name="edit-2" size={15} />
+            <Text style={styles.link}>重命名对话</Text>
+          </Pressable>
+          {!props.canRename ? <Text style={styles.contextNote}>连接 Agent 后可重命名</Text> : null}
+        </View>
+      ) : null}
       {props.renameEditor}
 
       {!props.connected ? (
@@ -234,6 +245,8 @@ const makeStyles = ({ palette }: AppTheme) =>
     head: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 2 },
     title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.semibold },
     close: { alignItems: "center", borderRadius: radius.pill, height: 40, justifyContent: "center", width: 40 },
+    renameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    renameButton: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 44, paddingHorizontal: 4 },
     pressed: { opacity: 0.72 },
     pressedRow: { backgroundColor: palette.pressed },
     dimmed: { opacity: 0.4 },

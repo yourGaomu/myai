@@ -534,6 +534,7 @@ export type TokenUsage = {
 };
 
 export type ErrorPayload = {
+  code?: string;
   message?: string;
   request_type?: RelayMessage["type"];
   approval_id?: string;

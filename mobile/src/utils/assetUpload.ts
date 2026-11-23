@@ -75,6 +75,20 @@ export class AssetUploadDisconnectedError extends Error {
   }
 }
 
+function uploadError(payload: UploadTransportErrorPayload): Error {
+  if (payload.transport_error) return new AssetUploadDisconnectedError();
+  switch (payload.code) {
+    case "upload_service_unavailable":
+      return new Error("附件上传服务未就绪。请在「设置 → 插件与 MCP」检查 Agent 的 short_links 服务。");
+    case "upload_missing_tool":
+      return new Error("short_links 服务缺少附件上传工具。请检查服务版本和工具配置。");
+    case "upload_upstream_failure":
+      return new Error("short_links 服务未完成附件上传。请在 Agent 日志中检查服务状态后重试。");
+    default:
+      return new Error(payload.message || "Agent 文件上传失败。");
+  }
+}
+
 export function assertAssetUploadScope(expected: RelayUploadScope, current: RelayUploadScope) {
   if (expected.pairingID !== current.pairingID) throw new AssetUploadCanceledError();
   if (!expected.pairingID || !expected.connectionID || expected.connectionID !== current.connectionID) {
@@ -183,7 +197,7 @@ export function createAssetUploadClient({
       const payload = (message.payload || {}) as UploadTransportErrorPayload;
       if (!waiting && !requestID.startsWith(uploadRequestPrefix) && !payload.request_type?.startsWith("asset_upload_")) return false;
       if (waitingIsCurrent && (!payload.request_type || payload.request_type === `asset_upload_${waiting.operation}`)) {
-        waiting.reject(payload.transport_error ? new AssetUploadDisconnectedError() : new Error(payload.message || "Agent 文件上传失败。"));
+        waiting.reject(uploadError(payload));
         beginRequests.delete(requestID);
       }
       return true;

@@ -1853,7 +1853,8 @@ function PairedWorkspace({
         onCompact={compactSession}
         onReconnect={connect}
         onRefreshUsage={requestSessions}
-        onRename={canRenameSessions && activeSession && !activeSession.deleted ? openSheetRename : undefined}
+        onRename={activeSession && !activeSession.deleted ? openSheetRename : undefined}
+        canRename={canRenameSessions}
         onRequestContext={requestContextInfo}
         onSetAgentMode={setAgentMode}
         onSetPermissionMode={setPermissionMode}

@@ -1705,6 +1705,7 @@ type AIMemoryDreamResultPayload struct {
 
 type ErrorPayload struct {
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
 }
 
 func NewMessage(

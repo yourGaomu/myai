@@ -208,29 +208,52 @@ func (r *Receiver) Begin(ctx context.Context, owner Owner, metadata Metadata) (R
 	if err := validateMetadata(metadata); err != nil {
 		return Result{}, err
 	}
+	key := idempotencyKey{Owner: owner, Key: metadata.IdempotencyKey}
+	preflight, _ := r.service.(files.UploadPreflighter)
+	var preflightErr error
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.service == nil {
-		return Result{}, errors.New("file upload service is unavailable")
-	}
-	r.pruneLocked(time.Now())
-	key := idempotencyKey{Owner: owner, Key: metadata.IdempotencyKey}
-	if previous := r.uploads[r.keys[key]]; previous != nil {
-		if previous.metadata != metadata {
-			return Result{}, errors.New("idempotency_key was already used with different upload metadata")
+	for {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
 		}
-		if previous.cancelled && previous.asset == nil {
-			return Result{}, errors.New("upload was cancelled; use a new idempotency_key")
+		if r.closed || r.service == nil {
+			return Result{}, files.ErrUploadServiceUnavailable
 		}
-		previous.lastActivity = time.Now()
-		return resultFor(previous), nil
-	}
-	if len(r.uploads) >= maxReceipts+MaxActiveGlobal {
-		return Result{}, errors.New("file upload recovery table is full; retry an existing cancellation first")
-	}
-	ownerActive, globalActive := r.activeCountsLocked(owner)
-	if ownerActive >= MaxActiveOwner || globalActive >= MaxActiveGlobal || metadata.Size > MaxDiskBytes-r.reserved {
-		return Result{}, errors.New("too many active uploads or upload disk quota exceeded")
+		r.pruneLocked(time.Now())
+		if previous := r.uploads[r.keys[key]]; previous != nil {
+			if previous.metadata != metadata {
+				return Result{}, errors.New("idempotency_key was already used with different upload metadata")
+			}
+			if previous.cancelled && previous.asset == nil {
+				return Result{}, errors.New("upload was cancelled; use a new idempotency_key")
+			}
+			previous.lastActivity = time.Now()
+			return resultFor(previous), nil
+		}
+		if preflightErr != nil {
+			return Result{}, preflightErr
+		}
+		if len(r.uploads) >= maxReceipts+MaxActiveGlobal {
+			return Result{}, errors.New("file upload recovery table is full; retry an existing cancellation first")
+		}
+		ownerActive, globalActive := r.activeCountsLocked(owner)
+		if ownerActive >= MaxActiveOwner || globalActive >= MaxActiveGlobal || metadata.Size > MaxDiskBytes-r.reserved {
+			return Result{}, errors.New("too many active uploads or upload disk quota exceeded")
+		}
+		if preflight == nil {
+			break
+		}
+		// Check only new uploads, before staging. Recheck receipts and limits
+		// after unlocking, since another request may have admitted this key.
+		r.mu.Unlock()
+		checkCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(r.ctx, cancel)
+		preflightErr = uploadBackendError(preflight.PreflightUpload(checkCtx))
+		stop()
+		cancel()
+		r.mu.Lock()
+		preflight = nil
 	}
 	if r.dir == "" {
 		dir, err := os.MkdirTemp(r.config.TempDir, "myai-uploads-*")
@@ -471,8 +494,9 @@ func (r *Receiver) finish(ctx context.Context, u *upload, completion *Completion
 			Size: u.metadata.Size, IdempotencyKey: u.backendKey,
 		})
 		if err == nil && strings.TrimSpace(asset.AssetID) == "" {
-			err = errors.New("upload backend returned an empty asset_id")
+			err = files.ErrUploadUpstreamFailure
 		}
+		err = uploadBackendError(err)
 		if err == nil {
 			if asset.FileName == "" {
 				asset.FileName = u.metadata.FileName
@@ -514,6 +538,23 @@ func (r *Receiver) finish(ctx context.Context, u *upload, completion *Completion
 	completion.result, completion.err = resultFor(u), err
 	close(completion.done)
 	r.pruneLocked(time.Now())
+}
+
+func uploadBackendError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	case errors.Is(err, files.ErrUploadServiceUnavailable):
+		return files.ErrUploadServiceUnavailable
+	case errors.Is(err, files.ErrUploadMissingTool):
+		return files.ErrUploadMissingTool
+	default:
+		return files.ErrUploadUpstreamFailure
+	}
 }
 
 func (r *Receiver) Cancel(ctx context.Context, owner Owner, id string) (Result, error) {

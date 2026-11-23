@@ -34,6 +34,7 @@ export function MobileMainContent({
           activeSession={settings.activeSession}
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
+          canRenameSessions={sessions.canRenameSessions}
           clientToken={common.clientToken}
           compact={settings.compact}
           connected={settings.connected}
@@ -71,6 +72,7 @@ export function MobileMainContent({
           onConnect={settings.onConnect}
           onDeleteSession={settings.onDeleteSession}
           onLoadSession={settings.onLoadSession}
+          onRenameSession={sessions.onRenameSession}
           onNewSession={settings.onNewSession}
           onPair={settings.onPair}
           onCompactSession={settings.onCompactSession}

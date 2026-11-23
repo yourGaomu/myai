@@ -7,6 +7,18 @@ import (
 
 var ErrSessionAssetUnavailable = errors.New("attachment is unavailable in this session")
 
+var (
+	ErrUploadServiceUnavailable = errors.New("file upload service is unavailable")
+	ErrUploadMissingTool        = errors.New("file upload service is missing a required tool")
+	ErrUploadUpstreamFailure    = errors.New("file upload failed at the upstream service")
+)
+
+// UploadPreflighter is an optional Service capability for checking whether new
+// uploads can start. It must not create a backend upload or consume file data.
+type UploadPreflighter interface {
+	PreflightUpload(ctx context.Context) error
+}
+
 // SessionAssetLookup admits assets uploaded or attached to the given session.
 // The calling code uses the returned metadata to check the downloaded object.
 type SessionAssetLookup func(ctx context.Context, sessionID, assetID string) (Asset, error)

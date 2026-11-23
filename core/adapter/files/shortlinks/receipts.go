@@ -239,10 +239,8 @@ func (s *Service) transfer(ctx context.Context, request filesport.UploadRequest,
 			return receipt.asset, nil, receipt, done, err
 		}
 	}
-	for _, name := range tools {
-		if !receipt.lease.HasTool(name) {
-			return receipt.asset, receipt.lease, receipt, done, errors.New("short_links MCP is missing a required file tool")
-		}
+	if err := requireTools(receipt.lease, tools); err != nil {
+		return receipt.asset, receipt.lease, receipt, done, err
 	}
 	if receipt.asset.AssetID != "" {
 		return receipt.asset, receipt.lease, receipt, done, nil

@@ -41,7 +41,7 @@ func (a *Agent) fileUploads() (*uploads.Receiver, error) {
 	a.uploadMu.Lock()
 	defer a.uploadMu.Unlock()
 	if a.uploadService == nil || a.uploadsClosed {
-		return nil, errors.New("file upload service is not configured or is closed")
+		return nil, files.ErrUploadServiceUnavailable
 	}
 	if a.uploadReceiver == nil {
 		a.uploadReceiver = uploads.New(a.uploadService, a.fileAssetRecorder, uploads.Config{})

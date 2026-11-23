@@ -87,6 +87,36 @@ test("256 KiB chunks preserve bytes, offsets, envelope session and independent r
   }
 });
 
+test("readiness errors stop before reading bytes or sending chunks and use local guidance", async () => {
+  for (const [code, expected] of [
+    ["upload_service_unavailable", /检查 Agent 的 short_links 服务/],
+    ["upload_missing_tool", /缺少附件上传工具/],
+  ]) {
+    const h = harness((message, _reply, client) => {
+      client.handleMessage({
+        type: "error", request_id: message.request_id, session_id: message.session_id,
+        payload: { request_type: message.type, code, message: "upstream details" },
+      });
+    });
+    await assert.rejects(h.upload(1, "s"), expected);
+    assert.deepEqual(h.sent.map(({ type }) => type), ["asset_upload_begin"]);
+    assert.deepEqual(h.reads, []);
+    assert.equal(h.closed, 1);
+  }
+});
+
+test("a coded upstream failure stays on the upload and does not display its original message", async () => {
+  const h = harness((message, reply, client) => {
+    if (message.type !== "asset_upload_complete") return reply(message);
+    client.handleMessage({
+      type: "error", request_id: message.request_id, session_id: message.session_id,
+      payload: { request_type: message.type, code: "upload_upstream_failure", message: "upstream details" },
+    });
+  });
+  await assert.rejects(h.upload(1, "s"), /short_links 服务未完成附件上传/);
+  assert.equal(h.sent.filter(({ type }) => type === "asset_upload_complete").length, 1);
+});
+
 test("boolean send and heartbeat cannot acknowledge upload; only matching result advances", async () => {
   const h = harness();
   const upload = h.upload(1, "s");

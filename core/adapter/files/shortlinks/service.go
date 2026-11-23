@@ -59,33 +59,43 @@ func (s *Service) uploadSlot(ctx context.Context) (func(), error) {
 }
 
 func (s *Service) acquire(ctx context.Context, tools ...string) (*mcp.ServerLease, error) {
-	if s == nil || s.provider == nil {
-		return nil, errors.New("short_links file service is unavailable")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if s == nil || s.provider == nil {
+		return nil, filesport.ErrUploadServiceUnavailable
 	}
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
 	if closed {
-		return nil, errors.New("short_links file service is closed")
+		return nil, fmt.Errorf("short_links file service is closed: %w", filesport.ErrUploadServiceUnavailable)
 	}
 	manager := s.provider()
 	if manager == nil {
-		return nil, errors.New("short_links MCP manager is unavailable")
+		return nil, fmt.Errorf("short_links MCP manager is unavailable: %w", filesport.ErrUploadServiceUnavailable)
 	}
 	lease, err := manager.AcquireServer(ctx, serverName)
 	if err != nil {
-		return nil, safeError("acquire short_links MCP", err)
-	}
-	for _, name := range tools {
-		if !lease.HasTool(name) {
-			_ = lease.Close()
-			return nil, errors.New("short_links MCP is missing a required file tool")
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, safeError("acquire short_links MCP", err)
 		}
+		return nil, fmt.Errorf("acquire short_links MCP: %w", filesport.ErrUploadServiceUnavailable)
+	}
+	if err := requireTools(lease, tools); err != nil {
+		_ = lease.Close()
+		return nil, err
 	}
 	return lease, nil
+}
+
+func requireTools(lease *mcp.ServerLease, tools []string) error {
+	for _, name := range tools {
+		if !lease.HasTool(name) {
+			return fmt.Errorf("short_links MCP: %w", filesport.ErrUploadMissingTool)
+		}
+	}
+	return nil
 }
 
 func (s *Service) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {

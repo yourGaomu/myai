@@ -85,6 +85,52 @@ func completeUpload(t *testing.T, r *Receiver, owner Owner, id, request string) 
 	return completion.Wait(ctx)
 }
 
+type preflightFakeService struct {
+	*fakeService
+	preflight func(context.Context) error
+}
+
+func (s *preflightFakeService) PreflightUpload(ctx context.Context) error {
+	return s.preflight(ctx)
+}
+
+func TestReceiverCancelledPreflightDoesNotStageUpload(t *testing.T) {
+	entered := make(chan struct{})
+	service := &preflightFakeService{fakeService: &fakeService{}, preflight: func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	r := testReceiver(t, service, nil, Config{})
+	metadata := Metadata{FileName: "report.txt", Size: 1, IdempotencyKey: "key"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Begin(ctx, testOwner(), metadata)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("upload did not start preflight")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("preflight cancellation = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not stop preflight")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dir != "" || r.reserved != 0 || len(r.uploads) != 0 || service.calls.Load() != 0 {
+		t.Fatal("preflight cancellation left staged data, a receipt, or an upload call")
+	}
+}
+
 func TestReceiverSequentialChunksAndExactRetries(t *testing.T) {
 	data := []byte("abcdefgh")
 	service := &fakeService{upload: func(_ context.Context, request files.UploadRequest) (files.Asset, error) {

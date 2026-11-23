@@ -51,6 +51,8 @@ type Props = {
   activeSession?: SessionSummary;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
+  canRenameSessions: boolean;
+  onRenameSession: (sessionID: string) => void;
   clientToken: string;
   compact?: CompactInfo;
   connected: boolean;
@@ -242,6 +244,8 @@ export function SettingsPanel({
   activeSession,
   bindCode,
   buttonFeedback,
+  canRenameSessions,
+  onRenameSession,
   clientToken,
   compact,
   connected,
@@ -364,6 +368,7 @@ export function SettingsPanel({
   const [maxTokensInput, setMaxTokensInput] = useState("");
   const [styleInput, setStyleInput] = useState("");
   const [generationError, setGenerationError] = useState("");
+  const [expandedSkill, setExpandedSkill] = useState<string>();
   const [modelFormOpen, setModelFormOpen] = useState(false);
   const [editingModelID, setEditingModelID] = useState("");
   const [modelFormSubmitting, setModelFormSubmitting] = useState(false);
@@ -1126,9 +1131,8 @@ export function SettingsPanel({
         <IconBox label="SK" />
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>技能</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>
-            {skills.length} 个技能已加载{skillRoot ? ` / ${skillRoot}` : ""}
-          </Text>
+          <Text style={styles.settingMeta}>{skills.length} 个技能已加载</Text>
+          {skillRoot ? <Text numberOfLines={1} style={styles.skillPath}>{skillRoot}</Text> : null}
         </View>
         <View style={styles.rowCompact}>
           <Pressable
@@ -1145,40 +1149,55 @@ export function SettingsPanel({
           >
             <ButtonContent color={palette.ink1} loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
           </Pressable>
-          <Pressable
-            disabled={!connected || mcpReloading}
-            onPress={reloadMCP}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpReloading) && styles.disabledButton], pressed)}
-          >
-            <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
-          </Pressable>
         </View>
       </View>
 
       {skillMessage ? <EmptyBox text={skillMessage} /> : null}
-      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
 
       {skills.length > 0 ? (
         <View style={styles.skillList}>
-          {skills.map((item) => (
-            <View key={`${item.name}:${item.path || ""}`} style={styles.skillCard}>
-              <View style={styles.skillHeader}>
-                <View style={styles.flex}>
-                  <Text numberOfLines={1} style={styles.skillName}>{item.name}</Text>
-                  {item.description ? <Text numberOfLines={2} style={styles.skillDescription}>{item.description}</Text> : null}
-                </View>
-                {item.updated_at ? <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text> : null}
+          {skills.map((item) => {
+            const key = JSON.stringify([item.name, item.path]);
+            const expanded = expandedSkill === key;
+            const triggers = [...new Set(item.triggers)];
+            return (
+              <View key={key} style={[styles.skillCard, styles.skillDisclosure]}>
+                <Pressable
+                  accessibilityLabel={item.name}
+                  accessibilityRole="button"
+                  aria-expanded={expanded}
+                  onPress={() => setExpandedSkill(expanded ? undefined : key)}
+                  style={({ pressed }) => buttonFeedback(styles.skillDisclosureHeader, pressed)}
+                >
+                  <View style={styles.flex}>
+                    <Text style={styles.skillName}>{item.name}</Text>
+                    {item.description && !expanded ? (
+                      <Text numberOfLines={3} style={styles.skillDescription}>{item.description}</Text>
+                    ) : null}
+                  </View>
+                  <Feather color={palette.ink3} name={expanded ? "chevron-up" : "chevron-down"} size={18} />
+                </Pressable>
+                {expanded ? (
+                  <View style={styles.skillDetails}>
+                    {item.description ? <Text selectable style={styles.skillDescription}>{item.description}</Text> : null}
+                    {triggers.length > 0 ? (
+                      <View style={styles.skillDetailGroup}>
+                        <Text style={styles.settingMeta}>触发词</Text>
+                        <View style={styles.triggerRow}>
+                          {triggers.map((trigger) => <Text key={trigger} style={styles.triggerChip}>{trigger}</Text>)}
+                        </View>
+                      </View>
+                    ) : null}
+                    {item.updated_at ? <Text style={styles.settingMeta}>更新于 {formatDate(item.updated_at)}</Text> : null}
+                    {item.path ? <Text selectable style={styles.skillPath}>{item.path}</Text> : null}
+                    {!item.description && !triggers.length && !item.updated_at && !item.path ? (
+                      <Text style={styles.settingMeta}>没有更多技能信息</Text>
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
-              {item.triggers && item.triggers.length > 0 ? (
-                <View style={styles.triggerRow}>
-                  {item.triggers.slice(0, 6).map((trigger) => (
-                    <Text key={trigger} style={styles.triggerChip}>{trigger}</Text>
-                  ))}
-                </View>
-              ) : null}
-              {item.path ? <Text numberOfLines={1} style={styles.skillPath}>{item.path}</Text> : null}
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : (
         <EmptyBox text={clientToken ? "还没有本地技能。可以用 SkillHub 安装，或创建 skills/<name>/SKILL.md。" : "先连接 agent，再查看本地技能。"} />
@@ -1246,6 +1265,22 @@ export function SettingsPanel({
     </View>
   );
 
+  const renameButton = (session: SessionSummary | undefined) => {
+    if (!session || session.deleted) return null;
+    return (
+      <Pressable
+        accessibilityLabel={`重命名对话：${session.title?.trim() || "未命名对话"}`}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canRenameSessions }}
+        disabled={!canRenameSessions}
+        onPress={() => onRenameSession(session.id)}
+        style={({ pressed }) => buttonFeedback([styles.sessionRenameButton, !canRenameSessions && styles.disabledButton], pressed)}
+      >
+        <Text style={styles.sessionRenameText}>重命名</Text>
+      </Pressable>
+    );
+  };
+
   const sessionSection = (
     <View style={styles.sectionStack}>
       {/* 顶部标题与快捷操作 */}
@@ -1272,6 +1307,10 @@ export function SettingsPanel({
         </View>
       </View>
 
+      {!canRenameSessions && (activeSession && !activeSession.deleted || sessions.some((session) => !session.deleted)) ? (
+        <Text style={styles.sectionSubheading}>连接 Agent 后可重命名对话</Text>
+      ) : null}
+
       {/* 当前激活会话 Hero 卡片 */}
       {sessionID ? (
         <View style={styles.activeHeroCard}>
@@ -1282,13 +1321,16 @@ export function SettingsPanel({
               </View>
               <Text style={styles.activeSessionId}>#{shortID(sessionID)}</Text>
             </View>
-            <Pressable
-              disabled={pendingActions.sessions}
-              onPress={() => onDeleteSession(sessionID)}
-              style={({ pressed }) => buttonFeedback([styles.heroDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)}
-            >
-              <Text style={styles.heroDeleteBtnText}>删除</Text>
-            </Pressable>
+            <View style={styles.sessionRowActions}>
+              {renameButton(activeSession)}
+              <Pressable
+                disabled={pendingActions.sessions}
+                onPress={() => onDeleteSession(sessionID)}
+                style={({ pressed }) => buttonFeedback([styles.heroDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)}
+              >
+                <Text style={styles.heroDeleteBtnText}>删除</Text>
+              </Pressable>
+            </View>
           </View>
 
           <Text numberOfLines={2} style={styles.activeHeroTitle}>
@@ -1383,19 +1425,13 @@ export function SettingsPanel({
           sessions.map((session) => {
             const selected = session.id === sessionID;
             return (
-              <Pressable
-                key={session.id}
-                disabled={pendingActions.sessions}
-                onPress={() => onLoadSession(session.id)}
-                style={({ pressed }) =>
-                  buttonFeedback([
-                    styles.sessionStreamCard,
-                    selected && styles.sessionStreamCardActive,
-                    pendingActions.sessions && styles.disabledButton,
-                  ], pressed)
-                }
-              >
-                <View style={styles.sessionStreamLeft}>
+              <View key={session.id} style={[styles.sessionStreamCard, selected && styles.sessionStreamCardActive]}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={pendingActions.sessions}
+                  onPress={() => onLoadSession(session.id)}
+                  style={({ pressed }) => buttonFeedback([styles.sessionStreamLeft, pendingActions.sessions && styles.disabledButton], pressed)}
+                >
                   <View style={[styles.sessionAvatarBox, selected && styles.sessionAvatarBoxActive]}>
                     <Feather
                       color={selected ? palette.inkInverse : palette.cyan}
@@ -1412,26 +1448,27 @@ export function SettingsPanel({
                       {session.model || "默认模型"} · {session.agent_mode === "plan" ? "规划" : "对话"} · {session.context_window_k || 16}K
                     </Text>
                   </View>
-                </View>
+                </Pressable>
 
                 <View style={styles.sessionStreamRight}>
                   <Text style={styles.sessionTimeText}>
                     {formatRelativeTime(session.updated_at)}
                   </Text>
-                  <Pressable
-                    disabled={pendingActions.sessions}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      onDeleteSession(session.id);
-                    }}
-                    style={({ pressed }) =>
-                      buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
-                    }
-                  >
-                    <Text style={styles.streamDeleteBtnText}>删除</Text>
-                  </Pressable>
+                  <View style={styles.sessionRowActions}>
+                    {renameButton(session)}
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={pendingActions.sessions}
+                      onPress={() => onDeleteSession(session.id)}
+                      style={({ pressed }) =>
+                        buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
+                      }
+                    >
+                      <Text style={styles.streamDeleteBtnText}>删除</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </Pressable>
+              </View>
             );
           })
         )}
@@ -3604,12 +3641,31 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     fontSize: font.bodyLg,
     fontWeight: weight.semibold,
   },
+  skillDisclosure: {
+    gap: 0,
+    padding: 0,
+  },
+  skillDisclosureHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 48,
+    padding: 14,
+  },
   skillDescription: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.regular,
-    lineHeight: 17,
-    marginTop: 3,
+    color: palette.ink2,
+    fontSize: font.body,
+    lineHeight: 22,
+    marginTop: 4,
+  },
+  skillDetails: {
+    borderTopColor: palette.hairline,
+    borderTopWidth: 1,
+    gap: 10,
+    padding: 14,
+  },
+  skillDetailGroup: {
+    gap: 6,
   },
   skillBadge: {
     backgroundColor: palette.well,
@@ -4214,6 +4270,22 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   sessionBusyRow: {
     marginTop: 8,
+  },
+  sessionRowActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  sessionRenameButton: {
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 8,
+  },
+  sessionRenameText: {
+    color: palette.brandLight,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   sessionStreamList: {
     gap: 8,
