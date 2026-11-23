@@ -23,6 +23,7 @@ func newTestServer() *Server {
 		memoryauthorization.NewStore(),
 		WithAgentCredentials(AgentCredential{UserID: "local", DeviceID: "pc-local", Token: "test-agent-token"}),
 		WithAllowedOrigins("http://localhost:19006"),
+		WithMCPTrustLocalDevelopment(),
 	)
 }
 

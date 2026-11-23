@@ -72,6 +72,9 @@ func newTrustCommand(store *trust.Store) *cobra.Command {
 	for _, kind := range []trust.Kind{trust.KindHook, trust.KindPlugin, trust.KindMCP} {
 		branch := &cobra.Command{Use: string(kind), Short: "Review " + string(kind) + " executable declarations"}
 		addActions(branch, kind)
+		if kind == trust.KindMCP {
+			branch.AddCommand(newMobileMCPTrustCommand(options, store))
+		}
 		command.AddCommand(branch)
 	}
 	return command

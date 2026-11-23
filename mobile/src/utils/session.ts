@@ -1,4 +1,4 @@
-import type { ModelSummary, SessionSummary } from "../protocol";
+import type { ModelSummary, SessionRenameResultPayload, SessionSummary } from "../protocol";
 
 export function upsertSession(current: SessionSummary[], next: SessionSummary) {
   const existingIndex = current.findIndex((item) => item.id === next.id);
@@ -24,12 +24,28 @@ function preferNewerSession(current: SessionSummary | undefined, next: SessionSu
 
   const currentTime = sessionTime(current);
   const nextTime = sessionTime(next);
-  if (currentTime !== null && nextTime === null) {
+  const latest = currentTime !== null && (nextTime === null || currentTime > nextTime) ? current : next;
+  const currentRevision = sessionTitleRevision(current.title_revision);
+  const nextRevision = sessionTitleRevision(next.title_revision);
+  if (currentRevision === 0 && nextRevision === 0) return latest;
+
+  // Title changes have their own clock. A later snapshot can carry newer usage or settings and an older title.
+  const titleSource = nextRevision > currentRevision ? next : current;
+  return latest === titleSource ? latest : { ...latest, title: titleSource.title, title_revision: titleSource.title_revision };
+}
+
+export function sessionTitleRevision(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+export function applySessionRename(current: SessionSummary[], result: SessionRenameResultPayload) {
+  const index = current.findIndex((session) => session.id === result.session_id);
+  const session = current[index];
+  if (!session || session.deleted || sessionTitleRevision(result.title_revision) <= sessionTitleRevision(session.title_revision)) {
     return current;
   }
-  if (currentTime !== null && nextTime !== null && currentTime > nextTime) {
-    return current;
-  }
+  const next = current.slice();
+  next[index] = { ...session, title: result.title, title_revision: result.title_revision };
   return next;
 }
 

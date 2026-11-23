@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -17,8 +16,9 @@ import (
 const clientRouteTTL = 30 * time.Minute
 
 type peer struct {
-	conn    *websocket.Conn
-	writeMu sync.Mutex
+	conn              *websocket.Conn
+	writeMu           sync.Mutex
+	mcpTrustTransport bool // immutable after upgrade
 }
 
 func newPeer(conn *websocket.Conn) *peer {
@@ -69,8 +69,36 @@ type clientEntry struct {
 	peer        *peer
 
 	foregroundFinished bool
+	renameSessionID    string
 	previewSessionID   string
 	previewAssetID     string
+	detailSessionID    string
+	detailServerName   string
+	detailAgentID      string
+	detailAgent        *peer
+	mcpTrust           *mcpTrustRoute // immutable pointer; check state guarded by clientLock
+}
+
+func (client *clientEntry) expired(now time.Time) bool {
+	switch client.RequestType {
+	case protocol.TypeAssetImagePreview:
+		return now.Sub(client.ConnectedAt) > assetPreviewRouteTTL || now.Sub(client.LastSeenAt) > clientRouteTTL
+	case protocol.TypeMCPDetail:
+		return !now.Before(client.ConnectedAt.Add(mcpDetailRouteTTL))
+	case protocol.TypeMCPTrust:
+		return !now.Before(client.ConnectedAt.Add(mcpTrustRouteTTL))
+	default:
+		return now.Sub(client.LastSeenAt) > clientRouteTTL
+	}
+}
+
+func (client *clientEntry) originalSocketOnly() bool {
+	switch client.RequestType {
+	case protocol.TypeAssetImagePreview, protocol.TypeSessionRename, protocol.TypeMCPDetail, protocol.TypeMCPTrust:
+		return true
+	default:
+		return false
+	}
 }
 
 type clientConnection struct {
@@ -79,6 +107,7 @@ type clientConnection struct {
 	ClientID   string
 	RemoteAddr string
 	LastSeenAt time.Time
+	mcpTrustID string
 }
 
 type AgentInfo struct {
@@ -93,8 +122,8 @@ type agentsResponse struct {
 	Agents []AgentInfo `json:"agents"`
 }
 
-func agentKey(userID string, deviceID string) string {
-	return fmt.Sprintf("%s/%s", userID, deviceID)
+func agentKey(userID string, deviceID string) agentIdentity {
+	return agentIdentity{UserID: userID, DeviceID: deviceID}
 }
 
 func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode string, remoteAddr string) *peer {
@@ -111,6 +140,7 @@ func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode
 	if previous := s.agents[key]; previous != nil {
 		if previous.peer != p {
 			superseded = previous.peer
+			s.removeMCPTrustAgentRoutes(previous.peer)
 		}
 	}
 
@@ -164,6 +194,7 @@ func (s *Server) unregisterAgent(p *peer, userID string, deviceID string) {
 
 	if agent := s.agents[key]; agent != nil && agent.peer == p {
 		delete(s.agents, key)
+		s.removeMCPTrustAgentRoutes(p)
 	}
 }
 
@@ -261,7 +292,7 @@ func (s *Server) registerClient(requestID string, requestType protocol.MessageTy
 	s.pruneExpiredClientRoutesLocked(now)
 	clientID := clientTokenHash(clientToken)
 	if previous := s.clients[requestID]; previous != nil {
-		if previous.RequestType == protocol.TypeAssetImagePreview || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
+		if previous.originalSocketOnly() || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
 			return false
 		}
 		// Same-client retries keep the original request type so an eventual
@@ -294,7 +325,7 @@ func (s *Server) touchClient(requestID string) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	if client := s.clients[requestID]; client != nil {
+	if client := s.clients[requestID]; client != nil && client.RequestType != protocol.TypeMCPDetail {
 		client.LastSeenAt = time.Now()
 	}
 }
@@ -309,7 +340,7 @@ func (s *Server) touchClientPeer(p *peer) {
 	defer s.clientLock.Unlock()
 
 	for _, client := range s.clients {
-		if client.peer == p {
+		if client.peer == p && client.RequestType != protocol.TypeMCPDetail {
 			client.LastSeenAt = now
 		}
 	}
@@ -343,6 +374,12 @@ func (s *Server) finishClientRoute(client *clientEntry) {
 
 func (s *Server) removeClientRouteLocked(client *clientEntry) {
 	delete(s.clients, client.RequestID)
+	if client.detailAgentID != "" {
+		delete(s.mcpDetailAgentRoutes, client.detailAgentID)
+	}
+	if client.mcpTrust != nil {
+		delete(s.mcpTrustAgentRoutes, client.mcpTrust.agentID)
+	}
 	s.clearForegroundPermissionsLocked(client)
 }
 
@@ -359,8 +396,11 @@ func (s *Server) unregisterClientPeerForRoute(p *peer, owner *clientEntry) {
 
 	for _, client := range s.clients {
 		if client.peer == p {
-			// Preview IDs stay reserved until their short TTL, and their old
-			// sockets are excluded from replay and rebinding.
+			if client.mcpTrust != nil {
+				s.removeClientRouteLocked(client)
+				continue
+			}
+			// Requests tied to this socket cannot be rebound or replayed.
 			client.peer = nil
 		}
 	}
@@ -396,7 +436,7 @@ func (s *Server) getClient(requestID string) *clientEntry {
 	defer s.clientLock.Unlock()
 
 	client := s.clients[requestID]
-	if client != nil && time.Since(client.LastSeenAt) > clientRouteTTL {
+	if client != nil && client.expired(time.Now()) {
 		s.removeClientRouteLocked(client)
 		return nil
 	}
@@ -418,13 +458,13 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 	defer s.clientLock.Unlock()
 
 	client := s.clients[requestID]
-	if client == nil || time.Since(client.LastSeenAt) > clientRouteTTL {
+	if client == nil || client.expired(time.Now()) {
 		if client != nil {
 			s.removeClientRouteLocked(client)
 		}
 		return false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
+	if client.originalSocketOnly() || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
 		return false
 	}
 	client.peer = p
@@ -447,14 +487,14 @@ func (s *Server) clientPeerForMessage(message protocol.Message, expected *client
 	if expected != nil && client != expected {
 		return nil, nil, false
 	}
-	if client == nil || now.Sub(client.LastSeenAt) > clientRouteTTL {
+	if client == nil || client.expired(now) {
 		if client != nil {
 			s.removeClientRouteLocked(client)
 		}
 		return nil, nil, false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview {
-		return nil, nil, false // A preview is tied to its original socket.
+	if client.originalSocketOnly() {
+		return nil, nil, false // These requests are tied to their original sockets.
 	}
 	if message.Type == protocol.TypeMCPListResult && client.RequestType != protocol.TypeMCPList {
 		return nil, nil, false
@@ -506,6 +546,19 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 	identity := &clientConnection{
 		UserID: userID, DeviceID: deviceID, ClientID: clientTokenHash(clientToken), RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
 	}
+	previous := s.connections[p]
+	if previous != nil {
+		if previous.UserID == identity.UserID && previous.DeviceID == identity.DeviceID && previous.ClientID == identity.ClientID {
+			identity.mcpTrustID = previous.mcpTrustID
+		} else {
+			// Switching the identity of a live socket retires its approval routes.
+			for _, route := range s.mcpTrustAgentRoutes {
+				if route.peer == p {
+					s.removeClientRouteLocked(route)
+				}
+			}
+		}
+	}
 	s.connections[p] = identity
 	var foreground []*foregroundPermission
 	if newConnection {
@@ -521,8 +574,7 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 
 func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {
 	for _, client := range s.clients {
-		if now.Sub(client.LastSeenAt) > clientRouteTTL ||
-			client.RequestType == protocol.TypeAssetImagePreview && now.Sub(client.ConnectedAt) > assetPreviewRouteTTL {
+		if client.expired(now) {
 			s.removeClientRouteLocked(client)
 		}
 	}

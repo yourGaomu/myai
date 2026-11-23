@@ -97,8 +97,6 @@ export function makeDrawerStyles({ font, palette, shadow }: AppTheme) {
     sessionTextCurrent: { fontWeight: weight.medium },
     unread: { backgroundColor: palette.brand, borderRadius: radius.pill, height: 7, width: 7 },
     empty: { color: palette.ink3, fontSize: font.label, paddingHorizontal: 12, paddingVertical: 12 },
-    more: { justifyContent: "center", minHeight: 40, paddingHorizontal: 12 },
-    moreText: { color: palette.brandLight, fontSize: font.label },
     footer: { borderTopColor: palette.hairline, borderTopWidth: 1, flexDirection: "row", gap: 4, paddingTop: 8 },
     footerItem: { flex: 1 },
   });

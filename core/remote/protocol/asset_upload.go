@@ -20,6 +20,10 @@ const (
 	AssetUploadChunkSize    = 262144
 	AssetUploadMaxFileBytes = 52428800
 	AssetUploadMaxJSONBytes = 524288
+
+	UploadErrorServiceUnavailable = "upload_service_unavailable"
+	UploadErrorMissingTool        = "upload_missing_tool"
+	UploadErrorUpstreamFailure    = "upload_upstream_failure"
 )
 
 type AssetUploadBeginPayload struct {

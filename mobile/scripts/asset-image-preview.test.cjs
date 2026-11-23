@@ -58,9 +58,11 @@ Module._load = function (name, ...args) {
   if (name === "expo-image") return { Image: "Image" };
   if (name === "@expo/vector-icons") return { Feather: "Feather" };
   if (name === "expo-haptics") return {};
+  if (name === "react-native-svg") return { SvgXml: "SvgXml" };
   if (name === "react-native") return {
     ActivityIndicator: "ActivityIndicator", Modal: "Modal", Pressable: "Pressable", ScrollView: "ScrollView", Text: "Text", View: "View",
     Linking: { openURL: async (url) => { openLinks.push(url); } }, Platform: { OS: "web" },
+    StyleSheet: { create: (styles) => styles, flatten: (style) => Object.assign({}, ...[style].flat()) },
   };
   if (name === "../../theme/ThemeProvider") return { useAppTheme: () => ({ palette: {} }) };
   if (name === "./styles") return { useChatStyles: () => new Proxy({}, { get: (_, key) => key }) };

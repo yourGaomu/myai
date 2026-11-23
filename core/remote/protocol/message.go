@@ -38,6 +38,8 @@ const (
 	TypeSessionListResult                MessageType = "session_list_result"
 	TypeSessionNew                       MessageType = "session_new"
 	TypeSessionLoad                      MessageType = "session_load"
+	TypeSessionRename                    MessageType = "session_rename"
+	TypeSessionRenameResult              MessageType = "session_rename_result"
 	TypeSessionDelete                    MessageType = "session_delete"
 	TypeSessionDeleteResult              MessageType = "session_delete_result"
 	TypeSessionRestore                   MessageType = "session_restore"
@@ -568,6 +570,17 @@ type SessionLoadPayload struct {
 	SessionID string `json:"session_id"`
 }
 
+type SessionRenamePayload struct {
+	SessionID string `json:"session_id"`
+	Title     string `json:"title"`
+}
+
+type SessionRenameResultPayload struct {
+	SessionID     string `json:"session_id"`
+	Title         string `json:"title"`
+	TitleRevision int64  `json:"title_revision"`
+}
+
 type SessionDeletePayload struct {
 	SessionID string `json:"session_id"`
 }
@@ -579,6 +592,7 @@ type SessionRestorePayload struct {
 type SessionSummary struct {
 	ID             string      `json:"id"`
 	Title          string      `json:"title"`
+	TitleRevision  int64       `json:"title_revision"`
 	Model          string      `json:"model"`
 	AgentMode      string      `json:"agent_mode,omitempty"`
 	PermissionMode string      `json:"permission_mode"`
@@ -1062,10 +1076,12 @@ type MCPServerSummary struct {
 	State              string `json:"state"`
 	InventoryToolCount int    `json:"inventory_tool_count"`
 	ExposedToolCount   int    `json:"exposed_tool_count"`
+	Reason             string `json:"reason,omitempty"`
 }
 
 type MCPListResultPayload struct {
-	Servers []MCPServerSummary `json:"servers"`
+	Servers         []MCPServerSummary `json:"servers"`
+	CatalogRevision *uint64            `json:"catalog_revision,omitempty"`
 }
 
 type MCPReloadPayload struct{}
@@ -1691,6 +1707,7 @@ type AIMemoryDreamResultPayload struct {
 
 type ErrorPayload struct {
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
 }
 
 func NewMessage(

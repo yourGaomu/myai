@@ -38,10 +38,31 @@ export function promptCacheLabel(usage?: TokenUsage) {
   return count > 0 ? `上游缓存命中 ${count}` : "上游缓存未命中（0）";
 }
 
-export function turnUsageSummary(usage?: TokenUsage) {
+export function promptCacheRate(usage?: TokenUsage) {
+  if (!usage?.prompt_cache_reported || usage.prompt_cache_incomplete) return undefined;
+  const input = usage.prompt_tokens;
+  const cached = usage.prompt_cached_tokens ?? 0;
+  if (input === undefined || !Number.isSafeInteger(input) || input <= 0 ||
+      !Number.isSafeInteger(cached) || cached < 0 || cached > input) return undefined;
+  return cached / input;
+}
+
+export function formatCacheRate(rate: number) {
+  const percent = rate * 100;
+  if (percent > 0 && percent < 0.1) return "<0.1%";
+  if (percent > 99.9 && percent < 100) return ">99.9%";
+  return `${Number(percent.toFixed(1))}%`;
+}
+
+export function turnUsageCounts(usage?: TokenUsage) {
   const input = usage?.prompt_tokens;
   const output = usage?.completion_tokens;
   const total = usage?.total_tokens ?? (input !== undefined && output !== undefined ? input + output : undefined);
+  return { input, output, total };
+}
+
+export function turnUsageSummary(usage?: TokenUsage) {
+  const { input, output, total } = turnUsageCounts(usage);
   return [
     `输入 ${input ?? "未上报"}`,
     `输出 ${output ?? "未上报"}`,

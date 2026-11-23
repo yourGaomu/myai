@@ -13,12 +13,14 @@ import { useListStyles } from "../common/listStyles";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
+  canRenameSessions: boolean;
   clientToken: string;
   deletedSessions: SessionSummary[];
   mode?: "active" | "trash";
   onDeleteSession: (sessionID: string) => void;
   onNewSession: () => void;
   onRefreshDeletedSessions: () => void;
+  onRenameSession: (sessionID: string) => void;
   onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
   pendingSessions: boolean;
@@ -158,11 +160,20 @@ export function SessionsPanel(props: Props) {
                       {props.unreadSessionIDs?.[session.id] ? <View style={styles.unread} /> : null}
                     </Pressable>
                     <Pressable
+                      accessibilityLabel="重命名对话"
+                      accessibilityRole="button"
+                      disabled={!props.canRenameSessions}
+                      onPress={() => props.onRenameSession(session.id)}
+                      style={({ pressed }) => [styles.rowAction, pressed && list.pressed, !props.canRenameSessions && list.disabled]}
+                    >
+                      <Feather color={palette.ink3} name="edit-2" size={17} />
+                    </Pressable>
+                    <Pressable
                       accessibilityLabel="删除对话"
                       disabled={pendingSessions}
                       hitSlop={4}
                       onPress={() => setConfirmDeleteSession(session)}
-                      style={({ pressed }) => [styles.trash, pressed && list.pressed]}
+                      style={({ pressed }) => [styles.rowAction, styles.trash, pressed && list.pressed]}
                     >
                       <Feather color={palette.ink3} name="trash-2" size={17} />
                     </Pressable>
@@ -221,7 +232,8 @@ const makeStyles = ({ palette }: AppTheme) =>
     main: { alignItems: "center", flex: 1, flexDirection: "row", gap: 10, minHeight: 58, paddingLeft: 16, paddingRight: 4 },
     bar: { backgroundColor: palette.brand, borderRadius: radius.xxs, height: 18, marginLeft: -8, width: 3 },
     unread: { backgroundColor: palette.brand, borderRadius: radius.pill, height: 7, width: 7 },
-    trash: { alignItems: "center", borderRadius: radius.pill, height: 44, justifyContent: "center", marginRight: 6, width: 44 },
+    rowAction: { alignItems: "center", borderRadius: radius.pill, height: 44, justifyContent: "center", width: 44 },
+    trash: { marginRight: 6 },
     divider: { backgroundColor: palette.hairline, height: 1, marginLeft: 16 },
     refresh: { justifyContent: "center", minHeight: 32, paddingTop: 12 },
     deleted: { color: palette.ink2 },

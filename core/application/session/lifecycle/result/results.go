@@ -18,6 +18,12 @@ type Lifecycle struct {
 	Action    Action
 }
 
+type RenameSession struct {
+	SessionID     string
+	Title         string
+	TitleRevision int64
+}
+
 type DeleteSession struct {
 	SessionID      string
 	DeletedCurrent bool

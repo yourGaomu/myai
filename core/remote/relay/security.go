@@ -108,6 +108,44 @@ func loopbackOriginKey(origin *url.URL) (string, bool) {
 	return strings.ToLower(origin.Scheme) + "://" + host, true
 }
 
+func loopbackListenAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	return err == nil && isLoopbackHost(host)
+}
+
+// MCP trust accepts real TLS or explicitly enabled, direct loopback development.
+// In particular, X-Forwarded-Proto is not proof that the peer used TLS.
+func (s *Server) mcpTrustTransportAllowed(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !s.mcpTrustLocalDev {
+		return false
+	}
+	remote, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(remote); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	localAddr, ok := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr)
+	if !ok || !localAddr.IP.IsLoopback() {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host = strings.TrimPrefix(strings.TrimSuffix(r.Host, "]"), "[")
+	}
+	if !isLoopbackHost(host) {
+		return false
+	}
+	for key := range r.Header {
+		key = strings.ToLower(key)
+		if key == "forwarded" || key == "via" || key == "x-real-ip" || strings.HasPrefix(key, "x-forwarded-") {
+			return false
+		}
+	}
+	return true
+}
+
 func isLoopbackHost(host string) bool {
 	host = strings.TrimSpace(strings.ToLower(host))
 	if host == "localhost" {

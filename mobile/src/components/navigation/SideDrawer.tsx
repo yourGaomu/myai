@@ -139,6 +139,7 @@ export function SideDrawer(props: Props) {
           </View>
 
           <NavRow icon="edit" label="新对话" onPress={() => { props.onNewSession?.(); onClose(); }} />
+          <NavRow active={props.viewMode === "sessions"} badge={total} icon="message-square" label="全部对话" onPress={() => go("sessions")} />
           <NavRow active={props.viewMode === "files"} icon="folder" label="文件" onPress={() => go("files")} />
           <NavRow active={props.viewMode === "changes" || props.viewMode === "changeDetail"} badge={props.changesCount} icon="git-pull-request" label="变更" onPress={() => go("changes")} />
           <NavRow active={props.viewMode === "knowledge"} icon="book-open" label="知识库与记忆" onPress={() => go("knowledge")} />
@@ -165,11 +166,6 @@ export function SideDrawer(props: Props) {
                 })}
               </View>
             ))}
-            {!query && total > maxListed ? (
-              <Pressable onPress={() => go("sessions")} style={({ pressed }) => [styles.more, pressed && styles.pressed]}>
-                <Text style={styles.moreText}>查看全部 {total} 个对话</Text>
-              </Pressable>
-            ) : null}
           </ScrollView>
 
           <View style={styles.footer}>

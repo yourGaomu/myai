@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+
+	"myai/core/port/files"
 	"myai/core/remote/protocol"
 )
 
@@ -99,6 +101,9 @@ func (a *Agent) dispatchRelayMessage(ctx, connectionCtx context.Context, conn *w
 		return a.handleRelayMessage(ctx, conn, message)
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
 		return a.enqueueUploadOperation(connectionCtx, conn, message)
+	case protocol.TypeMCPTrustInternal:
+		a.enqueueCatalogMutation(connectionCtx, conn, message, a.handleMCPTrust)
+		return nil
 	case protocol.TypeAssetImagePreview:
 		return a.startAssetImagePreview(connectionCtx, conn, message)
 	case protocol.TypeSubagentTaskWait:
@@ -147,12 +152,28 @@ func (a *Agent) startAsyncOperation(ctx context.Context, conn *websocket.Conn, m
 // Control replies reuse the chat request ID. Tag their errors so neither Relay
 // nor a client mistakes a failed approval for a terminal chat failure.
 func (a *Agent) writeHandlerError(conn *websocket.Conn, message protocol.Message, err error) error {
+	if message.Type == protocol.TypeMCPDetail {
+		return a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.MCPDetailErrorPayload{
+			ErrorPayload: protocol.ErrorPayload{Message: err.Error()}, RequestType: protocol.TypeMCPDetail,
+		})
+	}
 	payload := struct {
 		protocol.ErrorPayload
 		RequestType protocol.MessageType `json:"request_type,omitempty"`
 		ApprovalID  string               `json:"approval_id,omitempty"`
 		QuestionID  string               `json:"question_id,omitempty"`
 	}{ErrorPayload: protocol.ErrorPayload{Message: err.Error()}, RequestType: message.Type}
+	if protocol.IsAssetUploadRequest(message.Type) {
+		switch {
+		case errors.Is(err, files.ErrUploadServiceUnavailable):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadServiceUnavailable.Error(), Code: protocol.UploadErrorServiceUnavailable}
+		case errors.Is(err, files.ErrUploadMissingTool):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadMissingTool.Error(), Code: protocol.UploadErrorMissingTool}
+		case errors.Is(err, files.ErrUploadUpstreamFailure):
+			payload.ErrorPayload = protocol.ErrorPayload{Message: files.ErrUploadUpstreamFailure.Error(), Code: protocol.UploadErrorUpstreamFailure}
+		}
+		return a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, payload)
+	}
 	var identity struct {
 		ApprovalID string `json:"approval_id"`
 		QuestionID string `json:"question_id"`

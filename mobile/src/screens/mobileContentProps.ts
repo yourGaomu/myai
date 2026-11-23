@@ -45,7 +45,7 @@ import type { ChatItem } from "../types/chat";
 import type { DocumentImportStatus, KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
 import type { ModelConfigDraft } from "../hooks/useSessionModelActions";
-import type { MCPInventory } from "../hooks/useMCPState";
+import type { MCPCatalogControls } from "../components/settings/sections/MCPCatalogSection";
 import type { ModelDeleteFeedback } from "../utils/modelDelete";
 import type { SettingsSection } from "../components/settings/SettingsHome";
 import type { MotionSlot } from "../utils/motionRegistry";
@@ -127,11 +127,7 @@ export type SettingsContentProps = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
-  onRefreshMCPInventory: () => void;
-  mcpInventory: MCPInventory;
-  reloadMCP: () => void;
-  mcpReloading: boolean;
-  mcpMessage: string;
+  mcp: MCPCatalogControls;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -245,9 +241,11 @@ export type ChangesContentProps = {
 };
 
 export type SessionsContentProps = {
+  canRenameSessions: boolean;
   deletedSessions: SessionSummary[];
   onDeleteSession: (sessionID: string) => void;
   onRefreshDeletedSessions: () => void;
+  onRenameSession: (sessionID: string) => void;
   onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
   unreadSessionIDs?: Record<string, boolean>;

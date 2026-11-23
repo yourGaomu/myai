@@ -29,6 +29,8 @@ type SessionDocument struct {
 	CompactionCheckpoint *CompactionCheckpointDocument `bson:"compaction_checkpoint,omitempty"`
 	CompactedAt          *time.Time                    `bson:"compacted_at,omitempty"`
 	Title                string                        `bson:"title"`
+	ManualTitle          string                        `bson:"manual_title,omitempty"`
+	TitleRevision        int64                         `bson:"title_revision,omitempty"`
 	Usage                *TokenUsageDocument           `bson:"usage,omitempty"`
 	LastUsage            *TokenUsageDocument           `bson:"last_usage,omitempty"`
 	CurrentPlan          *PlanDocument                 `bson:"current_plan,omitempty"`

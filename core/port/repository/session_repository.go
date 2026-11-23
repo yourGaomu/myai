@@ -13,3 +13,9 @@ type SessionRepository interface {
 	ListSessions(ctx context.Context) ([]SessionRecord, error)
 	ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]SessionRecord, error)
 }
+
+// SessionTitleRepository updates the title of an existing active user session
+// and returns the metadata from that same write.
+type SessionTitleRepository interface {
+	RenameSession(ctx context.Context, sessionID string, title string) (SessionRecord, error)
+}

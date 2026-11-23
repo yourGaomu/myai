@@ -10,6 +10,7 @@ import (
 type SessionListItem struct {
 	ID             string
 	Title          string
+	TitleRevision  int64
 	Model          string
 	AgentMode      string
 	PermissionMode string

@@ -12,6 +12,11 @@ type DeleteSession struct {
 	SessionID string
 }
 
+type RenameSession struct {
+	SessionID string
+	Title     string
+}
+
 type RestoreSession struct {
 	SessionID string
 }

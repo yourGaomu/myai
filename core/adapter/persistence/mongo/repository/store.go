@@ -117,19 +117,57 @@ func isMessageSourceIndex(raw bson.Raw) bool {
 		(keys[0].Key == "source_id" && keys[1].Key == "session_id")
 }
 
+func activeSessionFilter() bson.M {
+	return bson.M{"$or": bson.A{
+		bson.M{"deleted": bson.M{"$exists": false}},
+		bson.M{"deleted": false},
+	}}
+}
+
+func userSessionFilter() bson.M {
+	return bson.M{"$or": bson.A{
+		bson.M{"kind": bson.M{"$exists": false}},
+		bson.M{"kind": ""},
+		bson.M{"kind": string(session.KindUser)},
+	}}
+}
+
 func (m *Store) GetSession(ctx context.Context, sessionID string) (repository.SessionRecord, error) {
+	filter := activeSessionFilter()
+	filter["_id"] = sessionID
+	return m.getSession(ctx, filter)
+}
+
+func (m *Store) GetSessionIncludingDeleted(ctx context.Context, sessionID string) (repository.SessionRecord, error) {
+	return m.getSession(ctx, bson.M{"_id": sessionID})
+}
+
+func (m *Store) getSession(ctx context.Context, filter bson.M) (repository.SessionRecord, error) {
 	var session po.SessionDocument
-	err := m.template.FindOne(ctx, sessionsCollection, bson.M{
-		"_id": sessionID,
-		"$or": bson.A{
-			bson.M{"deleted": bson.M{"$exists": false}},
-			bson.M{"deleted": false},
-		},
-	}, &session)
+	err := m.template.FindOne(ctx, sessionsCollection, filter, &session)
 	if err != nil {
 		return repository.SessionRecord{}, repositoryError(err)
 	}
 	return mongomapper.SessionRecordFromDocument(session), nil
+}
+
+func (m *Store) RenameSession(ctx context.Context, sessionID string, title string) (repository.SessionRecord, error) {
+	updater, ok := m.template.(mongotemplate.FindOneAndUpdater)
+	if !ok {
+		return repository.SessionRecord{}, errors.New("mongo template does not support atomic session rename")
+	}
+	filter := bson.M{"_id": sessionID, "$and": bson.A{userSessionFilter(), activeSessionFilter()}}
+	var document po.SessionDocument
+	// Return this write's post-image so a concurrent rename cannot change the
+	// revision or title reported for this request.
+	err := updater.FindOneAndUpdate(ctx, sessionsCollection, filter, bson.M{
+		"$set": bson.M{"manual_title": title},
+		"$inc": bson.M{"title_revision": int64(1)},
+	}, &document, options.FindOneAndUpdate().SetReturnDocument(options.After))
+	if err != nil {
+		return repository.SessionRecord{}, repositoryError(err)
+	}
+	return mongomapper.SessionRecordFromDocument(document), nil
 }
 
 func (m *Store) SaveSession(ctx context.Context, session repository.SessionRecord) error {
@@ -356,19 +394,11 @@ func (m *Store) ListSessions(ctx context.Context) ([]repository.SessionRecord, e
 }
 
 func (m *Store) ListSessionsWithDeleted(ctx context.Context, includeDeleted bool) ([]repository.SessionRecord, error) {
-	kindFilter := bson.M{"$or": bson.A{
-		bson.M{"kind": bson.M{"$exists": false}},
-		bson.M{"kind": ""},
-		bson.M{"kind": string(session.KindUser)},
-	}}
-	deletedFilter := bson.M{"$or": bson.A{
-		bson.M{"deleted": bson.M{"$exists": false}},
-		bson.M{"deleted": false},
-	}}
-	filter := bson.M{"$and": bson.A{kindFilter, deletedFilter}}
+	deletedFilter := activeSessionFilter()
 	if includeDeleted {
-		filter = bson.M{"$and": bson.A{kindFilter, bson.M{"deleted": true}}}
+		deletedFilter = bson.M{"deleted": true}
 	}
+	filter := bson.M{"$and": bson.A{userSessionFilter(), deletedFilter}}
 
 	var documents []po.SessionDocument
 	err := m.template.FindAll(

@@ -10,7 +10,7 @@ func SessionListItems(records []repository.SessionRecord) []sessionresult.Sessio
 	items := make([]sessionresult.SessionListItem, 0, len(records))
 	for _, record := range records {
 		items = append(items, sessionresult.SessionListItem{
-			ID: record.ID, Title: record.Title, Model: record.Model,
+			ID: record.ID, Title: record.DisplayTitle(), TitleRevision: record.TitleRevision, Model: record.Model,
 			AgentMode: record.AgentMode, PermissionMode: record.PermissionMode,
 			ContextWindowK: record.ContextWindowK, Usage: TokenUsageResultFromRecord(record.Usage),
 			LastUsage: TokenUsageResultFromRecord(record.LastUsage), CurrentPlan: record.CurrentPlan,

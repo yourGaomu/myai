@@ -91,16 +91,18 @@ func (f *sourceIngestFacade) ListDocuments(_ context.Context, command querycomma
 // Only the external MCP server and object store are faked. Responses follow the
 // modern structuredContent multipart contract, with nonnil part inventories.
 type mobileMCPBackend struct {
-	t           *testing.T
-	mu          sync.Mutex
-	name        string
-	mediaType   string
-	size        int64
-	key         string
-	parts       map[int][]byte
-	calls       map[string]int
-	completed   bool
-	downloadURL string
+	t              *testing.T
+	mu             sync.Mutex
+	name           string
+	mediaType      string
+	size           int64
+	key            string
+	parts          map[int][]byte
+	calls          map[string]int
+	completed      bool
+	downloadURL    string
+	omittedTool    string
+	rejectComplete bool
 }
 
 func (b *mobileMCPBackend) dataLocked() []byte {
@@ -182,7 +184,9 @@ func (b *mobileMCPBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"begin_asset_upload", "upload_asset_part", "get_asset_upload_status", "complete_asset_upload",
 			"get_asset_info", "get_asset_download_url", "create_asset_shortlink", "create_url_shortlink", "upload_file_and_share",
 		} {
-			infos = append(infos, mcp.ToolInfo{Name: name})
+			if name != b.omittedTool {
+				infos = append(infos, mcp.ToolInfo{Name: name})
+			}
 		}
 		result = map[string]any{"tools": infos}
 	case "tools/call":
@@ -196,6 +200,7 @@ func (b *mobileMCPBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name, args := request.Params.Name, request.Params.Arguments
 		b.calls[name]++
 		var structured any
+		var rejected bool
 		switch name {
 		case "begin_asset_upload":
 			b.name = integrationArgument[string](args, "fileName")
@@ -218,6 +223,11 @@ func (b *mobileMCPBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "get_asset_upload_status":
 			structured = b.sessionLocked()
 		case "complete_asset_upload":
+			if b.rejectComplete {
+				rejected = true
+				structured = map[string]any{"error": "X-Amz-Signature=integration-signed-secret"}
+				break
+			}
 			b.completed = true
 			structured = b.sessionLocked()
 		case "get_asset_download_url":
@@ -234,7 +244,7 @@ func (b *mobileMCPBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Any accidental use of untrusted MCP text exposes these sentinels and
 		// fails the outward-message assertions below.
-		result = map[string]any{"structuredContent": structured, "content": []any{map[string]any{
+		result = map[string]any{"isError": rejected, "structuredContent": structured, "content": []any{map[string]any{
 			"type": "text", "text": "mcp-integration-secret integration-api-secret X-Amz-Signature=integration-signed-secret",
 		}}}
 	default:
@@ -468,45 +478,142 @@ func TestAgentMobileUploadMCPAndKnowledgeAssetIDIntegration(t *testing.T) {
 	}
 }
 
-func TestAgentMobileUploadMissingMCPReportsExplicitError(t *testing.T) {
-	for _, name := range []string{"manager unavailable", "short_links unconfigured"} {
-		t.Run(name, func(t *testing.T) {
+func readIntegrationUploadError(t *testing.T, conn *websocket.Conn, request string, kind protocol.MessageType, code string) {
+	t.Helper()
+	message := readUploadAgentMessage(t, conn)
+	assertIntegrationNoSecrets(t, message)
+	var failure struct {
+		Message     string               `json:"message"`
+		Code        string               `json:"code"`
+		RequestType protocol.MessageType `json:"request_type"`
+	}
+	if message.Type != protocol.TypeError || message.RequestID != request || message.SessionID != "session" ||
+		json.Unmarshal(message.Payload, &failure) != nil || failure.RequestType != kind || failure.Code != code || failure.Message == "" {
+		t.Fatalf("unexpected upload error type=%s request=%s session=%s payload=%s", message.Type, message.RequestID, message.SessionID, message.Payload)
+	}
+}
+
+func integrationMCPConfig(t *testing.T, url string) mcp.Config {
+	t.Helper()
+	return mcp.Config{Servers: []mcp.ServerConfig{{
+		Name: "short_links", URL: url + "/api/mcp", Required: true, TimeoutSeconds: 5,
+		Trust: &trust.Policy{Allow: true}, TrustWorkspace: t.TempDir(),
+		Headers: map[string]string{"Authorization": "Bearer mcp-integration-secret", "X-API-Key": "integration-api-secret"},
+	}}}
+}
+
+func TestAgentMobileUploadMCPReadiness(t *testing.T) {
+	for _, tc := range []struct{ name, code string }{
+		{"file service unavailable", "upload_service_unavailable"},
+		{"manager unavailable", "upload_service_unavailable"},
+		{"short_links unconfigured", "upload_service_unavailable"},
+		{"missing required tool", "upload_missing_tool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			var manager *mcp.Manager
-			if name == "short_links unconfigured" {
+			var backend *mobileMCPBackend
+			switch tc.name {
+			case "short_links unconfigured":
 				manager = mcp.NewManager(mcp.Config{})
+			case "missing required tool":
+				backend = &mobileMCPBackend{t: t, calls: make(map[string]int), omittedTool: "upload_asset_part"}
+				server := httptest.NewServer(backend)
+				t.Cleanup(server.Close)
+				manager = mcp.NewManager(integrationMCPConfig(t, server.URL))
+			}
+			if manager != nil {
+				t.Cleanup(func() { _ = manager.Close() })
 				if err := manager.RegisterAll(context.Background(), tool.NewRegisterTools()); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = manager.Close() })
 			}
-			fileService := shortlinksfiles.New(func() *mcp.Manager { return manager })
-			var recorded atomic.Int32
+			var fileService files.Service
+			if tc.name != "file service unavailable" {
+				service := shortlinksfiles.New(func() *mcp.Manager { return manager })
+				t.Cleanup(func() { _ = service.Close() })
+				fileService = service
+			}
 			a := New(Config{UserID: "user", DeviceID: "device"}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-				WithFileService(fileService), WithFileUploadAdmission(testUploadAdmission), WithFileAssetRecorder(func(context.Context, string, string, uint64, files.Asset) error {
-					recorded.Add(1)
-					return nil
-				}))
+				WithFileService(fileService), WithFileUploadAdmission(testUploadAdmission))
 			conn := openUploadAgent(t, a)
-			id := stageAgentUpload(t, conn, []byte("content"))
-			writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadComplete, "missing-mcp-complete", protocol.AssetUploadCompletePayload{UploadID: id})
-			message := readUploadAgentMessage(t, conn)
-			assertIntegrationNoSecrets(t, message)
-			var failure struct {
-				Message     string               `json:"message"`
-				RequestType protocol.MessageType `json:"request_type"`
-			}
-			if message.Type != protocol.TypeError || message.RequestID != "missing-mcp-complete" || json.Unmarshal(message.Payload, &failure) != nil ||
-				failure.RequestType != protocol.TypeAssetUploadComplete || !strings.Contains(failure.Message, "short_links MCP") {
-				t.Fatalf("missing MCP did not produce an explicit correlated error: type=%s payload=%s", message.Type, message.Payload)
-			}
-			if recorded.Load() != 0 {
-				t.Fatal("missing MCP invoked session recorder")
-			}
-			writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadStatus, "missing-mcp-status", protocol.AssetUploadStatusPayload{UploadID: id})
-			status := readIntegrationUploadResult(t, conn, "missing-mcp-status", "status")
-			if status.Asset != nil {
-				t.Fatal("missing MCP exposed a successful asset receipt")
+			writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadBegin, "denied-begin", protocol.AssetUploadBeginPayload{
+				FileName: "report.txt", Size: 7, IdempotencyKey: "denied-key",
+			})
+			readIntegrationUploadError(t, conn, "denied-begin", protocol.TypeAssetUploadBegin, tc.code)
+			if backend != nil {
+				backend.mu.Lock()
+				defer backend.mu.Unlock()
+				if len(backend.calls) != 0 {
+					t.Fatal("preflight dispatched MCP tool calls")
+				}
 			}
 		})
+	}
+}
+
+func TestAgentMobileUploadMCPRejectionAndRecoveryAfterReload(t *testing.T) {
+	ctx := context.Background()
+	backend := &mobileMCPBackend{t: t, parts: make(map[int][]byte), calls: make(map[string]int), rejectComplete: true}
+	server := httptest.NewServer(backend)
+	t.Cleanup(server.Close)
+	manager := mcp.NewManager(integrationMCPConfig(t, server.URL))
+	t.Cleanup(func() { _ = manager.Close() })
+	registry := tool.NewRegisterTools()
+	if err := manager.RegisterAll(ctx, registry); err != nil {
+		t.Fatal(err)
+	}
+	service := shortlinksfiles.New(func() *mcp.Manager { return manager })
+	t.Cleanup(func() { _ = service.Close() })
+	var recorded atomic.Int32
+	a := New(Config{UserID: "user", DeviceID: "device"}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		WithFileService(service), WithFileUploadAdmission(testUploadAdmission), WithFileAssetRecorder(func(_ context.Context, session, request string, epoch uint64, asset files.Asset) error {
+			if session != "session" || request != "first-complete" || epoch != 7 || asset.AssetID != integrationAssetID {
+				t.Error("recorder lost upload identity on recovery")
+			}
+			recorded.Add(1)
+			return nil
+		}))
+	conn := openUploadAgent(t, a)
+	content := []byte("content")
+	id := stageAgentUpload(t, conn, content)
+	complete := protocol.AssetUploadCompletePayload{UploadID: id}
+	writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadComplete, "first-complete", complete)
+	readIntegrationUploadError(t, conn, "first-complete", protocol.TypeAssetUploadComplete, "upload_upstream_failure")
+	if recorded.Load() != 0 {
+		t.Fatal("rejected upload reached the session recorder")
+	}
+	if err := manager.Reload(ctx, mcp.Config{}, registry); err != nil {
+		t.Fatal(err)
+	}
+	begin := protocol.AssetUploadBeginPayload{
+		FileName: "report.txt", ContentType: "text/plain", Size: int64(len(content)), IdempotencyKey: "key",
+	}
+	writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadBegin, "begin-retry", begin)
+	retry := readIntegrationUploadResult(t, conn, "begin-retry", "begin")
+	if retry.UploadID != id || retry.Offset != int64(len(content)) || retry.Asset != nil {
+		t.Fatalf("readiness change lost staged receipt: %#v", retry)
+	}
+	begin.IdempotencyKey = "new-key"
+	writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadBegin, "new-begin", begin)
+	readIntegrationUploadError(t, conn, "new-begin", protocol.TypeAssetUploadBegin, "upload_service_unavailable")
+
+	backend.mu.Lock()
+	backend.rejectComplete = false
+	backend.mu.Unlock()
+	for _, request := range []string{"complete-retry", "completed-retry"} {
+		writeUploadAgentMessage(t, conn, protocol.TypeAssetUploadComplete, request, complete)
+		result := readIntegrationUploadResult(t, conn, request, "complete")
+		if result.UploadID != id || result.Asset == nil || result.Asset.AssetID != integrationAssetID {
+			t.Fatalf("could not recover existing upload: %#v", result)
+		}
+	}
+	if recorded.Load() != 1 {
+		t.Fatal("completion recovery did not record exactly one asset")
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.calls["begin_asset_upload"] != 1 || backend.calls["upload_asset_part"] != 1 ||
+		backend.calls["get_asset_upload_status"] != 1 || backend.calls["complete_asset_upload"] != 2 {
+		t.Fatalf("recovery did not reuse the original upload: %#v", backend.calls)
 	}
 }

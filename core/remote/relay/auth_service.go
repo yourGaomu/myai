@@ -174,6 +174,28 @@ func (s *Server) writeRoutedClient(p *peer, route *clientEntry, message protocol
 
 	s.clientLock.RLock()
 	ownsRoute := s.clients[route.RequestID] == route && route.ownsConnection(s.connections[p])
+	if route.RequestType == protocol.TypeMCPDetail {
+		if !ownsRoute || route.peer != p || route.expired(time.Now()) {
+			s.clientLock.RUnlock()
+			return nil // Superseded, expired or disconnected after the store lookup.
+		}
+		s.clientLock.RUnlock()
+		if !s.isCurrentAgentPeer(route.detailAgent, route.UserID, route.DeviceID) {
+			return nil
+		}
+		if err := p.conn.SetWriteDeadline(route.mcpDetailWriteDeadline(time.Now())); err != nil {
+			return err
+		}
+		defer p.conn.SetWriteDeadline(time.Time{})
+		if err := p.conn.WriteJSON(message); err != nil {
+			_ = p.close()
+			return err
+		}
+		return nil
+	}
+	if route.RequestType == protocol.TypeSessionRename {
+		ownsRoute = ownsRoute && route.peer == p
+	}
 	if route.RequestType == protocol.TypeAssetImagePreview {
 		ownsRoute = ownsRoute && route.peer == p && time.Since(route.ConnectedAt) <= assetPreviewRouteTTL
 	}

@@ -58,6 +58,23 @@ func (a *Agent) handleSessionLoad(ctx context.Context, conn *websocket.Conn, mes
 	return a.writeSessionChanged(ctx, conn, message.RequestID)
 }
 
+func (a *Agent) handleSessionRename(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
+	payload, err := protocol.SessionRenameRequest(message)
+	if err != nil {
+		return err
+	}
+	result, err := a.chatService.RenameSession(ctx, payload.SessionID, payload.Title)
+	if err != nil {
+		return err
+	}
+	if result.SessionID != payload.SessionID || result.TitleRevision <= 0 {
+		return fmt.Errorf("session rename returned mismatched session metadata")
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeSessionRenameResult, message.RequestID, result.SessionID, protocol.SessionRenameResultPayload{
+		SessionID: result.SessionID, Title: result.Title, TitleRevision: result.TitleRevision,
+	})
+}
+
 func (a *Agent) handleSessionDelete(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	payload, err := protocol.DecodePayload[protocol.SessionDeletePayload](message)
 	if err != nil {

@@ -38,6 +38,7 @@ type Agent struct {
 	subagentEvents        SubagentEventSource
 	pluginManager         PluginManagerFacade
 	mcpManager            MCPManagerFacade
+	mcpTrustReviews       map[string]mcpTrustReview
 	runtimes              *sessionRuntimeManager
 	writeMu               sync.Mutex
 	requestMu             sync.Mutex
@@ -381,7 +382,16 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 			}
 			continue
 		}
-		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
+		if message.Type == protocol.TypeMCPDetail && len(raw) > protocol.MCPDetailRequestMaxJSONBytes {
+			if writeErr := a.writeHandlerError(conn, message, errors.New("mcp detail request is too large")); writeErr != nil {
+				done <- writeErr
+				return
+			}
+			continue
+		}
+		if message.Type != protocol.TypeMCPTrustInternal {
+			fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
+		}
 		if waitCtx.Err() != nil {
 			done <- waitCtx.Err()
 			return
@@ -441,6 +451,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionNew(ctx, conn, message)
 	case protocol.TypeSessionLoad:
 		return a.handleSessionLoad(ctx, conn, message)
+	case protocol.TypeSessionRename:
+		return a.handleSessionRename(ctx, conn, message)
 	case protocol.TypeSessionDelete:
 		return a.handleSessionDelete(ctx, conn, message)
 	case protocol.TypeSessionRestore:
@@ -513,6 +525,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		a.enqueueCatalogMutation(ctx, conn, message, a.handlePluginReload)
 	case protocol.TypeMCPList:
 		return a.handleMCPList(conn, message)
+	case protocol.TypeMCPDetail:
+		return a.handleMCPDetail(conn, message)
 	case protocol.TypeMCPReload:
 		a.enqueueCatalogMutation(ctx, conn, message, a.handleMCPReload)
 	case protocol.TypePluginEnable:
@@ -761,8 +775,8 @@ func (a *Agent) writeJSON(conn *websocket.Conn, message protocol.Message) error 
 	// reasoning、answer、tool event 可能由不同回调触发，WebSocket 写操作必须串行化。
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
-	if message.Type == protocol.TypeAssetImagePreviewResult {
-		// A stalled thumbnail write must release the shared socket writer.
+	if message.Type == protocol.TypeAssetImagePreviewResult || message.Type == protocol.TypeMCPDetailResult {
+		// A stalled thumbnail or catalog write must release the shared socket writer.
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return err
 		}

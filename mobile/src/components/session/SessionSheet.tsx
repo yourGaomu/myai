@@ -11,9 +11,11 @@ import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemePr
 import { BottomSheet } from "../common/BottomSheet";
 import { ShimmerProgressBar } from "../common/MotionEffects";
 import { Segmented } from "../common/Segmented";
+import { CacheUsageMeter } from "../chat/TurnTokenUsage";
 
 type Props = {
   activeSession?: SessionSummary;
+  canRename: boolean;
   connected: boolean;
   connectionLabel: string;
   context?: ContextInfo;
@@ -25,7 +27,10 @@ type Props = {
   onClose: () => void;
   onCompact: () => void;
   onReconnect: () => void;
+  onRename?: () => void;
+  renameEditor?: import("react").ReactNode;
   onRequestContext: () => void;
+  onRefreshUsage: () => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
@@ -63,12 +68,13 @@ export function SessionSheet(props: Props) {
   const ratio = window && used !== undefined ? Math.min(1, used / window) : 0;
   const settingsDisabled = !hasSession || !props.connected || props.pendingSettings;
   const { connected } = props;
-  const requestContextRef = useRef(props.onRequestContext);
-  requestContextRef.current = props.onRequestContext;
+  const requestsRef = useRef({ context: props.onRequestContext, usage: props.onRefreshUsage });
+  requestsRef.current = { context: props.onRequestContext, usage: props.onRefreshUsage };
 
   useEffect(() => {
     if (visible && connected && hasSession) {
-      requestContextRef.current();
+      requestsRef.current.context();
+      requestsRef.current.usage();
     }
   }, [connected, sessionID, visible]);
 
@@ -132,6 +138,22 @@ export function SessionSheet(props: Props) {
           <Feather color={palette.ink2} name="x" size={20} />
         </Pressable>
       </View>
+      {props.onRename ? (
+        <View style={styles.renameRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !props.canRename }}
+            disabled={!props.canRename}
+            onPress={props.onRename}
+            style={({ pressed }) => [styles.renameButton, !props.canRename && styles.dimmed, pressed && styles.pressed]}
+          >
+            <Feather color={palette.brandLight} name="edit-2" size={15} />
+            <Text style={styles.link}>重命名对话</Text>
+          </Pressable>
+          {!props.canRename ? <Text style={styles.contextNote}>连接 Agent 后可重命名</Text> : null}
+        </View>
+      ) : null}
+      {props.renameEditor}
 
       {!props.connected ? (
         <View style={styles.offline}>
@@ -209,6 +231,11 @@ export function SessionSheet(props: Props) {
       <Text style={[styles.hint, permission === "full" && styles.hintWarn]}>{permissionHints[permission]}</Text>
 
       {!props.contextFirst ? contextDetails : null}
+      {hasSession ? (
+        <View style={[styles.group, styles.context, styles.usageGroup]}>
+          <CacheUsageMeter session usage={activeSession?.usage} />
+        </View>
+      ) : null}
     </BottomSheet>
   );
 }
@@ -218,6 +245,8 @@ const makeStyles = ({ palette }: AppTheme) =>
     head: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 2 },
     title: { color: palette.ink1, flex: 1, fontSize: font.title, fontWeight: weight.semibold },
     close: { alignItems: "center", borderRadius: radius.pill, height: 40, justifyContent: "center", width: 40 },
+    renameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    renameButton: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 44, paddingHorizontal: 4 },
     pressed: { opacity: 0.72 },
     pressedRow: { backgroundColor: palette.pressed },
     dimmed: { opacity: 0.4 },
@@ -252,6 +281,7 @@ const makeStyles = ({ palette }: AppTheme) =>
     hint: { color: palette.ink3, fontSize: font.caption, marginLeft: 2, marginTop: 8 },
     hintWarn: { color: palette.warn },
     context: { gap: 12, padding: 14 },
+    usageGroup: { marginTop: 12 },
     contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
     contextLine: { alignItems: "baseline", flexDirection: "row", gap: 8, justifyContent: "space-between" },
     contextBreakdown: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 5, paddingTop: 8 },

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 
 	"myai/core/tool"
 	tooldef "myai/core/tool/tool"
+	"myai/core/trust"
 )
 
 type Manager struct {
@@ -23,12 +25,14 @@ type Manager struct {
 	sources     []string
 	registry    *tool.RegisterTools
 	servers     map[string]*serverRuntime
+	loadReasons map[string]string
 	revision    uint64
 }
 
 type serverRuntime struct {
 	client           *Client
 	tools            map[string]struct{}
+	catalog          []catalogTool
 	exposedToolCount int
 }
 
@@ -44,29 +48,41 @@ const (
 type ServerStatus struct {
 	Name               string
 	State              ServerState
+	Reason             string
 	InventoryToolCount int
 	ExposedToolCount   int
 }
 
 func (m *Manager) ServerStatuses() []ServerStatus {
+	statuses, _ := m.CatalogStatuses()
+	return statuses
+}
+
+func (m *Manager) CatalogStatuses() ([]ServerStatus, uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	statuses := make([]ServerStatus, 0, len(m.config.Servers))
 	for _, server := range m.config.Servers {
-		status := ServerStatus{Name: strings.TrimSpace(server.Name), State: ServerUnavailable}
-		switch {
-		case server.Disabled:
-			status.State = ServerDisabled
-		case m.servers[status.Name] != nil:
-			runtime := m.servers[status.Name]
-			status.State = ServerLoaded
-			status.InventoryToolCount = len(runtime.tools)
-			status.ExposedToolCount = runtime.exposedToolCount
-		}
-		statuses = append(statuses, status)
+		statuses = append(statuses, m.serverStatusLocked(server))
 	}
-	return statuses
+	return statuses, m.revision
+}
+
+func (m *Manager) serverStatusLocked(server ServerConfig) ServerStatus {
+	status := ServerStatus{Name: strings.TrimSpace(server.Name), State: ServerUnavailable}
+	switch {
+	case server.Disabled:
+		status.State = ServerDisabled
+	case m.servers[status.Name] != nil:
+		runtime := m.servers[status.Name]
+		status.State = ServerLoaded
+		status.InventoryToolCount = len(runtime.tools)
+		status.ExposedToolCount = runtime.exposedToolCount
+	default:
+		status.Reason = m.loadReasons[status.Name]
+	}
+	return status
 }
 
 func NewManager(config Config) *Manager {
@@ -127,6 +143,7 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 
 	var candidateClients []*Client
 	candidateServers := make(map[string]*serverRuntime)
+	candidateReasons := make(map[string]string)
 	var candidateSources []string
 	var candidateTools = make(map[string][]tooldef.Tool)
 	cleanupCandidate := func() {
@@ -155,6 +172,11 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 				cleanupCandidate()
 				return err
 			}
+			name := strings.TrimSpace(server.Name)
+			candidateReasons[name] = ServerStartFailed
+			if errors.Is(err, trust.ErrUntrusted) {
+				candidateReasons[name] = ServerPendingTrust
+			}
 			log.Printf("warning: %v", err)
 			continue
 		}
@@ -167,28 +189,42 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 				cleanupCandidate()
 				return err
 			}
+			candidateReasons[strings.TrimSpace(server.Name)] = ServerDiscoveryFailed
 			log.Printf("warning: %v", err)
 			continue
 		}
 
+		source := prefix + strings.TrimSpace(server.Name)
 		wrapped := make([]tooldef.Tool, 0, len(infos))
 		runtime := &serverRuntime{client: client, tools: make(map[string]struct{}, len(infos))}
+		occurrences := make(map[string]int)
 		for _, info := range infos {
 			// Keep original names for host-side calls, including hidden byte tools.
 			if strings.TrimSpace(info.Name) == "" {
 				continue
 			}
+			_, alreadyListed := runtime.tools[info.Name]
 			runtime.tools[info.Name] = struct{}{}
-			if hiddenModelTool(server.Name, info.Name) {
-				continue
+			var registered *Tool
+			if !hiddenModelTool(server.Name, info.Name) {
+				exposedName := uniqueToolName(ExposedToolName(server.Name, info.Name), usedNames)
+				registered = NewToolWithName(client, server.Name, info, exposedName, server.toolPermission()).WithPermissionSource(source)
+				wrapped = append(wrapped, registered)
 			}
-			exposedName := uniqueToolName(ExposedToolName(server.Name, info.Name), usedNames)
-			wrapped = append(wrapped, NewToolWithName(client, server.Name, info, exposedName, server.toolPermission()).WithPermissionSource(prefix+strings.TrimSpace(server.Name)))
+			if !alreadyListed || registered != nil {
+				runtime.catalog = append(runtime.catalog, makeCatalogTool(source, info, occurrences[info.Name], registered))
+				occurrences[info.Name]++
+			}
 		}
+		sort.Slice(runtime.catalog, func(i, j int) bool {
+			left, right := runtime.catalog[i].descriptor, runtime.catalog[j].descriptor
+			if left.Name != right.Name {
+				return left.Name < right.Name
+			}
+			return left.ID < right.ID
+		})
 		runtime.exposedToolCount = len(wrapped)
 		candidateServers[strings.TrimSpace(server.Name)] = runtime
-
-		source := prefix + strings.TrimSpace(server.Name)
 		candidateClients = append(candidateClients, client)
 		candidateSources = append(candidateSources, source)
 		candidateTools[source] = wrapped
@@ -213,6 +249,7 @@ func (m *Manager) Reload(ctx context.Context, config Config, registry *tool.Regi
 	m.registry = registry
 	m.clients = candidateClients
 	m.servers = candidateServers
+	m.loadReasons = candidateReasons
 	m.sources = candidateSources
 	m.revision++
 	m.mu.Unlock()
@@ -378,6 +415,7 @@ func (m *Manager) Close() error {
 	registry := m.registry
 	m.clients = nil
 	m.servers = nil
+	m.loadReasons = nil
 	m.sources = nil
 	m.registry = nil
 	m.revision++

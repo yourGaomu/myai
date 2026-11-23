@@ -34,6 +34,7 @@ export function MobileMainContent({
           activeSession={settings.activeSession}
           bindCode={settings.bindCode}
           buttonFeedback={common.buttonFeedback}
+          canRenameSessions={sessions.canRenameSessions}
           clientToken={common.clientToken}
           compact={settings.compact}
           connected={settings.connected}
@@ -71,6 +72,7 @@ export function MobileMainContent({
           onConnect={settings.onConnect}
           onDeleteSession={settings.onDeleteSession}
           onLoadSession={settings.onLoadSession}
+          onRenameSession={sessions.onRenameSession}
           onNewSession={settings.onNewSession}
           onPair={settings.onPair}
           onCompactSession={settings.onCompactSession}
@@ -99,11 +101,7 @@ export function MobileMainContent({
           onReloadSkills={settings.onReloadSkills}
           onRefreshPlugins={settings.onRefreshPlugins}
           onReloadPlugins={settings.onReloadPlugins}
-          onRefreshMCPInventory={settings.onRefreshMCPInventory}
-          mcpInventory={settings.mcpInventory}
-          reloadMCP={settings.reloadMCP}
-          mcpReloading={settings.mcpReloading}
-          mcpMessage={settings.mcpMessage}
+          mcp={settings.mcp}
           onSetPluginEnabled={settings.onSetPluginEnabled}
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}
@@ -306,12 +304,14 @@ export function MobileMainContent({
       {common.viewMode === "sessions" || common.viewMode === "trash" ? (
         <SessionsPanel
           buttonFeedback={common.buttonFeedback}
+          canRenameSessions={sessions.canRenameSessions}
           clientToken={common.clientToken}
           deletedSessions={sessions.deletedSessions}
           mode={common.viewMode === "trash" ? "trash" : "active"}
           onDeleteSession={sessions.onDeleteSession}
           onNewSession={settings.onNewSession}
           onRefreshDeletedSessions={sessions.onRefreshDeletedSessions}
+          onRenameSession={sessions.onRenameSession}
           onRestoreSession={sessions.onRestoreSession}
           onSelectSession={sessions.onSelectSession}
           pendingSessions={common.pendingActions.sessions}

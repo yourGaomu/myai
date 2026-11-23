@@ -20,67 +20,92 @@ func (s SelectionService) ToolsForSession(current *session.Session, forceChatMod
 	if s.Catalog == nil {
 		return nil
 	}
-	permissionMode := session.PermissionModeAsk
-	agentMode := session.AgentModeChat
-	if current != nil {
-		permissionMode = session.NormalizePermissionMode(current.PermissionMode)
-		agentMode = session.NormalizeAgentMode(current.AgentMode)
-	}
+	policy := s.PolicyForSession(current, forceChatMode)
 	tools := s.Catalog.LLMToolsByPermission(func(permission tooldef.Permission) bool {
-		// Plan 生成阶段由 ModePolicy 禁止写操作；执行批准计划时 forceChatMode 会解除该限制。
-		if s.ModePolicy != nil && !s.ModePolicy.AllowsToolPermission(permission, agentMode, forceChatMode) {
-			return false
-		}
-		if !allowsPermissionMode(permission, permissionMode) {
-			return false
-		}
-		return current == nil || tooldef.PermissionAllowsCeiling(permission, current.PermissionCeiling)
+		return policy.permissionReason(permission) == ""
 	})
-	// Knowledge retrieval is exposed only in auto mode; always mode searches
-	// before generation. AI memory search is independent of those RAG settings.
-	if !knowledgeSearchToolAvailable(current) {
-		tools = withoutKnowledgeSearch(tools)
-	}
-	if current == nil || !current.EnforceToolAllowlist && current.AllowedTools == nil {
+	if policy.knowledgeSearch && policy.allowlist == nil {
 		return tools
-	}
-	allowed := make(map[string]struct{}, len(current.AllowedTools))
-	for _, name := range current.AllowedTools {
-		allowed[name] = struct{}{}
 	}
 	filtered := make([]modelport.Tool, 0, len(tools))
 	for _, candidate := range tools {
 		if candidate.Function == nil {
+			if policy.allowlist == nil {
+				filtered = append(filtered, candidate)
+			}
 			continue
 		}
-		// 1. ask_user 是交互能力，不授予工作区工具权限；Agent Loop 会检查本轮是否有用户交互通道。
-		if candidate.Function.Name == "ask_user" {
-			filtered = append(filtered, candidate)
-			continue
-		}
-		if _, ok := allowed[candidate.Function.Name]; ok {
+		if policy.nameReason(candidate.Function.Name) == "" {
 			filtered = append(filtered, candidate)
 		}
 	}
 	return filtered
 }
 
-func knowledgeSearchToolAvailable(current *session.Session) bool {
-	if current == nil {
-		return false
-	}
-	return session.NormalizeRAGSettings(current.RAGSettings).Mode == session.RetrievalModeAuto
+// SelectionPolicy answers model visibility without projecting model schemas or executing tools.
+type SelectionPolicy struct {
+	modePolicy      toolport.ToolModePolicy
+	permissionMode  session.PermissionMode
+	agentMode       session.AgentMode
+	forceChatMode   bool
+	knowledgeSearch bool
+	allowlist       map[string]struct{}
+	ceiling         []tooldef.Permission
 }
 
-func withoutKnowledgeSearch(tools []modelport.Tool) []modelport.Tool {
-	filtered := make([]modelport.Tool, 0, len(tools))
-	for _, candidate := range tools {
-		if candidate.Function != nil && candidate.Function.Name == "knowledge_search" {
-			continue
-		}
-		filtered = append(filtered, candidate)
+func (s SelectionService) PolicyForSession(current *session.Session, forceChatMode bool) SelectionPolicy {
+	policy := SelectionPolicy{
+		modePolicy: s.ModePolicy, forceChatMode: forceChatMode,
+		permissionMode: session.PermissionModeAsk, agentMode: session.AgentModeChat,
 	}
-	return filtered
+	if current != nil {
+		policy.permissionMode = session.NormalizePermissionMode(current.PermissionMode)
+		policy.agentMode = session.NormalizeAgentMode(current.AgentMode)
+		policy.knowledgeSearch = session.NormalizeRAGSettings(current.RAGSettings).Mode == session.RetrievalModeAuto
+		policy.ceiling = tooldef.ClonePermissionCeiling(current.PermissionCeiling)
+		if current.EnforceToolAllowlist || current.AllowedTools != nil {
+			policy.allowlist = make(map[string]struct{}, len(current.AllowedTools))
+			for _, name := range current.AllowedTools {
+				policy.allowlist[name] = struct{}{}
+			}
+		}
+	}
+	return policy
+}
+
+func (p SelectionPolicy) permissionReason(permission tooldef.Permission) string {
+	// Plan 生成阶段由 ModePolicy 禁止写操作；执行批准计划时 forceChatMode 会解除该限制。
+	if p.modePolicy != nil && !p.modePolicy.AllowsToolPermission(permission, p.agentMode, p.forceChatMode) {
+		return "agent_mode"
+	}
+	if !allowsPermissionMode(permission, p.permissionMode) {
+		return "permission_mode"
+	}
+	if !tooldef.PermissionAllowsCeiling(permission, p.ceiling) {
+		return "permission_ceiling"
+	}
+	return ""
+}
+
+func (p SelectionPolicy) nameReason(name string) string {
+	// Knowledge retrieval is exposed only in auto mode; always mode searches before generation.
+	if name == "knowledge_search" && !p.knowledgeSearch {
+		return "retrieval_mode"
+	}
+	// ask_user 是交互能力，不授予工作区工具权限；Agent Loop 会检查本轮是否有用户交互通道。
+	if p.allowlist != nil && name != "ask_user" {
+		if _, ok := p.allowlist[name]; !ok {
+			return "allowlist"
+		}
+	}
+	return ""
+}
+
+func (p SelectionPolicy) Reason(name string, permission tooldef.Permission) string {
+	if reason := p.permissionReason(permission); reason != "" {
+		return reason
+	}
+	return p.nameReason(name)
 }
 
 func allowsPermissionMode(permission tooldef.Permission, mode session.PermissionMode) bool {

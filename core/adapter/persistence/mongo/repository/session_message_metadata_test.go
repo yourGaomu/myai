@@ -15,11 +15,80 @@ import (
 
 	mongomapper "myai/core/adapter/persistence/mongo/mapper"
 	mongotemplate "myai/core/adapter/persistence/mongo/template"
+	lifecyclecommand "myai/core/application/session/lifecycle/command"
+	lifecycleservice "myai/core/application/session/lifecycle/service"
 	generation "myai/core/domain/generation"
 	agentplan "myai/core/plan"
 	portrepository "myai/core/port/repository"
 	"myai/core/session"
 )
+
+func TestSessionRenameSurvivesStaleSavesOutboxAndVerifiedRestore(t *testing.T) {
+	ctx := context.Background()
+	ops := newMetadataMongo(t)
+	store := NewWithTemplate(ops)
+	stale := portrepository.SessionRecord{ID: "session", Kind: "user", Title: "New chat", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.SaveSession(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.RenameSession(ctx, stale.ID, "手动标题")
+	if err != nil || first.DisplayTitle() != "手动标题" || first.TitleRevision != 1 || first.Title != "New chat" {
+		t.Fatalf("first rename=%+v err=%v", first, err)
+	}
+	stale.Title = "First user message"
+	if err := store.TouchSessionMessages(ctx, stale, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	automatic, err := store.GetSession(ctx, stale.ID)
+	if err != nil || automatic.Title != stale.Title || automatic.DisplayTitle() != first.DisplayTitle() || automatic.TitleRevision != 1 {
+		t.Fatalf("outbox replay changed the display title: record=%+v err=%v", automatic, err)
+	}
+	second, err := store.RenameSession(ctx, stale.ID, "Second title")
+	if err != nil || second.DisplayTitle() != "Second title" || second.TitleRevision != 2 {
+		t.Fatalf("second rename=%+v err=%v", second, err)
+	}
+	first.Title = "Stale full save"
+	if err := store.SaveSession(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkSessionDeleted(ctx, stale.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RenameSession(ctx, stale.ID, "Deleted session"); !errors.Is(err, portrepository.ErrNotFound) {
+		t.Fatalf("rename of deleted session returned %v", err)
+	}
+	if _, err := (lifecycleservice.LifecycleService{Sessions: store}).RestoreDeletedSession(ctx, lifecyclecommand.RestoreSession{SessionID: stale.ID}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewWithTemplate(ops).GetSession(ctx, stale.ID)
+	if err != nil || reopened.Deleted || reopened.DisplayTitle() != second.DisplayTitle() || reopened.TitleRevision != second.TitleRevision || reopened.Title != first.Title {
+		t.Fatalf("reopened after stale write and restore: record=%+v err=%v", reopened, err)
+	}
+}
+
+func TestSessionRenameMatchesOnlyActiveUserAndLegacyRecords(t *testing.T) {
+	ctx := context.Background()
+	ops := newMetadataMongo(t)
+	store := NewWithTemplate(ops)
+	ops.documents["legacy"] = bson.M{"_id": "legacy", "title": "Old title"}
+	ops.documents["legacy-empty"] = bson.M{"_id": "legacy-empty", "kind": "", "deleted": false}
+	ops.documents["subagent"] = bson.M{"_id": "subagent", "kind": "subagent"}
+	ops.documents["other"] = bson.M{"_id": "other", "kind": "other"}
+	for _, id := range []string{"legacy", "legacy-empty"} {
+		record, err := store.RenameSession(ctx, id, "Renamed")
+		if err != nil || record.ID != id || record.DisplayTitle() != "Renamed" || record.TitleRevision != 1 {
+			t.Fatalf("rename %s: record=%+v err=%v", id, record, err)
+		}
+	}
+	for _, id := range []string{"missing", "subagent", "other"} {
+		if _, err := store.RenameSession(ctx, id, "Rejected"); !errors.Is(err, portrepository.ErrNotFound) || ops.documents[id]["manual_title"] != nil {
+			t.Fatalf("ineligible session %s: document=%+v err=%v", id, ops.documents[id], err)
+		}
+	}
+	if len(ops.documents) != 4 {
+		t.Fatal("rename inserted a record")
+	}
+}
 
 func TestTouchSessionMessagesPreservesFieldsOwnedByOtherWriters(t *testing.T) {
 	ops := newMetadataMongo(t)
@@ -74,7 +143,7 @@ func TestTouchSessionMessagesInitializesWithoutPlanOrUnrequestedUsage(t *testing
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	record := portrepository.SessionRecord{
 		ID: "session", Kind: "user", Model: "model", AgentMode: string(session.AgentModePlan),
-		PermissionMode: "ask", Title: "Initial title", ContextWindowK: 64,
+		PermissionMode: "ask", Title: "Initial title", ManualTitle: "stale rename", TitleRevision: 99, ContextWindowK: 64,
 		CurrentPlan: metadataPlan("stale", 9), Usage: metadataUsage(400), LastUsage: metadataUsage(20),
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -85,7 +154,7 @@ func TestTouchSessionMessagesInitializesWithoutPlanOrUnrequestedUsage(t *testing
 		}
 	}
 	document := ops.documents[record.ID]
-	for _, key := range []string{"current_plan", "usage", "last_usage", "message_usage_sequence"} {
+	for _, key := range []string{"current_plan", "usage", "last_usage", "message_usage_sequence", "manual_title", "title_revision"} {
 		if _, exists := document[key]; exists {
 			t.Fatalf("initial message snapshot inserted %q: %#v", key, document[key])
 		}
@@ -531,6 +600,28 @@ func (f *metadataMongo) FindOne(_ context.Context, collection string, filter any
 	return mongotemplate.ErrNotFound
 }
 
+func (f *metadataMongo) FindOneAndUpdate(ctx context.Context, collection string, filter, update, out any, opts ...options.Lister[options.FindOneAndUpdateOptions]) error {
+	settings := options.FindOneAndUpdateOptions{}
+	for _, option := range opts {
+		for _, apply := range option.List() {
+			if err := apply(&settings); err != nil {
+				return err
+			}
+		}
+	}
+	if settings.ReturnDocument == nil || *settings.ReturnDocument != options.After || (settings.Upsert != nil && *settings.Upsert) {
+		f.t.Fatal("rename must return the post-image without upserting")
+	}
+	result, err := f.UpdateOne(ctx, collection, filter, update)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return mongotemplate.ErrNotFound
+	}
+	return f.FindOne(ctx, collection, bson.M{"_id": metadataBSON(f.t, filter)["_id"]}, out)
+}
+
 func (f *metadataMongo) InsertOne(context.Context, string, any) (*gomongo.InsertOneResult, error) {
 	f.messageInserts++
 	f.t.Fatal("session metadata helper inserted a message")
@@ -600,6 +691,10 @@ func (f *metadataMongo) UpdateOne(_ context.Context, collection string, filter, 
 					if !exists || metadataCompare(f.t, current, value) < 0 {
 						metadataSet(f.t, document, path, value)
 					}
+				case "$inc":
+					current, _ := metadataGet(document, path)
+					number, _ := current.(int64)
+					metadataSet(f.t, document, path, number+value.(int64))
 				case "$unset":
 					delete(document, path)
 				default:

@@ -46,6 +46,9 @@ type Args = {
   pendingHistorySessionIDRef: RefObject<string>;
   relayScopeRef: RefObject<RelayScope>;
   sessionNavigationRef: RefObject<SessionNavigationState>;
+  onSessionDeleted?: (sessionID: string) => void;
+  onSessionList?: (sessions: SessionSummary[]) => void;
+  onSessionPolicyObserved?: (session: SessionSummary | undefined, currentAgentSessionID?: string) => void;
   removeSessionContext: (sessionID: string) => void;
   requestAssets: (sessionID?: string) => boolean;
   requestChanges: () => boolean;
@@ -94,6 +97,9 @@ export function useRemoteResultAppliers({
   pendingHistorySessionIDRef,
   relayScopeRef,
   sessionNavigationRef,
+  onSessionDeleted,
+  onSessionList,
+  onSessionPolicyObserved,
   removeSessionContext,
   requestAssets,
   requestChanges,
@@ -194,11 +200,15 @@ export function useRemoteResultAppliers({
       if (!payload) return;
       const nextSessions = payload.sessions || [];
       if (payload.include_deleted) {
-        setDeletedSessions(nextSessions);
+        setDeletedSessions((current) => mergeSessionList(current, nextSessions));
         return;
       }
       setSessions((current) => mergeSessionList(current, nextSessions));
+      if (Array.isArray(payload.sessions)) onSessionList?.(nextSessions);
       const localSessionID = sessionIDRef.current.trim();
+      const observedSession = nextSessions.find((session) => session.id === localSessionID);
+      // A session list can reveal that the Agent's current session changed without navigating Mobile.
+      onSessionPolicyObserved?.(observedSession, payload.current_session_id);
       // A list can initialize a blank workspace, but not navigate an existing one.
       const currentSessionID = localSessionID || (!hasPendingNavigation() ? payload.current_session_id?.trim() : "");
       if (!currentSessionID) return;
@@ -235,10 +245,12 @@ export function useRemoteResultAppliers({
         const affectedID = mutation.targetSessionID;
         if (mutation.type === "session_restore") {
           const restored = nextSessions.find((session) => session.id === affectedID);
+          onSessionPolicyObserved?.(nextSessions.find((session) => session.id === sessionIDRef.current), payload.current_session_id);
           if (restored) setSessions((current) => upsertSession(current, restored));
           setDeletedSessions((current) => current.filter((session) => session.id !== affectedID));
           return true;
         }
+        onSessionDeleted?.(affectedID);
         removeSessionContext(affectedID);
         const fallback = nextSessions.find((session) => session.id === targetSessionID) || payload.session;
         setSessions((current) => {
@@ -248,10 +260,14 @@ export function useRemoteResultAppliers({
         // Only a delete of the still-selected session can pick its fallback.
         if (sessionIDRef.current !== affectedID || mutation.navigationVersion !== navigation.version ||
             (navigation.current?.connectionID === connectionID && !navigation.current.targetSessionID) ||
-            !targetSessionID || targetSessionID === affectedID) return true;
+            !targetSessionID || targetSessionID === affectedID) {
+          onSessionPolicyObserved?.(nextSessions.find((session) => session.id === sessionIDRef.current), payload.current_session_id);
+          return true;
+        }
         selectSession(targetSessionID);
       }
       const selectedSession = payload.session?.id === targetSessionID ? payload.session : undefined;
+      onSessionPolicyObserved?.(selectedSession ?? nextSessions.find((session) => session.id === targetSessionID), targetSessionID);
       const modelID = selectedSession?.model || nextSessions.find((session) => session.id === targetSessionID)?.model;
       if (modelID) setCurrentModelID(modelID);
       const usage = selectedSession?.last_usage || findSessionUsage(nextSessions, targetSessionID);
@@ -279,6 +295,9 @@ export function useRemoteResultAppliers({
       const sessionID = (payload.session?.id || envelopeSessionID || "").trim();
       if (!sessionID) return;
       const session = payload.session?.id === sessionID ? payload.session : payload.sessions?.find((item) => item.id === sessionID);
+      const selectedID = sessionIDRef.current;
+      const selectedSession = session?.id === selectedID ? session : payload.sessions?.find((item) => item.id === selectedID);
+      onSessionPolicyObserved?.(selectedSession, payload.current_session_id);
       if (session) {
         setSessions((current) => upsertSession(current, session));
         if (session.last_usage) setSessionLastUsage(sessionID, session.last_usage);
@@ -460,6 +479,9 @@ export function useRemoteResultAppliers({
     historySessionIDRef,
     pendingHistorySessionIDRef,
     relayScopeRef,
+    onSessionDeleted,
+    onSessionList,
+    onSessionPolicyObserved,
     removeSessionContext,
     sessionNavigationRef,
     sessionIDRef,

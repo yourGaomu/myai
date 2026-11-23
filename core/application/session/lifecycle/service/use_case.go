@@ -105,6 +105,10 @@ func (u UseCase) Delete(ctx context.Context, command lifecyclecommand.DeleteSess
 	return deleted, nil
 }
 
+func (u UseCase) Rename(ctx context.Context, command lifecyclecommand.RenameSession) (lifecycleresult.RenameSession, error) {
+	return u.Lifecycle.RenameSession(ctx, command)
+}
+
 func (u UseCase) Restore(ctx context.Context, command lifecyclecommand.RestoreSession) (lifecycleresult.Lifecycle, error) {
 	sessionID, err := u.Lifecycle.RestoreSession(ctx, command)
 	if err != nil {

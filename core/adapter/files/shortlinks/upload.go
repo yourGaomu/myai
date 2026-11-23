@@ -97,6 +97,18 @@ func (u uploadSession) validate(request filesport.UploadRequest, previous *uploa
 
 var uploadTools = []string{"begin_asset_upload", "upload_asset_part", "get_asset_upload_status", "complete_asset_upload"}
 
+var _ filesport.UploadPreflighter = (*Service)(nil)
+
+// PreflightUpload checks the current managed catalog without calling a tool or
+// retaining a lease. A later transfer still acquires and validates its own lease.
+func (s *Service) PreflightUpload(ctx context.Context) error {
+	lease, err := s.acquire(ctx, uploadTools...)
+	if err != nil {
+		return err
+	}
+	return lease.Close()
+}
+
 func (s *Service) Upload(ctx context.Context, request filesport.UploadRequest) (filesport.Asset, error) {
 	ctx, cancel := s.operationContext(ctx)
 	defer cancel()

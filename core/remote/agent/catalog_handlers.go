@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	modelcommand "myai/core/application/model/command"
 	"myai/core/domain/generation"
 	domainmodel "myai/core/domain/model"
+	"myai/core/mcp"
 	pluginruntime "myai/core/plugin"
 	"myai/core/remote/protocol"
 	"myai/core/skill"
@@ -95,24 +97,99 @@ func (a *Agent) handleMCPList(conn *websocket.Conn, message protocol.Message) er
 	if _, err := protocol.DecodePayload[protocol.MCPListPayload](message); err != nil {
 		return fmt.Errorf("invalid mcp list request")
 	}
-	reader, ok := a.mcpManager.(mcpStatusReader)
-	if !ok {
-		return fmt.Errorf("mcp inventory is unavailable")
+	var statuses []mcp.ServerStatus
+	var revision *uint64
+	var err error
+	switch reader := a.mcpManager.(type) {
+	case mcpCatalogStatusReader:
+		var version uint64
+		statuses, version, err = reader.MCPCatalogStatuses()
+		revision = &version
+	case mcpStatusReader:
+		statuses, err = reader.MCPServerStatuses()
+	default:
+		return errors.New("mcp inventory is unavailable")
 	}
-	statuses, err := reader.MCPServerStatuses()
 	if err != nil {
-		return fmt.Errorf("mcp inventory is unavailable")
+		return errors.New("mcp inventory is unavailable")
 	}
 	servers := make([]protocol.MCPServerSummary, 0, len(statuses))
 	for _, status := range statuses {
-		servers = append(servers, protocol.MCPServerSummary{
-			Name:               status.Name,
-			State:              string(status.State),
-			InventoryToolCount: status.InventoryToolCount,
-			ExposedToolCount:   status.ExposedToolCount,
+		servers = append(servers, mcpServerSummary(status))
+	}
+	return a.writeRemoteMessage(conn, protocol.TypeMCPListResult, message.RequestID, message.SessionID, protocol.MCPListResultPayload{
+		Servers: servers, CatalogRevision: revision,
+	})
+}
+
+func mcpServerSummary(status mcp.ServerStatus) protocol.MCPServerSummary {
+	result := protocol.MCPServerSummary{
+		Name: status.Name, State: string(status.State),
+		InventoryToolCount: status.InventoryToolCount, ExposedToolCount: status.ExposedToolCount,
+	}
+	switch status.Reason {
+	case "pending_trust", "start_failed", "discovery_failed":
+		result.Reason = status.Reason
+	}
+	return result
+}
+
+func (a *Agent) handleMCPDetail(conn *websocket.Conn, message protocol.Message) error {
+	request, err := protocol.MCPDetailRequest(message)
+	if err != nil {
+		return err
+	}
+	if _, err := a.uploadOwner(message); err != nil {
+		return errors.New("mcp detail requires an authenticated paired client")
+	}
+	reader, ok := a.mcpManager.(mcpDetailReader)
+	if !ok {
+		return errors.New("mcp detail is not available on this Agent")
+	}
+	writeFailure := func(text, code string) error {
+		return a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.MCPDetailErrorPayload{
+			ErrorPayload: protocol.ErrorPayload{Message: text, Code: code},
+			RequestType:  protocol.TypeMCPDetail, ServerName: request.ServerName,
 		})
 	}
-	return a.writeRemoteMessage(conn, protocol.TypeMCPListResult, message.RequestID, message.SessionID, protocol.MCPListResultPayload{Servers: servers})
+	detail, err := reader.MCPServerDetail(request.ServerName, message.SessionID, request.Cursor)
+	switch {
+	case errors.Is(err, mcp.ErrCatalogChanged):
+		return writeFailure("mcp catalog changed; refresh and retry", protocol.MCPErrorCatalogChanged)
+	case errors.Is(err, mcp.ErrCatalogServerNotFound):
+		return writeFailure("mcp server was not found", "")
+	case errors.Is(err, mcp.ErrCatalogInvalidCursor):
+		return writeFailure("invalid mcp catalog cursor", "")
+	case err != nil, detail.Server.Name != request.ServerName, len(detail.Tools) > protocol.MCPDetailMaxTools:
+		return writeFailure("mcp detail is unavailable", "")
+	}
+	tools := make([]protocol.MCPToolDescriptor, 0, len(detail.Tools))
+	for _, tool := range detail.Tools {
+		tools = append(tools, protocol.MCPToolDescriptor{
+			ID: tool.ID, Name: tool.Name, Title: tool.Title, Description: tool.Description, Alias: tool.Alias,
+			HostOnly: tool.HostOnly, MetadataTruncated: tool.MetadataTruncated, Input: mcpSchemaSummary(tool.Input),
+			Output: mcpSchemaSummary(tool.Output), Eligibility: tool.Eligibility, Reason: tool.Reason,
+		})
+	}
+	response, err := protocol.NewMessage(protocol.TypeMCPDetailResult, message.RequestID, a.config.UserID, a.config.DeviceID, message.SessionID, protocol.MCPDetailResultPayload{
+		Server: mcpServerSummary(detail.Server), CatalogRevision: detail.CatalogRevision, SessionEvaluated: detail.SessionEvaluated,
+		Tools: tools, NextCursor: detail.NextCursor,
+	})
+	if err != nil {
+		return writeFailure("mcp detail is unavailable", "")
+	}
+	if _, err := protocol.MCPDetailResult(response); err != nil {
+		return writeFailure("mcp detail is unavailable", "")
+	}
+	return a.writeJSON(conn, response)
+}
+
+func mcpSchemaSummary(summary mcp.SchemaSummary) protocol.MCPSchemaSummary {
+	result := protocol.MCPSchemaSummary{State: summary.State, Truncated: summary.Truncated}
+	for _, field := range summary.Fields {
+		result.Fields = append(result.Fields, protocol.MCPSchemaField(field))
+	}
+	return result
 }
 
 func (a *Agent) handleMCPReload(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {

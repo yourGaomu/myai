@@ -16,3 +16,9 @@ type Operations interface {
 	DeleteMany(ctx context.Context, collection string, filter any) (*gomongo.DeleteResult, error)
 	Count(ctx context.Context, collection string, filter any) (int64, error)
 }
+
+// FindOneAndUpdater is the atomic read-after-write capability used by repositories
+// that need to return the result of their own update.
+type FindOneAndUpdater interface {
+	FindOneAndUpdate(ctx context.Context, collection string, filter any, update any, out any, opts ...options.Lister[options.FindOneAndUpdateOptions]) error
+}

@@ -10,7 +10,8 @@ import { isImageAttachment } from "../../utils/attachments";
 import { copyToClipboard } from "../../utils/clipboard";
 import { assetSummaryToSharedAsset, isAssistantAssetTool, mergeSharedAssets, parseSharedAssets } from "../../utils/toolAssets";
 import { toolIcon, toolKind } from "../../utils/toolDisplay";
-import { usageHasValues, usageSummary } from "../../utils/tokenUsage";
+import { usageHasValues } from "../../utils/tokenUsage";
+import { TurnTokenUsage } from "./TurnTokenUsage";
 import { CharacterAvatar } from "../common/CharacterAvatar";
 import { AssistantReply } from "./AssistantReply";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
@@ -185,7 +186,7 @@ export function MessageBubble({ buttonFeedback, catalog, hideReasoning = false, 
           ) : null}
         </View>
       ) : null}
-      {message.usage && usageHasValues(message.usage) ? <Text style={styles.messageMeta}>{usageSummary(message.usage)}</Text> : null}
+      <TurnTokenUsage id={message.id} running={isStreaming} show={Boolean(message.usage && usageHasValues(message.usage))} usage={message.usage} />
     </View>
   );
 }

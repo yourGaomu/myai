@@ -7,12 +7,15 @@ import * as Updates from "expo-updates";
 import { ButtonContent } from "../common/ButtonContent";
 import { SettingsHome, type SettingsSection } from "./SettingsHome";
 import { AppearanceSettings } from "./sections/AppearanceSettings";
+import { MCPCatalogSection, type MCPCatalogControls } from "./sections/MCPCatalogSection";
 import { MotionSettings } from "./sections/MotionSettings";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
 import { accentOptions } from "../../constants/theme";
 import { useMotion } from "../../hooks/useMotionConfig";
+import { fetchOwnAuthorizationID } from "../../services/pairing";
+import { copyToClipboard } from "../../utils/clipboard";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { defaultIntentConfig, normalizeIntentStrategy } from "../../hooks/useIntentSettings";
 import type {
@@ -36,13 +39,69 @@ import type {
 import type { PendingAction, SessionAgentMode, SessionPermissionMode } from "../../types/app";
 import type { ButtonFeedback } from "../../types/ui";
 import type { ModelConfigDraft } from "../../hooks/useSessionModelActions";
-import type { MCPInventory } from "../../hooks/useMCPState";
 import { shortID } from "../../utils/ids";
 import type { ModelDeleteFeedback } from "../../utils/modelDelete";
 import { websocketURL } from "../../utils/relay";
 import { modelDisplayName, normalizePermission, permissionLabel } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
 import { fontFamily, radius, weight } from "../../constants/theme";
+
+function PairingAuthorizationID({ relayURL, userID, deviceID, clientToken, buttonFeedback }: {
+  relayURL: string; userID: string; deviceID: string; clientToken: string; buttonFeedback: ButtonFeedback;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
+  const [authorizationID, setAuthorizationID] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const pending = useRef<AbortController | null>(null);
+  useEffect(() => () => pending.current?.abort(), []);
+
+  async function load() {
+    if (pending.current) return;
+    const controller = new AbortController();
+    pending.current = controller;
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    setMessage("");
+    setLoading(true);
+    try {
+      const id = await fetchOwnAuthorizationID({ relayURL, userID, deviceID, clientToken }, controller.signal);
+      if (!controller.signal.aborted) setAuthorizationID(id);
+    } catch {
+      setMessage("无法读取当前配对的授权 ID，请检查中继后重试。");
+    } finally {
+      clearTimeout(timer);
+      pending.current = null;
+      setLoading(false);
+    }
+  }
+
+  return (
+    <View style={styles.sectionStack}>
+      <Text style={styles.settingTitle}>本机配对授权 ID</Text>
+      <Text style={styles.settingMeta}>用于在电脑端开启本机的 MCP 信任审批，不会显示配对令牌。</Text>
+      {!relayURL.startsWith("https://") ? <Text style={styles.settingMeta}>仅支持从 HTTPS 中继读取授权 ID。</Text> : (
+        <>
+          {authorizationID ? <Text selectable style={styles.settingMeta}>{authorizationID}</Text> : null}
+          <View style={styles.rowCompact}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={loading}
+              onPress={() => {
+                if (!authorizationID) void load();
+                else void copyToClipboard(authorizationID).then((copied) => setMessage(copied ? "授权 ID 已复制。" : "复制失败，可长按 ID 选择并复制。"));
+              }}
+              style={({ pressed }) => buttonFeedback([styles.secondaryButton, loading && styles.disabledButton], pressed)}
+            >
+              <ButtonContent color={palette.ink1} loading={loading} text={authorizationID ? "复制授权 ID" : "显示授权 ID"} />
+            </Pressable>
+          </View>
+          {message ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{message}</Text> : null}
+        </>
+      )}
+    </View>
+  );
+}
 
 type Props = {
   activeSection: SettingsSection | null;
@@ -51,6 +110,8 @@ type Props = {
   activeSession?: SessionSummary;
   bindCode: string;
   buttonFeedback: ButtonFeedback;
+  canRenameSessions: boolean;
+  onRenameSession: (sessionID: string) => void;
   clientToken: string;
   compact?: CompactInfo;
   connected: boolean;
@@ -116,11 +177,7 @@ type Props = {
   onReloadSkills: () => void;
   onRefreshPlugins: () => void;
   onReloadPlugins: () => void;
-  onRefreshMCPInventory: () => void;
-  mcpInventory: MCPInventory;
-  reloadMCP: () => void;
-  mcpReloading: boolean;
-  mcpMessage: string;
+  mcp: MCPCatalogControls;
   onSetPluginEnabled: (pluginID: string, enabled: boolean) => void;
   onRelayURLChange: (value: string) => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
@@ -171,26 +228,6 @@ const agentModes: Array<{ label: string; mode: SessionAgentMode; meta: string }>
   { label: "对话", mode: "chat", meta: "正常对话与执行" },
   { label: "计划", mode: "plan", meta: "只读规划" },
 ];
-const mcpServerStateLabels = { loaded: "已加载", disabled: "已禁用", unavailable: "不可用" };
-const mcpInventoryMessages: Partial<Record<MCPInventory["status"], string>> = {
-  loading: "正在获取 MCP 服务列表…",
-  unsupported: "当前中继或电脑端 Agent 版本不支持查看 MCP 列表。",
-  timeout: "MCP 列表请求超时。请确认电脑端 Agent 在线且支持此功能，然后刷新。",
-  error: "无法获取 MCP 列表，请检查电脑端 Agent 后刷新。",
-};
-
-function mcpInventoryStatusText({ servers, status }: MCPInventory, connected: boolean) {
-  if (!connected) return servers === null
-    ? "连接中继后可查看 MCP 服务列表。"
-    : "中继未连接，显示上次获取的 MCP 列表。";
-  if (status !== "ready" && servers !== null) {
-    const feedback = mcpInventoryMessages[status];
-    return feedback ? `${feedback} 显示上次获取的列表。` : "显示上次获取的 MCP 列表。";
-  }
-  if (status === "ready" && servers?.length === 0) return "没有已配置的 MCP 服务。";
-  return mcpInventoryMessages[status];
-}
-
 const contextPresets = [8, 16, 32, 64, 128];
 type ModelProtocol = "openai-chat-completions" | "anthropic-messages" | "google-generative-ai" | "mistral-chat" | "ollama-chat";
 
@@ -242,6 +279,8 @@ export function SettingsPanel({
   activeSession,
   bindCode,
   buttonFeedback,
+  canRenameSessions,
+  onRenameSession,
   clientToken,
   compact,
   connected,
@@ -329,11 +368,7 @@ export function SettingsPanel({
   onRefreshSubagents,
   onUpdateSubagentDefinition,
   pendingActions,
-  onRefreshMCPInventory,
-  mcpInventory,
-  reloadMCP,
-  mcpReloading,
-  mcpMessage,
+  mcp,
   plugins,
   pluginMessage,
   pluginRoot,
@@ -364,6 +399,7 @@ export function SettingsPanel({
   const [maxTokensInput, setMaxTokensInput] = useState("");
   const [styleInput, setStyleInput] = useState("");
   const [generationError, setGenerationError] = useState("");
+  const [expandedSkill, setExpandedSkill] = useState<string>();
   const [modelFormOpen, setModelFormOpen] = useState(false);
   const [editingModelID, setEditingModelID] = useState("");
   const [modelFormSubmitting, setModelFormSubmitting] = useState(false);
@@ -737,6 +773,9 @@ export function SettingsPanel({
       </View>
       {pairingError ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{pairingError}</Text> : null}
       <Text style={styles.settingMeta}>已配对设备 · {userID} / {deviceID}</Text>
+      {activeSection === "connection" && clientToken ? (
+        <PairingAuthorizationID relayURL={pairedRelayURL} userID={userID} deviceID={deviceID} clientToken={clientToken} buttonFeedback={buttonFeedback} />
+      ) : null}
     </View>
   );
 
@@ -1126,9 +1165,8 @@ export function SettingsPanel({
         <IconBox label="SK" />
         <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
           <Text style={styles.settingTitle}>技能</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>
-            {skills.length} 个技能已加载{skillRoot ? ` / ${skillRoot}` : ""}
-          </Text>
+          <Text style={styles.settingMeta}>{skills.length} 个技能已加载</Text>
+          {skillRoot ? <Text numberOfLines={1} style={styles.skillPath}>{skillRoot}</Text> : null}
         </View>
         <View style={styles.rowCompact}>
           <Pressable
@@ -1145,40 +1183,55 @@ export function SettingsPanel({
           >
             <ButtonContent color={palette.ink1} loading={pendingActions.skills} text={pendingActions.skills ? "重载中" : "重载"} />
           </Pressable>
-          <Pressable
-            disabled={!connected || mcpReloading}
-            onPress={reloadMCP}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpReloading) && styles.disabledButton], pressed)}
-          >
-            <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
-          </Pressable>
         </View>
       </View>
 
       {skillMessage ? <EmptyBox text={skillMessage} /> : null}
-      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
 
       {skills.length > 0 ? (
         <View style={styles.skillList}>
-          {skills.map((item) => (
-            <View key={`${item.name}:${item.path || ""}`} style={styles.skillCard}>
-              <View style={styles.skillHeader}>
-                <View style={styles.flex}>
-                  <Text numberOfLines={1} style={styles.skillName}>{item.name}</Text>
-                  {item.description ? <Text numberOfLines={2} style={styles.skillDescription}>{item.description}</Text> : null}
-                </View>
-                {item.updated_at ? <Text style={styles.skillBadge}>{formatDate(item.updated_at)}</Text> : null}
+          {skills.map((item) => {
+            const key = JSON.stringify([item.name, item.path]);
+            const expanded = expandedSkill === key;
+            const triggers = [...new Set(item.triggers)];
+            return (
+              <View key={key} style={[styles.skillCard, styles.skillDisclosure]}>
+                <Pressable
+                  accessibilityLabel={item.name}
+                  accessibilityRole="button"
+                  aria-expanded={expanded}
+                  onPress={() => setExpandedSkill(expanded ? undefined : key)}
+                  style={({ pressed }) => buttonFeedback(styles.skillDisclosureHeader, pressed)}
+                >
+                  <View style={styles.flex}>
+                    <Text style={styles.skillName}>{item.name}</Text>
+                    {item.description && !expanded ? (
+                      <Text numberOfLines={3} style={styles.skillDescription}>{item.description}</Text>
+                    ) : null}
+                  </View>
+                  <Feather color={palette.ink3} name={expanded ? "chevron-up" : "chevron-down"} size={18} />
+                </Pressable>
+                {expanded ? (
+                  <View style={styles.skillDetails}>
+                    {item.description ? <Text selectable style={styles.skillDescription}>{item.description}</Text> : null}
+                    {triggers.length > 0 ? (
+                      <View style={styles.skillDetailGroup}>
+                        <Text style={styles.settingMeta}>触发词</Text>
+                        <View style={styles.triggerRow}>
+                          {triggers.map((trigger) => <Text key={trigger} style={styles.triggerChip}>{trigger}</Text>)}
+                        </View>
+                      </View>
+                    ) : null}
+                    {item.updated_at ? <Text style={styles.settingMeta}>更新于 {formatDate(item.updated_at)}</Text> : null}
+                    {item.path ? <Text selectable style={styles.skillPath}>{item.path}</Text> : null}
+                    {!item.description && !triggers.length && !item.updated_at && !item.path ? (
+                      <Text style={styles.settingMeta}>没有更多技能信息</Text>
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
-              {item.triggers && item.triggers.length > 0 ? (
-                <View style={styles.triggerRow}>
-                  {item.triggers.slice(0, 6).map((trigger) => (
-                    <Text key={trigger} style={styles.triggerChip}>{trigger}</Text>
-                  ))}
-                </View>
-              ) : null}
-              {item.path ? <Text numberOfLines={1} style={styles.skillPath}>{item.path}</Text> : null}
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : (
         <EmptyBox text={clientToken ? "还没有本地技能。可以用 SkillHub 安装，或创建 skills/<name>/SKILL.md。" : "先连接 agent，再查看本地技能。"} />
@@ -1186,65 +1239,39 @@ export function SettingsPanel({
     </View>
   );
 
-  const mcpInventoryFeedback = mcpInventoryStatusText(mcpInventory, connected);
   const pluginSection = (
     <View style={styles.sectionStack}>
-      <View style={[styles.settingCard, !wideLayout && styles.settingCardCompact]}>
-        <IconBox label="MCP" />
-        <View style={[styles.flex, !wideLayout && styles.settingCardBody]}>
-          <Text style={styles.settingTitle}>MCP 运行时</Text>
-          <Text numberOfLines={2} style={styles.settingMeta}>服务状态与工具数量</Text>
-        </View>
-        <View style={styles.rowCompact}>
-          <Pressable
-            accessibilityLabel="刷新 MCP 列表"
-            disabled={!connected || mcpInventory.status === "loading"}
-            onPress={onRefreshMCPInventory}
-            style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpInventory.status === "loading") && styles.disabledButton], pressed)}
-          >
-            <ButtonContent color={palette.ink1} loading={mcpInventory.status === "loading"} text={mcpInventory.status === "loading" ? "刷新中" : "刷新列表"} />
-          </Pressable>
-          <Pressable
-            accessibilityLabel="重载 MCP"
-            disabled={!connected || mcpReloading}
-            onPress={reloadMCP}
-            style={({ pressed }) => buttonFeedback([styles.secondaryButton, (!connected || mcpReloading) && styles.disabledButton], pressed)}
-          >
-            <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
-          </Pressable>
-        </View>
-      </View>
-
-      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
-      {mcpInventoryFeedback ? <EmptyBox text={mcpInventoryFeedback} /> : null}
-      {mcpInventory.servers?.length ? (
-        <View style={styles.skillList}>
-          {mcpInventory.servers.map((server) => (
-            <View key={server.name} style={styles.skillCard}>
-              <View style={styles.skillHeader}>
-                <Text style={[styles.flex, styles.skillName]}>{server.name}</Text>
-                <Text style={styles.skillBadge}>{mcpServerStateLabels[server.state]}</Text>
-              </View>
-              <Text style={styles.settingMeta}>
-                {`库存工具 ${server.inventory_tool_count} 个 · 暴露工具 ${server.exposed_tool_count} 个`}
-              </Text>
-            </View>
-          ))}
-        </View>
+      <MCPCatalogSection {...mcp} buttonFeedback={buttonFeedback} connected={connected} />
+      {!mcp.detail ? (
+        <PluginPanel
+          buttonFeedback={buttonFeedback}
+          message={pluginMessage}
+          onRefresh={onRefreshPlugins}
+          onReload={onReloadPlugins}
+          onSetEnabled={onSetPluginEnabled}
+          pending={pendingActions.plugins}
+          plugins={plugins}
+          root={pluginRoot}
+        />
       ) : null}
-
-      <PluginPanel
-        buttonFeedback={buttonFeedback}
-        message={pluginMessage}
-        onRefresh={onRefreshPlugins}
-        onReload={onReloadPlugins}
-        onSetEnabled={onSetPluginEnabled}
-        pending={pendingActions.plugins}
-        plugins={plugins}
-        root={pluginRoot}
-      />
     </View>
   );
+
+  const renameButton = (session: SessionSummary | undefined) => {
+    if (!session || session.deleted) return null;
+    return (
+      <Pressable
+        accessibilityLabel={`重命名对话：${session.title?.trim() || "未命名对话"}`}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canRenameSessions }}
+        disabled={!canRenameSessions}
+        onPress={() => onRenameSession(session.id)}
+        style={({ pressed }) => buttonFeedback([styles.sessionRenameButton, !canRenameSessions && styles.disabledButton], pressed)}
+      >
+        <Text style={styles.sessionRenameText}>重命名</Text>
+      </Pressable>
+    );
+  };
 
   const sessionSection = (
     <View style={styles.sectionStack}>
@@ -1272,6 +1299,10 @@ export function SettingsPanel({
         </View>
       </View>
 
+      {!canRenameSessions && (activeSession && !activeSession.deleted || sessions.some((session) => !session.deleted)) ? (
+        <Text style={styles.sectionSubheading}>连接 Agent 后可重命名对话</Text>
+      ) : null}
+
       {/* 当前激活会话 Hero 卡片 */}
       {sessionID ? (
         <View style={styles.activeHeroCard}>
@@ -1282,13 +1313,16 @@ export function SettingsPanel({
               </View>
               <Text style={styles.activeSessionId}>#{shortID(sessionID)}</Text>
             </View>
-            <Pressable
-              disabled={pendingActions.sessions}
-              onPress={() => onDeleteSession(sessionID)}
-              style={({ pressed }) => buttonFeedback([styles.heroDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)}
-            >
-              <Text style={styles.heroDeleteBtnText}>删除</Text>
-            </Pressable>
+            <View style={styles.sessionRowActions}>
+              {renameButton(activeSession)}
+              <Pressable
+                disabled={pendingActions.sessions}
+                onPress={() => onDeleteSession(sessionID)}
+                style={({ pressed }) => buttonFeedback([styles.heroDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)}
+              >
+                <Text style={styles.heroDeleteBtnText}>删除</Text>
+              </Pressable>
+            </View>
           </View>
 
           <Text numberOfLines={2} style={styles.activeHeroTitle}>
@@ -1383,19 +1417,13 @@ export function SettingsPanel({
           sessions.map((session) => {
             const selected = session.id === sessionID;
             return (
-              <Pressable
-                key={session.id}
-                disabled={pendingActions.sessions}
-                onPress={() => onLoadSession(session.id)}
-                style={({ pressed }) =>
-                  buttonFeedback([
-                    styles.sessionStreamCard,
-                    selected && styles.sessionStreamCardActive,
-                    pendingActions.sessions && styles.disabledButton,
-                  ], pressed)
-                }
-              >
-                <View style={styles.sessionStreamLeft}>
+              <View key={session.id} style={[styles.sessionStreamCard, selected && styles.sessionStreamCardActive]}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={pendingActions.sessions}
+                  onPress={() => onLoadSession(session.id)}
+                  style={({ pressed }) => buttonFeedback([styles.sessionStreamLeft, pendingActions.sessions && styles.disabledButton], pressed)}
+                >
                   <View style={[styles.sessionAvatarBox, selected && styles.sessionAvatarBoxActive]}>
                     <Feather
                       color={selected ? palette.inkInverse : palette.cyan}
@@ -1412,26 +1440,27 @@ export function SettingsPanel({
                       {session.model || "默认模型"} · {session.agent_mode === "plan" ? "规划" : "对话"} · {session.context_window_k || 16}K
                     </Text>
                   </View>
-                </View>
+                </Pressable>
 
                 <View style={styles.sessionStreamRight}>
                   <Text style={styles.sessionTimeText}>
                     {formatRelativeTime(session.updated_at)}
                   </Text>
-                  <Pressable
-                    disabled={pendingActions.sessions}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      onDeleteSession(session.id);
-                    }}
-                    style={({ pressed }) =>
-                      buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
-                    }
-                  >
-                    <Text style={styles.streamDeleteBtnText}>删除</Text>
-                  </Pressable>
+                  <View style={styles.sessionRowActions}>
+                    {renameButton(session)}
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={pendingActions.sessions}
+                      onPress={() => onDeleteSession(session.id)}
+                      style={({ pressed }) =>
+                        buttonFeedback([styles.streamDeleteBtn, pendingActions.sessions && styles.disabledButton], pressed)
+                      }
+                    >
+                      <Text style={styles.streamDeleteBtnText}>删除</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </Pressable>
+              </View>
             );
           })
         )}
@@ -1690,11 +1719,11 @@ export function SettingsPanel({
           <ButtonContent color={palette.ink1} loading={pendingActions.skills} text="刷新技能" />
         </Pressable>
         <Pressable
-          disabled={!connected || mcpReloading}
-          onPress={reloadMCP}
-          style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcpReloading) && styles.disabledButton], pressed)}
+          disabled={!connected || mcp.reloading}
+          onPress={mcp.reload}
+          style={({ pressed }) => buttonFeedback([styles.settingAction, (!connected || mcp.reloading) && styles.disabledButton], pressed)}
         >
-          <ButtonContent color={palette.ink1} loading={mcpReloading} text={mcpReloading ? "重载中" : "重载 MCP"} />
+          <ButtonContent color={palette.ink1} loading={mcp.reloading} text={mcp.reloading ? "重载中" : "重载 MCP"} />
         </Pressable>
         <Pressable
           disabled={pendingActions.sessions}
@@ -1704,7 +1733,7 @@ export function SettingsPanel({
           <ButtonContent color={palette.ink1} loading={pendingActions.sessions} text="刷新会话" />
         </Pressable>
       </View>
-      {mcpMessage ? <EmptyBox text={mcpMessage} /> : null}
+      {mcp.reloadMessage ? <EmptyBox text={mcp.reloadMessage} /> : null}
     </View>
   );
 
@@ -3604,12 +3633,31 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
     fontSize: font.bodyLg,
     fontWeight: weight.semibold,
   },
+  skillDisclosure: {
+    gap: 0,
+    padding: 0,
+  },
+  skillDisclosureHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 48,
+    padding: 14,
+  },
   skillDescription: {
-    color: palette.ink1,
-    fontSize: font.label,
-    fontWeight: weight.regular,
-    lineHeight: 17,
-    marginTop: 3,
+    color: palette.ink2,
+    fontSize: font.body,
+    lineHeight: 22,
+    marginTop: 4,
+  },
+  skillDetails: {
+    borderTopColor: palette.hairline,
+    borderTopWidth: 1,
+    gap: 10,
+    padding: 14,
+  },
+  skillDetailGroup: {
+    gap: 6,
   },
   skillBadge: {
     backgroundColor: palette.well,
@@ -4214,6 +4262,22 @@ const createStyles = ({ font, palette, shadow }: AppTheme) =>
   },
   sessionBusyRow: {
     marginTop: 8,
+  },
+  sessionRowActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  sessionRenameButton: {
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 8,
+  },
+  sessionRenameText: {
+    color: palette.brandLight,
+    fontSize: font.label,
+    fontWeight: weight.semibold,
   },
   sessionStreamList: {
     gap: 8,

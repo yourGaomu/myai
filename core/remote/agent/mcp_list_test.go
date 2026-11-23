@@ -73,7 +73,7 @@ func TestMCPListReadsPublishedCatalogDuringReload(t *testing.T) {
 				t.Fatalf("unexpected list response: %#v", message)
 			}
 			payload, err := protocol.DecodePayload[protocol.MCPListResultPayload](message)
-			if err != nil || payload.Servers == nil || len(payload.Servers) != len(tc.statuses) {
+			if err != nil || payload.Servers == nil || len(payload.Servers) != len(tc.statuses) || payload.CatalogRevision != nil {
 				t.Fatalf("unexpected list payload: %#v, %v", payload, err)
 			}
 			if len(payload.Servers) > 0 && payload.Servers[0] != (protocol.MCPServerSummary{Name: "short_links", State: "loaded", InventoryToolCount: 2, ExposedToolCount: 1}) {

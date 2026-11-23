@@ -130,6 +130,18 @@ func (s *callerLifecycleStore) GetSession(context.Context, string) (repository.S
 	defer s.mu.Unlock()
 	return s.record, nil
 }
+func (s *callerLifecycleStore) RenameSession(_ context.Context, sessionID, title string) (repository.SessionRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.record.ID != sessionID || s.record.Deleted {
+		return repository.SessionRecord{}, repository.ErrNotFound
+	}
+	s.record.ManualTitle = title
+	s.record.TitleRevision++
+	s.log = append(s.log, "rename")
+	return s.record, nil
+}
+
 func (s *callerLifecycleStore) MarkSessionDeleted(context.Context, string, time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -320,6 +332,29 @@ func TestCallerLifecycleWaitsForCancelledGenerationBeforeBlockAndStore(t *testin
 				}
 			})
 		}
+	}
+}
+
+func TestRenameSessionDoesNotWaitForOrCancelGeneration(t *testing.T) {
+	memory := callerLifecycleMemory(t)
+	store := &callerLifecycleStore{record: repository.SessionRecord{ID: "other", Title: "New chat"}}
+	chat := callerLifecycleChat(t, memory, store)
+	generationCtx, finish, err := chat.beginSessionGeneration(context.Background(), "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := chat.RenameSession(ctx, "other", " Renamed ")
+	if err != nil || result.SessionID != "other" || result.Title != "Renamed" || result.TitleRevision != 1 {
+		t.Fatalf("rename result=%+v err=%v", result, err)
+	}
+	if generationCtx.Err() != nil || chat.CurrentSessionID() != "session" {
+		t.Fatal("rename changed the running generation or current session")
+	}
+	if got := store.events(); !reflect.DeepEqual(got, []string{"rename"}) {
+		t.Fatalf("rename touched other session state: %v", got)
 	}
 }
 

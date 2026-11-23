@@ -23,6 +23,8 @@ export type MessageType =
   | "session_list_result"
   | "session_new"
   | "session_load"
+  | "session_rename"
+  | "session_rename_result"
   | "session_delete"
   | "session_delete_result"
   | "session_restore"
@@ -96,8 +98,12 @@ export type MessageType =
   | "plugin_mutation_result"
   | "mcp_list"
   | "mcp_list_result"
+  | "mcp_detail"
+  | "mcp_detail_result"
   | "mcp_reload"
   | "mcp_reload_result"
+  | "mcp_trust"
+  | "mcp_trust_result"
   | "background_turn_event"
   | "asset_list"
   | "asset_list_result"
@@ -532,6 +538,7 @@ export type TokenUsage = {
 };
 
 export type ErrorPayload = {
+  code?: string;
   message?: string;
   request_type?: RelayMessage["type"];
   approval_id?: string;
@@ -614,6 +621,7 @@ export type UserQuestionListResultPayload = {
 export type SessionSummary = {
   id: string;
   title?: string;
+  title_revision?: number;
   model?: string;
   agent_mode?: string;
   permission_mode?: string;
@@ -678,6 +686,15 @@ export type SessionChangedPayload = SessionListResultPayload & {
 
 export type SessionHistoryPayload = {
   session_id?: string;
+};
+
+export type SessionRenamePayload = {
+  session_id: string;
+  title: string;
+};
+
+export type SessionRenameResultPayload = SessionRenamePayload & {
+  title_revision: number;
 };
 
 export type SessionDeletePayload = {
@@ -1136,10 +1153,45 @@ export type MCPServerSummary = {
   state: "loaded" | "disabled" | "unavailable";
   inventory_tool_count: number;
   exposed_tool_count: number;
+  reason?: "pending_trust" | "start_failed" | "discovery_failed";
 };
 
 export type MCPListResultPayload = {
   servers: MCPServerSummary[];
+  catalog_revision?: number;
+};
+
+export type MCPDetailPayload = {
+  server_name: string;
+  cursor?: string;
+};
+
+export type MCPToolSchemaSummary = {
+  state: "undeclared" | "empty" | "unsupported" | "fields";
+  fields?: { name: string; type?: string; required: boolean }[];
+  truncated?: boolean;
+};
+
+export type MCPToolSummary = {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  alias?: string;
+  host_only: boolean;
+  metadata_truncated?: boolean;
+  input: MCPToolSchemaSummary;
+  output: MCPToolSchemaSummary;
+  eligibility: "available" | "filtered" | "host_only" | "not_evaluated";
+  reason?: "agent_mode" | "permission_mode" | "permission_ceiling" | "allowlist" | "not_registered";
+};
+
+export type MCPDetailResultPayload = {
+  server: MCPServerSummary;
+  catalog_revision: number;
+  session_evaluated: boolean;
+  tools: MCPToolSummary[];
+  next_cursor?: string;
 };
 
 export type MCPReloadPayload = {};
@@ -1147,6 +1199,30 @@ export type MCPReloadPayload = {};
 export type MCPReloadResultPayload = {
   reloaded: boolean;
   message?: string;
+};
+
+export type MCPTrustAction = "list" | "review" | "approve";
+
+export type MCPTrustPayload =
+  | { action: "list" }
+  | { action: "review"; server_name: string }
+  | { action: "approve"; server_name: string; review_id: string };
+
+export type MCPTrustService = {
+  name: string;
+  endpoint: string;
+  permission: "read" | "write" | "execute";
+  authentication: "none" | "headers_configured";
+  trusted: boolean;
+  runtime: "loaded" | "older" | "not_loaded";
+};
+
+export type MCPTrustResultPayload = {
+  action: MCPTrustAction;
+  code?: string;
+  server_name?: string;
+  review_id?: string;
+  services?: MCPTrustService[];
 };
 
 export type AssetListPayload = {

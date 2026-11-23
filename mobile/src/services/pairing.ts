@@ -1,5 +1,7 @@
+import { fetch as expoFetch } from "expo/fetch";
+
 import { clientName } from "../utils/relay";
-import { normalizeRelayUrl, readPairingResponse } from "../utils/relayPairing";
+import { normalizeRelayUrl, readPairingResponse, type RelayPairing } from "../utils/relayPairing";
 
 const pairTimeoutMs = 10000;
 
@@ -35,4 +37,31 @@ export async function pairWithRelay(relayURL: string, bindCode: string, signal: 
     signal.removeEventListener("abort", cancel);
     clearTimeout(timeoutID);
   }
+}
+
+export async function fetchOwnAuthorizationID(
+  pairing: Pick<RelayPairing, "relayURL" | "userID" | "deviceID" | "clientToken">,
+  signal: AbortSignal,
+): Promise<string> {
+  const { relayURL, userID, deviceID, clientToken } = pairing;
+  if (!clientToken || !userID || !deviceID || !relayURL.startsWith("https://") || normalizeRelayUrl(relayURL) !== relayURL) {
+    throw new Error("Authorization lookup requires an HTTPS pairing");
+  }
+  const query = `user_id=${encodeURIComponent(userID)}&device_id=${encodeURIComponent(deviceID)}`;
+  const url = `${relayURL}/authorizations?${query}`;
+  // Expo fetch honors redirect: error on native, unlike legacy React Native fetch.
+  const response = await expoFetch(url, {
+    headers: { Authorization: `Bearer ${clientToken}`, Accept: "application/json" },
+    credentials: "omit", redirect: "error", signal,
+  });
+  if (!response.ok || response.redirected || response.url !== url) throw new Error("Authorization lookup failed");
+  const data = await response.json() as { authorizations?: unknown[] } | null;
+  const current = Array.isArray(data?.authorizations) ? data.authorizations.filter((raw) => {
+    const entry = raw as { current?: unknown } | null;
+    return entry?.current === true;
+  }) : [];
+  const entry = current[0] as { id?: unknown; user_id?: unknown; device_id?: unknown } | undefined;
+  if (current.length !== 1 || entry?.user_id !== userID || entry?.device_id !== deviceID ||
+      typeof entry?.id !== "string" || entry.id === clientToken || !/^[a-f0-9]{64}$/.test(entry.id)) throw new Error("Authorization ID not found");
+  return entry.id;
 }
