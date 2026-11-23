@@ -53,6 +53,25 @@ mcp:
 
 Mobile 的「设置 → 插件与 MCP」可以浏览上一次由 Agent 发布的服务状态、工具和参数摘要。「待信任审批」表示上一次加载被信任检查拦截，不表示重新读取了信任存储；完成上述 CLI 审批后，可使用现有的 MCP 重载入口。「已加载」表示工具发现成功，不代表当前网络连通或附件上传权限已通过。工具详情区分 Agent 内部工具、模型可见工具及当前会话是否可选；可选不等于已批准执行。详情查询不会调用 MCP 服务。
 
+### 在手机上审批已配置的 HTTP 服务
+
+此功能默认关闭，只供主机管理员指定的配对使用。Agent 必须在线，Agent 和 Mobile 到 Relay 的审批通道都必须使用 TLS。仅本机开发可在 Relay 绑定回环地址（例如 `--addr 127.0.0.1:18080`）时显式设置 `MYAI_RELAY_MCP_TRUST_LOCAL_DEV=1`，不要把该模式放在反向代理后面。新版 Relay 可使用 `MYAI_RELAY_TLS_CERT_FILE` / `MYAI_RELAY_TLS_KEY_FILE` 配置证书和私钥。现有生产 Compose 默认使用 `ws://relay`，仅升级镜像不会启用该入口；未配置加密链路前继续使用 CLI。负载均衡部署须让 Agent 的审批校验请求到达持有 WebSocket 路由的同一 Relay 实例；校验失败时不会写入。
+
+1. 在指定手机上进入「设置 → 连接与配对 → 显示授权 ID」，然后复制该 ID（仅 HTTPS 中继支持）。也可调用现有 `GET /authorizations?user_id=…&device_id=…`，用该手机的配对凭据通过 `Authorization: Bearer …` 认证，取 `current: true` 的完整 `id`。不要把配对 token 放进 URL 或填给主机授权命令，也不要仅凭昵称选设备。
+2. 在 **运行 Agent 的同一 OS 用户、同一工作区** 下执行：
+
+   ```sh
+   myai trust mcp mobile-admin grant --workspace /workspace \
+     --user local --device server-agent --pairing-id '<完整配对授权 ID>' \
+     --public-endpoint 'https://links.example.test/api/mcp'
+   ```
+
+   替换成 Agent 的真实工作区、用户、设备和完整解析后的端点。使用生产 Compose 时，可按[部署安全迁移说明](DEPLOYMENT_SECURITY_MIGRATION.md)用 `compose_prod run --rm --no-deps agent trust mcp mobile-admin grant …`，沿用同一个 `agent-user-config` 卷。`--public-endpoint` 明确允许把该地址展示给该配对；不要填写含秘密的主机名或路径。带查询参数、片段、URL 用户信息或百分号编码的端点不支持手机审批。授权在 Agent OS 用户配置目录的 `myai/mcp-mobile-admin.json`，不随工作区配置分发。此命令只授权操作权限，不批准任何 MCP 声明。
+3. 打开「设置 → 插件与 MCP」，找到「HTTP MCP 信任审批」，选择服务的「查看并审批」，核对端点、工具权限类别和是否配置了认证请求头，再确认。这里读取 Agent 当前声明，而不是上次加载的目录。审批只保存当前声明的指纹，不测试后端、不展开认证头、不调用工具；声明变化后需重新审阅。审批结果未确认时，查看刷新后的信任状态，不自动重复提交。需要生效时再手动「重载 MCP」；如失败，旧配置仍可能在运行。
+4. 使用同一路径和 `--user` / `--device` 参数执行 `myai trust mcp mobile-admin list` 查看授权，或执行 `myai trust mcp mobile-admin revoke --pairing-id '<完整配对授权 ID>'` 移除该配对在此范围的审批权限。撤销管理权限不撤销既有声明信任；旧配对过期、被撤销或重新配对后不能沿用原授权。
+
+手机不能新增或编辑服务、输入密钥、审批 stdio，或代替公开分享的执行确认。必需服务因未批准导致 Agent 无法启动、声明无法安全展示或链路不兼容时，使用原有的 `myai trust mcp list` / `approve` 流程。Skills 不受此功能影响，仍可在本地安装和使用，不要求 URL。
+
 ## 3. 后端工具契约
 
 后端必须通过 `tools/list` 提供以下现有 10 个工具，并增加最后 3 个素材工具。表格是部署兼容性要求，不表示已在真实后端完成部署或验收。模型可见工具与主机内部文件传输工具分开管理；不要让模型生成、转述或搬运 Base64 文件内容。

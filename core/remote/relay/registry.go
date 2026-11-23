@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -17,8 +16,9 @@ import (
 const clientRouteTTL = 30 * time.Minute
 
 type peer struct {
-	conn    *websocket.Conn
-	writeMu sync.Mutex
+	conn              *websocket.Conn
+	writeMu           sync.Mutex
+	mcpTrustTransport bool // immutable after upgrade
 }
 
 func newPeer(conn *websocket.Conn) *peer {
@@ -76,6 +76,7 @@ type clientEntry struct {
 	detailServerName   string
 	detailAgentID      string
 	detailAgent        *peer
+	mcpTrust           *mcpTrustRoute // immutable pointer; check state guarded by clientLock
 }
 
 func (client *clientEntry) expired(now time.Time) bool {
@@ -84,6 +85,8 @@ func (client *clientEntry) expired(now time.Time) bool {
 		return now.Sub(client.ConnectedAt) > assetPreviewRouteTTL || now.Sub(client.LastSeenAt) > clientRouteTTL
 	case protocol.TypeMCPDetail:
 		return !now.Before(client.ConnectedAt.Add(mcpDetailRouteTTL))
+	case protocol.TypeMCPTrust:
+		return !now.Before(client.ConnectedAt.Add(mcpTrustRouteTTL))
 	default:
 		return now.Sub(client.LastSeenAt) > clientRouteTTL
 	}
@@ -91,7 +94,7 @@ func (client *clientEntry) expired(now time.Time) bool {
 
 func (client *clientEntry) originalSocketOnly() bool {
 	switch client.RequestType {
-	case protocol.TypeAssetImagePreview, protocol.TypeSessionRename, protocol.TypeMCPDetail:
+	case protocol.TypeAssetImagePreview, protocol.TypeSessionRename, protocol.TypeMCPDetail, protocol.TypeMCPTrust:
 		return true
 	default:
 		return false
@@ -104,6 +107,7 @@ type clientConnection struct {
 	ClientID   string
 	RemoteAddr string
 	LastSeenAt time.Time
+	mcpTrustID string
 }
 
 type AgentInfo struct {
@@ -118,8 +122,8 @@ type agentsResponse struct {
 	Agents []AgentInfo `json:"agents"`
 }
 
-func agentKey(userID string, deviceID string) string {
-	return fmt.Sprintf("%s/%s", userID, deviceID)
+func agentKey(userID string, deviceID string) agentIdentity {
+	return agentIdentity{UserID: userID, DeviceID: deviceID}
 }
 
 func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode string, remoteAddr string) *peer {
@@ -136,6 +140,7 @@ func (s *Server) registerAgent(p *peer, userID string, deviceID string, bindCode
 	if previous := s.agents[key]; previous != nil {
 		if previous.peer != p {
 			superseded = previous.peer
+			s.removeMCPTrustAgentRoutes(previous.peer)
 		}
 	}
 
@@ -189,6 +194,7 @@ func (s *Server) unregisterAgent(p *peer, userID string, deviceID string) {
 
 	if agent := s.agents[key]; agent != nil && agent.peer == p {
 		delete(s.agents, key)
+		s.removeMCPTrustAgentRoutes(p)
 	}
 }
 
@@ -371,6 +377,9 @@ func (s *Server) removeClientRouteLocked(client *clientEntry) {
 	if client.detailAgentID != "" {
 		delete(s.mcpDetailAgentRoutes, client.detailAgentID)
 	}
+	if client.mcpTrust != nil {
+		delete(s.mcpTrustAgentRoutes, client.mcpTrust.agentID)
+	}
 	s.clearForegroundPermissionsLocked(client)
 }
 
@@ -387,6 +396,10 @@ func (s *Server) unregisterClientPeerForRoute(p *peer, owner *clientEntry) {
 
 	for _, client := range s.clients {
 		if client.peer == p {
+			if client.mcpTrust != nil {
+				s.removeClientRouteLocked(client)
+				continue
+			}
 			// Requests tied to this socket cannot be rebound or replayed.
 			client.peer = nil
 		}
@@ -532,6 +545,19 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 	newConnection := s.connections[p] == nil
 	identity := &clientConnection{
 		UserID: userID, DeviceID: deviceID, ClientID: clientTokenHash(clientToken), RemoteAddr: remoteAddr, LastSeenAt: time.Now(),
+	}
+	previous := s.connections[p]
+	if previous != nil {
+		if previous.UserID == identity.UserID && previous.DeviceID == identity.DeviceID && previous.ClientID == identity.ClientID {
+			identity.mcpTrustID = previous.mcpTrustID
+		} else {
+			// Switching the identity of a live socket retires its approval routes.
+			for _, route := range s.mcpTrustAgentRoutes {
+				if route.peer == p {
+					s.removeClientRouteLocked(route)
+				}
+			}
+		}
 	}
 	s.connections[p] = identity
 	var foreground []*foregroundPermission

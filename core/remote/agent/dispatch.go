@@ -101,6 +101,9 @@ func (a *Agent) dispatchRelayMessage(ctx, connectionCtx context.Context, conn *w
 		return a.handleRelayMessage(ctx, conn, message)
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
 		return a.enqueueUploadOperation(connectionCtx, conn, message)
+	case protocol.TypeMCPTrustInternal:
+		a.enqueueCatalogMutation(connectionCtx, conn, message, a.handleMCPTrust)
+		return nil
 	case protocol.TypeAssetImagePreview:
 		return a.startAssetImagePreview(connectionCtx, conn, message)
 	case protocol.TypeSubagentTaskWait:

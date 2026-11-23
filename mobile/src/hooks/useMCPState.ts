@@ -105,11 +105,12 @@ function isUnsupported(error: ErrorPayload | undefined, operation: Operation) {
 }
 
 // Summary/reload are global to the paired Agent. Detail belongs to the selected server and explicit session as well.
-export function createMCPRequests({ getScope, getSessionID, sendEnvelope, onChange }: {
+export function createMCPRequests({ getScope, getSessionID, sendEnvelope, onChange, onReloaded }: {
   getScope: () => RelayScope;
   getSessionID: () => string;
   sendEnvelope: SendEnvelope;
   onChange: (state: MCPState) => void;
+  onReloaded?: () => void;
 }) {
   let state = initialState;
   let scope: RelayScope | undefined;
@@ -359,6 +360,7 @@ export function createMCPRequests({ getScope, getSessionID, sendEnvelope, onChan
         // Replace any earlier inventory request so only a post-reload snapshot can be applied.
         cancel("mcp_list");
         start("mcp_list");
+        onReloaded?.();
       }
     }
     return true;
@@ -381,11 +383,12 @@ export function createMCPRequests({ getScope, getSessionID, sendEnvelope, onChan
   };
 }
 
-export function useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelope }: {
+export function useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelope, onReloaded }: {
   relayScopeRef: RefObject<RelayScope>;
   sessionIDRef: RefObject<string>;
   sessionID: string;
   sendEnvelope: SendEnvelope;
+  onReloaded?: () => void;
 }) {
   const [state, setState] = useState(initialState);
   const requests = useMemo(() => createMCPRequests({
@@ -393,7 +396,8 @@ export function useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelo
     getSessionID: () => sessionIDRef.current,
     sendEnvelope,
     onChange: setState,
-  }), [relayScopeRef, sendEnvelope, sessionIDRef]);
+    onReloaded,
+  }), [onReloaded, relayScopeRef, sendEnvelope, sessionIDRef]);
   useLayoutEffect(() => { requests.syncScope(); }, [requests, sessionID]);
   useEffect(() => requests.clear, [requests]);
   return { ...state, ...requests };

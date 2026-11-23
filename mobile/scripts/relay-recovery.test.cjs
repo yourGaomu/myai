@@ -43,6 +43,7 @@ try {
 const { normalizeRelayUrl, restoreRelaySettings } = require("../src/utils/relayPairing.ts");
 const { startRelayWebSocket } = require("../src/utils/relayWebSocket.ts");
 const { createMCPRequests } = require("../src/hooks/useMCPState.ts");
+const { createMCPTrustRequests } = require("../src/hooks/useMCPTrust.ts");
 
 const noop = () => {};
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -97,6 +98,44 @@ test("Relay URL migration preserves the issuer and rejects incomplete settings",
   assert.ok(restored.pairing.pairingID);
   assert.equal(restoreRelaySettings({ ...pairing, relayURL: "" }).pairing, null);
   assert.equal(restoreRelaySettings({ ...pairing, deviceID: "" }).pairing, null);
+});
+
+test("pairing authorization ID lookup uses the paired HTTPS issuer with no redirect or token in URL", async () => {
+  let fetchOwnAuthorizationID;
+  const calls = [];
+  const id = "ab".repeat(32);
+  let response = {};
+  try {
+    Module._load = (name, ...args) => {
+      if (name === "expo/fetch") return { fetch: async (url, options) => {
+        calls.push({ url, options });
+        return { url, ok: true, redirected: false, json: async () => ({ authorizations: [
+          { current: false, id: "cd".repeat(32), ...identity }, { current: true, id, ...identity },
+        ] }), ...response };
+      } };
+      if (name === "../utils/relay") return { clientName: () => "test" };
+      return originalLoad.call(Module, name, ...args);
+    };
+    ({ fetchOwnAuthorizationID } = require("../src/services/pairing.ts"));
+  } finally {
+    Module._load = originalLoad;
+  }
+  const { signal } = new AbortController();
+  assert.equal(await fetchOwnAuthorizationID(pairing, signal), id);
+  assert.deepEqual(calls[0], {
+    url: `${pairing.relayURL}/authorizations?user_id=${pairing.userID}&device_id=${pairing.deviceID}`,
+    options: { headers: { Authorization: `Bearer ${pairing.clientToken}`, Accept: "application/json" }, credentials: "omit", redirect: "error", signal },
+  });
+  await assert.rejects(fetchOwnAuthorizationID({ ...pairing, relayURL: "http://relay.example.invalid" }, signal));
+  assert.equal(calls.length, 1);
+  response = { redirected: true };
+  await assert.rejects(fetchOwnAuthorizationID(pairing, signal));
+  response = { json: async () => ({ authorizations: [{ current: true, id: pairing.clientToken, ...identity }] }) };
+  await assert.rejects(fetchOwnAuthorizationID(pairing, signal));
+  response = { json: async () => ({ authorizations: [{ current: true, id, ...identity }] }) };
+  await assert.rejects(fetchOwnAuthorizationID({ ...pairing, clientToken: id }, signal));
+  response = { json: async () => ({ authorizations: [{ current: true, id, ...identity, device_id: "different-device" }] }) };
+  await assert.rejects(fetchOwnAuthorizationID(pairing, signal));
 });
 
 test("a WebSocket authenticates only on its own heartbeat and then drains replay", (t) => {
@@ -281,7 +320,7 @@ const mcpReload = (request, reloaded = true) => ({
 });
 const mcpError = (request, payload) => ({ type: "error", request_id: request.request_id, session_id: request.session_id, payload });
 
-function mcpFixture(t, { send = () => true, useTransport = false, sessionID = "session-a" } = {}) {
+function mcpFixture(t, { send = () => true, useTransport = false, sessionID = "session-a", onReloaded } = {}) {
   const scope = { current: { pairingID: pairing.pairingID, connectionID: "connection-a" } };
   const session = { current: sessionID };
   const sent = [], states = [], chatErrors = [];
@@ -295,6 +334,7 @@ function mcpFixture(t, { send = () => true, useTransport = false, sessionID = "s
     getSessionID: () => session.current,
     sendEnvelope: (type, frame) => { sent.push({ type, ...frame }); return sendFromRelay(type, frame); },
     onChange: (state) => states.push(state),
+    onReloaded,
   });
   t.after(api.clear);
   return { api, scope, session, sent, states, chatErrors, get state() { return states.at(-1); } };
@@ -643,6 +683,174 @@ test("MCP detail retains loaded pages after a recoverable pagination failure", (
   assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["01", "02"]);
 });
 
+const trustService = {
+  name: "example", endpoint: "https://mcp.example.invalid:8443/tools/v1", permission: "execute",
+  authentication: "headers_configured", trusted: false, runtime: "older",
+};
+
+function trustFixture(t, initialConnection = "socket-a") {
+  let scope = { pairingID: "pairing-a", connectionID: initialConnection };
+  let state;
+  const sent = [];
+  const api = createMCPTrustRequests({
+    getScope: () => scope,
+    sendEnvelope: (type, request) => { sent.push({ type, ...request }); return true; },
+    onChange: (next) => { state = next; },
+  });
+  t.after(api.clear);
+  return {
+    api, sent, get state() { return state; },
+    changeScope(connectionID, pairingID = scope.pairingID) { scope = { pairingID, connectionID }; api.syncScope(); },
+    reply(payload, request = sent.at(-1)) {
+      api.handleMessage({ type: "mcp_trust_result", request_id: request.request_id, payload: { action: request.payload.action, ...payload } });
+    },
+  };
+}
+
+function readyTrust(h) {
+  h.api.setActive(true);
+  h.reply({ services: [trustService] });
+}
+
+function reviewTrust(h) {
+  assert.equal(h.api.requestReview(trustService.name), true);
+  h.reply({ server_name: trustService.name, review_id: `review-${h.sent.length}`, services: [trustService] });
+  return h.state.review.id;
+}
+
+test("MCP trust requires a valid capability response on the current connection", (t) => {
+  const h = trustFixture(t, "");
+  h.api.setActive(true);
+  assert.equal(h.sent.length, 0);
+  h.changeScope("socket-a");
+  assert.deepEqual(h.sent[0].payload, { action: "list" });
+  for (const endpoint of ["https://u:secret@host.example/mcp", "https://host.example/mcp?secret", "https://host.example/mcp%2fescaped", "file:///tmp/mcp"]) {
+    h.reply({ services: [{ ...trustService, endpoint }] });
+    assert.equal(h.state.services, null);
+    h.api.refresh();
+  }
+  h.reply({ code: "mcp_trust_denied" });
+  assert.equal(h.state.services, null);
+  assert.equal(h.api.requestReview(trustService.name), false);
+  h.api.refresh();
+  h.reply({}); // Go omits an empty slice; this is still positive capability.
+  assert.deepEqual(h.state.services, []);
+  h.api.refresh();
+  const old = h.sent.at(-1);
+  h.changeScope("socket-b");
+  h.reply({ services: [trustService] }, old);
+  assert.equal(h.state.services, null);
+  h.reply({ services: [trustService] });
+  assert.deepEqual(h.state.services, [trustService]);
+});
+
+test("MCP trust approval uses an explicit matching review and never reloads", (t) => {
+  const h = trustFixture(t);
+  readyTrust(h);
+  assert.equal(h.api.confirm("unreviewed"), false);
+  let reviewed = reviewTrust(h);
+  h.api.cancelReview();
+  assert.equal(h.api.confirm(reviewed), false);
+  reviewed = reviewTrust(h);
+  assert.equal(h.api.confirm(reviewed), true);
+  assert.equal(h.api.confirm(reviewed), false);
+  assert.deepEqual(h.sent.at(-1).payload, { action: "approve", server_name: trustService.name, review_id: reviewed });
+  h.reply({ services: [{ ...trustService, name: "not-reviewed", trusted: true }] });
+  assert.equal(h.state.pendingAction, "approve");
+  h.reply({ services: [{ ...trustService, trusted: true }] });
+  assert.equal(h.state.services[0].trusted, true);
+  assert.equal(h.state.services[0].runtime, "older");
+  assert.equal(h.sent.at(-1).payload.action, "approve");
+  const runtime = mcpFixture(t, { onReloaded: h.api.afterReload });
+  runtime.api.reload();
+  runtime.api.handleMessage(mcpReload(runtime.sent.at(-1), false));
+  assert.equal(h.sent.at(-1).payload.action, "approve");
+  runtime.api.reload();
+  runtime.api.handleMessage(mcpReload(runtime.sent.at(-1)));
+  assert.deepEqual(h.sent.at(-1).payload, { action: "list" });
+  h.reply({ services: [{ ...trustService, trusted: true, runtime: "loaded" }] });
+  assert.equal(h.state.services[0].runtime, "loaded");
+});
+
+test("MCP trust discards review on settings exit, reload, and socket replacement", (t) => {
+  const h = trustFixture(t);
+  readyTrust(h);
+  let reviewed = reviewTrust(h);
+  h.api.setActive(false);
+  assert.equal(h.api.confirm(reviewed), false);
+  h.api.setActive(true);
+  h.reply({ services: [trustService] });
+  reviewed = reviewTrust(h);
+  h.api.afterReload();
+  assert.equal(h.api.confirm(reviewed), false);
+  h.reply({ services: [trustService] });
+  reviewed = reviewTrust(h);
+  h.changeScope("socket-b");
+  assert.equal(h.state.review, null);
+  assert.equal(h.api.confirm(reviewed), false);
+  assert.ok(h.sent.every(({ payload }) => payload.action !== "approve"));
+});
+
+test("MCP trust timeout or uncertain reply triggers a fresh list, never another write", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const h = trustFixture(t);
+  readyTrust(h);
+  for (const reason of ["timeout", "mcp_trust_unavailable", "unexpected", "transport"]) {
+    assert.equal(h.api.confirm(reviewTrust(h)), true);
+    const approve = h.sent.at(-1);
+    if (reason === "timeout") t.mock.timers.tick(15_000);
+    else if (reason === "transport") h.api.handleMessage({ type: "error", request_id: approve.request_id, payload: { request_type: "mcp_trust", transport_error: true } });
+    else h.reply({ code: reason });
+    assert.equal(h.state.unclear, true);
+    assert.equal(h.state.services, null);
+    assert.equal(h.sent.at(-1).payload.action, "list");
+    h.reply({ services: [{ ...trustService, trusted: true }] }, approve);
+    assert.equal(h.state.pendingAction, "list");
+    h.reply({ services: [trustService] });
+    assert.equal(h.state.services[0].trusted, false);
+    assert.equal(h.state.unclear, true);
+  }
+  assert.deepEqual(h.sent.map(({ payload }) => payload.action), ["list", ...Array(4).fill(["review", "approve", "list"]).flat()]);
+});
+
+test("MCP trust denial and re-review are known non-writes", (t) => {
+  const h = trustFixture(t);
+  readyTrust(h);
+  h.api.confirm(reviewTrust(h));
+  h.reply({ code: "mcp_trust_review_required" });
+  assert.equal(h.state.unclear, false);
+  assert.match(h.state.notice, /重新查看/);
+  assert.equal(h.sent.at(-1).payload.action, "approve");
+  h.api.confirm(reviewTrust(h));
+  h.reply({ code: "mcp_trust_denied" });
+  assert.equal(h.state.unclear, false);
+  assert.equal(h.state.services, null);
+  assert.equal(h.sent.at(-1).payload.action, "list");
+  h.reply({ code: "mcp_trust_denied" });
+  assert.equal(h.state.services, null);
+});
+
+test("MCP trust disconnect waits for a new socket to reconcile and re-pair drops the old outcome", (t) => {
+  const h = trustFixture(t);
+  readyTrust(h);
+  h.api.confirm(reviewTrust(h));
+  const approve = h.sent.at(-1);
+  h.changeScope("");
+  assert.equal(h.state.unclear, true);
+  h.api.setActive(false);
+  assert.equal(h.sent.at(-1), approve);
+  h.changeScope("socket-b");
+  assert.equal(h.sent.at(-1).payload.action, "list");
+  h.reply({ services: [{ ...trustService, trusted: true }] }, approve);
+  assert.equal(h.state.services, null);
+  h.reply({ services: [{ ...trustService, trusted: true }] });
+  assert.equal(h.state.services[0].trusted, true);
+  h.changeScope("socket-c", "pairing-b");
+  assert.equal(h.state.unclear, false);
+  assert.equal(h.state.services, null);
+  assert.deepEqual(h.sent.map(({ payload }) => payload.action), ["list", "review", "approve", "list"]);
+});
+
 test("narrow MCP settings interaction opens plain-text tool details, goes back, and paginates", (t) => {
   let width = 320;
   const jsx = (type, props) => ({ type, props });
@@ -654,6 +862,7 @@ test("narrow MCP settings interaction opens plain-text tool details, goes back, 
     },
     "@expo/vector-icons": { Feather: "Feather" },
     "../../common/ButtonContent": { ButtonContent: "ButtonContent" },
+    "../../common/ConfirmModal": { ConfirmModal: "ConfirmModal" },
     "../../../theme/ThemeProvider": { useAppTheme: () => ({ palette: {} }), useThemedStyles: (create) => create({ palette: {} }) },
   };
   let MCPCatalogSection;
@@ -677,8 +886,9 @@ test("narrow MCP settings interaction opens plain-text tool details, goes back, 
     return value.type === "ButtonContent" ? value.props.text : text(value.props.children);
   }
   const h = mcpFixture(t);
+  const trust = trustFixture(t);
   loadSummary(h);
-  const render = (connected = true) => MCPCatalogSection({ ...h.api, ...h.state, connected, buttonFeedback: (style) => style });
+  const render = (connected = true) => MCPCatalogSection({ ...h.api, ...h.state, trust: { ...trust.api, ...trust.state }, connected, buttonFeedback: (style) => style });
   const button = (tree, label) => nodes(tree).find((node) => node.props.accessibilityRole === "button" &&
     (node.props.accessibilityLabel === label || text(node).includes(label)));
 
@@ -730,4 +940,16 @@ test("narrow MCP settings interaction opens plain-text tool details, goes back, 
   h.api.backFromDetail();
   loadSummary(h, []);
   assert.match(text(render()), /没有已配置的 MCP 服务/);
+  assert.doesNotMatch(text(render()), /HTTP MCP 信任审批/);
+  readyTrust(trust);
+  assert.match(text(render()), /未信任 · 运行时：已加载旧配置/);
+  assert.ok(text(render()).includes(trustService.endpoint));
+  assert.doesNotMatch(text(render(false)), /HTTP MCP 信任审批/);
+  button(render(), "查看并审批：example").props.onPress();
+  trust.reply({ services: [trustService], review_id: "review-ui", server_name: trustService.name });
+  const modal = nodes(render()).find(({ type }) => type === "ConfirmModal");
+  assert.ok(modal.props.message.includes(trustService.endpoint));
+  assert.equal(trust.sent.at(-1).payload.action, "review");
+  modal.props.onConfirm();
+  assert.deepEqual(trust.sent.at(-1).payload, { action: "approve", server_name: trustService.name, review_id: "review-ui" });
 });

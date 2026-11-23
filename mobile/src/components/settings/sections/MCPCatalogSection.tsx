@@ -2,9 +2,11 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-na
 import { Feather } from "@expo/vector-icons";
 
 import { ButtonContent } from "../../common/ButtonContent";
+import { ConfirmModal } from "../../common/ConfirmModal";
 import { fontFamily, radius, weight } from "../../../constants/theme";
 import type { MCPDetail, MCPInventory } from "../../../hooks/useMCPState";
-import type { MCPServerSummary, MCPToolSchemaSummary, MCPToolSummary } from "../../../protocol";
+import { mcpTrustOutcomeUnclear, type MCPTrustControls } from "../../../hooks/useMCPTrust";
+import type { MCPServerSummary, MCPToolSchemaSummary, MCPToolSummary, MCPTrustService } from "../../../protocol";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../../theme/ThemeProvider";
 import type { ButtonFeedback } from "../../../types/ui";
 
@@ -19,6 +21,7 @@ export type MCPCatalogControls = {
   openTool: (toolID: string) => void;
   loadMoreDetail: () => void;
   retryDetail: () => void;
+  trust: MCPTrustControls;
 };
 
 type Props = MCPCatalogControls & { connected: boolean; buttonFeedback: ButtonFeedback };
@@ -27,7 +30,7 @@ const serverStates: Record<MCPServerSummary["state"], string> = {
   loaded: "已加载", disabled: "已禁用", unavailable: "不可用",
 };
 const serverReasons: Record<NonNullable<MCPServerSummary["reason"]>, string> = {
-  pending_trust: "待信任审批；请在电脑端 Agent 完成审批，再重载 MCP。",
+  pending_trust: "待信任审批；审批通过后需手动重载 MCP。若没有手机审批入口，请使用电脑端 Agent。",
   start_failed: "服务启动失败，请检查电脑端 Agent。",
   discovery_failed: "服务工具发现失败，请检查电脑端 Agent。",
 };
@@ -130,9 +133,19 @@ function ToolDetail({ sessionEvaluated, tool }: { sessionEvaluated: boolean; too
   );
 }
 
+const trustRuntime: Record<MCPTrustService["runtime"], string> = {
+  loaded: "已加载当前配置", older: "已加载旧配置", not_loaded: "未加载",
+};
+const trustAuthentication: Record<MCPTrustService["authentication"], string> = {
+  none: "无身份验证", headers_configured: "已配置请求标头（不显示值）",
+};
+const trustPermission: Record<MCPTrustService["permission"], string> = {
+  read: "读取", write: "写入", execute: "执行",
+};
+
 export function MCPCatalogSection({
   connected, buttonFeedback, detail, inventory, loadMoreDetail, openDetail, openTool, refresh, reload,
-  reloading, reloadMessage, retryDetail,
+  reloading, reloadMessage, retryDetail, trust,
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
@@ -208,13 +221,19 @@ export function MCPCatalogSection({
 
   const feedback = inventoryStatus(inventory, connected);
   const loading = inventory.status === "loading";
+  const trustServices = connected ? trust.services : null;
+  const review = trustServices && !reloading ? trust.review : null;
+  const reviewing = trust.pendingAction === "review";
+  const approving = trust.pendingAction === "approve";
+  const listing = trust.pendingAction === "list";
+  const trustBusy = !!trust.pendingAction || !!review || reloading;
   return (
     <View style={styles.section}>
       <View style={styles.card}>
         <Text accessibilityRole="header" style={styles.heading}>MCP 运行时</Text>
         <Text style={styles.meta}>只读目录：服务诊断、工具定义与会话资格</Text>
         <View style={styles.actions}>
-          {action("刷新 MCP 列表", refresh, { busy: loading, disabled: !connected || loading, text: "刷新列表" })}
+          {action("刷新 MCP 列表", () => { refresh(); trust.refresh(); }, { busy: loading, disabled: !connected || loading, text: "刷新列表" })}
           {action("重载 MCP", reload, { busy: reloading, disabled: !connected || reloading, text: reloading ? "重载中" : "重载 MCP" })}
         </View>
       </View>
@@ -236,6 +255,39 @@ export function MCPCatalogSection({
           <View key={server.name} style={[styles.card, wide && styles.gridItem]}><ServiceSummary server={server} /></View>
         ))}
       </View>
+      {trust.unclear ? <Status>{mcpTrustOutcomeUnclear}</Status> : null}
+      {trustServices ? (
+        <View style={styles.card}>
+          <Text accessibilityRole="header" style={styles.heading}>HTTP MCP 信任审批</Text>
+          <Text style={styles.meta}>仅限电脑端已配置且允许远程审批的服务。审批只保存信任，不会连接服务或重载 MCP。</Text>
+          {action("刷新 MCP 信任状态", trust.refresh, { busy: listing, disabled: trustBusy, text: "刷新信任状态" })}
+          {approving ? <Status>正在保存信任审批…</Status> : null}
+          {trust.notice ? <Status>{trust.notice}</Status> : null}
+          {trustServices.length === 0 ? <Status>没有可在手机端审批的 HTTP MCP 服务。</Status> : null}
+          {trustServices.map((service) => (
+            <View key={service.name} style={styles.field}>
+              <Text style={styles.identifier}>{service.name}</Text>
+              <Text selectable style={styles.meta}>{service.endpoint}</Text>
+              <Text style={styles.meta}>{`权限：${trustPermission[service.permission]} · ${trustAuthentication[service.authentication]}`}</Text>
+              <Text style={styles.state}>{`${service.trusted ? "已信任" : "未信任"} · 运行时：${trustRuntime[service.runtime]}`}</Text>
+              {!service.trusted ? action(`查看并审批：${service.name}`, () => trust.requestReview(service.name), {
+                disabled: trustBusy, text: reviewing ? "正在查看…" : "查看并审批",
+              }) : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {review ? (
+        <ConfirmModal
+          confirmLabel="信任此配置"
+          danger
+          message={`服务：${review.service.name}\n端点：${review.service.endpoint}\n权限：${trustPermission[review.service.permission]}\n认证：${trustAuthentication[review.service.authentication]}\n运行时：${trustRuntime[review.service.runtime]}\n\n仅在你确认信任此服务及其配置时继续。审批不会连接服务或重载 MCP。`}
+          onCancel={trust.cancelReview}
+          onConfirm={() => trust.confirm(review.id)}
+          title="确认信任 HTTP MCP 服务"
+          visible
+        />
+      ) : null}
     </View>
   );
 }

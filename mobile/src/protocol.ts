@@ -102,6 +102,8 @@ export type MessageType =
   | "mcp_detail_result"
   | "mcp_reload"
   | "mcp_reload_result"
+  | "mcp_trust"
+  | "mcp_trust_result"
   | "background_turn_event"
   | "asset_list"
   | "asset_list_result"
@@ -1197,6 +1199,30 @@ export type MCPReloadPayload = {};
 export type MCPReloadResultPayload = {
   reloaded: boolean;
   message?: string;
+};
+
+export type MCPTrustAction = "list" | "review" | "approve";
+
+export type MCPTrustPayload =
+  | { action: "list" }
+  | { action: "review"; server_name: string }
+  | { action: "approve"; server_name: string; review_id: string };
+
+export type MCPTrustService = {
+  name: string;
+  endpoint: string;
+  permission: "read" | "write" | "execute";
+  authentication: "none" | "headers_configured";
+  trusted: boolean;
+  runtime: "loaded" | "older" | "not_loaded";
+};
+
+export type MCPTrustResultPayload = {
+  action: MCPTrustAction;
+  code?: string;
+  server_name?: string;
+  review_id?: string;
+  services?: MCPTrustService[];
 };
 
 export type AssetListPayload = {

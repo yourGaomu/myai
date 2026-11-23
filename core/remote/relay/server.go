@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,7 @@ type Server struct {
 	addr             string
 	upgrader         websocket.Upgrader
 	agentLock        sync.RWMutex
-	agents           map[string]*agentEntry
+	agents           map[agentIdentity]*agentEntry
 	bindings         map[string]*bindingEntry
 	pairLimiter      pairRateLimiter
 	authStore        authorizationport.Store
@@ -36,13 +37,15 @@ type Server struct {
 	clients          map[string]*clientEntry
 	connections      map[*peer]*clientConnection
 	interactions     map[interactionKey]*pendingInteraction
-	agentCredentials map[string]string
+	agentCredentials map[agentIdentity]string
 	origins          map[string]struct{}
 	loopbackOrigins  map[string]struct{}
 	allowAllOrigins  bool
+	mcpTrustLocalDev bool // configured before serving
 
 	foregroundPermissions map[foregroundPermissionKey]*foregroundPermission // guarded by clientLock
 	mcpDetailAgentRoutes  map[string]*clientEntry                           // guarded by clientLock
+	mcpTrustAgentRoutes   map[string]*clientEntry                           // guarded by clientLock
 }
 
 type Option func(*Server)
@@ -85,6 +88,12 @@ func WithAllowedOrigins(origins ...string) Option {
 	}
 }
 
+// WithMCPTrustLocalDevelopment permits unencrypted trust traffic for direct
+// loopback development only. Never enable behind a proxy.
+func WithMCPTrustLocalDevelopment() Option {
+	return func(server *Server) { server.mcpTrustLocalDev = true }
+}
+
 func NewServer(addr string, authStore authorizationport.Store, options ...Option) *Server {
 	if addr == "" {
 		addr = ":8080"
@@ -92,13 +101,13 @@ func NewServer(addr string, authStore authorizationport.Store, options ...Option
 
 	server := &Server{
 		addr:             addr,
-		agents:           make(map[string]*agentEntry),
+		agents:           make(map[agentIdentity]*agentEntry),
 		bindings:         make(map[string]*bindingEntry),
 		authStore:        authStore,
 		clients:          make(map[string]*clientEntry),
 		connections:      make(map[*peer]*clientConnection),
 		interactions:     make(map[interactionKey]*pendingInteraction),
-		agentCredentials: make(map[string]string),
+		agentCredentials: make(map[agentIdentity]string),
 		origins:          make(map[string]struct{}),
 		loopbackOrigins:  make(map[string]struct{}),
 
@@ -126,9 +135,23 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	if os.Getenv("MYAI_RELAY_MCP_TRUST_LOCAL_DEV") == "1" {
+		s.mcpTrustLocalDev = true
+	}
+	if s.mcpTrustLocalDev && !loopbackListenAddress(s.addr) {
+		return errors.New("MCP trust local development requires a loopback Relay listen address")
+	}
+	certFile, keyFile := os.Getenv("MYAI_RELAY_TLS_CERT_FILE"), os.Getenv("MYAI_RELAY_TLS_KEY_FILE")
+	if (certFile == "") != (keyFile == "") {
+		return errors.New("both Relay TLS certificate and key are required")
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("relay server listening on %s", s.addr)
+		if certFile != "" {
+			errCh <- server.ListenAndServeTLS(certFile, keyFile)
+			return
+		}
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -156,6 +179,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/pair", s.handlePair)
 	mux.HandleFunc("/authorizations", s.handleAuthorizations)
 	mux.HandleFunc("/authorizations/revoke", s.handleRevokeAuthorization)
+	mux.HandleFunc(protocol.MCPTrustCheckPath, s.handleMCPTrustCheck)
 	mux.HandleFunc("/ws/agent", s.handleAgent)
 	mux.HandleFunc("/ws/client", s.handleClient)
 	mux.Handle("/", s.webHandler())
@@ -164,6 +188,11 @@ func (s *Server) routes() http.Handler {
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == protocol.MCPTrustCheckPath {
+			// This is an Agent-to-Relay endpoint, not a browser API.
+			next.ServeHTTP(w, r)
+			return
+		}
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin != "" {
 			if !s.originAllowed(r) {
@@ -252,6 +281,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		conn.SetReadLimit(8 * 1024 * 1024)
 	}
 	peer := newPeer(conn)
+	peer.mcpTrustTransport = s.mcpTrustTransportAllowed(r)
 	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
@@ -309,6 +339,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		// request cannot be closed by the read deadline while its Pong is delayed.
 		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 
+		if role == "client" && message.Type == protocol.TypeMCPTrust && len(raw) > protocol.MCPTrustMaxRequestBytes {
+			if err := writeError(peer, message, errors.New("mcp trust request is too large")); err != nil {
+				return
+			}
+			continue
+		}
+		if role == "agent" && strings.HasPrefix(message.RequestID, mcpTrustIDPrefix) && len(raw) > protocol.MCPTrustMaxResponseBytes {
+			message.Payload = nil // A matching route receives only the sanitized failure.
+		}
 		if role == "client" && message.Type == protocol.TypeMCPDetail && len(raw) > protocol.MCPDetailRequestMaxJSONBytes {
 			if err := writeError(peer, message, errors.New("mcp detail request is too large")); err != nil {
 				return
@@ -328,7 +367,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 			continue
 		}
 
-		log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
+		// Do not log private MCP trust correlators, which authorize the narrow check.
+		if message.Type != protocol.TypeMCPTrust && !strings.HasPrefix(message.RequestID, mcpTrustIDPrefix) {
+			log.Printf("%s message: type=%s request=%s user=%s device=%s session=%s", role, message.Type, message.RequestID, message.UserID, message.DeviceID, message.SessionID)
+		}
 		if err := s.handleRemoteMessage(peer, role, remoteAddr, message, authenticatedAgent, &agentUserID, &agentDeviceID); err != nil {
 			log.Printf("%s handle message failed: %v", role, err)
 			if writeErr := writeError(peer, message, err); writeErr != nil {
@@ -338,6 +380,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 			continue
 		}
 
+		if role == "agent" && strings.HasPrefix(message.RequestID, mcpTrustIDPrefix) {
+			continue // A private terminal Agent response needs no legacy ack.
+		}
 		if err := writeAck(peer, role, message); err != nil {
 			log.Printf("%s ack failed: %v", role, err)
 			return
@@ -367,6 +412,20 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		if !s.isCurrentAgentPeer(p, *agentUserID, *agentDeviceID) {
 			return errors.New("agent connection has been superseded")
 		}
+	}
+	if strings.HasPrefix(message.RequestID, mcpTrustIDPrefix) {
+		switch message.Type {
+		case protocol.TypeMCPTrustResult, protocol.TypeError:
+			return s.forwardMCPTrust(p, message)
+		default:
+			return errors.New("agent request ID is reserved")
+		}
+	}
+	if message.Type == protocol.TypeMCPTrustResult {
+		return nil // Never allow trust results onto generic routes.
+	}
+	if message.Type == protocol.TypeMCPTrustInternal || message.Type == protocol.TypeMCPTrust {
+		return errors.New("invalid agent mcp trust message type")
 	}
 	if strings.HasPrefix(message.RequestID, mcpDetailIDPrefix) {
 		return s.forwardMCPDetail(p, message)
@@ -421,6 +480,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 				return s.forwardSessionRename(message)
 			case protocol.TypeMCPDetail:
 				return s.forwardMCPDetail(p, message)
+			case protocol.TypeMCPTrust, protocol.TypeMCPTrustInternal:
+				return nil // Never deliver uncorrelated or unsanitized legacy errors.
 			}
 		}
 		return s.forwardToClient(message)
@@ -450,10 +511,14 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 }
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
-	if strings.HasPrefix(message.RequestID, mcpDetailIDPrefix) {
+	if strings.HasPrefix(message.RequestID, mcpDetailIDPrefix) || strings.HasPrefix(message.RequestID, mcpTrustIDPrefix) {
 		return errors.New("client request ID is reserved")
 	}
 	switch message.Type {
+	case protocol.TypeMCPTrust:
+		return s.routeMCPTrust(p, remoteAddr, message)
+	case protocol.TypeMCPTrustInternal, protocol.TypeMCPTrustResult:
+		return errors.New("invalid client mcp trust message type")
 	case protocol.TypeSessionRename:
 		return s.routeSessionRename(p, remoteAddr, message)
 	case protocol.TypePermissionResult:
@@ -812,7 +877,7 @@ func writeError(p *peer, received protocol.Message, cause error) error {
 	var authError clientAuthError
 	_ = errors.As(cause, &authError)
 	var approvalID, questionID string
-	if received.Type != protocol.TypeMCPDetail {
+	if received.Type != protocol.TypeMCPDetail && received.Type != protocol.TypeMCPTrust && received.Type != protocol.TypeMCPTrustInternal && received.Type != protocol.TypeMCPTrustResult {
 		approvalID = controlReplyID(received, "approval_id")
 		questionID = controlReplyID(received, "question_id")
 	}

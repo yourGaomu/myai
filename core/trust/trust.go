@@ -273,8 +273,13 @@ func (s *Store) Trusted(request Request) (bool, error) {
 	return false, nil
 }
 
-func (s *Store) Approve(request Request) error { return s.update(request, true) }
-func (s *Store) Revoke(request Request) error  { return s.update(request, false) }
+func (s *Store) Approve(request Request) error { return s.ApproveIf(request, nil) }
+func (s *Store) Revoke(request Request) error  { return s.update(request, false, nil) }
+
+// ApproveIf rechecks a caller's authorization after taking the write lock.
+func (s *Store) ApproveIf(request Request, check func() error) error {
+	return s.update(request, true, check)
+}
 
 // List exposes only scope and digest, including approvals whose declaration is
 // no longer present, so the user can revoke stale approvals too.
@@ -302,7 +307,7 @@ func (s *Store) List(workspace string, kind Kind) ([]Request, error) {
 	return requests, nil
 }
 
-func (s *Store) update(request Request, approve bool) error {
+func (s *Store) update(request Request, approve bool, check func() error) error {
 	unlock, err := s.lock(request)
 	if err != nil {
 		return err
@@ -312,10 +317,17 @@ func (s *Store) update(request Request, approve bool) error {
 	if err != nil {
 		return err
 	}
+	if check != nil {
+		if err := check(); err != nil {
+			return err
+		}
+	}
 	next := make([]Request, 0, len(data.Approvals)+1)
 	for _, existing := range data.Approvals {
 		if !sameRequest(existing, request) {
 			next = append(next, existing)
+		} else if approve {
+			return nil
 		}
 	}
 	if approve {
@@ -370,37 +382,45 @@ func (s *Store) validateScope(request Request) error {
 
 func (s *Store) read() (records, error) {
 	data := records{Version: 1}
+	err := s.readJSON(&data)
+	if err == nil && data.Version != 1 {
+		err = errors.New("invalid user trust store format")
+	}
+	return data, err
+}
+
+func (s *Store) readJSON(data any) error {
 	info, err := os.Lstat(s.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return data, nil
+		return nil
 	}
 	if err != nil {
-		return data, errors.New("read user trust store")
+		return errors.New("read user trust store")
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxStoreBytes {
-		return data, errors.New("invalid user trust store file")
+		return errors.New("invalid user trust store file")
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0 {
-		return data, errors.New("user trust store must not be writable by other users")
+		return errors.New("user trust store must not be writable by other users")
 	}
 	file, err := os.Open(s.path)
 	if err != nil {
-		return data, errors.New("open user trust store")
+		return errors.New("open user trust store")
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(io.LimitReader(file, maxStoreBytes+1))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&data); err != nil {
-		return data, errors.New("decode user trust store")
+	if err := decoder.Decode(data); err != nil {
+		return errors.New("decode user trust store")
 	}
 	var trailing any
-	if decoder.Decode(&trailing) != io.EOF || data.Version != 1 {
-		return data, errors.New("invalid user trust store format")
+	if decoder.Decode(&trailing) != io.EOF {
+		return errors.New("invalid user trust store format")
 	}
-	return data, nil
+	return nil
 }
 
-func (s *Store) write(data records) error {
+func (s *Store) write(data any) error {
 	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return errors.New("encode user trust store")

@@ -14,6 +14,8 @@ import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
 import { accentOptions } from "../../constants/theme";
 import { useMotion } from "../../hooks/useMotionConfig";
+import { fetchOwnAuthorizationID } from "../../services/pairing";
+import { copyToClipboard } from "../../utils/clipboard";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
 import { defaultIntentConfig, normalizeIntentStrategy } from "../../hooks/useIntentSettings";
 import type {
@@ -43,6 +45,63 @@ import { websocketURL } from "../../utils/relay";
 import { modelDisplayName, normalizePermission, permissionLabel } from "../../utils/session";
 import { formatTokenCount } from "../../utils/tokenUsage";
 import { fontFamily, radius, weight } from "../../constants/theme";
+
+function PairingAuthorizationID({ relayURL, userID, deviceID, clientToken, buttonFeedback }: {
+  relayURL: string; userID: string; deviceID: string; clientToken: string; buttonFeedback: ButtonFeedback;
+}) {
+  const { palette } = useAppTheme();
+  const styles = useThemedStyles(createStyles);
+  const [authorizationID, setAuthorizationID] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const pending = useRef<AbortController | null>(null);
+  useEffect(() => () => pending.current?.abort(), []);
+
+  async function load() {
+    if (pending.current) return;
+    const controller = new AbortController();
+    pending.current = controller;
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    setMessage("");
+    setLoading(true);
+    try {
+      const id = await fetchOwnAuthorizationID({ relayURL, userID, deviceID, clientToken }, controller.signal);
+      if (!controller.signal.aborted) setAuthorizationID(id);
+    } catch {
+      setMessage("无法读取当前配对的授权 ID，请检查中继后重试。");
+    } finally {
+      clearTimeout(timer);
+      pending.current = null;
+      setLoading(false);
+    }
+  }
+
+  return (
+    <View style={styles.sectionStack}>
+      <Text style={styles.settingTitle}>本机配对授权 ID</Text>
+      <Text style={styles.settingMeta}>用于在电脑端开启本机的 MCP 信任审批，不会显示配对令牌。</Text>
+      {!relayURL.startsWith("https://") ? <Text style={styles.settingMeta}>仅支持从 HTTPS 中继读取授权 ID。</Text> : (
+        <>
+          {authorizationID ? <Text selectable style={styles.settingMeta}>{authorizationID}</Text> : null}
+          <View style={styles.rowCompact}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={loading}
+              onPress={() => {
+                if (!authorizationID) void load();
+                else void copyToClipboard(authorizationID).then((copied) => setMessage(copied ? "授权 ID 已复制。" : "复制失败，可长按 ID 选择并复制。"));
+              }}
+              style={({ pressed }) => buttonFeedback([styles.secondaryButton, loading && styles.disabledButton], pressed)}
+            >
+              <ButtonContent color={palette.ink1} loading={loading} text={authorizationID ? "复制授权 ID" : "显示授权 ID"} />
+            </Pressable>
+          </View>
+          {message ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{message}</Text> : null}
+        </>
+      )}
+    </View>
+  );
+}
 
 type Props = {
   activeSection: SettingsSection | null;
@@ -714,6 +773,9 @@ export function SettingsPanel({
       </View>
       {pairingError ? <Text accessibilityLiveRegion="polite" style={styles.settingMeta}>{pairingError}</Text> : null}
       <Text style={styles.settingMeta}>已配对设备 · {userID} / {deviceID}</Text>
+      {activeSection === "connection" && clientToken ? (
+        <PairingAuthorizationID relayURL={pairedRelayURL} userID={userID} deviceID={deviceID} clientToken={clientToken} buttonFeedback={buttonFeedback} />
+      ) : null}
     </View>
   );
 

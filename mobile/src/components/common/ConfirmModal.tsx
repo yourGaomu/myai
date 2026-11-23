@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { radius, weight } from "../../constants/theme";
@@ -129,7 +129,9 @@ export function ConfirmModal({
             </View>
             <Text style={styles.title}>{title}</Text>
           </View>
-          <Text style={styles.message}>{message}</Text>
+          <ScrollView style={styles.messageScroll}>
+            <Text style={styles.message}>{message}</Text>
+          </ScrollView>
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
@@ -180,6 +182,7 @@ const makeStyles = ({ font, palette, shadow }: ReturnType<typeof useAppTheme>) =
       borderColor: palette.hairlineStrong,
       borderRadius: radius.xl,
       borderWidth: 1,
+      maxHeight: "100%",
       maxWidth: 380,
       padding: 20,
       width: "100%",
@@ -219,11 +222,15 @@ const makeStyles = ({ font, palette, shadow }: ReturnType<typeof useAppTheme>) =
       fontSize: font.title,
       fontWeight: weight.bold,
     },
+    messageScroll: {
+      flexGrow: 0,
+      flexShrink: 1,
+      marginBottom: 20,
+    },
     message: {
       color: palette.ink2,
       fontSize: font.body - 0.5,
       lineHeight: 22,
-      marginBottom: 20,
     },
     actions: {
       flexDirection: "row",

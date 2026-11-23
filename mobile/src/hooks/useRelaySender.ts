@@ -20,7 +20,7 @@ export function useRelaySender({
   return useCallback(
     (type: RelayMessage["type"], overrides: Partial<RelayMessage> = {}) => {
       const handlesOwnErrors = type === "asset_image_preview" || type === "mcp_list" || type === "mcp_detail" ||
-        type === "mcp_reload" || type === "session_context_query" || type === "session_rename";
+        type === "mcp_reload" || type === "mcp_trust" || type === "session_context_query" || type === "session_rename";
       const socket = socketRef.current;
       if (!socket || currentPairingRef.current !== socket.pairing) {
         if (!handlesOwnErrors) addErrorMessage("中继尚未就绪，请等待连接或检查配对。");
@@ -32,7 +32,8 @@ export function useRelaySender({
         request_id: overrides.request_id ?? (activeRequestIDRef.current || newRequestID()),
         user_id: userID,
         device_id: deviceID,
-        session_id: type === "mcp_detail" ? (overrides.session_id || undefined) : (overrides.session_id ?? sessionIDRef.current),
+        session_id: type === "mcp_trust" ? undefined
+          : type === "mcp_detail" ? (overrides.session_id || undefined) : (overrides.session_id ?? sessionIDRef.current),
         client_token: clientToken,
         payload: overrides.payload ?? {},
       };

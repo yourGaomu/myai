@@ -16,7 +16,7 @@ const (
 )
 
 type bindingEntry struct {
-	AgentKey  string
+	AgentKey  agentIdentity
 	ExpiresAt time.Time
 	Consumed  bool
 }

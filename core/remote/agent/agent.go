@@ -38,6 +38,7 @@ type Agent struct {
 	subagentEvents        SubagentEventSource
 	pluginManager         PluginManagerFacade
 	mcpManager            MCPManagerFacade
+	mcpTrustReviews       map[string]mcpTrustReview
 	runtimes              *sessionRuntimeManager
 	writeMu               sync.Mutex
 	requestMu             sync.Mutex
@@ -388,7 +389,9 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 			}
 			continue
 		}
-		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
+		if message.Type != protocol.TypeMCPTrustInternal {
+			fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
+		}
 		if waitCtx.Err() != nil {
 			done <- waitCtx.Err()
 			return

@@ -60,6 +60,7 @@ import { useSubagentInspection } from "../hooks/useSubagentInspection";
 import { useSubagentState } from "../hooks/useSubagentState";
 import { useIntentSettings } from "../hooks/useIntentSettings";
 import { useMCPState } from "../hooks/useMCPState";
+import { useMCPTrust } from "../hooks/useMCPTrust";
 import { SubagentInspectionModal } from "../components/subagents/SubagentInspectionModal";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
@@ -426,6 +427,9 @@ function PairedWorkspace({
     if (connected && viewMode === "chat" && sessionID) requestContextInfo();
   }, [connected, requestContextInfo, sessionID, viewMode]);
 
+  const mcpTrust = useMCPTrust({ relayScopeRef, sendEnvelope });
+  const { afterReload: refreshMCPTrustAfterReload, handleMessage: handleMCPTrustMessage,
+    setActive: setMCPTrustActive, syncScope: syncMCPTrustScope } = mcpTrust;
   const {
     backFromDetail: backFromMCPDetail,
     closeDetail: closeMCPDetail,
@@ -442,9 +446,12 @@ function PairedWorkspace({
     reload: reloadMCP,
     handleDisconnect: disconnectMCP,
     handleMessage: handleMCPMessage,
-  } = useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelope });
+  } = useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelope, onReloaded: refreshMCPTrustAfterReload });
   const mcpSectionActive = viewMode === "settings" && settingsSection === "plugin";
   const visibleMCPDetail = mcpSectionActive && connected ? mcpDetail : null;
+  useLayoutEffect(() => {
+    setMCPTrustActive(mcpSectionActive && !mcpDetail);
+  }, [mcpDetail, mcpSectionActive, setMCPTrustActive]);
   const mcpDetailNavKey = visibleMCPDetail
     ? JSON.stringify([visibleMCPDetail.serverName, visibleMCPDetail.selectedToolID])
     : undefined;
@@ -1069,8 +1076,9 @@ function PairedWorkspace({
     reconnectKnowledgeUploads();
     requestUserQuestionSync();
     requestMCPInventory();
+    syncMCPTrustScope();
     refreshAllRemoteState();
-  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestMCPInventory, requestUserQuestionSync, syncPreviewConnection]);
+  }, [reconnectAssetUploads, reconnectKnowledgeUploads, refreshAllRemoteState, requestMCPInventory, requestUserQuestionSync, syncMCPTrustScope, syncPreviewConnection]);
 
   const handleDisconnected = useCallback(() => {
     syncPreviewConnection();
@@ -1078,18 +1086,19 @@ function PairedWorkspace({
     resetRemoteQueries();
     resetContextQuery();
     disconnectMCP();
+    syncMCPTrustScope();
     disconnectModelDelete();
     renameTracker.disconnect();
     disconnectFileUpload();
     disconnectKnowledgeUploads();
     disconnectAssetUploads();
     stopPending("pause");
-  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectMCP, disconnectModelDelete, renameTracker, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectMCP, disconnectModelDelete, renameTracker, resetContextQuery, resetRemoteQueries, stopPending, syncMCPTrustScope, syncPreviewConnection]);
 
   const dispatchRelayMessage = useCallback((message: RelayMessage) => {
-    if (handleContextMessage(message) || handleMCPMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
+    if (handleMCPTrustMessage(message) || handleContextMessage(message) || handleMCPMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
     handleRemoteMessage(message);
-  }, [handleContextMessage, handleMCPMessage, handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
+  }, [handleMCPTrustMessage, handleContextMessage, handleMCPMessage, handleAssetPreviewMessage, handleKnowledgeUploadMessage, handleRemoteMessage]);
   useLayoutEffect(() => {
     onEnqueueFailureRef.current = dispatchRelayMessage;
   }, [dispatchRelayMessage]);
@@ -1696,6 +1705,7 @@ function PairedWorkspace({
             detail: visibleMCPDetail, inventory: mcpInventory, loadMoreDetail: loadMoreMCPDetail,
             openDetail: openMCPDetail, openTool: openMCPTool, refresh: requestMCPInventory,
             reload: reloadMCP, reloading: mcpReloading, reloadMessage: mcpMessage, retryDetail: retryMCPDetail,
+            trust: mcpTrust,
           },
           onSetPluginEnabled: setPluginEnabled,
           onRelayURLChange,
