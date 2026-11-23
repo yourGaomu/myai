@@ -23,6 +23,8 @@ export type MessageType =
   | "session_list_result"
   | "session_new"
   | "session_load"
+  | "session_rename"
+  | "session_rename_result"
   | "session_delete"
   | "session_delete_result"
   | "session_restore"
@@ -614,6 +616,7 @@ export type UserQuestionListResultPayload = {
 export type SessionSummary = {
   id: string;
   title?: string;
+  title_revision?: number;
   model?: string;
   agent_mode?: string;
   permission_mode?: string;
@@ -678,6 +681,15 @@ export type SessionChangedPayload = SessionListResultPayload & {
 
 export type SessionHistoryPayload = {
   session_id?: string;
+};
+
+export type SessionRenamePayload = {
+  session_id: string;
+  title: string;
+};
+
+export type SessionRenameResultPayload = SessionRenamePayload & {
+  title_revision: number;
 };
 
 export type SessionDeletePayload = {

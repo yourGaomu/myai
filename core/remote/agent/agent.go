@@ -441,6 +441,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleSessionNew(ctx, conn, message)
 	case protocol.TypeSessionLoad:
 		return a.handleSessionLoad(ctx, conn, message)
+	case protocol.TypeSessionRename:
+		return a.handleSessionRename(ctx, conn, message)
 	case protocol.TypeSessionDelete:
 		return a.handleSessionDelete(ctx, conn, message)
 	case protocol.TypeSessionRestore:

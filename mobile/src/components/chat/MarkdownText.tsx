@@ -1,11 +1,12 @@
 import { type ReactNode, useMemo, useState } from "react";
-import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { copyToClipboard } from "../../utils/clipboard";
-import { isEscapedMarkdown, markdownImage, markdownInlineMatches, markdownLinkTarget, parseMarkdownBlocks, webURL, type MarkdownBlock } from "../../utils/chatMarkdown";
+import { isEscapedMarkdown, markdownImage, markdownInlineMatches, markdownInlineMath, markdownLinkTarget, parseMarkdownBlocks, webURL, type MarkdownBlock } from "../../utils/chatMarkdown";
+import { MathFormula } from "./MathFormula";
 import { useChatStyles, type ChatStyles } from "./styles";
 
 // tone="muted" 用于过程时间线里的思考文字：更小、更淡，和最终回答拉开层次。
@@ -30,19 +31,15 @@ export function MarkdownText({ text, tone = "default" }: { text: string; tone?: 
 
 function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default" | "muted", styles: ChatStyles) {
   const muted = tone === "muted" ? styles.markdownMutedText : null;
+  if (block.type === "math") {
+    return <MathFormula key={`math-${index}`} display source={block.source} text={block.text} textStyle={StyleSheet.flatten([styles.markdownParagraph, muted])} />;
+  }
+
   if (block.type === "heading") {
+    const headingStyle = [styles.markdownHeading, styles[`markdownHeading${block.level}`]];
     return (
-      <Text
-        key={`heading-${index}`}
-        selectable
-        style={[
-          styles.markdownHeading,
-          block.level === 1 && styles.markdownHeading1,
-          block.level === 2 && styles.markdownHeading2,
-          block.level === 3 && styles.markdownHeading3,
-        ]}
-      >
-        {renderMarkdownInline(block.text, `heading-${index}`, styles)}
+      <Text key={`heading-${index}`} selectable style={headingStyle}>
+        {renderMarkdownInline(block.text, `heading-${index}`, styles, StyleSheet.flatten(headingStyle))}
       </Text>
     );
   }
@@ -50,7 +47,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
   if (block.type === "paragraph") {
     return (
       <Text key={`paragraph-${index}`} selectable style={[styles.markdownParagraph, muted]}>
-        {renderMarkdownInline(block.text, `paragraph-${index}`, styles)}
+        {renderMarkdownInline(block.text, `paragraph-${index}`, styles, StyleSheet.flatten([styles.markdownParagraph, muted]))}
       </Text>
     );
   }
@@ -62,7 +59,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
           <View key={`list-${index}-${itemIndex}`} style={styles.markdownListItem}>
             <Text style={[styles.markdownListMarker, muted]}>{block.ordered ? `${itemIndex + 1}.` : "•"}</Text>
             <Text selectable style={[styles.markdownListText, muted]}>
-              {renderMarkdownInline(item, `list-${index}-${itemIndex}`, styles)}
+              {renderMarkdownInline(item, `list-${index}-${itemIndex}`, styles, StyleSheet.flatten([styles.markdownListText, muted]))}
             </Text>
           </View>
         ))}
@@ -84,7 +81,7 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number, tone: "default
       <View style={styles.flex}>
         {block.lines.map((line, lineIndex) => (
           <Text key={`quote-${index}-${lineIndex}`} selectable style={styles.markdownQuoteText}>
-            {renderMarkdownInline(line, `quote-${index}-${lineIndex}`, styles)}
+            {renderMarkdownInline(line, `quote-${index}-${lineIndex}`, styles, styles.markdownQuoteText)}
           </Text>
         ))}
       </View>
@@ -135,7 +132,7 @@ function MarkdownTable({ header, rows, styles }: { header: string[]; rows: strin
           {columns.map((columnIndex) => (
             <View key={`header-${columnIndex}`} style={[styles.markdownTableCell, styles.markdownTableHeaderCell]}>
               <Text selectable style={styles.markdownTableCellText}>
-                {renderMarkdownInline(header[columnIndex] || "", `table-header-${columnIndex}`, styles)}
+                {renderMarkdownInline(header[columnIndex] || "", `table-header-${columnIndex}`, styles, styles.markdownTableCellText)}
               </Text>
             </View>
           ))}
@@ -145,7 +142,7 @@ function MarkdownTable({ header, rows, styles }: { header: string[]; rows: strin
             {columns.map((columnIndex) => (
               <View key={`row-${rowIndex}-${columnIndex}`} style={styles.markdownTableCell}>
                 <Text selectable style={styles.markdownTableCellText}>
-                  {renderMarkdownInline(row[columnIndex] || "", `table-${rowIndex}-${columnIndex}`, styles)}
+                  {renderMarkdownInline(row[columnIndex] || "", `table-${rowIndex}-${columnIndex}`, styles, styles.markdownTableCellText)}
                 </Text>
               </View>
             ))}
@@ -192,7 +189,7 @@ function trimURL(text: string) {
   return text.slice(0, end);
 }
 
-function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyles, allowLinks = true): ReactNode[] {
+function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyles, textStyle: TextStyle, allowLinks = true): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIndex = 0;
   let partIndex = 0;
@@ -204,12 +201,15 @@ function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyle
 
     const token = match[0];
     const key = `${keyPrefix}-${partIndex}`;
+    const formula = markdownInlineMath(token);
     if (isEscapedMarkdown(text, match.index)) {
       parts.push(token);
+    } else if (formula) {
+      parts.push(<MathFormula key={key} source={token} text={formula.text} textStyle={textStyle} />);
     } else if (token.startsWith("**")) {
       parts.push(
         <Text key={key} style={styles.markdownStrong}>
-          {renderMarkdownInline(token.slice(2, -2), key, styles, allowLinks)}
+          {renderMarkdownInline(token.slice(2, -2), key, styles, textStyle, allowLinks)}
         </Text>,
       );
     } else if (token.startsWith("`")) {
@@ -222,7 +222,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyle
     } else if (token.startsWith("*")) {
       parts.push(
         <Text key={key} style={styles.markdownEmphasis}>
-          {renderMarkdownInline(token.slice(1, -1), key, styles, allowLinks)}
+          {renderMarkdownInline(token.slice(1, -1), key, styles, textStyle, allowLinks)}
         </Text>,
       );
     } else if (!allowLinks) {
@@ -240,7 +240,7 @@ function renderMarkdownInline(text: string, keyPrefix: string, styles: ChatStyle
       const link = token.match(/^\[((?:\\.|[^\]\\\n])+)\]\((.*)\)$/);
       const url = link && webURL(markdownLinkTarget(link[2]));
       if (link && url) {
-        parts.push(<MarkdownLink key={key} styles={styles} url={url}>{renderMarkdownInline(link[1], `${key}-label`, styles, false)}</MarkdownLink>);
+        parts.push(<MarkdownLink key={key} styles={styles} url={url}>{renderMarkdownInline(link[1], `${key}-label`, styles, { ...textStyle, color: styles.markdownLink.color }, false)}</MarkdownLink>);
       } else {
         parts.push(token);
       }

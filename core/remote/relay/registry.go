@@ -69,6 +69,7 @@ type clientEntry struct {
 	peer        *peer
 
 	foregroundFinished bool
+	renameSessionID    string
 	previewSessionID   string
 	previewAssetID     string
 }
@@ -261,7 +262,7 @@ func (s *Server) registerClient(requestID string, requestType protocol.MessageTy
 	s.pruneExpiredClientRoutesLocked(now)
 	clientID := clientTokenHash(clientToken)
 	if previous := s.clients[requestID]; previous != nil {
-		if previous.RequestType == protocol.TypeAssetImagePreview || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
+		if previous.RequestType == protocol.TypeAssetImagePreview || previous.RequestType == protocol.TypeSessionRename || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
 			return false
 		}
 		// Same-client retries keep the original request type so an eventual
@@ -424,7 +425,7 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 		}
 		return false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
+	if client.RequestType == protocol.TypeAssetImagePreview || client.RequestType == protocol.TypeSessionRename || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
 		return false
 	}
 	client.peer = p
@@ -453,8 +454,8 @@ func (s *Server) clientPeerForMessage(message protocol.Message, expected *client
 		}
 		return nil, nil, false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview {
-		return nil, nil, false // A preview is tied to its original socket.
+	if client.RequestType == protocol.TypeAssetImagePreview || client.RequestType == protocol.TypeSessionRename {
+		return nil, nil, false // These requests are tied to their original sockets.
 	}
 	if message.Type == protocol.TypeMCPListResult && client.RequestType != protocol.TypeMCPList {
 		return nil, nil, false

@@ -46,6 +46,8 @@ type Args = {
   pendingHistorySessionIDRef: RefObject<string>;
   relayScopeRef: RefObject<RelayScope>;
   sessionNavigationRef: RefObject<SessionNavigationState>;
+  onSessionDeleted?: (sessionID: string) => void;
+  onSessionList?: (sessions: SessionSummary[]) => void;
   removeSessionContext: (sessionID: string) => void;
   requestAssets: (sessionID?: string) => boolean;
   requestChanges: () => boolean;
@@ -94,6 +96,8 @@ export function useRemoteResultAppliers({
   pendingHistorySessionIDRef,
   relayScopeRef,
   sessionNavigationRef,
+  onSessionDeleted,
+  onSessionList,
   removeSessionContext,
   requestAssets,
   requestChanges,
@@ -194,10 +198,11 @@ export function useRemoteResultAppliers({
       if (!payload) return;
       const nextSessions = payload.sessions || [];
       if (payload.include_deleted) {
-        setDeletedSessions(nextSessions);
+        setDeletedSessions((current) => mergeSessionList(current, nextSessions));
         return;
       }
       setSessions((current) => mergeSessionList(current, nextSessions));
+      if (Array.isArray(payload.sessions)) onSessionList?.(nextSessions);
       const localSessionID = sessionIDRef.current.trim();
       // A list can initialize a blank workspace, but not navigate an existing one.
       const currentSessionID = localSessionID || (!hasPendingNavigation() ? payload.current_session_id?.trim() : "");
@@ -239,6 +244,7 @@ export function useRemoteResultAppliers({
           setDeletedSessions((current) => current.filter((session) => session.id !== affectedID));
           return true;
         }
+        onSessionDeleted?.(affectedID);
         removeSessionContext(affectedID);
         const fallback = nextSessions.find((session) => session.id === targetSessionID) || payload.session;
         setSessions((current) => {
@@ -460,6 +466,8 @@ export function useRemoteResultAppliers({
     historySessionIDRef,
     pendingHistorySessionIDRef,
     relayScopeRef,
+    onSessionDeleted,
+    onSessionList,
     removeSessionContext,
     sessionNavigationRef,
     sessionIDRef,

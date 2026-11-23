@@ -9,7 +9,7 @@ import (
 
 func TestSessionQueryServiceListSessions(t *testing.T) {
 	store := &fakeSessionQueryStore{
-		sessions: []repository.SessionRecord{{ID: "session-1", Deleted: true}},
+		sessions: []repository.SessionRecord{{ID: "session-1", Title: "Automatic title", ManualTitle: "Manual title", TitleRevision: 4, Deleted: true}},
 	}
 
 	records, err := (SessionQueryService{Sessions: store}).ListSessions(context.Background(), true)
@@ -17,7 +17,7 @@ func TestSessionQueryServiceListSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !store.includeDeleted || len(records) != 1 || records[0].ID != "session-1" {
+	if !store.includeDeleted || len(records) != 1 || records[0].ID != "session-1" || records[0].Title != "Manual title" || records[0].TitleRevision != 4 {
 		t.Fatalf("expected deleted sessions to be listed, include=%v records=%#v", store.includeDeleted, records)
 	}
 }

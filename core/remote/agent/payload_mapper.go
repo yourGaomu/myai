@@ -138,6 +138,7 @@ func sessionSummaries(sessions []sessionresult.SessionListItem) []protocol.Sessi
 		summaries = append(summaries, protocol.SessionSummary{
 			ID:             session.ID,
 			Title:          session.Title,
+			TitleRevision:  session.TitleRevision,
 			Model:          session.Model,
 			AgentMode:      agentModePayload(session.AgentMode),
 			PermissionMode: session.PermissionMode,

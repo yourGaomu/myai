@@ -11,6 +11,7 @@ import { useAppTheme, useThemedStyles, type AppTheme } from "../../theme/ThemePr
 import { BottomSheet } from "../common/BottomSheet";
 import { ShimmerProgressBar } from "../common/MotionEffects";
 import { Segmented } from "../common/Segmented";
+import { CacheUsageMeter } from "../chat/TurnTokenUsage";
 
 type Props = {
   activeSession?: SessionSummary;
@@ -25,7 +26,10 @@ type Props = {
   onClose: () => void;
   onCompact: () => void;
   onReconnect: () => void;
+  onRename?: () => void;
+  renameEditor?: import("react").ReactNode;
   onRequestContext: () => void;
+  onRefreshUsage: () => void;
   onSetAgentMode: (mode: SessionAgentMode) => void;
   onSetPermissionMode: (mode: SessionPermissionMode) => void;
   onSwitchModel: (modelID: string) => void;
@@ -63,12 +67,13 @@ export function SessionSheet(props: Props) {
   const ratio = window && used !== undefined ? Math.min(1, used / window) : 0;
   const settingsDisabled = !hasSession || !props.connected || props.pendingSettings;
   const { connected } = props;
-  const requestContextRef = useRef(props.onRequestContext);
-  requestContextRef.current = props.onRequestContext;
+  const requestsRef = useRef({ context: props.onRequestContext, usage: props.onRefreshUsage });
+  requestsRef.current = { context: props.onRequestContext, usage: props.onRefreshUsage };
 
   useEffect(() => {
     if (visible && connected && hasSession) {
-      requestContextRef.current();
+      requestsRef.current.context();
+      requestsRef.current.usage();
     }
   }, [connected, sessionID, visible]);
 
@@ -128,10 +133,16 @@ export function SessionSheet(props: Props) {
     <BottomSheet accessibilityLabel="会话设置" onDismiss={props.onClose} visible={visible}>
       <View style={styles.head}>
         <Text numberOfLines={1} style={styles.title}>{activeSession?.title?.trim() || "新对话"}</Text>
+        {props.onRename ? (
+          <Pressable accessibilityLabel="重命名对话" accessibilityRole="button" onPress={props.onRename} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
+            <Feather color={palette.ink2} name="edit-2" size={17} />
+          </Pressable>
+        ) : null}
         <Pressable accessibilityLabel="关闭" hitSlop={8} onPress={props.onClose} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
           <Feather color={palette.ink2} name="x" size={20} />
         </Pressable>
       </View>
+      {props.renameEditor}
 
       {!props.connected ? (
         <View style={styles.offline}>
@@ -209,6 +220,11 @@ export function SessionSheet(props: Props) {
       <Text style={[styles.hint, permission === "full" && styles.hintWarn]}>{permissionHints[permission]}</Text>
 
       {!props.contextFirst ? contextDetails : null}
+      {hasSession ? (
+        <View style={[styles.group, styles.context, styles.usageGroup]}>
+          <CacheUsageMeter session usage={activeSession?.usage} />
+        </View>
+      ) : null}
     </BottomSheet>
   );
 }
@@ -252,6 +268,7 @@ const makeStyles = ({ palette }: AppTheme) =>
     hint: { color: palette.ink3, fontSize: font.caption, marginLeft: 2, marginTop: 8 },
     hintWarn: { color: palette.warn },
     context: { gap: 12, padding: 14 },
+    usageGroup: { marginTop: 12 },
     contextRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8, justifyContent: "space-between" },
     contextLine: { alignItems: "baseline", flexDirection: "row", gap: 8, justifyContent: "space-between" },
     contextBreakdown: { borderTopColor: palette.hairline, borderTopWidth: 1, gap: 5, paddingTop: 8 },

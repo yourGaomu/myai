@@ -174,6 +174,9 @@ func (s *Server) writeRoutedClient(p *peer, route *clientEntry, message protocol
 
 	s.clientLock.RLock()
 	ownsRoute := s.clients[route.RequestID] == route && route.ownsConnection(s.connections[p])
+	if route.RequestType == protocol.TypeSessionRename {
+		ownsRoute = ownsRoute && route.peer == p
+	}
 	if route.RequestType == protocol.TypeAssetImagePreview {
 		ownsRoute = ownsRoute && route.peer == p && time.Since(route.ConnectedAt) <= assetPreviewRouteTTL
 	}

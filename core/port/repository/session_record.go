@@ -33,7 +33,9 @@ type SessionRecord struct {
 	CompactionSourceHash string
 	CompactionCheckpoint *compaction.Checkpoint
 	CompactedAt          *time.Time
-	Title                string
+	Title                string // Automatic or initial title.
+	ManualTitle          string
+	TitleRevision        int64
 	Usage                *TokenUsageRecord
 	LastUsage            *TokenUsageRecord
 	CurrentPlan          *agentplan.Plan
@@ -44,4 +46,11 @@ type SessionRecord struct {
 	DeletedAt            *time.Time
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+}
+
+func (r SessionRecord) DisplayTitle() string {
+	if r.ManualTitle != "" {
+		return r.ManualTitle
+	}
+	return r.Title
 }

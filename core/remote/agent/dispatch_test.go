@@ -30,6 +30,7 @@ import (
 	contextservice "myai/core/application/chat/context/service"
 	generationservice "myai/core/application/chat/generation/service"
 	currentservice "myai/core/application/session/current/service"
+	lifecycleresult "myai/core/application/session/lifecycle/result"
 	loadservice "myai/core/application/session/load/service"
 	messageservice "myai/core/application/session/message/service"
 	queryservice "myai/core/application/session/query/service"
@@ -64,6 +65,67 @@ func (f *blockingFileFacade) Read(ctx context.Context, _ protocol.FileReadPayloa
 type controlChatFacade struct{ ChatFacade }
 
 func (controlChatFacade) CurrentSessionID() string { return "session" }
+
+type renameDispatchChat struct {
+	ChatFacade
+}
+
+func (renameDispatchChat) RenameSession(_ context.Context, sessionID, title string) (lifecycleresult.RenameSession, error) {
+	return lifecycleresult.RenameSession{SessionID: sessionID, Title: title, TitleRevision: 6}, nil
+}
+
+func TestDispatchSessionRenameRequiresAnExplicitTarget(t *testing.T) {
+	a := &Agent{chatService: renameDispatchChat{}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		a.readLoop(context.Background(), conn, make(chan error, 1))
+	}))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		requestID string
+		sessionID string
+		payloadID string
+		response  protocol.MessageType
+	}{
+		{"rename-missing-target", "envelope-only", "", protocol.TypeError},
+		{"rename-conflicting-target", "other", "target", protocol.TypeError},
+		{"rename-success", "target", "target", protocol.TypeSessionRenameResult},
+	}
+	for _, test := range tests {
+		request, err := protocol.NewMessage(protocol.TypeSessionRename, test.requestID, "local", "pc", test.sessionID, protocol.SessionRenamePayload{SessionID: test.payloadID, Title: "标题"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.WriteJSON(request); err != nil {
+			t.Fatal(err)
+		}
+		var result protocol.Message
+		if err := conn.ReadJSON(&result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Type != test.response || result.RequestID != test.requestID || result.SessionID != test.sessionID {
+			t.Fatalf("wrong response for %+v: %+v", test, result)
+		}
+		if result.Type == protocol.TypeSessionRenameResult {
+			payload, err := protocol.DecodePayload[protocol.SessionRenameResultPayload](result)
+			if err != nil || payload.SessionID != "target" || payload.Title != "标题" || payload.TitleRevision != 6 {
+				t.Fatalf("wrong result payload %+v, err=%v", payload, err)
+			}
+		}
+	}
+}
 
 func TestSlowFileReadKeepsPermissionAndPauseFast(t *testing.T) {
 	facade := &blockingFileFacade{started: make(chan struct{}), release: make(chan struct{})}

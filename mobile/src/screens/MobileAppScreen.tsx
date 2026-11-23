@@ -6,7 +6,9 @@ import { AppHeader, describeConnection } from "../components/layout/AppHeader";
 import { HeaderIconButton, ScreenHeader } from "../components/layout/ScreenHeader";
 import { ChatWallpaperLayer } from "../components/chat/ChatWallpaperLayer";
 import { ConfirmModal } from "../components/common/ConfirmModal";
+import { ResponsiveFormModal } from "../components/common/ResponsiveFormModal";
 import { PermissionSheet } from "../components/permissions/PermissionSheet";
+import { SessionRenameEditor } from "../components/session/SessionRenameEditor";
 import { SessionSheet } from "../components/session/SessionSheet";
 import { settingsSectionTitles, type SettingsSection } from "../components/settings/SettingsHome";
 import { PairingScreen } from "../components/startup/PairingScreen";
@@ -49,6 +51,7 @@ import { useRemoteRequests } from "../hooks/useRemoteRequests";
 import { useSessionContext } from "../hooks/useSessionContext";
 import { useSessionModelActions } from "../hooks/useSessionModelActions";
 import { useSessionModelState } from "../hooks/useSessionModelState";
+import { useSessionRename } from "../hooks/useSessionRename";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
 import { useSessionGenerationState } from "../hooks/useSessionGenerationState";
 import { useSkillState } from "../hooks/useSkillState";
@@ -621,6 +624,26 @@ function PairedWorkspace({
     startPending,
     stopPending,
   });
+  const getRenameScope = useCallback(() => {
+    const scope = relayScopeRef.current;
+    const socket = socketRef.current;
+    return currentPairingRef.current === pairing && socket?.pairing === pairing &&
+      scope.pairingID === pairingID && scope.connectionID === socket.connectionID
+      ? scope : { pairingID: "", connectionID: "" };
+  }, [currentPairingRef, pairing, pairingID, relayScopeRef, socketRef]);
+  const {
+    draft: renameDraft,
+    open: openRename,
+    close: closeRename,
+    edit: editRename,
+    save: saveRename,
+    tracker: renameTracker,
+  } = useSessionRename({ getScope: getRenameScope, refreshSessions: requestSessions, sendEnvelope, sessions, setSessions });
+  const canRenameSessions = connected && Boolean(getRenameScope().connectionID);
+  const openListRename = useCallback((targetSessionID: string) => {
+    openRename(targetSessionID, "list");
+  }, [openRename]);
+
   const {
     addModelConfig,
     deleteModelConfig,
@@ -844,6 +867,8 @@ function PairedWorkspace({
     historySessionIDRef,
     pendingHistorySessionIDRef,
     relayScopeRef,
+    onSessionDeleted: renameTracker.invalidateSession,
+    onSessionList: renameTracker.reconcile,
     removeSessionContext,
     requestAssets,
     requestChanges,
@@ -934,6 +959,7 @@ function PairedWorkspace({
     applyModelConfigMutation,
     applyModelConfigError,
     handleModelDeleteMessage,
+    handleSessionRenameMessage: renameTracker.handleMessage,
     isModelOperationPending: pendingActions.models,
     applyModelSwitch,
     applySkillList,
@@ -1035,11 +1061,12 @@ function PairedWorkspace({
     resetContextQuery();
     disconnectMCP();
     disconnectModelDelete();
+    renameTracker.disconnect();
     disconnectFileUpload();
     disconnectKnowledgeUploads();
     disconnectAssetUploads();
     stopPending("pause");
-  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectMCP, disconnectModelDelete, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
+  }, [disconnectAssetUploads, disconnectFileUpload, disconnectKnowledgeUploads, disconnectMCP, disconnectModelDelete, renameTracker, resetContextQuery, resetRemoteQueries, stopPending, syncPreviewConnection]);
 
   const dispatchRelayMessage = useCallback((message: RelayMessage) => {
     if (handleContextMessage(message) || handleMCPMessage(message) || handleAssetPreviewMessage(message) || handleKnowledgeUploadMessage(message)) return;
@@ -1228,14 +1255,20 @@ function PairedWorkspace({
     setSessionSheetContextFirst(true);
     setSessionSheetVisible(true);
   }, []);
+  const openSheetRename = useCallback(() => {
+    openRename(sessionIDRef.current, "sheet");
+  }, [openRename, sessionIDRef]);
   const closeSessionSheet = useCallback(() => {
+    closeRename("sheet");
     setSessionSheetVisible(false);
     // 从权限确认里点「修改策略」进来的，关掉后回到权限确认
     if (sessionFromPermissionRef.current) {
       sessionFromPermissionRef.current = false;
       setMinimizedPermissionID("");
     }
-  }, []);
+  }, [closeRename]);
+  const sheetRenameDraft = renameDraft?.entry === "sheet" && renameDraft.sessionID === sessionID ? renameDraft : null;
+  const listRenameDraft = renameDraft?.entry === "list" ? renameDraft : null;
   const startNewSession = useCallback(() => {
     setChatScrolled(false);
     setDrawerVisible(false);
@@ -1555,9 +1588,11 @@ function PairedWorkspace({
           sessionID,
         }}
         sessions={{
+          canRenameSessions,
           deletedSessions,
           onDeleteSession: deleteSession,
           onRefreshDeletedSessions: requestDeletedSessions,
+          onRenameSession: openListRename,
           onRestoreSession: restoreSession,
           onSelectSession: selectSession,
           unreadSessionIDs,
@@ -1787,6 +1822,24 @@ function PairedWorkspace({
         visible={confirmRevertFile}
       />
 
+      {listRenameDraft ? (
+        <ResponsiveFormModal
+          buttonFeedback={buttonFeedback}
+          footer={null}
+          onClose={() => closeRename("list")}
+          title="重命名对话"
+          visible
+        >
+          <SessionRenameEditor
+            connected={canRenameSessions}
+            draft={listRenameDraft}
+            onCancel={() => closeRename("list")}
+            onChange={editRename}
+            onSave={saveRename}
+          />
+        </ResponsiveFormModal>
+      ) : null}
+
       {/* 会话设置：模型、对话/规划、工具权限、上下文 */}
       <SessionSheet
         activeSession={activeSession}
@@ -1799,6 +1852,8 @@ function PairedWorkspace({
         onClose={closeSessionSheet}
         onCompact={compactSession}
         onReconnect={connect}
+        onRefreshUsage={requestSessions}
+        onRename={canRenameSessions && activeSession && !activeSession.deleted ? openSheetRename : undefined}
         onRequestContext={requestContextInfo}
         onSetAgentMode={setAgentMode}
         onSetPermissionMode={setPermissionMode}
@@ -1806,6 +1861,15 @@ function PairedWorkspace({
         pendingContext={contextPending}
         pendingModels={pendingActions.models}
         pendingSettings={pendingActions.settings}
+        renameEditor={sheetRenameDraft ? (
+          <SessionRenameEditor
+            connected={canRenameSessions}
+            draft={sheetRenameDraft}
+            onCancel={() => closeRename("sheet")}
+            onChange={editRename}
+            onSave={saveRename}
+          />
+        ) : null}
         sessionID={sessionID}
         visible={sessionSheetVisible}
       />

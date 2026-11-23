@@ -245,9 +245,11 @@ export type ChangesContentProps = {
 };
 
 export type SessionsContentProps = {
+  canRenameSessions: boolean;
   deletedSessions: SessionSummary[];
   onDeleteSession: (sessionID: string) => void;
   onRefreshDeletedSessions: () => void;
+  onRenameSession: (sessionID: string) => void;
   onRestoreSession: (sessionID: string) => void;
   onSelectSession: (sessionID: string) => void;
   unreadSessionIDs?: Record<string, boolean>;

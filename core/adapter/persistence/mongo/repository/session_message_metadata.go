@@ -32,6 +32,8 @@ func (m *Store) TouchSessionMessages(ctx context.Context, record repository.Sess
 	// A message snapshot may initialize defaults, but it cannot initialize a
 	// plan or opt a missing session into plan mode. Plans have their own CAS.
 	initial := record
+	// Only the dedicated rename operation may write these fields, even on insert.
+	initial.ManualTitle, initial.TitleRevision = "", 0
 	initial.CurrentPlan = nil
 	initial.AgentMode = string(session.AgentModeChat)
 	initial.Usage, initial.LastUsage = nil, nil

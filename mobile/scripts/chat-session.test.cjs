@@ -38,7 +38,7 @@ try {
 }
 const { buildChatTurns } = require("../src/utils/chatRenderItems.ts");
 const { historyMessageToChatItem } = require("../src/utils/chatHistory.ts");
-const { promptCacheLabel, turnUsageSummary, usageBreakdown } = require("../src/utils/tokenUsage.ts");
+const { formatCacheRate, promptCacheLabel, promptCacheRate, turnUsageSummary, usageBreakdown } = require("../src/utils/tokenUsage.ts");
 const { findSubagentForLaunch, subagentLaunchState } = require("../src/utils/subagentLaunch.ts");
 const { toolKind } = require("../src/utils/toolDisplay.ts");
 
@@ -184,6 +184,25 @@ test("turn usage summary keeps exact counts and does not treat missing counts as
     "输入 1200 · 输出 未上报 · 上游缓存命中 12（部分上报） · 合计 未上报",
   );
   assert.equal(turnUsageSummary(), "输入 未上报 · 输出 未上报 · 上游缓存未上报 · 合计 未上报");
+});
+
+test("cache rate uses recorded input and refuses partial, legacy, or inconsistent counts", () => {
+  const rate = (prompt, cached, flags = {}) => promptCacheRate({
+    prompt_tokens: prompt, prompt_cached_tokens: cached, prompt_cache_reported: true, ...flags,
+  });
+  assert.equal(formatCacheRate(rate(15334, 15104)), "98.5%");
+  assert.equal(formatCacheRate(rate(1200, undefined)), "0%");
+  assert.equal(formatCacheRate(rate(250, 200)), "80%");
+  assert.equal(formatCacheRate(rate(100, 100)), "100%");
+  assert.equal(formatCacheRate(rate(10000, 1)), "<0.1%");
+  assert.equal(formatCacheRate(rate(10000, 9999)), ">99.9%");
+  assert.equal(rate(1200, 12, { prompt_cache_incomplete: true }), undefined);
+  assert.equal(rate(1200, 12, { prompt_cache_reported: undefined }), undefined);
+  for (const [input, cached] of [[undefined, 1], [0, 0], [10, -1], [10, 11], [10, 1.5], [Infinity, 1]]) {
+    assert.equal(rate(input, cached), undefined);
+  }
+  // Session totals are weighted by tokens, even when turns have different input sizes.
+  assert.equal(formatCacheRate(rate(100 + 900, 50 + 0)), "5%");
 });
 
 test("the turn footer gets all token counts from assistant_done and history", () => {

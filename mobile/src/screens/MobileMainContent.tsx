@@ -306,12 +306,14 @@ export function MobileMainContent({
       {common.viewMode === "sessions" || common.viewMode === "trash" ? (
         <SessionsPanel
           buttonFeedback={common.buttonFeedback}
+          canRenameSessions={sessions.canRenameSessions}
           clientToken={common.clientToken}
           deletedSessions={sessions.deletedSessions}
           mode={common.viewMode === "trash" ? "trash" : "active"}
           onDeleteSession={sessions.onDeleteSession}
           onNewSession={settings.onNewSession}
           onRefreshDeletedSessions={sessions.onRefreshDeletedSessions}
+          onRenameSession={sessions.onRenameSession}
           onRestoreSession={sessions.onRestoreSession}
           onSelectSession={sessions.onSelectSession}
           pendingSessions={common.pendingActions.sessions}

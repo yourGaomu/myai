@@ -407,9 +407,13 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 				return s.forwardControlReply(message)
 			case protocol.TypeAssetImagePreview:
 				return s.forwardAssetImagePreview(message)
+			case protocol.TypeSessionRename:
+				return s.forwardSessionRename(message)
 			}
 		}
 		return s.forwardToClient(message)
+	case protocol.TypeSessionRenameResult:
+		return s.forwardSessionRename(message)
 	case protocol.TypeAssetImagePreviewResult:
 		return s.forwardAssetImagePreview(message)
 	case protocol.TypeAssetUploadResult:
@@ -433,6 +437,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
 	switch message.Type {
+	case protocol.TypeSessionRename:
+		return s.routeSessionRename(p, remoteAddr, message)
 	case protocol.TypePermissionResult:
 		if err := s.checkClientToken(message.UserID, message.DeviceID, message.ClientToken); err != nil {
 			return err

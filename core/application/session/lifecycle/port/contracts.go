@@ -66,6 +66,7 @@ type LifecycleService interface {
 	NewSession(ctx context.Context) (*session.Session, error)
 	LoadSession(ctx context.Context, sessionID string) (*session.Session, error)
 	DeleteSession(ctx context.Context, command lifecyclecommand.DeleteSession) (lifecycleresult.DeleteSession, error)
+	RenameSession(ctx context.Context, command lifecyclecommand.RenameSession) (lifecycleresult.RenameSession, error)
 	RestoreSession(ctx context.Context, command lifecyclecommand.RestoreSession) (string, error)
 	ClearCurrent(ctx context.Context) (*session.Session, error)
 }

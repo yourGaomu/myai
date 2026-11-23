@@ -5,6 +5,7 @@ import (
 
 	agentrunresult "myai/core/application/agentrun/result"
 	modelcommand "myai/core/application/model/command"
+	lifecycleresult "myai/core/application/session/lifecycle/result"
 	sessionresult "myai/core/application/session/result"
 	"myai/core/domain/generation"
 	"myai/core/llm"
@@ -25,6 +26,7 @@ type ChatGenerationFacade interface {
 type SessionLifecycleFacade interface {
 	NewSession(ctx context.Context) error
 	LoadSession(ctx context.Context, sessionID string) error
+	RenameSession(ctx context.Context, sessionID, title string) (lifecycleresult.RenameSession, error)
 	DeleteSession(ctx context.Context, sessionID string) error
 	RestoreSession(ctx context.Context, sessionID string) error
 }

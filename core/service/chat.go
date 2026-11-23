@@ -1081,6 +1081,11 @@ func (s *ChatService) DeleteSession(ctx context.Context, sessionID string) error
 	return err
 }
 
+func (s *ChatService) RenameSession(ctx context.Context, sessionID, title string) (lifecycleresult.RenameSession, error) {
+	// Titles are durable metadata. Renaming neither waits for nor cancels a turn.
+	return s.dependencies.SessionLifecycle.Rename(ctx, lifecyclecommand.RenameSession{SessionID: sessionID, Title: title})
+}
+
 func (s *ChatService) RestoreSession(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	unlock, err := s.lockSessionLifecycle(ctx, sessionID, sessionBlockRestore)

@@ -141,6 +141,7 @@ type Args = {
   applyModelConfigMutation: (payload?: ModelConfigMutationResultPayload) => void;
   applyModelConfigError: (message: string) => void;
   handleModelDeleteMessage: (message: RelayMessage) => boolean;
+  handleSessionRenameMessage?: (message: RelayMessage) => boolean;
   isModelOperationPending: boolean;
   applyModelSwitch: (payload?: ModelSwitchResultPayload) => void;
   applySessionChanged: (message: RelayMessage) => boolean;
@@ -288,6 +289,7 @@ export function useRemoteMessageHandler({
   applyModelConfigMutation,
   applyModelConfigError,
   handleModelDeleteMessage,
+  handleSessionRenameMessage,
   isModelOperationPending,
   applyModelSwitch,
   applySessionChanged,
@@ -358,7 +360,7 @@ export function useRemoteMessageHandler({
 
   return useCallback(
     (message: RelayMessage) => {
-      if (handleAssetUploadMessage(message)) return;
+      if (handleSessionRenameMessage?.(message) || handleAssetUploadMessage(message)) return;
 
       function forgetRequest(requestID: string) {
         if (activeRequestIDRef.current === requestID) activeRequestIDRef.current = "";
@@ -1229,6 +1231,7 @@ export function useRemoteMessageHandler({
       applyModelConfigMutation,
       applyModelConfigError,
       handleModelDeleteMessage,
+      handleSessionRenameMessage,
       isModelOperationPending,
       applyModelSwitch,
       applySessionChanged,

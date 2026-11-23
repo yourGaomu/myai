@@ -3,9 +3,11 @@ package sessionapp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	lifecyclecommand "myai/core/application/session/lifecycle/command"
 	domainmessage "myai/core/domain/message"
 	repository "myai/core/port/repository"
 	"myai/core/session"
@@ -78,6 +80,41 @@ func TestLifecycleServiceRestoreSession(t *testing.T) {
 	if store.restoredID != "session-1" || !store.restoredAt.Equal(fixedLifecycleTime()) {
 		t.Fatalf("expected store session to be marked restored, got id=%q at=%v", store.restoredID, store.restoredAt)
 	}
+}
+
+func TestLifecycleRenameValidatesExplicitTargetAndUnicodeTitle(t *testing.T) {
+	memory := lifecycleMemory("current")
+	store := &fakeRenameSessionRepository{}
+	lifecycle := LifecycleService{Memory: memory, Sessions: store}
+	ctx := context.Background()
+	for _, command := range []lifecyclecommand.RenameSession{
+		{Title: "cannot fall back"},
+		{SessionID: "target", Title: "　\t"},
+		{SessionID: "target", Title: strings.Repeat("界", 101)},
+		{SessionID: "target", Title: "\xff"},
+	} {
+		if _, err := lifecycle.RenameSession(ctx, command); err == nil {
+			t.Fatalf("accepted invalid rename: %+v", command)
+		}
+	}
+	if store.calls != 0 {
+		t.Fatal("invalid request reached repository")
+	}
+	title := strings.Repeat("界", 99) + "🙂"
+	result, err := lifecycle.RenameSession(ctx, lifecyclecommand.RenameSession{SessionID: "target", Title: "  " + title + "　"})
+	if err != nil || result.SessionID != "target" || result.Title != title || result.TitleRevision != 1 || memory.currentID != "current" {
+		t.Fatalf("rename result=%+v err=%v current=%s", result, err, memory.currentID)
+	}
+}
+
+type fakeRenameSessionRepository struct {
+	fakeLifecycleSessionRepository
+	calls int
+}
+
+func (r *fakeRenameSessionRepository) RenameSession(_ context.Context, sessionID, title string) (repository.SessionRecord, error) {
+	r.calls++
+	return repository.SessionRecord{ID: sessionID, Title: "New chat", ManualTitle: title, TitleRevision: int64(r.calls)}, nil
 }
 
 func TestLifecycleServiceClearCurrent(t *testing.T) {

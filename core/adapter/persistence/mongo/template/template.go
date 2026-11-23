@@ -28,6 +28,17 @@ func (t *Template) FindOne(ctx context.Context, collection string, filter any, o
 	return translateError(err)
 }
 
+func (t *Template) FindOneAndUpdate(ctx context.Context, collection string, filter any, update any, out any, opts ...options.Lister[options.FindOneAndUpdateOptions]) error {
+	target, err := t.collection(collection)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		return errors.New("mongo find one and update output is nil")
+	}
+	return translateError(target.FindOneAndUpdate(ctx, filter, update, opts...).Decode(out))
+}
+
 func (t *Template) FindAll(ctx context.Context, collection string, filter any, out any, opts ...options.Lister[options.FindOptions]) error {
 	target, err := t.collection(collection)
 	if err != nil {
