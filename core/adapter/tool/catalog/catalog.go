@@ -35,6 +35,10 @@ func (c Catalog) ToolsForSession(current *session.Session, forceChatMode bool) [
 	}.ToolsForSession(current, forceChatMode)
 }
 
+func (c Catalog) PolicyForSession(current *session.Session) toolservice.SelectionPolicy {
+	return (toolservice.SelectionService{ModePolicy: c.modePolicy()}).PolicyForSession(current, false)
+}
+
 func (c Catalog) modePolicy() toolport.ToolModePolicy {
 	if c.ModePolicy != nil {
 		return c.ModePolicy

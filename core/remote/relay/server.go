@@ -42,6 +42,7 @@ type Server struct {
 	allowAllOrigins  bool
 
 	foregroundPermissions map[foregroundPermissionKey]*foregroundPermission // guarded by clientLock
+	mcpDetailAgentRoutes  map[string]*clientEntry                           // guarded by clientLock
 }
 
 type Option func(*Server)
@@ -308,6 +309,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request, role st
 		// request cannot be closed by the read deadline while its Pong is delayed.
 		_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
 
+		if role == "client" && message.Type == protocol.TypeMCPDetail && len(raw) > protocol.MCPDetailRequestMaxJSONBytes {
+			if err := writeError(peer, message, errors.New("mcp detail request is too large")); err != nil {
+				return
+			}
+			continue
+		}
 		if role == "client" && message.Type == protocol.TypeAssetImagePreview && len(raw) > protocol.AssetImagePreviewRequestMaxJSONBytes {
 			if err := writeError(peer, message, errors.New("image preview request is too large")); err != nil {
 				return
@@ -361,6 +368,9 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 			return errors.New("agent connection has been superseded")
 		}
 	}
+	if strings.HasPrefix(message.RequestID, mcpDetailIDPrefix) {
+		return s.forwardMCPDetail(p, message)
+	}
 	switch message.Type {
 	case protocol.TypeAgentOnline:
 		// AgentOnline 建立 user/device 到连接的路由，之后手机请求才能定位到这台电脑。
@@ -409,6 +419,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 				return s.forwardAssetImagePreview(message)
 			case protocol.TypeSessionRename:
 				return s.forwardSessionRename(message)
+			case protocol.TypeMCPDetail:
+				return s.forwardMCPDetail(p, message)
 			}
 		}
 		return s.forwardToClient(message)
@@ -416,6 +428,8 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		return s.forwardSessionRename(message)
 	case protocol.TypeAssetImagePreviewResult:
 		return s.forwardAssetImagePreview(message)
+	case protocol.TypeMCPDetailResult:
+		return s.forwardMCPDetail(p, message)
 	case protocol.TypeAssetUploadResult:
 		return s.forwardToClient(message)
 	case protocol.TypeUserQuestionListResult, protocol.TypeMCPListResult:
@@ -436,6 +450,9 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 }
 
 func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protocol.Message) error {
+	if strings.HasPrefix(message.RequestID, mcpDetailIDPrefix) {
+		return errors.New("client request ID is reserved")
+	}
 	switch message.Type {
 	case protocol.TypeSessionRename:
 		return s.routeSessionRename(p, remoteAddr, message)
@@ -487,6 +504,8 @@ func (s *Server) handleClientMessage(p *peer, remoteAddr string, message protoco
 		}
 		s.registerClientConnection(p, message.UserID, message.DeviceID, message.ClientToken, remoteAddr)
 		return s.forwardToAgent(message)
+	case protocol.TypeMCPDetail:
+		return s.routeMCPDetail(p, remoteAddr, message)
 	case protocol.TypeAssetImagePreview:
 		return s.routeAssetImagePreview(p, remoteAddr, message)
 	case protocol.TypeAssetUploadBegin, protocol.TypeAssetUploadChunk, protocol.TypeAssetUploadStatus, protocol.TypeAssetUploadComplete, protocol.TypeAssetUploadCancel:
@@ -792,6 +811,11 @@ func controlReplyID(message protocol.Message, field string) string {
 func writeError(p *peer, received protocol.Message, cause error) error {
 	var authError clientAuthError
 	_ = errors.As(cause, &authError)
+	var approvalID, questionID string
+	if received.Type != protocol.TypeMCPDetail {
+		approvalID = controlReplyID(received, "approval_id")
+		questionID = controlReplyID(received, "question_id")
+	}
 	message, err := protocol.NewMessage(
 		protocol.TypeError,
 		received.RequestID,
@@ -807,8 +831,8 @@ func writeError(p *peer, received protocol.Message, cause error) error {
 		}{
 			ErrorPayload: protocol.ErrorPayload{Message: cause.Error()},
 			RequestType:  received.Type,
-			ApprovalID:   controlReplyID(received, "approval_id"),
-			QuestionID:   controlReplyID(received, "question_id"),
+			ApprovalID:   approvalID,
+			QuestionID:   questionID,
 			ErrorCode:    authError,
 		},
 	)

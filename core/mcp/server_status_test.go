@@ -63,7 +63,7 @@ func TestServerStatusesTrackPublishedCatalog(t *testing.T) {
 		{Name: "short_links", State: ServerLoaded, InventoryToolCount: 2, ExposedToolCount: 1},
 		{Name: "empty", State: ServerLoaded},
 		{Name: "off", State: ServerDisabled},
-		{Name: "offline", State: ServerUnavailable},
+		{Name: "offline", State: ServerUnavailable, Reason: ServerStartFailed},
 	}
 	got := manager.ServerStatuses()
 	if !reflect.DeepEqual(got, want) {

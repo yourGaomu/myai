@@ -381,6 +381,13 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 			}
 			continue
 		}
+		if message.Type == protocol.TypeMCPDetail && len(raw) > protocol.MCPDetailRequestMaxJSONBytes {
+			if writeErr := a.writeHandlerError(conn, message, errors.New("mcp detail request is too large")); writeErr != nil {
+				done <- writeErr
+				return
+			}
+			continue
+		}
 		fmt.Printf("relay message: type=%s request=%s\n", message.Type, message.RequestID)
 		if waitCtx.Err() != nil {
 			done <- waitCtx.Err()
@@ -515,6 +522,8 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		a.enqueueCatalogMutation(ctx, conn, message, a.handlePluginReload)
 	case protocol.TypeMCPList:
 		return a.handleMCPList(conn, message)
+	case protocol.TypeMCPDetail:
+		return a.handleMCPDetail(conn, message)
 	case protocol.TypeMCPReload:
 		a.enqueueCatalogMutation(ctx, conn, message, a.handleMCPReload)
 	case protocol.TypePluginEnable:
@@ -763,8 +772,8 @@ func (a *Agent) writeJSON(conn *websocket.Conn, message protocol.Message) error 
 	// reasoning、answer、tool event 可能由不同回调触发，WebSocket 写操作必须串行化。
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
-	if message.Type == protocol.TypeAssetImagePreviewResult {
-		// A stalled thumbnail write must release the shared socket writer.
+	if message.Type == protocol.TypeAssetImagePreviewResult || message.Type == protocol.TypeMCPDetailResult {
+		// A stalled thumbnail or catalog write must release the shared socket writer.
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return err
 		}

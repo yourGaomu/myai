@@ -72,6 +72,30 @@ type clientEntry struct {
 	renameSessionID    string
 	previewSessionID   string
 	previewAssetID     string
+	detailSessionID    string
+	detailServerName   string
+	detailAgentID      string
+	detailAgent        *peer
+}
+
+func (client *clientEntry) expired(now time.Time) bool {
+	switch client.RequestType {
+	case protocol.TypeAssetImagePreview:
+		return now.Sub(client.ConnectedAt) > assetPreviewRouteTTL || now.Sub(client.LastSeenAt) > clientRouteTTL
+	case protocol.TypeMCPDetail:
+		return !now.Before(client.ConnectedAt.Add(mcpDetailRouteTTL))
+	default:
+		return now.Sub(client.LastSeenAt) > clientRouteTTL
+	}
+}
+
+func (client *clientEntry) originalSocketOnly() bool {
+	switch client.RequestType {
+	case protocol.TypeAssetImagePreview, protocol.TypeSessionRename, protocol.TypeMCPDetail:
+		return true
+	default:
+		return false
+	}
 }
 
 type clientConnection struct {
@@ -262,7 +286,7 @@ func (s *Server) registerClient(requestID string, requestType protocol.MessageTy
 	s.pruneExpiredClientRoutesLocked(now)
 	clientID := clientTokenHash(clientToken)
 	if previous := s.clients[requestID]; previous != nil {
-		if previous.RequestType == protocol.TypeAssetImagePreview || previous.RequestType == protocol.TypeSessionRename || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
+		if previous.originalSocketOnly() || previous.UserID != userID || previous.DeviceID != deviceID || previous.ClientID != clientID {
 			return false
 		}
 		// Same-client retries keep the original request type so an eventual
@@ -295,7 +319,7 @@ func (s *Server) touchClient(requestID string) {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	if client := s.clients[requestID]; client != nil {
+	if client := s.clients[requestID]; client != nil && client.RequestType != protocol.TypeMCPDetail {
 		client.LastSeenAt = time.Now()
 	}
 }
@@ -310,7 +334,7 @@ func (s *Server) touchClientPeer(p *peer) {
 	defer s.clientLock.Unlock()
 
 	for _, client := range s.clients {
-		if client.peer == p {
+		if client.peer == p && client.RequestType != protocol.TypeMCPDetail {
 			client.LastSeenAt = now
 		}
 	}
@@ -344,6 +368,9 @@ func (s *Server) finishClientRoute(client *clientEntry) {
 
 func (s *Server) removeClientRouteLocked(client *clientEntry) {
 	delete(s.clients, client.RequestID)
+	if client.detailAgentID != "" {
+		delete(s.mcpDetailAgentRoutes, client.detailAgentID)
+	}
 	s.clearForegroundPermissionsLocked(client)
 }
 
@@ -360,8 +387,7 @@ func (s *Server) unregisterClientPeerForRoute(p *peer, owner *clientEntry) {
 
 	for _, client := range s.clients {
 		if client.peer == p {
-			// Preview IDs stay reserved until their short TTL, and their old
-			// sockets are excluded from replay and rebinding.
+			// Requests tied to this socket cannot be rebound or replayed.
 			client.peer = nil
 		}
 	}
@@ -397,7 +423,7 @@ func (s *Server) getClient(requestID string) *clientEntry {
 	defer s.clientLock.Unlock()
 
 	client := s.clients[requestID]
-	if client != nil && time.Since(client.LastSeenAt) > clientRouteTTL {
+	if client != nil && client.expired(time.Now()) {
 		s.removeClientRouteLocked(client)
 		return nil
 	}
@@ -419,13 +445,13 @@ func (s *Server) rebindClientRequest(requestID string, userID string, deviceID s
 	defer s.clientLock.Unlock()
 
 	client := s.clients[requestID]
-	if client == nil || time.Since(client.LastSeenAt) > clientRouteTTL {
+	if client == nil || client.expired(time.Now()) {
 		if client != nil {
 			s.removeClientRouteLocked(client)
 		}
 		return false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview || client.RequestType == protocol.TypeSessionRename || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
+	if client.originalSocketOnly() || client.UserID != userID || client.DeviceID != deviceID || client.ClientID != clientTokenHash(clientToken) {
 		return false
 	}
 	client.peer = p
@@ -448,13 +474,13 @@ func (s *Server) clientPeerForMessage(message protocol.Message, expected *client
 	if expected != nil && client != expected {
 		return nil, nil, false
 	}
-	if client == nil || now.Sub(client.LastSeenAt) > clientRouteTTL {
+	if client == nil || client.expired(now) {
 		if client != nil {
 			s.removeClientRouteLocked(client)
 		}
 		return nil, nil, false
 	}
-	if client.RequestType == protocol.TypeAssetImagePreview || client.RequestType == protocol.TypeSessionRename {
+	if client.originalSocketOnly() {
 		return nil, nil, false // These requests are tied to their original sockets.
 	}
 	if message.Type == protocol.TypeMCPListResult && client.RequestType != protocol.TypeMCPList {
@@ -522,8 +548,7 @@ func (s *Server) registerClientConnection(p *peer, userID string, deviceID strin
 
 func (s *Server) pruneExpiredClientRoutesLocked(now time.Time) {
 	for _, client := range s.clients {
-		if now.Sub(client.LastSeenAt) > clientRouteTTL ||
-			client.RequestType == protocol.TypeAssetImagePreview && now.Sub(client.ConnectedAt) > assetPreviewRouteTTL {
+		if client.expired(now) {
 			s.removeClientRouteLocked(client)
 		}
 	}

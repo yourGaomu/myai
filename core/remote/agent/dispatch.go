@@ -149,6 +149,11 @@ func (a *Agent) startAsyncOperation(ctx context.Context, conn *websocket.Conn, m
 // Control replies reuse the chat request ID. Tag their errors so neither Relay
 // nor a client mistakes a failed approval for a terminal chat failure.
 func (a *Agent) writeHandlerError(conn *websocket.Conn, message protocol.Message, err error) error {
+	if message.Type == protocol.TypeMCPDetail {
+		return a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, protocol.MCPDetailErrorPayload{
+			ErrorPayload: protocol.ErrorPayload{Message: err.Error()}, RequestType: protocol.TypeMCPDetail,
+		})
+	}
 	payload := struct {
 		protocol.ErrorPayload
 		RequestType protocol.MessageType `json:"request_type,omitempty"`

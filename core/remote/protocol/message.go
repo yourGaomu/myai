@@ -1076,10 +1076,12 @@ type MCPServerSummary struct {
 	State              string `json:"state"`
 	InventoryToolCount int    `json:"inventory_tool_count"`
 	ExposedToolCount   int    `json:"exposed_tool_count"`
+	Reason             string `json:"reason,omitempty"`
 }
 
 type MCPListResultPayload struct {
-	Servers []MCPServerSummary `json:"servers"`
+	Servers         []MCPServerSummary `json:"servers"`
+	CatalogRevision *uint64            `json:"catalog_revision,omitempty"`
 }
 
 type MCPReloadPayload struct{}

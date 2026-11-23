@@ -98,6 +98,8 @@ export type MessageType =
   | "plugin_mutation_result"
   | "mcp_list"
   | "mcp_list_result"
+  | "mcp_detail"
+  | "mcp_detail_result"
   | "mcp_reload"
   | "mcp_reload_result"
   | "background_turn_event"
@@ -1149,10 +1151,45 @@ export type MCPServerSummary = {
   state: "loaded" | "disabled" | "unavailable";
   inventory_tool_count: number;
   exposed_tool_count: number;
+  reason?: "pending_trust" | "start_failed" | "discovery_failed";
 };
 
 export type MCPListResultPayload = {
   servers: MCPServerSummary[];
+  catalog_revision?: number;
+};
+
+export type MCPDetailPayload = {
+  server_name: string;
+  cursor?: string;
+};
+
+export type MCPToolSchemaSummary = {
+  state: "undeclared" | "empty" | "unsupported" | "fields";
+  fields?: { name: string; type?: string; required: boolean }[];
+  truncated?: boolean;
+};
+
+export type MCPToolSummary = {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  alias?: string;
+  host_only: boolean;
+  metadata_truncated?: boolean;
+  input: MCPToolSchemaSummary;
+  output: MCPToolSchemaSummary;
+  eligibility: "available" | "filtered" | "host_only" | "not_evaluated";
+  reason?: "agent_mode" | "permission_mode" | "permission_ceiling" | "allowlist" | "not_registered";
+};
+
+export type MCPDetailResultPayload = {
+  server: MCPServerSummary;
+  catalog_revision: number;
+  session_evaluated: boolean;
+  tools: MCPToolSummary[];
+  next_cursor?: string;
 };
 
 export type MCPReloadPayload = {};

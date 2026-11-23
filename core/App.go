@@ -50,6 +50,7 @@ import (
 	subagentregistry "myai/core/adapter/subagent/registry"
 	subagentruntime "myai/core/adapter/subagent/runtime"
 	subagentsession "myai/core/adapter/subagent/session"
+	toolcatalog "myai/core/adapter/tool/catalog"
 	milvusadapter "myai/core/adapter/vectorstore/milvus"
 	sqlitevec "myai/core/adapter/vectorstore/sqlitevec"
 	opensandboxworkspace "myai/core/adapter/workspace/opensandbox"
@@ -1240,10 +1241,29 @@ func (app *Application) InitMCP() *mcp.Manager {
 }
 
 func (app *Application) MCPServerStatuses() ([]mcp.ServerStatus, error) {
+	statuses, _, err := app.MCPCatalogStatuses()
+	return statuses, err
+}
+
+func (app *Application) MCPCatalogStatuses() ([]mcp.ServerStatus, uint64, error) {
 	if app == nil || app.mcpManager == nil {
-		return nil, errors.New("mcp manager is not configured")
+		return nil, 0, errors.New("mcp manager is not configured")
 	}
-	return app.mcpManager.ServerStatuses(), nil
+	statuses, revision := app.mcpManager.CatalogStatuses()
+	return statuses, revision, nil
+}
+
+func (app *Application) MCPServerDetail(serverName, sessionID, cursor string) (mcp.ServerDetail, error) {
+	if app == nil || app.mcpManager == nil {
+		return mcp.ServerDetail{}, errors.New("mcp manager is not configured")
+	}
+	var evaluate func(string, tooldef.Permission) string
+	if app.sessionMemory != nil {
+		if current := app.sessionMemory.CurrentToolPolicy(sessionID); current != nil {
+			evaluate = (toolcatalog.Catalog{}).PolicyForSession(current).Reason
+		}
+	}
+	return app.mcpManager.ServerDetail(serverName, cursor, evaluate)
 }
 
 // ReloadMCP rereads MCP settings and atomically replaces the configured

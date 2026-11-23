@@ -101,11 +101,7 @@ export function MobileMainContent({
           onReloadSkills={settings.onReloadSkills}
           onRefreshPlugins={settings.onRefreshPlugins}
           onReloadPlugins={settings.onReloadPlugins}
-          onRefreshMCPInventory={settings.onRefreshMCPInventory}
-          mcpInventory={settings.mcpInventory}
-          reloadMCP={settings.reloadMCP}
-          mcpReloading={settings.mcpReloading}
-          mcpMessage={settings.mcpMessage}
+          mcp={settings.mcp}
           onSetPluginEnabled={settings.onSetPluginEnabled}
           onRelayURLChange={settings.onRelayURLChange}
           onSetAgentMode={settings.onSetAgentMode}

@@ -14,3 +14,11 @@ type MCPManagerFacade interface {
 type mcpStatusReader interface {
 	MCPServerStatuses() ([]mcp.ServerStatus, error)
 }
+
+type mcpCatalogStatusReader interface {
+	MCPCatalogStatuses() ([]mcp.ServerStatus, uint64, error)
+}
+
+type mcpDetailReader interface {
+	MCPServerDetail(serverName, sessionID, cursor string) (mcp.ServerDetail, error)
+}

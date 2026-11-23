@@ -14,6 +14,7 @@ type Props = {
   // floatingHeader=true 时顶栏以透明悬浮层覆盖在主内容上方，让对话消息滑过顶栏背部
   header: ReactNode;
   scrollEnabled?: boolean;
+  scrollKey?: string;
 };
 
 export function MobileScreenShell({
@@ -24,6 +25,7 @@ export function MobileScreenShell({
   floatingHeader = false,
   header,
   scrollEnabled = true,
+  scrollKey,
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
@@ -46,6 +48,7 @@ export function MobileScreenShell({
         <View style={styles.stage}>
           {scrollEnabled ? (
             <ScrollView
+              key={scrollKey}
               contentContainerStyle={[styles.content, { paddingBottom: bottomSafePadding + 20 }]}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}

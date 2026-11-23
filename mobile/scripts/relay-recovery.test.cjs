@@ -4,13 +4,15 @@ const Module = require("node:module");
 const { test } = require("node:test");
 const ts = require("typescript");
 
-require.extensions[".ts"] = (module, filename) => {
-  const { outputText } = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    fileName: filename,
-  });
-  module._compile(outputText, filename);
-};
+for (const extension of [".ts", ".tsx"]) {
+  require.extensions[extension] = (module, filename) => {
+    const { outputText } = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+      fileName: filename,
+    });
+    module._compile(outputText, filename);
+  };
+}
 
 let fixture;
 const originalLoad = Module._load;
@@ -270,16 +272,18 @@ const mcpServers = [
   { name: "notes", state: "disabled", inventory_tool_count: 0, exposed_tool_count: 0 },
   { name: "search", state: "unavailable", inventory_tool_count: 0, exposed_tool_count: 0 },
 ];
-const mcpList = (request, servers = mcpServers) => ({
-  type: "mcp_list_result", request_id: request.request_id, payload: { servers },
+const mcpList = (request, servers = mcpServers, catalog_revision) => ({
+  type: "mcp_list_result", request_id: request.request_id,
+  payload: { servers, ...(catalog_revision === undefined ? {} : { catalog_revision }) },
 });
 const mcpReload = (request, reloaded = true) => ({
   type: "mcp_reload_result", request_id: request.request_id, payload: { reloaded, message: "agent detail" },
 });
-const mcpError = (request, payload) => ({ type: "error", request_id: request.request_id, payload });
+const mcpError = (request, payload) => ({ type: "error", request_id: request.request_id, session_id: request.session_id, payload });
 
-function mcpFixture(t, { send = () => true, useTransport = false } = {}) {
+function mcpFixture(t, { send = () => true, useTransport = false, sessionID = "session-a" } = {}) {
   const scope = { current: { pairingID: pairing.pairingID, connectionID: "connection-a" } };
+  const session = { current: sessionID };
   const sent = [], states = [], chatErrors = [];
   const sendFromRelay = useTransport ? useRelaySender({
     socketRef: { current: { pairing, connectionID: "connection-a", send } },
@@ -288,11 +292,12 @@ function mcpFixture(t, { send = () => true, useTransport = false } = {}) {
   }) : send;
   const api = createMCPRequests({
     getScope: () => scope.current,
+    getSessionID: () => session.current,
     sendEnvelope: (type, frame) => { sent.push({ type, ...frame }); return sendFromRelay(type, frame); },
     onChange: (state) => states.push(state),
   });
   t.after(api.clear);
-  return { api, scope, sent, states, chatErrors, get state() { return states.at(-1); } };
+  return { api, scope, session, sent, states, chatErrors, get state() { return states.at(-1); } };
 }
 
 test("MCP inventory and reload own separate global requests and accept explicit empty inventory", (t) => {
@@ -425,4 +430,304 @@ test("MCP transport failures stay in settings and cleanup ignores late results",
   next.api.handleMessage(mcpReload(next.sent[1]));
   assert.equal(next.states.length, updates);
   assert.equal(next.sent.length, 2);
+});
+
+const summaryWithReasons = [mcpServers[0], mcpServers[1], { ...mcpServers[2], reason: "pending_trust" }];
+const tool = (id, props = {}) => ({
+  id, name: id, host_only: false, eligibility: "available",
+  input: { state: "empty" }, output: { state: "undeclared" }, ...props,
+});
+const mcpPage = (request, props = {}) => ({
+  type: "mcp_detail_result", request_id: request.request_id, session_id: request.session_id || undefined,
+  payload: {
+    server: summaryWithReasons.find((row) => row.name === request.payload.server_name),
+    catalog_revision: 7, session_evaluated: Boolean(request.session_id), tools: [], ...props,
+  },
+});
+
+function loadSummary(h, servers = summaryWithReasons, revision = 7) {
+  h.api.refresh();
+  h.api.handleMessage(mcpList(h.sent.at(-1), servers, revision));
+}
+
+test("MCP detail owns server, session, request and socket; only matching pages append", (t) => {
+  const h = mcpFixture(t);
+  loadSummary(h);
+  assert.equal(h.state.inventory.catalogRevision, 7);
+  assert.equal(h.state.inventory.servers.at(-1).reason, "pending_trust");
+  assert.equal(h.api.openDetail("not-in-the-list"), false);
+  h.api.openDetail("notes");
+  const replaced = h.sent.at(-1);
+  h.api.openDetail("files");
+  const first = h.sent.at(-1);
+  assert.equal(h.api.openDetail("files"), false);
+  assert.deepEqual(first.payload, { server_name: "files" });
+  assert.equal(first.type, "mcp_detail");
+  assert.equal(first.session_id, "session-a");
+  assert.match(first.request_id, /^mcp-detail-/);
+  h.api.handleMessage(mcpPage(replaced));
+  h.api.handleMessage({ ...mcpPage(first), session_id: "session-b" });
+  h.api.handleMessage({ ...mcpPage(first), session_id: undefined });
+  h.api.handleMessage(mcpPage(first, { server: mcpServers[1] }));
+  h.api.handleMessage(mcpList(first, []));
+  h.api.handleMessage(mcpError(first, { request_type: "mcp_reload" }));
+  h.api.handleMessage(mcpError(first, { request_type: "mcp_detail", server_name: "notes", code: "mcp_catalog_changed" }));
+  assert.equal(h.state.detail.status, "loading");
+  h.api.handleMessage(mcpPage(first, { tools: [tool("01")], next_cursor: "page-2" }));
+  assert.equal(h.state.detail.status, "ready");
+  assert.equal(h.api.loadMoreDetail(), true);
+  assert.equal(h.api.loadMoreDetail(), false);
+  const second = h.sent.at(-1);
+  assert.deepEqual(second.payload, { server_name: "files", cursor: "page-2" });
+  h.api.openTool("01");
+  h.api.handleMessage(mcpPage(second, { tools: [tool("02")] }));
+  assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["01", "02"]);
+  assert.equal(h.state.detail.selectedToolID, "01");
+  assert.equal(h.api.loadMoreDetail(), false);
+  h.api.backFromDetail();
+  assert.equal(h.state.detail.selectedToolID, undefined);
+  h.api.backFromDetail();
+  assert.equal(h.state.detail, null);
+});
+
+test("MCP detail doesn't mix catalog revisions or evaluated and unevaluated pages", (t) => {
+  const scenarios = [
+    (request) => mcpError(request, { code: "mcp_catalog_changed", request_type: "mcp_detail" }),
+    (request) => mcpPage(request, { catalog_revision: 8, tools: [tool("02")] }),
+    (request) => mcpPage(request, { session_evaluated: false, tools: [tool("02", { eligibility: "not_evaluated" })] }),
+  ];
+  for (const reply of scenarios) {
+    const h = mcpFixture(t);
+    loadSummary(h);
+    h.api.openDetail("files");
+    h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("01")], next_cursor: "page-2" }));
+    h.api.loadMoreDetail();
+    const page2 = h.sent.at(-1);
+    h.api.handleMessage(reply(page2));
+    assert.equal(h.state.detail.status, "changed");
+    assert.equal(h.state.detail.result, null);
+    assert.equal(h.state.inventory.status, "idle");
+    assert.equal(h.api.retryDetail(), true);
+    const restart = h.sent.at(-1);
+    assert.deepEqual(restart.payload, { server_name: "files" });
+    h.api.handleMessage(mcpPage(page2, { tools: [tool("02")] }));
+    assert.equal(h.state.detail.status, "loading");
+    h.api.handleMessage(mcpPage(restart, { catalog_revision: 8, tools: [tool("03")] }));
+    assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["03"]);
+  }
+});
+
+test("MCP detail invalidates immediately on session, policy, connection and pairing changes", (t) => {
+  const h = mcpFixture(t);
+  loadSummary(h);
+  const chat = { id: "session-a", agent_mode: "chat", permission_mode: "ask" };
+  h.api.observeSessionPolicy(chat, "session-a");
+  h.api.openDetail("files");
+  const oldMode = h.sent.at(-1);
+  h.api.observeSessionPolicy({ ...chat, title: "A different title" });
+  assert.equal(h.state.detail.status, "loading");
+  h.api.observeSessionPolicy({ ...chat, permission_mode: "readonly" });
+  h.api.handleMessage(mcpPage(oldMode));
+  assert.equal(h.state.detail, null);
+  h.api.openDetail("files");
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("01")] }));
+  h.api.openTool("01");
+  h.api.observeSessionPolicy(undefined, "session-remote");
+  assert.equal(h.state.detail, null);
+
+  h.api.openDetail("files");
+  const oldSession = h.sent.at(-1);
+  h.session.current = "session-b";
+  h.api.handleMessage(mcpPage(oldSession));
+  assert.equal(h.state.detail, null);
+  h.api.openDetail("files");
+  const oldSocket = h.sent.at(-1);
+  assert.equal(oldSocket.session_id, "session-b");
+  h.scope.current = { ...h.scope.current, connectionID: "" };
+  h.api.handleDisconnect();
+  assert.equal(h.state.inventory.status, "idle");
+  assert.equal(h.state.detail, null);
+  assert.equal(h.api.openDetail("files"), false);
+  h.scope.current = { ...h.scope.current, connectionID: "connection-b" };
+  h.api.openDetail("files");
+  h.api.handleMessage(mcpPage(oldSocket));
+  assert.equal(h.state.detail.status, "loading");
+  h.scope.current = { pairingID: "pairing-b", connectionID: "connection-b" };
+  h.api.handleMessage(mcpPage(h.sent.at(-1)));
+  assert.equal(h.state.detail, null);
+  assert.equal(h.state.inventory.servers, null);
+});
+
+test("MCP detail retains the published snapshot on failed reload but drops it on confirmed reload or a new list revision", (t) => {
+  const h = mcpFixture(t);
+  loadSummary(h);
+  h.api.openDetail("files");
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("old")], next_cursor: "page-2" }));
+  h.api.reload();
+  h.api.handleMessage(mcpReload(h.sent.at(-1), false));
+  assert.equal(h.state.detail.result.tools[0].id, "old");
+  h.api.loadMoreDetail();
+  const stalePage = h.sent.at(-1);
+  h.api.reload();
+  h.api.handleMessage(mcpReload(h.sent.at(-1), true));
+  assert.equal(h.state.detail, null);
+  h.api.handleMessage(mcpPage(stalePage));
+  assert.equal(h.state.detail, null);
+  const list = h.sent.at(-1);
+  assert.equal(list.type, "mcp_list");
+  h.api.handleMessage(mcpList(list, summaryWithReasons, 8));
+  h.api.openDetail("files");
+  const olderFirstPage = h.sent.at(-1);
+  loadSummary(h, summaryWithReasons, 9);
+  h.api.handleMessage(mcpPage(olderFirstPage, { catalog_revision: 8 }));
+  assert.equal(h.state.detail.status, "changed");
+  assert.equal(h.state.detail.result, null);
+  h.api.retryDetail();
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { catalog_revision: 9 }));
+  loadSummary(h, summaryWithReasons, 10);
+  assert.equal(h.state.detail.status, "changed");
+  assert.equal(h.state.detail.result, null);
+  loadSummary(h, [mcpServers[1]], 11);
+  assert.equal(h.state.detail, null);
+});
+
+test("MCP detail supports old summary-only agents and handles silent timeout and transport failure locally", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const frames = [];
+  const h = mcpFixture(t, { useTransport: true, sessionID: "", send: (raw) => {
+    const frame = JSON.parse(raw);
+    frames.push(frame);
+    if (frame.type === "mcp_detail" && frames.length === 4) return Promise.resolve(false);
+  } });
+  h.api.refresh();
+  h.api.handleMessage(mcpList(h.sent.at(-1)));
+  assert.equal(h.state.inventory.status, "ready");
+  assert.equal(h.state.inventory.catalogRevision, undefined);
+  h.api.openDetail("files");
+  assert.equal(Object.hasOwn(frames.at(-1), "session_id"), false);
+  h.api.handleMessage(mcpError(h.sent.at(-1), { message: "unsupported client message type: mcp_detail" }));
+  assert.equal(h.state.detail.status, "unsupported");
+  h.api.openDetail("files");
+  const expired = h.sent.at(-1);
+  t.mock.timers.tick(15_000);
+  assert.equal(h.state.detail.status, "timeout");
+  h.api.handleMessage(mcpPage(expired));
+  assert.equal(h.state.detail.status, "timeout");
+  h.api.retryDetail();
+  await tick();
+  assert.equal(h.state.detail.status, "error");
+  h.api.retryDetail();
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("01", { eligibility: "not_evaluated" })] }));
+  assert.equal(h.state.detail.status, "ready");
+  assert.equal(h.state.detail.result.session_evaluated, false);
+  assert.equal(h.state.inventory.status, "ready");
+  assert.deepEqual(h.chatErrors, []);
+});
+
+test("MCP detail retains loaded pages after a recoverable pagination failure", (t) => {
+  const h = mcpFixture(t);
+  loadSummary(h);
+  h.api.openDetail("files");
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("01")], next_cursor: "page-2" }));
+  h.api.loadMoreDetail();
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("02", { input: { state: "bad" } })] }));
+  assert.equal(h.state.detail.status, "error");
+  assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["01"]);
+  h.api.retryDetail();
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("02", { host_only: true })] }));
+  assert.equal(h.state.detail.status, "error");
+  assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["01"]);
+  h.api.retryDetail();
+  assert.equal(h.sent.at(-1).payload.cursor, "page-2");
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { tools: [tool("02")] }));
+  assert.deepEqual(h.state.detail.result.tools.map(({ id }) => id), ["01", "02"]);
+});
+
+test("narrow MCP settings interaction opens plain-text tool details, goes back, and paginates", (t) => {
+  let width = 320;
+  const jsx = (type, props) => ({ type, props });
+  const stubs = {
+    "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+    "react-native": {
+      Pressable: "Pressable", Text: "Text", View: "View", useWindowDimensions: () => ({ width }),
+      StyleSheet: { create: (styles) => styles }, Platform: { select: (choices) => choices.web ?? choices.default },
+    },
+    "@expo/vector-icons": { Feather: "Feather" },
+    "../../common/ButtonContent": { ButtonContent: "ButtonContent" },
+    "../../../theme/ThemeProvider": { useAppTheme: () => ({ palette: {} }), useThemedStyles: (create) => create({ palette: {} }) },
+  };
+  let MCPCatalogSection;
+  try {
+    Module._load = (name, ...args) => stubs[name] ?? originalLoad.call(Module, name, ...args);
+    ({ MCPCatalogSection } = require("../src/components/settings/sections/MCPCatalogSection.tsx"));
+  } finally {
+    Module._load = originalLoad;
+  }
+  function nodes(value) {
+    if (Array.isArray(value)) return value.flatMap(nodes);
+    if (!value || typeof value !== "object") return [];
+    if (typeof value.type === "function") return nodes(value.type(value.props));
+    return [value, ...nodes(value.props.children)];
+  }
+  function text(value) {
+    if (Array.isArray(value)) return value.map(text).join(" ");
+    if (typeof value === "string" || typeof value === "number") return String(value);
+    if (!value || typeof value !== "object") return "";
+    if (typeof value.type === "function") return text(value.type(value.props));
+    return value.type === "ButtonContent" ? value.props.text : text(value.props.children);
+  }
+  const h = mcpFixture(t);
+  loadSummary(h);
+  const render = (connected = true) => MCPCatalogSection({ ...h.api, ...h.state, connected, buttonFeedback: (style) => style });
+  const button = (tree, label) => nodes(tree).find((node) => node.props.accessibilityRole === "button" &&
+    (node.props.accessibilityLabel === label || text(node).includes(label)));
+
+  assert.match(text(render()), /待信任审批/);
+  assert.match(text(render(false)), /显示上次获取的 MCP 列表/);
+  assert.equal(button(render(false), "files"), undefined);
+  button(render(), "search").props.onPress();
+  h.api.handleMessage(mcpPage(h.sent.at(-1), { session_evaluated: false }));
+  assert.match(text(render()), /此服务没有已发现的工具/);
+  assert.match(text(render()), /未评估会话资格/);
+  h.api.backFromDetail();
+
+  button(render(), "files").props.onPress();
+  const name = "long_tool_name_".repeat(10);
+  const field = "param_name_".repeat(8);
+  h.api.handleMessage(mcpPage(h.sent.at(-1), {
+    tools: [tool("01", {
+      name, title: "Tool A", alias: "mcp_files_tool", description: "<b>Plain description</b>", metadata_truncated: true,
+      eligibility: "filtered", reason: "permission_mode",
+      input: { state: "fields", fields: [{ name: field, type: "string", required: true }], truncated: true },
+      output: { state: "unsupported" },
+    })], next_cursor: "page-2",
+  }));
+  const narrowRow = button(render(), name);
+  assert.equal(narrowRow.props.style({ pressed: false }).some((s) => s?.flexBasis === "48%"), false);
+  width = 900;
+  assert.equal(button(render(), name).props.style({ pressed: false }).some((s) => s?.flexBasis === "48%"), true);
+  width = 320;
+  narrowRow.props.onPress();
+  const detail = render();
+  assert.ok(text(detail).includes(name));
+  assert.ok(text(detail).includes(field));
+  assert.match(text(detail), /必填/);
+  assert.match(text(detail), /模型别名：mcp_files_tool/);
+  assert.match(text(detail), /会话权限模式限制/);
+  assert.match(text(detail), /<b>Plain description<\/b>/);
+  assert.match(text(detail), /结构无法简要展示/);
+  assert.match(text(detail), /内容已截断|信息已截断/);
+  assert.equal(button(detail, "加载更多工具"), undefined);
+  assert.equal(nodes(detail).some((node) => node.type === "Text" && node.props.numberOfLines && text(node).includes(name)), false);
+  h.api.backFromDetail();
+  button(render(), "加载更多工具").props.onPress();
+  assert.deepEqual(button(render(), "加载更多工具").props.accessibilityState, { busy: true, disabled: true });
+  h.api.handleMessage(mcpPage(h.sent.at(-1), {
+    tools: [tool("02", { name: "Internal", host_only: true, eligibility: "host_only" })],
+  }));
+  assert.match(text(render()), /仅 Agent 内部使用/);
+  assert.ok(button(render(), name));
+  h.api.backFromDetail();
+  loadSummary(h, []);
+  assert.match(text(render()), /没有已配置的 MCP 服务/);
 });

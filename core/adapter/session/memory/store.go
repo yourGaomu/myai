@@ -631,6 +631,25 @@ func (sm *Store) Current() (*Session, error) {
 	return sm.getSessionLocked(sm.currentSessionId)
 }
 
+// CurrentToolPolicy copies the visibility inputs for the selected user session.
+func (sm *Store) CurrentToolPolicy(id string) *Session {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if id == "" || sm.currentSessionId != id {
+		return nil
+	}
+	current := sm.session[id]
+	if current == nil || domainsession.NormalizeKind(current.Kind) != domainsession.KindUser {
+		return nil
+	}
+	return &Session{
+		ID: current.ID, AgentMode: current.AgentMode, PermissionMode: current.PermissionMode,
+		EnforceToolAllowlist: current.EnforceToolAllowlist, AllowedTools: append([]string(nil), current.AllowedTools...),
+		PermissionCeiling: domainsession.ClonePermissionCeiling(current.PermissionCeiling),
+		RAGSettings:       domainsession.CloneRAGSettings(current.RAGSettings),
+	}
+}
+
 func (sm *Store) GetSession(sessionId string) (*Session, error) {
 	return sm.Snapshot(sessionId)
 }

@@ -427,18 +427,35 @@ function PairedWorkspace({
   }, [connected, requestContextInfo, sessionID, viewMode]);
 
   const {
+    backFromDetail: backFromMCPDetail,
+    closeDetail: closeMCPDetail,
+    detail: mcpDetail,
     inventory: mcpInventory,
+    loadMoreDetail: loadMoreMCPDetail,
+    observeSessionPolicy: observeMCPPolicy,
+    openDetail: openMCPDetail,
+    openTool: openMCPTool,
+    retryDetail: retryMCPDetail,
     reloading: mcpReloading,
     reloadMessage: mcpMessage,
     refresh: requestMCPInventory,
     reload: reloadMCP,
     handleDisconnect: disconnectMCP,
     handleMessage: handleMCPMessage,
-  } = useMCPState({ relayScopeRef, sendEnvelope });
+  } = useMCPState({ relayScopeRef, sessionIDRef, sessionID, sendEnvelope });
+  const mcpSectionActive = viewMode === "settings" && settingsSection === "plugin";
+  const visibleMCPDetail = mcpSectionActive && connected ? mcpDetail : null;
+  const mcpDetailNavKey = visibleMCPDetail
+    ? JSON.stringify([visibleMCPDetail.serverName, visibleMCPDetail.selectedToolID])
+    : undefined;
+
+  useLayoutEffect(() => {
+    if (!mcpSectionActive) closeMCPDetail();
+  }, [closeMCPDetail, mcpSectionActive]);
 
   useEffect(() => {
-    if (viewMode === "settings" && settingsSection === "plugin") requestMCPInventory();
-  }, [requestMCPInventory, settingsSection, viewMode]);
+    if (mcpSectionActive) requestMCPInventory();
+  }, [mcpSectionActive, requestMCPInventory]);
 
   const { uploadMobileAsset, handleAssetUploadMessage, disconnectAssetUploads, reconnectAssetUploads } = useAssetUpload({
     sendEnvelope,
@@ -869,6 +886,7 @@ function PairedWorkspace({
     relayScopeRef,
     onSessionDeleted: renameTracker.invalidateSession,
     onSessionList: renameTracker.reconcile,
+    onSessionPolicyObserved: observeMCPPolicy,
     removeSessionContext,
     requestAssets,
     requestChanges,
@@ -1229,7 +1247,8 @@ function PairedWorkspace({
         return true;
       }
       if (viewMode === "settings" && settingsSection) {
-        setSettingsSection(null);
+        if (visibleMCPDetail) backFromMCPDetail();
+        else setSettingsSection(null);
         return true;
       }
       if (viewMode === "changeDetail") {
@@ -1243,7 +1262,7 @@ function PairedWorkspace({
       return false;
     });
     return () => subscription.remove();
-  }, [filePreviewOpen, openChanges, openChat, settingsSection, viewMode]);
+  }, [backFromMCPDetail, filePreviewOpen, openChanges, openChat, settingsSection, viewMode, visibleMCPDetail]);
 
   const openSessionSheet = useCallback(() => {
     sessionFromPermissionRef.current = false;
@@ -1358,8 +1377,10 @@ function PairedWorkspace({
     } else if (viewMode === "plan") {
       title = "计划";
     } else if (settingsSection) {
-      title = settingsSectionTitles[settingsSection];
-      onBack = () => setSettingsSection(null);
+      title = visibleMCPDetail
+        ? (visibleMCPDetail.selectedToolID ? "MCP 工具详情" : "MCP 工具目录")
+        : settingsSectionTitles[settingsSection];
+      onBack = visibleMCPDetail ? backFromMCPDetail : () => setSettingsSection(null);
     }
     header = <ScreenHeader onBack={onBack} right={right} subtitle={subtitle} title={title} topInset={topSafePadding} />;
   }
@@ -1454,6 +1475,7 @@ function PairedWorkspace({
       floatingHeader={viewMode === "chat"}
       header={header}
       scrollEnabled={viewMode !== "chat" && viewMode !== "changeDetail"}
+      scrollKey={mcpDetailNavKey}
     >
       <AssetPreviewConnectionContext value={previewConnection}>
       <MobileMainContent
@@ -1670,11 +1692,11 @@ function PairedWorkspace({
           onReloadSkills: reloadSkills,
           onRefreshPlugins: requestPlugins,
           onReloadPlugins: reloadPlugins,
-          onRefreshMCPInventory: requestMCPInventory,
-          mcpInventory,
-          reloadMCP,
-          mcpReloading,
-          mcpMessage,
+          mcp: {
+            detail: visibleMCPDetail, inventory: mcpInventory, loadMoreDetail: loadMoreMCPDetail,
+            openDetail: openMCPDetail, openTool: openMCPTool, refresh: requestMCPInventory,
+            reload: reloadMCP, reloading: mcpReloading, reloadMessage: mcpMessage, retryDetail: retryMCPDetail,
+          },
           onSetPluginEnabled: setPluginEnabled,
           onRelayURLChange,
           onSetAgentMode: setAgentMode,

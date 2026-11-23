@@ -57,10 +57,11 @@ type Client struct {
 }
 
 type ToolInfo struct {
-	Name        string          `json:"name"`
-	Title       string          `json:"title,omitempty"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+	Name         string          `json:"name"`
+	Title        string          `json:"title,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
 
 type CallResult struct {
