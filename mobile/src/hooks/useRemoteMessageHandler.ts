@@ -25,6 +25,10 @@ import type {
   HistoryDiffResultPayload,
   HistoryListResultPayload,
   HistoryRevertResultPayload,
+  ImageModelConfigAddResultPayload,
+  ImageModelConfigMutationResultPayload,
+  ImageModelConfigTestResultPayload,
+  ImageModelListResultPayload,
   IntentConfigResultPayload,
   IntentConfigTestResultPayload,
   IntentTraceClearResultPayload,
@@ -140,6 +144,11 @@ type Args = {
   applyModelConfigTest: (payload?: ModelConfigTestResultPayload) => void;
   applyModelConfigMutation: (payload?: ModelConfigMutationResultPayload) => void;
   applyModelConfigError: (message: string) => void;
+  applyImageModelList: (payload?: ImageModelListResultPayload) => void;
+  applyImageModelConfigAdd: (payload?: ImageModelConfigAddResultPayload) => void;
+  applyImageModelConfigTest: (payload?: ImageModelConfigTestResultPayload) => void;
+  applyImageModelConfigMutation: (payload?: ImageModelConfigMutationResultPayload) => void;
+  applyImageModelConfigError: (message: string) => void;
   handleModelDeleteMessage: (message: RelayMessage) => boolean;
   handleSessionRenameMessage?: (message: RelayMessage) => boolean;
   isModelOperationPending: boolean;
@@ -288,6 +297,11 @@ export function useRemoteMessageHandler({
   applyModelConfigTest,
   applyModelConfigMutation,
   applyModelConfigError,
+  applyImageModelList,
+  applyImageModelConfigAdd,
+  applyImageModelConfigTest,
+  applyImageModelConfigMutation,
+  applyImageModelConfigError,
   handleModelDeleteMessage,
   handleSessionRenameMessage,
   isModelOperationPending,
@@ -954,6 +968,22 @@ export function useRemoteMessageHandler({
           stopPending("models");
           applyModelConfigMutation(message.payload as ModelConfigMutationResultPayload | undefined);
           break;
+        case "image_model_list_result":
+          stopPending("imageModels");
+          applyImageModelList(message.payload as ImageModelListResultPayload | undefined);
+          break;
+        case "image_model_config_add_result":
+          stopPending("imageModels");
+          applyImageModelConfigAdd(message.payload as ImageModelConfigAddResultPayload | undefined);
+          break;
+        case "image_model_config_test_result":
+          stopPending("imageModels");
+          applyImageModelConfigTest(message.payload as ImageModelConfigTestResultPayload | undefined);
+          break;
+        case "image_model_config_mutation_result":
+          stopPending("imageModels");
+          applyImageModelConfigMutation(message.payload as ImageModelConfigMutationResultPayload | undefined);
+          break;
         case "intent_config_query_result":
           applyIntentConfigQuery(message.payload as IntentConfigResultPayload | undefined, message.request_id);
           break;
@@ -1169,6 +1199,7 @@ export function useRemoteMessageHandler({
           const action = type && pendingActionForError(type);
           if (action) stopPending(action);
           if (action === "models" && isModelOperationPending) applyModelConfigError(text);
+          if (action === "imageModels") applyImageModelConfigError(text);
           if (action === "generation" && isGenerationOperationPending) applySessionGenerationError(text);
           if ((action === "knowledge" || type === "session_rag_set") && isKnowledgeOperationPending) applyKnowledgeError(text);
           if (action === "memory" && isMemoryOperationPending) applyAIMemoryError(text);
@@ -1230,6 +1261,11 @@ export function useRemoteMessageHandler({
       applyModelConfigTest,
       applyModelConfigMutation,
       applyModelConfigError,
+      applyImageModelList,
+      applyImageModelConfigAdd,
+      applyImageModelConfigTest,
+      applyImageModelConfigMutation,
+      applyImageModelConfigError,
       handleModelDeleteMessage,
       handleSessionRenameMessage,
       isModelOperationPending,
@@ -1324,6 +1360,7 @@ function resolveChatSessionID(
 }
 
 function pendingActionForError(type: RelayMessage["type"]): PendingAction | undefined {
+  if (type.startsWith("image_model_")) return "imageModels";
   if (type.startsWith("model_")) return "models";
   if (type.startsWith("skill_")) return "skills";
   if (type.startsWith("plugin_")) return "plugins";

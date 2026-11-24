@@ -18,6 +18,10 @@ import type {
   IntentConfigResultPayload,
   IntentConfigTestResultPayload,
   IntentTracePayload,
+  ImageModelConfigAddPayload,
+  ImageModelConfigTestPayload,
+  ImageModelConfigUpdatePayload,
+  ImageModelSummary,
   ModelSummary,
   Plan,
   PluginInfo,
@@ -93,6 +97,20 @@ export type SettingsContentProps = {
   modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
+  imageModels: ImageModelSummary[];
+  imageModelDefaultID: string;
+  imageModelMessage: string;
+  imageModelMessageError: boolean;
+  imageModelTestResult: { ok: boolean; message: string; latency_ms: number; mime_type?: string } | null;
+  imageModelLoading: boolean;
+  onRefreshImageModels: () => boolean;
+  onAddImageModel: (payload: ImageModelConfigAddPayload) => boolean;
+  onUpdateImageModel: (payload: ImageModelConfigUpdatePayload) => boolean;
+  onTestImageModel: (payload: ImageModelConfigTestPayload) => boolean;
+  onDeleteImageModel: (id: string) => boolean;
+  onSetImageModelEnabled: (id: string, enabled: boolean) => boolean;
+  onSetDefaultImageModel: (id: string) => boolean;
+  onClearImageModelMessage: () => void;
   normalizedRelayURL: string;
   onBindCodeChange: (value: string) => void;
   onCloseSettings: () => void;

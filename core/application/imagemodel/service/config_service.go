@@ -210,10 +210,16 @@ func (s *ConfigService) SetDefault(ctx context.Context, id string) (imageresult.
 	return s.result(ctx, "set_default", id, "Default image model updated.")
 }
 func (s *ConfigService) Test(ctx context.Context, config domain.Config) (imageresult.TestResult, error) {
+	isDraft := strings.TrimSpace(config.ID) == ""
+	if isDraft {
+		// Connection tests for an unsaved draft still pass through the same
+		// validation as persisted models, but use a temporary non-persistent ID.
+		config.ID = "image-model-test"
+	}
 	if err := s.validate(); err != nil {
 		return imageresult.TestResult{}, err
 	}
-	if strings.TrimSpace(config.ID) != "" && strings.TrimSpace(config.APIKey) == "" {
+	if !isDraft && strings.TrimSpace(config.APIKey) == "" {
 		if saved, err := s.Repository.Get(ctx, strings.TrimSpace(config.ID)); err == nil {
 			if config.AuthType == "" {
 				config.AuthType = saved.AuthType

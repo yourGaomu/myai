@@ -15,6 +15,7 @@ export type SettingsSection =
   | "general"
   | "connection"
   | "model"
+  | "imageModel"
   | "autoplan"
   | "skill"
   | "plugin"
@@ -48,6 +49,7 @@ export const settingsSectionTitles: Record<SettingsSection, string> = {
   general: "版本与热更新",
   generation: "生成参数与回复风格",
   model: "模型",
+  imageModel: "生图模型",
   motion: "角色动效与 GIF",
   permission: "工具权限",
   plugin: "插件与 MCP",

@@ -7,6 +7,7 @@ const initialPendingActions: Record<PendingAction, boolean> = {
   pair: false,
   sessions: false,
   models: false,
+  imageModels: false,
   skills: false,
 	plugins: false,
   settings: false,
