@@ -27,6 +27,7 @@ import (
 	"myai/core/contextmgr"
 	"myai/core/domain/generation"
 	message "myai/core/domain/message"
+	agentplan "myai/core/plan"
 	modelport "myai/core/port/model"
 	"myai/core/port/repository"
 	"myai/core/session"
@@ -208,7 +209,183 @@ func TestFreshChatSessionsSendIdenticalRequests(t *testing.T) {
 	}
 }
 
-func TestProjectedRequestDoesNotReplayOldTurnState(t *testing.T) {
+func TestDynamicContextAndSubsequentTurnsPreserveWirePrefix(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer %d\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", len(bodies))
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := session.NewFromState(session.InitialState{ID: "dynamic-prefix", Model: "test-model", ContextWindowK: 128})
+	loop := service.AgentLoopService{Contexts: contextservice.SnapshotService{}}
+	for turn := 1; turn <= 2; turn++ {
+		current.AddUserTurnWithContext("stable retrieval", "stable runtime", fmt.Sprintf("question %d", turn))
+		response, err := loop.Run(context.Background(), command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.AppendMessage(message.Assistant(response.Content, response.Reasoning, nil))
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests=%d", len(bodies))
+	}
+	first, second := wireMessages(t, bodies[0]), wireMessages(t, bodies[1])
+	assertWirePrefix(t, first, second)
+	if len(first) != 4 || len(second) != 8 {
+		t.Fatalf("dynamic context was not appended in turn order: first=%v second=%v", first, second)
+	}
+}
+
+func TestChildMailboxRuntimeScopeKeepsToolRoundPrefix(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(bodies) == 1 {
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"wait-1\",\"type\":\"function\",\"function\":{\"name\":\"wait_agent\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+		} else {
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		}
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := session.NewFromState(session.InitialState{ID: "child-mailbox-prefix", Model: "test-model", ContextWindowK: 128})
+	current.AddUserTurnWithContext("stable retrieval", "stable child skill", "child task")
+	loop := service.AgentLoopService{Contexts: contextservice.SnapshotService{}, Tools: replayTools{}, ToolExecutor: planSnapshotExecutor{}}
+	ctx := command.WithAfterToolRound(context.Background(), func(_ context.Context, current *session.Session) error {
+		current.AppendMessages(message.RuntimeInstruction("stable child skill"), message.SyntheticUserText(message.SyntheticReasonInterAgentMessage, "mailbox update"))
+		return nil
+	})
+	if _, err := loop.Run(ctx, command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()}); err != nil {
+		t.Fatal(err)
+	}
+	before, after := wireMessages(t, bodies[0]), wireMessages(t, bodies[1])
+	assertWirePrefix(t, before, after)
+	if len(before) != 4 || len(after) != 8 || !strings.Contains(after[6].(map[string]any)["content"].(string), "stable child skill") || after[7].(map[string]any)["role"] != "user" {
+		t.Fatalf("child mailbox lost the stable runtime scope or moved history: %v", after)
+	}
+}
+
+func TestSubagentContinuationContextDoesNotRewriteParentHistory(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer %d\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", len(bodies))
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := session.NewFromState(session.InitialState{ID: "parent-completion-prefix", Model: "test-model", ContextWindowK: 128})
+	current.AddUserTurn("original parent skill", "parent request")
+	loop := service.AgentLoopService{Contexts: contextservice.SnapshotService{}}
+	first, err := loop.Run(context.Background(), command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.AppendMessage(message.Assistant(first.Content, first.Reasoning, nil))
+	current.AppendMessages(message.RuntimeInstruction("continuation formatting skill"), message.SyntheticUserText(message.SyntheticReasonSubagentResult, "child result"))
+	if _, err := loop.Run(context.Background(), command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()}); err != nil {
+		t.Fatal(err)
+	}
+	before, after := wireMessages(t, bodies[0]), wireMessages(t, bodies[1])
+	assertWirePrefix(t, before, after)
+	if len(after) != len(before)+3 || !strings.Contains(after[len(before)+1].(map[string]any)["content"].(string), "continuation formatting skill") {
+		t.Fatalf("continuation context was not appended after parent history: %v", after)
+	}
+}
+
+func TestPlanSnapshotUpdatesAppendAfterCompletedToolExchange(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(bodies) == 1 {
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"wait-1\",\"type\":\"function\",\"function\":{\"name\":\"wait_agent\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+		} else {
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		}
+	}))
+	defer server.Close()
+	model, err := (modeladapter.OpenAIChatCompletionsAdapter{}).CreateModel(modelport.CreationConfig{
+		APIKey: "local-test", BaseURL: server.URL + "/v1", ModelName: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := session.NewFromState(session.InitialState{ID: "plan-prefix", Model: "test-model", ContextWindowK: 128})
+	current.CurrentPlan = &agentplan.Plan{ID: "plan", Goal: "inspect", Status: agentplan.StatusRunning,
+		Steps: []agentplan.Step{{ID: "step", Order: 1, Title: "Inspect", Status: agentplan.StepStatusRunning}}}
+	current.AddUserTurnWithContext("stable retrieval", "stable runtime", "continue plan")
+	loop := service.AgentLoopService{Contexts: contextservice.SnapshotService{}, Tools: replayTools{}, ToolExecutor: planSnapshotExecutor{}}
+	ctx := command.WithAfterToolRound(context.Background(), func(_ context.Context, current *session.Session) error {
+		current.CurrentPlan.Status = agentplan.StatusDone
+		current.CurrentPlan.Steps[0].Status = agentplan.StepStatusDone
+		return nil
+	})
+	if _, err := loop.Run(ctx, command.Run{Model: model, Session: current, Settings: generation.SystemDefaults()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests=%d", len(bodies))
+	}
+	first, second := wireMessages(t, bodies[0]), wireMessages(t, bodies[1])
+	assertWirePrefix(t, first, second)
+	if !strings.Contains(first[len(first)-1].(map[string]any)["content"].(string), "status: running") ||
+		!strings.Contains(second[len(second)-1].(map[string]any)["content"].(string), "status: done") {
+		t.Fatalf("plan snapshots did not advance as appended events: first=%v second=%v", first, second)
+	}
+}
+
+type planSnapshotExecutor struct{}
+
+func (planSnapshotExecutor) Execute(_ context.Context, c command.ToolExecution) (result.ToolExecution, error) {
+	return result.ToolExecution{Calls: c.Calls, Messages: []message.Message{message.ToolResultMessage(message.ToolResult{
+		ToolCallID: c.Calls[0].ID, Name: c.Calls[0].Name, Content: "child completed",
+	})}}, nil
+}
+
+func TestProjectedRequestPreservesTurnContextInAppendOnlyOrder(t *testing.T) {
 	bodies := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -237,14 +414,15 @@ func TestProjectedRequestDoesNotReplayOldTurnState(t *testing.T) {
 		t.Fatal(err)
 	}
 	wire := wireMessages(t, <-bodies)
-	if len(wire) != 6 {
-		t.Fatalf("unexpected projected history: %v", wire)
+	wantMessages := []string{"local AI coding assistant", "OLD_RETRIEVAL", "OLD_RULES", "previous question", "OLD_PLAN", "prior answer", "NEW_RETRIEVAL", "NEW_RULES", "current question", "No active plan"}
+	if len(wire) != len(wantMessages) {
+		t.Fatalf("unexpected append-only history: %v", wire)
 	}
-	for i, want := range []string{"local AI coding assistant", "previous question", "prior answer", "NEW_RULES", "NEW_RETRIEVAL", "current question"} {
+	for i, want := range wantMessages {
 		payload := wire[i].(map[string]any)
 		text, _ := payload["content"].(string)
-		if !strings.Contains(text, want) || strings.Contains(text, "OLD_") || (i > 0 && payload["role"] == "system") {
-			t.Fatalf("wire message %d: %v; want %q without old turn state", i, payload, want)
+		if !strings.Contains(text, want) || (i > 0 && payload["role"] == "system") {
+			t.Fatalf("wire message %d: %v; want %q in chronological history", i, payload, want)
 		}
 	}
 }

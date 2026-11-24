@@ -206,7 +206,7 @@ func TestAnthropicUsageIncludesAllInputComponents(t *testing.T) {
 	}
 }
 
-func TestAnthropicCacheBreakpointsStableAndExcludeActiveContext(t *testing.T) {
+func TestAnthropicCacheBreakpointsAdvanceThroughCompletedBlocks(t *testing.T) {
 	type block struct {
 		Text  string `json:"text"`
 		Type  string `json:"type"`
@@ -262,7 +262,7 @@ func TestAnthropicCacheBreakpointsStableAndExcludeActiveContext(t *testing.T) {
 	for i, tc := range []struct {
 		body body
 		want []int
-	}{{first, []int{1}}, {second, []int{1, 4}}, {third, nil}, {fallback, nil}} {
+	}{{first, []int{1, 4}}, {second, []int{1, 4}}, {third, nil}, {fallback, nil}} {
 		var found []int
 		for j, message := range tc.body.Messages {
 			for _, part := range message.Content {

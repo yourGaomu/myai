@@ -86,7 +86,7 @@ func TestBuildSnapshotCachePrefixIncludesCompletedTurnsOnly(t *testing.T) {
 	}
 
 	snapshot := BuildSnapshot(messages, "", 0, 16)
-	wantPrefix := []domainmessage.Message{messages[0], messages[2], messages[3]}
+	wantPrefix := []domainmessage.Message{messages[0], messages[1], messages[2], messages[3]}
 	if snapshot.Info.PrefixHash != StableMessagesHash(wantPrefix) {
 		t.Fatalf("prefix hash = %s, want completed-turn hash %s", snapshot.Info.PrefixHash, StableMessagesHash(wantPrefix))
 	}

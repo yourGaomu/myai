@@ -154,6 +154,9 @@ func (s AgentLoopService) generateSample(ctx context.Context, command generation
 	}
 	var effectiveBudget contextmgr.RequestBudget
 	build := func(budget contextmgr.RequestBudget) (modelport.GenerateRequest, contextmgr.Snapshot, int, error) {
+		if _, err := s.appendPlanContext(ctx, command.Session, command.Session.Messages); err != nil {
+			return modelport.GenerateRequest{}, contextmgr.Snapshot{}, 0, err
+		}
 		snapshot, err := s.prepareSnapshot(ctx, command, budget)
 		if err != nil {
 			return modelport.GenerateRequest{}, snapshot, 0, err

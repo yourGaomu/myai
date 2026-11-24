@@ -11,7 +11,7 @@ import (
 	domainmessage "myai/core/domain/message"
 )
 
-func TestRequestSnapshotFiltersLegacyDynamicStateWithoutChangingSources(t *testing.T) {
+func TestRequestSnapshotProjectsCurrentContextAndPreservesSourceHistory(t *testing.T) {
 	legacy := domainmessage.SyntheticText(domainmessage.SyntheticReasonRuntimeInstruction, "old plan rules")
 	messages := []domainmessage.Message{
 		domainmessage.Text(domainmessage.RoleSystem, "fixed policy"), legacy,
@@ -30,15 +30,19 @@ func TestRequestSnapshotFiltersLegacyDynamicStateWithoutChangingSources(t *testi
 	if snapshot.Info.DroppedMessages != 0 || snapshot.Info.Checkpoint == nil || snapshot.Info.Checkpoint.SourceHistoryHash != hash {
 		t.Fatalf("projection changed checkpoint meaning: %#v", snapshot.Info)
 	}
+	var foundCurrentRules, foundCurrentEnvironment bool
 	for index, message := range snapshot.Messages {
 		if message.Role == domainmessage.RoleSystem && index != 0 {
 			t.Fatal("runtime state was promoted to system")
 		}
-		for _, stale := range []string{"old plan rules", "obsolete evidence", "old environment", "stale current rules"} {
-			if strings.Contains(message.Text(), stale) {
-				t.Fatalf("old dynamic context survived: %s", stale)
-			}
+		foundCurrentRules = foundCurrentRules || strings.Contains(message.Text(), "current chat rules")
+		foundCurrentEnvironment = foundCurrentEnvironment || strings.Contains(message.Text(), "current environment")
+		if strings.Contains(message.Text(), "stale current rules") || strings.Contains(message.Text(), "old environment") {
+			t.Fatalf("superseded current-turn context survived: %s", message.Text())
 		}
+	}
+	if !foundCurrentRules || !foundCurrentEnvironment {
+		t.Fatalf("current context or completed history missing: %#v", snapshot.Messages)
 	}
 	if !reflect.DeepEqual(messages, original) || CompactionSourceHash(messages, 6) != hash {
 		t.Fatal("request projection mutated durable history")
@@ -75,12 +79,12 @@ func TestRequestProjectionPreservesSkillAccountingOnExistingRuntimeMessage(t *te
 	projected := BuildSnapshotForRequest(history, compaction.Checkpoint{}, 0, options)
 	options.TurnContext.SkillPromptTokens = 0
 	unattributed := BuildSnapshotForRequest(history, compaction.Checkpoint{}, 0, options)
-	if len(projected.Messages) != 5 || !projected.Messages[3].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || projected.Messages[3].SkillPromptTokens != 3 {
+	if len(projected.Messages) != 6 || !projected.Messages[4].IsSyntheticReason(domainmessage.SyntheticReasonRuntimeInstruction) || projected.Messages[4].SkillPromptTokens != 3 {
 		t.Fatalf("expected the active runtime message to carry its Skill estimate: %#v", projected.Messages)
 	}
-	projected.Messages[3].SkillPromptTokens = 0
-	if !reflect.DeepEqual(projected, unattributed) {
-		t.Fatal("Skill accounting changed the request projection or its total estimate")
+	projected.Messages[4].SkillPromptTokens = 0
+	if !reflect.DeepEqual(projected.Messages, unattributed.Messages) || projected.Info.SelectedTokens != unattributed.Info.SelectedTokens {
+		t.Fatal("Skill accounting changed wire content or its token estimate")
 	}
 	if got := (TurnContext{RuntimeInstruction: domainmessage.RuntimeTurnBoundaryPrompt, SkillPromptTokens: 3}).Messages(); len(got) != 0 {
 		t.Fatalf("expected a legacy boundary-only prompt to remain omitted: %#v", got)

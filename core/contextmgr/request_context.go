@@ -24,7 +24,7 @@ func IsDynamicContext(message domainmessage.Message) bool {
 func LatestUserInputIndex(messages []domainmessage.Message) int {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Role == domainmessage.RoleUser && (!message.IsSynthetic() || message.SyntheticReason == domainmessage.SyntheticReasonPlanStep || message.SyntheticReason == domainmessage.SyntheticReasonAutonomousPlanning) {
+		if message.Role == domainmessage.RoleUser && (!message.IsSynthetic() || isSyntheticInput(message.SyntheticReason)) {
 			return index
 		}
 	}
@@ -34,6 +34,16 @@ func LatestUserInputIndex(messages []domainmessage.Message) int {
 		}
 	}
 	return -1
+}
+
+func isSyntheticInput(reason domainmessage.SyntheticReason) bool {
+	switch reason {
+	case domainmessage.SyntheticReasonPlanStep, domainmessage.SyntheticReasonAutonomousPlanning,
+		domainmessage.SyntheticReasonSubagentResult, domainmessage.SyntheticReasonInterAgentMessage:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t TurnContext) Messages() []domainmessage.Message {
@@ -60,8 +70,9 @@ func (t TurnContext) Messages() []domainmessage.Message {
 }
 
 // requestHistory projects a raw suffix while keeping all checkpoint arithmetic
-// against the raw transcript. The compatibility path keeps only state attached
-// to the latest input; new request callers provide all current state explicitly.
+// against the raw transcript. Historical dynamic context stays in place; only
+// context attached to the active input may be refreshed, and new context events
+// remain at their appended positions.
 func requestHistory(messages []domainmessage.Message, start int, turn *TurnContext) ([]domainmessage.Message, int) {
 	latest := LatestUserInputIndex(messages)
 	attached := latest
@@ -77,9 +88,6 @@ func requestHistory(messages []domainmessage.Message, start int, turn *TurnConte
 			if !IsDynamicContext(messages[index]) {
 				continue
 			}
-			if text, ok := messages[index].RuntimeInstructionText(); ok && text == domainmessage.RuntimeTurnBoundaryPrompt {
-				continue
-			}
 			message := domainmessage.Clone(messages[index])
 			message.Role = domainmessage.RoleUser
 			if previous, ok := byReason[message.SyntheticReason]; ok {
@@ -90,37 +98,120 @@ func requestHistory(messages []domainmessage.Message, start int, turn *TurnConte
 			}
 		}
 	}
+
 	result := make([]domainmessage.Message, 0, len(messages)-min(start, len(messages))+len(currentContext)+1)
+	filtered := 0
 	inserted := false
-	// A checkpoint can end inside a long tool turn. Repeating its actual user
-	// request preserves the active goal without replaying summarized tool calls.
 	if latest >= 0 && latest < start {
-		result = append(result, currentContext...)
-		result = append(result, domainmessage.Clone(messages[latest]))
+		// The checkpoint cut through the active turn. Restore its input and any
+		// context not already present in the retained tool tail.
+		for _, current := range currentContext {
+			if !containsRequestContext(messages[start:], current) {
+				result = append(result, domainmessage.Clone(current))
+			}
+		}
+		result = append(result, cloneRequestMessage(messages[latest]))
 		inserted = true
 	}
-	filtered := 0
+
+	attachedReplacements := make(map[int]domainmessage.Message)
+	attachedSkips := make(map[int]bool)
+	missingContext := make([]domainmessage.Message, 0, len(currentContext))
+	if latest >= start && latest >= 0 {
+		byReason := make(map[domainmessage.SyntheticReason]domainmessage.Message, len(currentContext))
+		for _, message := range currentContext {
+			byReason[message.SyntheticReason] = message
+		}
+		used := make(map[domainmessage.SyntheticReason]bool, len(currentContext))
+		for index := max(start, attached); index < latest; index++ {
+			message := messages[index]
+			if !IsDynamicContext(message) {
+				continue
+			}
+			current, exists := byReason[message.SyntheticReason]
+			if !exists || containsRequestContext(messages[latest:], current) {
+				continue
+			}
+			if used[message.SyntheticReason] {
+				attachedSkips[index] = true
+				filtered++
+				continue
+			}
+			used[message.SyntheticReason] = true
+			attachedReplacements[index] = current
+			if !sameRequestContext(message, current) {
+				filtered++
+			}
+		}
+
+		// A current context already recorded elsewhere in the retained suffix
+		// is an append-only event; do not move it back in front of the input.
+		for _, current := range currentContext {
+			if used[current.SyntheticReason] || containsRequestContext(messages[latest:], current) {
+				continue
+			}
+			missingContext = append(missingContext, domainmessage.Clone(current))
+		}
+	}
 	for index := start; index < len(messages); index++ {
-		message := messages[index]
-		if IsDynamicContext(message) {
-			filtered++
+		if attachedSkips[index] {
 			continue
 		}
-		if index == latest {
-			result = append(result, currentContext...)
+		if index == latest && !inserted {
+			if latest < 0 {
+				result = append(result, cloneRequestContext(currentContext)...)
+			} else if latest < start {
+				// Already restored above.
+			} else {
+				// Missing request-only context is inserted at the current input
+				// boundary. Production callers persist plan/environment events
+				// before snapshotting, so later samples replay them in place.
+				result = append(result, missingContext...)
+			}
 			inserted = true
 		}
-		message = domainmessage.Clone(message)
-		if message.Role == domainmessage.RoleSystem {
-			// Only the fixed leading system message is provider-level policy.
-			message.Role = domainmessage.RoleUser
+		if replacement, ok := attachedReplacements[index]; ok {
+			result = append(result, domainmessage.Clone(replacement))
+			continue
 		}
-		result = append(result, message)
+		result = append(result, cloneRequestMessage(messages[index]))
 	}
 	if !inserted {
-		result = append(currentContext, result...)
+		result = append(cloneRequestContext(currentContext), result...)
 	}
 	return result, filtered
+}
+
+func cloneRequestContext(messages []domainmessage.Message) []domainmessage.Message {
+	cloned := make([]domainmessage.Message, 0, len(messages))
+	for _, message := range messages {
+		message = domainmessage.Clone(message)
+		message.Role = domainmessage.RoleUser
+		cloned = append(cloned, message)
+	}
+	return cloned
+}
+
+func cloneRequestMessage(message domainmessage.Message) domainmessage.Message {
+	message = domainmessage.Clone(message)
+	if message.Role == domainmessage.RoleSystem {
+		// Only the fixed leading system message is provider-level policy.
+		message.Role = domainmessage.RoleUser
+	}
+	return message
+}
+
+func sameRequestContext(left, right domainmessage.Message) bool {
+	return left.SyntheticReason == right.SyntheticReason && left.Text() == right.Text()
+}
+
+func containsRequestContext(messages []domainmessage.Message, context domainmessage.Message) bool {
+	for _, message := range messages {
+		if IsDynamicContext(message) && sameRequestContext(message, context) {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolSafeChunks allows a cut between completed tool exchanges within a user
