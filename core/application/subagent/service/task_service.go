@@ -12,6 +12,7 @@ import (
 	generationcommand "myai/core/application/chat/generation/command"
 	subagentcommand "myai/core/application/subagent/command"
 	subagentresult "myai/core/application/subagent/result"
+	"myai/core/contextmgr"
 	domaininteraction "myai/core/domain/interaction"
 	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
@@ -816,12 +817,36 @@ func (service *Service) injectMailboxBetweenToolRounds(_ context.Context, taskID
 			}
 		}
 		if !alreadyInSession {
-			entry := domainmessage.Text(domainmessage.RoleUser, message.Content)
+			// A mailbox update is another input in the active child task. Repeat
+			// its runtime/skill scope immediately before the new input so the
+			// scope stays explicit and the sent transcript only grows by suffixes.
+			if runtime := runtimeContextForLatestInput(current.Messages); runtime.IsSynthetic() {
+				current.AppendMessage(runtime)
+			}
+			entry := domainmessage.SyntheticUserText(domainmessage.SyntheticReasonInterAgentMessage, message.Content)
 			entry.ID = message.ID
 			current.AppendMessage(entry)
 		}
 	}
 	return claimed, nil
+}
+
+func runtimeContextForLatestInput(messages []domainmessage.Message) domainmessage.Message {
+	latest := contextmgr.LatestUserInputIndex(messages)
+	for index := latest - 1; index >= 0 && contextmgr.IsDynamicContext(messages[index]); index-- {
+		message := messages[index]
+		if message.SyntheticReason != domainmessage.SyntheticReasonRuntimeInstruction {
+			continue
+		}
+		text, ok := message.RuntimeInstructionText()
+		if !ok || text == domainmessage.RuntimeTurnBoundaryPrompt || strings.TrimSpace(text) == "" {
+			return domainmessage.Message{}
+		}
+		runtime := domainmessage.RuntimeInstruction(text)
+		runtime.SkillPromptTokens = message.SkillPromptTokens
+		return runtime
+	}
+	return domainmessage.Message{}
 }
 
 func (service *Service) runMailboxFollowUps(ctx context.Context, task domainsubagent.Task, run domainsubagent.Run, response subagentport.AgentRunResult) (subagentport.AgentRunResult, error) {

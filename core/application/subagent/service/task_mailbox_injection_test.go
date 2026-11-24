@@ -9,11 +9,46 @@ import (
 	"myai/core/adapter/subagent/memory"
 	generationcommand "myai/core/application/chat/generation/command"
 	subagentcommand "myai/core/application/subagent/command"
+	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	domainworkspace "myai/core/domain/workspace"
 	subagentport "myai/core/port/subagent"
 	"myai/core/session"
 )
+
+func TestInjectedMailboxCarriesCurrentRuntimeScopeAsAppendOnlyMessages(t *testing.T) {
+	repository := memory.NewRepository()
+	task := domainsubagent.Task{
+		ID: "task", ParentSessionID: "parent", ChildSessionID: "child", CurrentRunID: "run",
+		Status:  domainsubagent.TaskStatusRunning,
+		Mailbox: []domainsubagent.Message{{ID: "message", Content: "extra requirement", Status: domainsubagent.MessageStatusPending}},
+	}
+	if err := repository.SaveTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	runtime := domainmessage.RuntimeInstruction("use the parser skill")
+	runtime.SkillPromptTokens = 4
+	current := &session.Session{ID: task.ChildSessionID, Messages: []domainmessage.Message{
+		runtime, domainmessage.Text(domainmessage.RoleUser, "inspect this input"),
+		domainmessage.Assistant("", "", []domainmessage.ToolCall{{ID: "call", Name: "read_file", Arguments: `{"path":"note.txt"}`}}),
+		domainmessage.ToolResultMessage(domainmessage.ToolResult{ToolCallID: "call", Name: "read_file", Content: "contents"}),
+	}}
+	service := &Service{Tasks: repository}
+	claimed, err := service.injectMailboxBetweenToolRounds(context.Background(), task.ID, current)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claimed=%#v err=%v", claimed, err)
+	}
+	if len(current.Messages) != 6 {
+		t.Fatalf("messages=%d, want the original 4 plus a scoped runtime and mailbox input", len(current.Messages))
+	}
+	copiedRuntime, mailboxInput := current.Messages[4], current.Messages[5]
+	if copiedRuntime.SyntheticReason != domainmessage.SyntheticReasonRuntimeInstruction || copiedRuntime.Text() != runtime.Text() || copiedRuntime.SkillPromptTokens != 4 || copiedRuntime.ID == runtime.ID {
+		t.Fatalf("runtime scope was not copied as a fresh append: %#v", copiedRuntime)
+	}
+	if mailboxInput.SyntheticReason != domainmessage.SyntheticReasonInterAgentMessage || mailboxInput.ID != "message" || mailboxInput.Text() != "extra requirement" {
+		t.Fatalf("mailbox input lacks its durable synthetic identity: %#v", mailboxInput)
+	}
+}
 
 func TestInjectedMailboxIsAcknowledgedOnlyAfterModelSuccess(t *testing.T) {
 	for _, test := range []struct {

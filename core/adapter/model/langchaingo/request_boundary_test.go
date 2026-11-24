@@ -653,7 +653,7 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 	}
 	type wireMessage struct{ Role, Text string }
 	wantConversation := []wireMessage{
-		{"user", "earlier question"}, {"assistant", "earlier answer"},
+		{"user", legacyRuntime}, {"user", "earlier question"}, {"assistant", "earlier answer"},
 		{"user", current.Text()}, {"user", "current question"},
 	}
 	for _, provider := range []string{"openai", "anthropic", "google"} {
@@ -676,8 +676,8 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 					domainmessage.ToolCallMessage([]domainmessage.ToolCall{{ID: "call-local", Name: toolName, Arguments: `{"path":"note.txt"}`}}),
 					domainmessage.ToolResultMessage(toolResult),
 				)
-				wantHistory = slices.Insert(slices.Clone(wantConversation), 2, wireMessage{"model", ""}, wireMessage{"user", ""})
-				wantHistory[1].Role = "model"
+				wantHistory = slices.Insert(slices.Clone(wantConversation), 3, wireMessage{"model", ""}, wireMessage{"user", ""})
+				wantHistory[2].Role = "model"
 			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -693,8 +693,8 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 				if r.Method != http.MethodPost || r.URL.Path != paths[provider] {
 					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 				}
-				if strings.Contains(string(body), legacyRuntime) {
-					t.Error("legacy runtime survived projection into provider body")
+				if !strings.Contains(string(body), legacyRuntime) {
+					t.Error("completed-turn runtime context was not preserved in provider body")
 				}
 				var payload struct {
 					System            json.RawMessage `json:"system"`
@@ -817,10 +817,10 @@ func TestContextSnapshotWirePreservesSystemAndRuntimeRoles(t *testing.T) {
 						t.Errorf("unexpected Gemini function declaration: %+v", tool)
 					}
 					if len(payload.Contents) >= 4 {
-						if parts := payload.Contents[2].Parts; len(parts) != 1 || parts[0].FunctionCall == nil || parts[0].FunctionCall.Name != toolName || parts[0].FunctionCall.Args["path"] != "note.txt" {
+						if parts := payload.Contents[3].Parts; len(parts) != 1 || parts[0].FunctionCall == nil || parts[0].FunctionCall.Name != toolName || parts[0].FunctionCall.Args["path"] != "note.txt" {
 							t.Errorf("unexpected Gemini function call history: %+v", parts)
 						}
-						if parts := payload.Contents[3].Parts; len(parts) != 1 || parts[0].FunctionResponse == nil || parts[0].FunctionResponse.Name != toolName || parts[0].FunctionResponse.Response["response"] != toolResult.PromptContent() {
+						if parts := payload.Contents[4].Parts; len(parts) != 1 || parts[0].FunctionResponse == nil || parts[0].FunctionResponse.Name != toolName || parts[0].FunctionResponse.Response["response"] != toolResult.PromptContent() {
 							t.Errorf("unexpected Gemini function response history: %+v", parts)
 						}
 					}

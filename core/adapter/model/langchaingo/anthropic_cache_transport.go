@@ -23,13 +23,12 @@ type anthropicCachePrefix struct {
 func withAnthropicCachePrefix(ctx context.Context, request modelport.GenerateRequest) context.Context {
 	var prefix anthropicCachePrefix
 	var system strings.Builder
-	var wireIndex, firstVolatile int
-	firstVolatile = -1
+	var wireIndex int
 	leadingSystem, historySafe := true, true
 	for _, message := range request.Messages {
 		if message.Role == domainmessage.RoleSystem {
 			// The SDK concatenates the first text part of each system message.
-			// Retain the exact fixed prefix and leave the trailing system text unmarked.
+			// Retain the exact fixed prefix and leave trailing system text unmarked.
 			if leadingSystem && !message.IsSynthetic() && len(message.Parts) > 0 && message.Parts[0].Type == domainmessage.PartText {
 				system.WriteString(message.Parts[0].Text)
 			} else {
@@ -38,20 +37,14 @@ func withAnthropicCachePrefix(ctx context.Context, request modelport.GenerateReq
 			continue
 		}
 		leadingSystem = false
-		if message.IsSynthetic() && message.SyntheticReason != domainmessage.SyntheticReasonCompactionSummary && firstVolatile < 0 {
-			firstVolatile = wireIndex
-		}
-		if historySafe && message.Role == domainmessage.RoleUser && !message.IsSynthetic() {
-			// Only cache completed history before a genuine input. Never advance
-			// into the active turn or past injected per-request context.
-			prefix.historyLimit = wireIndex
-			if firstVolatile >= 0 {
-				prefix.historyLimit = firstVolatile
-			}
-		}
 		wireIndex++
 	}
 	prefix.system = system.String()
+	if historySafe {
+		// Request history is append-only. Dynamic context blocks are scoped
+		// messages in that history, not a reason to freeze the cache boundary.
+		prefix.historyLimit = wireIndex
+	}
 	return context.WithValue(ctx, anthropicCacheKey{}, prefix)
 }
 
@@ -183,7 +176,8 @@ scanHistory:
 		}
 		boundary := message.Content[len(message.Content)-1]
 		kind := boundary.stringField("type")
-		if len(pending) != 0 || !(message.Role == "assistant" && kind == "text" && strings.TrimSpace(boundary.stringField("text")) != "" || kind == "tool_result") {
+		eligibleAssistantText := message.Role == "assistant" && kind == "text" && strings.TrimSpace(boundary.stringField("text")) != ""
+		if len(pending) != 0 || !(eligibleAssistantText || kind == "tool_result") {
 			continue
 		}
 		if first == nil {

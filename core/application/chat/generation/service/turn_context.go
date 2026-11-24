@@ -99,7 +99,7 @@ func (s AgentLoopService) persistMessages(ctx context.Context, current *session.
 
 func (s AgentLoopService) appendPlanContext(ctx context.Context, current *session.Session, messages []domainmessage.Message) (bool, error) {
 	// 1. 在已选历史中查找最新计划快照；状态未变时不重复注入。
-	text := planSnapshot(current.CurrentPlan)
+	text := strings.TrimSpace(planSnapshot(current.CurrentPlan))
 	previous := ""
 	for _, message := range messages {
 		if message.SyntheticReason == domainmessage.SyntheticReasonPlanContext {
