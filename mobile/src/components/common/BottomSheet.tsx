@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { radius } from "../../constants/theme";
 import { useThemedStyles, type AppTheme } from "../../theme/ThemeProvider";
+import { useReduceMotion } from "./MotionEffects";
 
 type Props = {
   accessibilityLabel: string;
@@ -14,38 +15,57 @@ type Props = {
 
 const hiddenOffset = 640;
 
-// 底部弹层：遮罩淡入，面板从底部滑入；自适应深浅主题。
+// 底部弹层：遮罩淡入，面板从底部滑入；支持打断衔接与减弱动态。
 export function BottomSheet({ accessibilityLabel, children, onDismiss, visible }: Props) {
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
   const [mounted, setMounted] = useState(visible);
-  const fade = useRef(new Animated.Value(0)).current;
-  const offset = useRef(new Animated.Value(hiddenOffset)).current;
+  const mountedRef = useRef(visible);
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  const offset = useRef(new Animated.Value(visible ? 0 : hiddenOffset)).current;
 
   useEffect(() => {
+    fade.stopAnimation();
+    offset.stopAnimation();
     if (visible) {
-      setMounted(true);
-      fade.setValue(0);
-      offset.setValue(hiddenOffset);
+      if (!mountedRef.current) {
+        mountedRef.current = true;
+        setMounted(true);
+        fade.setValue(reduceMotion ? 1 : 0);
+        offset.setValue(reduceMotion ? 0 : hiddenOffset);
+      } else if (reduceMotion) {
+        fade.setValue(1);
+        offset.setValue(0);
+      }
+      if (reduceMotion) {
+        return;
+      }
       Animated.parallel([
         Animated.timing(fade, { duration: 200, easing: Easing.out(Easing.quad), toValue: 1, useNativeDriver: true }),
         Animated.spring(offset, { bounciness: 0, speed: 16, toValue: 0, useNativeDriver: true }),
       ]).start();
       return;
     }
-    if (!mounted) {
+    if (!mountedRef.current) {
+      return;
+    }
+    if (reduceMotion) {
+      mountedRef.current = false;
+      setMounted(false);
       return;
     }
     Animated.parallel([
-      Animated.timing(fade, { duration: 160, toValue: 0, useNativeDriver: true }),
+      Animated.timing(fade, { duration: 160, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true }),
       Animated.timing(offset, { duration: 180, easing: Easing.in(Easing.quad), toValue: hiddenOffset, useNativeDriver: true }),
     ]).start(({ finished }) => {
       if (finished) {
+        mountedRef.current = false;
         setMounted(false);
       }
     });
-  }, [fade, offset, visible]);
+  }, [fade, offset, reduceMotion, visible]);
 
   if (!mounted) {
     return null;

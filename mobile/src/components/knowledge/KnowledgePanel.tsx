@@ -611,69 +611,71 @@ export function KnowledgePanel({
         />
       </ResponsiveFormModal>
 
-      {selectedBase ? (
-        <ResponsiveFormModal
-          buttonFeedback={buttonFeedback}
-          footer={(
-            <Pressable onPress={() => setDetailTab(null)} style={({ pressed }) => buttonFeedback(styles.footerDoneButton, pressed)}>
-              <Text style={styles.footerDoneText}>完成</Text>
-            </Pressable>
-          )}
-          onClose={() => setDetailTab(null)}
-          title={selectedBase.name}
-          visible={Boolean(detailTab)}
-        >
-          <Text style={styles.meta}>{selectedBase.description || "未填写描述"}</Text>
-          <View style={styles.tabRow}>
-            {(["search", "config"] as const).map((tab) => (
-              <Pressable
-                key={tab}
-                onPress={() => setDetailTab(tab)}
-                style={({ pressed }) =>
-                  buttonFeedback([styles.tabButton, detailTab === tab && styles.tabButtonActive], pressed)
+      <ResponsiveFormModal
+        buttonFeedback={buttonFeedback}
+        footer={(
+          <Pressable onPress={() => setDetailTab(null)} style={({ pressed }) => buttonFeedback(styles.footerDoneButton, pressed)}>
+            <Text style={styles.footerDoneText}>完成</Text>
+          </Pressable>
+        )}
+        onClose={() => setDetailTab(null)}
+        title={selectedBase?.name || "知识库详情"}
+        visible={Boolean(selectedBase && detailTab)}
+      >
+        {selectedBase ? (
+          <>
+            <Text style={styles.meta}>{selectedBase.description || "未填写描述"}</Text>
+            <View style={styles.tabRow}>
+              {(["search", "config"] as const).map((tab) => (
+                <Pressable
+                  key={tab}
+                  onPress={() => setDetailTab(tab)}
+                  style={({ pressed }) =>
+                    buttonFeedback([styles.tabButton, detailTab === tab && styles.tabButtonActive], pressed)
+                  }
+                >
+                  <Text style={[styles.tabText, detailTab === tab && styles.tabTextActive]}>{tab === "search" ? "检索测试" : "知识库设置"}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {detailTab === "search" ? (
+              <SearchPanel
+                buttonFeedback={buttonFeedback}
+                onChangeQuery={setSemanticQuery}
+                onInsertReference={onInsertReference ? (snippet) => {
+                  setDetailTab(null);
+                  onInsertReference(snippet);
+                } : undefined}
+                onSearch={() =>
+                  onSearch(semanticQuery, {
+                    ...settings,
+                    category_ids: [],
+                    knowledge_base_ids: [selectedBase.id],
+                  })
                 }
-              >
-                <Text style={[styles.tabText, detailTab === tab && styles.tabTextActive]}>{tab === "search" ? "检索测试" : "知识库设置"}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {detailTab === "search" ? (
-            <SearchPanel
-              buttonFeedback={buttonFeedback}
-              onChangeQuery={setSemanticQuery}
-              onInsertReference={onInsertReference ? (snippet) => {
-                setDetailTab(null);
-                onInsertReference(snippet);
-              } : undefined}
-              onSearch={() =>
-                onSearch(semanticQuery, {
-                  ...settings,
-                  category_ids: [],
-                  knowledge_base_ids: [selectedBase.id],
-                })
-              }
-              pending={pendingKnowledge}
-              query={semanticQuery}
-              result={searchResult}
-            />
-          ) : null}
-          {detailTab === "config" ? (
-            <ConfigPanel
-              base={selectedBase}
-              buttonFeedback={buttonFeedback}
-              categories={categories}
-              onDelete={(knowledgeBaseID) => {
-                const sent = onDeleteKnowledgeBase(knowledgeBaseID);
-                if (sent) setDetailTab(null);
-                return sent;
-              }}
-              onUpdate={onUpdateKnowledgeBase}
-              pending={pendingKnowledge}
-              profiles={profiles}
-            />
-          ) : null}
-        </ResponsiveFormModal>
-      ) : null}
+                pending={pendingKnowledge}
+                query={semanticQuery}
+                result={searchResult}
+              />
+            ) : null}
+            {detailTab === "config" ? (
+              <ConfigPanel
+                base={selectedBase}
+                buttonFeedback={buttonFeedback}
+                categories={categories}
+                onDelete={(knowledgeBaseID) => {
+                  const sent = onDeleteKnowledgeBase(knowledgeBaseID);
+                  if (sent) setDetailTab(null);
+                  return sent;
+                }}
+                onUpdate={onUpdateKnowledgeBase}
+                pending={pendingKnowledge}
+                profiles={profiles}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </ResponsiveFormModal>
     </>
   );
 }

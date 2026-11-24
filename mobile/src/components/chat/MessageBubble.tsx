@@ -81,7 +81,7 @@ export function MessageBubble({ buttonFeedback, catalog, hideReasoning = false, 
               <View style={styles.toolSection}>
                 <Text style={[styles.toolSectionTitle, failed && styles.toolErrorText]}>{failed ? "错误" : "返回"}</Text>
                 {sharedAssets.length > 0 && !failed ? (
-                  sharedAssets.map((asset) => <SharedAssetCard key={asset.assetID} asset={asset} buttonFeedback={buttonFeedback} />)
+                  sharedAssets.map((asset) => <SharedAssetCard key={asset.assetID} asset={asset} buttonFeedback={buttonFeedback} sessionID={sessionID} />)
                 ) : (
                   <Text selectable style={[styles.toolCode, failed && styles.toolErrorText]}>{message.text}</Text>
                 )}

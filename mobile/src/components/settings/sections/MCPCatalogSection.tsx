@@ -277,17 +277,15 @@ export function MCPCatalogSection({
           ))}
         </View>
       ) : null}
-      {review ? (
-        <ConfirmModal
-          confirmLabel="信任此配置"
-          danger
-          message={`服务：${review.service.name}\n端点：${review.service.endpoint}\n权限：${trustPermission[review.service.permission]}\n认证：${trustAuthentication[review.service.authentication]}\n运行时：${trustRuntime[review.service.runtime]}\n\n仅在你确认信任此服务及其配置时继续。审批不会连接服务或重载 MCP。`}
-          onCancel={trust.cancelReview}
-          onConfirm={() => trust.confirm(review.id)}
-          title="确认信任 HTTP MCP 服务"
-          visible
-        />
-      ) : null}
+      <ConfirmModal
+        confirmLabel="信任此配置"
+        danger
+        message={review ? `服务：${review.service.name}\n端点：${review.service.endpoint}\n权限：${trustPermission[review.service.permission]}\n认证：${trustAuthentication[review.service.authentication]}\n运行时：${trustRuntime[review.service.runtime]}\n\n仅在你确认信任此服务及其配置时继续。审批不会连接服务或重载 MCP。` : ""}
+        onCancel={trust.cancelReview}
+        onConfirm={() => { if (review) trust.confirm(review.id); }}
+        title="确认信任 HTTP MCP 服务"
+        visible={Boolean(review)}
+      />
     </View>
   );
 }

@@ -22,7 +22,7 @@ export function CharacterAvatar({
   accessibilityLabel,
   autoplay,
   circular = false,
-  contentFit = "contain",
+  contentFit,
   height,
   size,
   slot,
@@ -33,13 +33,14 @@ export function CharacterAvatar({
   const resolved = resolveMedia(slot, variant);
   const shouldPlay = autoplay ?? (settings.motionEnabled && !settings.reduceMotion && !systemReduceMotion);
   const boxH = height ?? size;
+  const resolvedFit: ImageContentFit = contentFit ?? (circular && variant === "avatar" ? "cover" : "contain");
 
   return (
     <View
       style={[
         styles.frame,
         {
-          borderRadius: circular ? size / 2 : 0,
+          borderRadius: circular ? Math.min(size, boxH) / 2 : 0,
           height: boxH,
           width: size,
         },
@@ -49,14 +50,14 @@ export function CharacterAvatar({
       <Image
         accessibilityLabel={accessibilityLabel}
         autoplay={shouldPlay}
-        contentFit={contentFit}
+        contentFit={resolvedFit}
         contentPosition={resolved.cropPosition}
         source={typeof resolved.source === "string" ? { uri: resolved.source } : resolved.source}
         style={[
           styles.image,
           resolved.scale !== 1 || resolved.offsetY !== 0
             ? {
-                transform: [{ translateY: resolved.offsetY }, { scale: resolved.scale }],
+                transform: [{ scale: resolved.scale }, { translateY: resolved.offsetY }],
               }
             : null,
         ]}

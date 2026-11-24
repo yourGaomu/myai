@@ -199,7 +199,7 @@ export function makeChatStyles(theme: AppTheme) {
     assetImageCard: { alignItems: "stretch", flexDirection: "column" },
     assetDetailsRow: { alignItems: "center", flexDirection: "row", gap: 10, width: "100%" },
     assetPreviewButton: {
-      backgroundColor: palette.surface2,
+      backgroundColor: palette.well,
       borderColor: palette.hairline,
       borderRadius: radius.sm,
       borderWidth: 1,
@@ -207,7 +207,7 @@ export function makeChatStyles(theme: AppTheme) {
       position: "relative",
       width: "100%",
     },
-    assetPreviewFrame: { aspectRatio: 16 / 10, maxHeight: 260, minHeight: 120 },
+    assetPreviewFrame: { aspectRatio: 16 / 10, maxHeight: 300, minHeight: 120 },
     assetPreviewImage: { height: "100%", width: "100%" },
     assetPreviewPlaceholder: { alignItems: "center", gap: 4, justifyContent: "center", paddingHorizontal: 12 },
     assetPreviewTapHint: {

@@ -9,7 +9,7 @@ import type { ButtonFeedback } from "../../types/ui";
 import { groupSessionsByDate } from "../../utils/session";
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
-import { PulseDot } from "../common/MotionEffects";
+import { PulseDot, useReduceMotion } from "../common/MotionEffects";
 import { Spinner } from "../common/Spinner";
 import { useDrawerStyles } from "./sideDrawerStyles";
 
@@ -43,31 +43,56 @@ export function SideDrawer(props: Props) {
   const { onClose, sessions, visible } = props;
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
   const drawerWidth = Math.min(width * 0.84, 320);
-  const slide = useRef(new Animated.Value(-drawerWidth)).current;
-  const fade = useRef(new Animated.Value(0)).current;
+  const slide = useRef(new Animated.Value(visible ? 0 : -drawerWidth)).current;
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
   const [mounted, setMounted] = useState(visible);
+  const mountedRef = useRef(visible);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
+    slide.stopAnimation();
+    fade.stopAnimation();
     if (visible) {
-      setMounted(true);
+      if (!mountedRef.current) {
+        mountedRef.current = true;
+        setMounted(true);
+        slide.setValue(reduceMotion ? 0 : -drawerWidth);
+        fade.setValue(reduceMotion ? 1 : 0);
+      } else if (reduceMotion) {
+        slide.setValue(0);
+        fade.setValue(1);
+      }
+      if (reduceMotion) {
+        return;
+      }
       Animated.parallel([
-        Animated.timing(slide, { duration: 260, easing: Easing.out(Easing.cubic), toValue: 0, useNativeDriver: true }),
-        Animated.timing(fade, { duration: 220, toValue: 1, useNativeDriver: true }),
+        Animated.timing(slide, { duration: 240, easing: Easing.out(Easing.cubic), toValue: 0, useNativeDriver: true }),
+        Animated.timing(fade, { duration: 200, easing: Easing.out(Easing.quad), toValue: 1, useNativeDriver: true }),
       ]).start();
       return;
     }
+    if (!mountedRef.current) {
+      return;
+    }
+    if (reduceMotion) {
+      mountedRef.current = false;
+      setMounted(false);
+      setQuery("");
+      return;
+    }
     Animated.parallel([
-      Animated.timing(slide, { duration: 200, easing: Easing.in(Easing.quad), toValue: -drawerWidth, useNativeDriver: true }),
-      Animated.timing(fade, { duration: 200, toValue: 0, useNativeDriver: true }),
+      Animated.timing(slide, { duration: 190, easing: Easing.in(Easing.quad), toValue: -drawerWidth, useNativeDriver: true }),
+      Animated.timing(fade, { duration: 180, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true }),
     ]).start(({ finished }) => {
       if (finished) {
+        mountedRef.current = false;
         setMounted(false);
         setQuery("");
       }
     });
-  }, [drawerWidth, fade, slide, visible]);
+  }, [drawerWidth, fade, reduceMotion, slide, visible]);
 
   const groups = useMemo(() => {
     const keyword = query.trim().toLowerCase();

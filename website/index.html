@@ -1,2743 +1,585 @@
-<!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<!doctype html>
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MyAI 官网 — 手机上的全域自主编程智能体系统</title>
-  <meta name="keywords" content="MyAI,MyAI官网,AI编程智能体,子代理群,Subagent,移动端编程,代码生成,两阶段规划,Git时光机,远程控制,Go语言">
-  <meta name="description" content="MyAI 是一款专为移动端与全域工程打造的专业自主编程智能体系统。首创移动端子代理群并发调度、方案 A 分离式安全审批与 Git 原子时光机。真自主、真安全、真随身，随时随地掌控复杂工程代码库。">
-  <meta name="author" content="MyAI Team">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyAI — 把电脑里的 AI 程序员，装进口袋</title>
+  <meta name="description" content="MyAI 是一个用 Go 编写的开源 AI 编程 Agent：在电脑上读代码、改文件、跑命令；在手机上下达任务、审批权限、查看 diff、还原可恢复的文件。支持 Plan 模式、子智能体、RAG 知识库、AI 记忆、MCP 与 Skills。">
+  <meta name="theme-color" content="#F4F0E6">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="MyAI 官网 — 手机上的全域自主编程智能体">
-  <meta property="og:description" content="真自主 · 真安全 · 真随身。随时随地掌控复杂工程代码库。">
+  <meta property="og:title" content="MyAI — 把电脑里的 AI 程序员，装进口袋">
+  <meta property="og:description" content="在手机上发任务和审批，在电脑上执行。试用交互演示，体验任务交付、查看 diff 和还原文件。">
+  <meta property="og:image" content="assets/img/mascot.png">
+  <link rel="icon" type="image/svg+xml" href="assets/img/logo.svg">
+
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-
-  <style>
-    /* ==========================================================================
-       1. MODERN HIGH-TECH DESIGN SYSTEM (宽阔通透 · 双主题切换)
-       ========================================================================== */
-    :root, [data-theme="dark"] {
-      --bg-page: #08090d;
-      --bg-surface: #10121a;
-      --bg-surface-elevated: #161a26;
-      --bg-card: rgba(18, 21, 31, 0.72);
-      --bg-card-hover: rgba(26, 31, 48, 0.9);
-      --bg-glass: rgba(12, 14, 22, 0.82);
-      --bg-input: #0d0f17;
-
-      --text-main: #f8fafc;
-      --text-sub: #94a3b8;
-      --text-muted: #64748b;
-      --text-bright: #ffffff;
-
-      --border-subtle: rgba(255, 255, 255, 0.08);
-      --border-medium: rgba(255, 255, 255, 0.14);
-      --border-focus: rgba(0, 242, 254, 0.5);
-
-      --accent-cyan: #00f2fe;
-      --accent-cyan-subtle: rgba(0, 242, 254, 0.12);
-      --accent-blue: #38bdf8;
-      --accent-indigo: #6366f1;
-      --accent-emerald: #10b981;
-      --accent-emerald-subtle: rgba(16, 185, 129, 0.12);
-      --accent-amber: #f59e0b;
-      --accent-rose: #f43f5e;
-
-      --glow-cyan: 0 0 35px rgba(0, 242, 254, 0.22);
-      --shadow-card: 0 16px 40px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--border-subtle);
-      --shadow-elevated: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
-
-      --code-bg: #090b12;
-      --terminal-header: #151824;
-      --chassis-outer: #121520;
-      --chassis-border: rgba(255, 255, 255, 0.12);
-    }
-
-    [data-theme="light"] {
-      --bg-page: #f8fafc;
-      --bg-surface: #ffffff;
-      --bg-surface-elevated: #f1f5f9;
-      --bg-card: rgba(255, 255, 255, 0.9);
-      --bg-card-hover: #ffffff;
-      --bg-glass: rgba(255, 255, 255, 0.88);
-      --bg-input: #f1f5f9;
-
-      --text-main: #0f172a;
-      --text-sub: #475569;
-      --text-muted: #94a3b8;
-      --text-bright: #020617;
-
-      --border-subtle: rgba(0, 0, 0, 0.08);
-      --border-medium: rgba(0, 0, 0, 0.14);
-      --border-focus: rgba(2, 132, 199, 0.5);
-
-      --accent-cyan: #0284c7;
-      --accent-cyan-subtle: rgba(2, 132, 199, 0.1);
-      --accent-blue: #2563eb;
-      --accent-indigo: #4f46e5;
-      --accent-emerald: #059669;
-      --accent-emerald-subtle: rgba(5, 150, 105, 0.1);
-      --accent-amber: #d97706;
-      --accent-rose: #e11d48;
-
-      --glow-cyan: 0 0 30px rgba(2, 132, 199, 0.18);
-      --shadow-card: 0 16px 36px -12px rgba(15, 23, 42, 0.08), 0 0 0 1px var(--border-subtle);
-      --shadow-elevated: 0 25px 50px -15px rgba(15, 23, 42, 0.14);
-
-      --code-bg: #1e293b;
-      --terminal-header: #334155;
-      --chassis-outer: #1e293b;
-      --chassis-border: rgba(0, 0, 0, 0.15);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    html {
-      scroll-behavior: smooth;
-    }
-
-    body {
-      background-color: var(--bg-page);
-      color: var(--text-main);
-      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", sans-serif;
-      line-height: 1.6;
-      overflow-x: hidden;
-      position: relative;
-      transition: background-color 0.3s ease, color 0.3s ease;
-    }
-
-    /* Ambient Background Atmosphere */
-    .ambient-glow-top {
-      position: fixed;
-      top: -200px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 1300px;
-      height: 800px;
-      background: radial-gradient(circle at 50% 30%, rgba(0, 242, 254, 0.14) 0%, rgba(99, 102, 241, 0.08) 45%, transparent 70%);
-      pointer-events: none;
-      z-index: 0;
-    }
-    [data-theme="light"] .ambient-glow-top {
-      background: radial-gradient(circle at 50% 30%, rgba(2, 132, 199, 0.12) 0%, rgba(79, 70, 229, 0.06) 45%, transparent 70%);
-    }
-
-    .ambient-grid {
-      position: fixed;
-      inset: 0;
-      background-image: 
-        linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
-        linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
-      background-size: 56px 56px;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.55;
-    }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: var(--bg-page); }
-    ::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-    /* Layout Container */
-    .container {
-      max-width: 1380px;
-      margin: 0 auto;
-      padding: 0 32px;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* ==========================================================================
-       2. NAVIGATION BAR (悬浮玻璃态顶栏)
-       ========================================================================== */
-    .site-nav {
-      position: sticky;
-      top: 0;
-      z-index: 1000;
-      background: var(--bg-glass);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border-subtle);
-      transition: all 0.25s ease;
-    }
-    .nav-inner {
-      height: 72px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 24px;
-    }
-    .brand-wrap {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-      color: var(--text-bright);
-    }
-    .brand-icon {
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-indigo) 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      box-shadow: 0 4px 16px rgba(0, 242, 254, 0.35);
-    }
-    .brand-text {
-      display: flex;
-      flex-direction: column;
-      line-height: 1.15;
-    }
-    .brand-title {
-      font-size: 21px;
-      font-weight: 900;
-      letter-spacing: -0.6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .brand-sub {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-      letter-spacing: 0.5px;
-    }
-    .brand-badge {
-      font-size: 10px;
-      font-weight: 800;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: var(--accent-cyan-subtle);
-      border: 1px solid var(--border-medium);
-      color: var(--accent-cyan);
-    }
-
-    .nav-menu {
-      display: flex;
-      align-items: center;
-      gap: 32px;
-      list-style: none;
-    }
-    @media (max-width: 980px) {
-      .nav-menu { display: none; }
-    }
-    .nav-link {
-      color: var(--text-sub);
-      text-decoration: none;
-      font-size: 14.5px;
-      font-weight: 600;
-      transition: color 0.15s ease;
-      position: relative;
-    }
-    .nav-link:hover {
-      color: var(--accent-cyan);
-    }
-
-    .nav-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .nav-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      height: 40px;
-      padding: 0 16px;
-      border-radius: 999px;
-      font-size: 13.5px;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      border: 1px solid var(--border-medium);
-      background: var(--bg-card);
-      color: var(--text-main);
-    }
-    .nav-btn:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-focus);
-      transform: translateY(-1px);
-    }
-
-    .theme-toggle-btn {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      border: 1px solid var(--border-medium);
-      background: var(--bg-card);
-      color: var(--text-main);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .theme-toggle-btn:hover {
-      border-color: var(--border-focus);
-      transform: rotate(20deg);
-    }
-
-    .primary-btn {
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
-      color: #040d1a !important;
-      border: none;
-      font-weight: 800;
-      box-shadow: 0 4px 18px rgba(0, 242, 254, 0.35);
-    }
-    .primary-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 26px rgba(0, 242, 254, 0.5);
-    }
-
-    /* ==========================================================================
-       3. HERO SECTION (宽阔大气的首屏叙事)
-       ========================================================================== */
-    .hero-section {
-      padding: 80px 0 60px 0;
-      text-align: center;
-      position: relative;
-    }
-    .hero-announce {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-medium);
-      border-radius: 999px;
-      padding: 6px 18px;
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text-main);
-      margin-bottom: 30px;
-      backdrop-filter: blur(12px);
-      box-shadow: var(--shadow-card);
-      transition: transform 0.2s;
-    }
-    .hero-announce:hover {
-      transform: translateY(-2px);
-      border-color: var(--accent-cyan);
-    }
-    .hero-announce-tag {
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
-      color: #040d1a;
-      font-size: 11px;
-      font-weight: 900;
-      padding: 2px 8px;
-      border-radius: 999px;
-    }
-
-    .hero-h1 {
-      font-size: clamp(40px, 6vw, 68px);
-      font-weight: 900;
-      line-height: 1.15;
-      letter-spacing: -1.8px;
-      margin-bottom: 22px;
-      color: var(--text-bright);
-    }
-    .hero-h1 .gradient-text {
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 50%, var(--accent-indigo) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .hero-sub {
-      font-size: clamp(17px, 2.2vw, 20px);
-      color: var(--text-sub);
-      max-width: 860px;
-      margin: 0 auto 40px auto;
-      line-height: 1.65;
-      font-weight: 500;
-    }
-    .hero-sub strong {
-      color: var(--text-bright);
-      font-weight: 700;
-    }
-
-    .hero-cta-group {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-bottom: 36px;
-    }
-    .cta-glow-btn {
-      height: 52px;
-      padding: 0 32px;
-      border-radius: 999px;
-      font-size: 16px;
-      font-weight: 800;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
-      color: #030a14;
-      text-decoration: none;
-      box-shadow: 0 6px 28px rgba(0, 242, 254, 0.4);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      cursor: pointer;
-      border: none;
-    }
-    .cta-glow-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 36px rgba(0, 242, 254, 0.55);
-    }
-
-    .hero-terminal-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      background: var(--code-bg);
-      border: 1px solid var(--border-medium);
-      border-radius: 999px;
-      height: 52px;
-      padding: 0 20px;
-      font-family: 'Fira Code', monospace;
-      font-size: 14px;
-      color: #86efac;
-      box-shadow: var(--shadow-card);
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .hero-terminal-pill:hover {
-      border-color: var(--accent-emerald);
-      transform: translateY(-2px);
-    }
-    .terminal-copy-badge {
-      font-size: 11px;
-      background: rgba(255, 255, 255, 0.1);
-      padding: 3px 8px;
-      border-radius: 6px;
-      color: #fff;
-    }
-
-    /* Platforms Chips */
-    .platforms-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 56px;
-    }
-    .platform-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 6px 14px;
-      border-radius: 999px;
-      font-size: 12.5px;
-      font-weight: 700;
-      color: var(--text-sub);
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      transition: all 0.15s ease;
-      cursor: pointer;
-    }
-    .platform-pill:hover {
-      border-color: var(--accent-cyan);
-      color: var(--text-bright);
-      background: var(--accent-cyan-subtle);
-    }
-
-    /* 4 Hardcore Metrics */
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 24px;
-      max-width: 1160px;
-      margin: 0 auto;
-    }
-    @media (max-width: 860px) {
-      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 480px) {
-      .metrics-grid { grid-template-columns: 1fr; }
-    }
-    .metric-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 24px;
-      padding: 28px 24px;
-      text-align: center;
-      backdrop-filter: blur(14px);
-      box-shadow: var(--shadow-card);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .metric-card:hover {
-      transform: translateY(-4px);
-      border-color: var(--border-medium);
-      box-shadow: var(--shadow-elevated);
-    }
-    .metric-val {
-      font-size: clamp(34px, 4vw, 44px);
-      font-weight: 900;
-      letter-spacing: -1px;
-      line-height: 1;
-      margin-bottom: 8px;
-      background: linear-gradient(135deg, var(--text-bright) 0%, var(--accent-cyan) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .metric-label {
-      font-size: 13.5px;
-      font-weight: 700;
-      color: var(--text-sub);
-    }
-
-    /* Section Header Common */
-    .section-wrap {
-      padding: 96px 0;
-      position: relative;
-    }
-    .section-head {
-      text-align: center;
-      max-width: 760px;
-      margin: 0 auto 56px auto;
-    }
-    .badge-capsule {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 14px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      background: var(--accent-cyan-subtle);
-      border: 1px solid var(--border-medium);
-      color: var(--accent-cyan);
-      margin-bottom: 16px;
-    }
-    .section-title {
-      font-size: clamp(30px, 4vw, 44px);
-      font-weight: 900;
-      letter-spacing: -1px;
-      margin-bottom: 16px;
-      color: var(--text-bright);
-    }
-    .section-desc {
-      font-size: 16px;
-      color: var(--text-sub);
-      line-height: 1.7;
-    }
-
-    /* ==========================================================================
-       4. INTERACTIVE LIVE RIG SECTION (深空钛金真机交互实验室)
-       ========================================================================== */
-    .rig-ctrl-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 14px 24px;
-      margin-bottom: 32px;
-      backdrop-filter: blur(16px);
-      flex-wrap: wrap;
-      box-shadow: var(--shadow-card);
-    }
-    .rig-mode-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .rig-pill-btn {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-sub);
-      border-radius: 12px;
-      padding: 8px 18px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .rig-pill-btn:hover {
-      color: var(--text-bright);
-      border-color: var(--border-medium);
-    }
-    .rig-pill-btn.active {
-      background: var(--accent-cyan-subtle);
-      border-color: var(--accent-cyan);
-      color: var(--accent-cyan);
-      box-shadow: 0 0 16px rgba(0, 242, 254, 0.25);
-    }
-
-    .preset-chips-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .preset-chip {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-sub);
-      border-radius: 999px;
-      padding: 6px 14px;
-      font-size: 12.5px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .preset-chip:hover {
-      border-color: var(--border-medium);
-      color: var(--text-bright);
-    }
-    .preset-chip.active {
-      background: var(--accent-cyan-subtle);
-      border-color: var(--accent-cyan);
-      color: var(--accent-cyan);
-    }
-
-    /* Rig Dual Container */
-    .rig-stage-container {
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      gap: 40px;
-      position: relative;
-    }
-    @media (max-width: 1080px) {
-      .rig-stage-container { flex-direction: column; align-items: center; }
-    }
-
-    /* Titanium Matte Mobile Chassis */
-    .phone-chassis {
-      width: 420px;
-      max-width: 100%;
-      height: 840px;
-      background: var(--chassis-outer);
-      border-radius: 52px;
-      padding: 12px;
-      box-shadow: 
-        0 30px 80px -20px rgba(0, 0, 0, 0.9),
-        0 0 0 2px var(--chassis-border),
-        0 0 0 6px #1a1e2b,
-        var(--glow-cyan);
-      position: relative;
-      flex-shrink: 0;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .phone-screen {
-      flex: 1;
-      background: #f8f6f0;
-      border-radius: 42px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      color: #12100e;
-      box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.15);
-    }
-
-    /* Inside Phone: Status Bar */
-    .p-status-bar {
-      height: 38px;
-      padding: 0 22px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 11.5px;
-      font-weight: 800;
-      color: #1a1815;
-      background: #f8f6f0;
-      user-select: none;
-      z-index: 10;
-    }
-
-    /* Inside Phone: App Header */
-    .p-app-header {
-      padding: 10px 14px 8px 14px;
-      background: #f8f6f0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: relative;
-      z-index: 20;
-    }
-    .p-circle-btn {
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
-      background: #fff;
-      border: 2px solid #12100e;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 900;
-      color: #12100e;
-      cursor: pointer;
-      box-shadow: 0 1.5px 0 #12100e;
-      transition: transform 0.1s;
-    }
-    .p-circle-btn:active {
-      transform: translateY(1px);
-      box-shadow: none;
-    }
-
-    /* Central Island Capsule */
-    .p-island-box {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      background: #fffdf7;
-      border: 2px solid #12100e;
-      border-radius: 18px;
-      padding: 4px 14px 6px 14px;
-      box-shadow: 0 2px 0 #12100e;
-      position: relative;
-      margin-top: 10px;
-    }
-    .p-avatar-circle {
-      position: absolute;
-      top: -18px;
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: #7dd3fc;
-      border: 2px solid #12100e;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      box-shadow: 0 1px 0 #12100e;
-    }
-    .p-identity-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-top: 14px;
-    }
-    .p-island-title {
-      font-size: 13px;
-      font-weight: 900;
-      color: #12100e;
-      line-height: 1;
-    }
-    .p-device-tag {
-      font-size: 9px;
-      font-weight: 800;
-      color: #555;
-      background: #eeeae0;
-      border: 1px solid #12100e;
-      border-radius: 4px;
-      padding: 0 4px;
-      line-height: 1.3;
-    }
-    .p-status-row {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      margin-top: 2px;
-      font-size: 10px;
-      font-weight: 800;
-    }
-    .p-status-dot {
-      width: 6.5px;
-      height: 6.5px;
-      border-radius: 50%;
-      background: #10b981;
-      animation: pulseDot 2s infinite;
-    }
-    @keyframes pulseDot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(0.8); }
-    }
-    .p-mode-pill {
-      background: #ffffff;
-      border: 1px solid #12100e;
-      border-radius: 999px;
-      padding: 1px 6px;
-      font-size: 9.5px;
-      font-weight: 800;
-      cursor: pointer;
-      color: #12100e;
-    }
-
-    /* Screen Stage */
-    .p-scroll-stage {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    /* Phone Cards & Bubbles */
-    .p-turn-card {
-      background: #fffdf7;
-      border: 2px solid #12100e;
-      border-radius: 16px;
-      padding: 12px 14px;
-      box-shadow: 0 2px 0 #12100e;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .p-accordion-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 11px;
-      font-weight: 800;
-      color: #4a453e;
-      padding-bottom: 6px;
-      border-bottom: 1.5px dashed rgba(18, 16, 14, 0.15);
-      cursor: pointer;
-    }
-    .p-subagent-box {
-      background: #f4f2ea;
-      border: 1.5px solid #12100e;
-      border-radius: 10px;
-      padding: 8px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .p-subagent-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 11px;
-      font-weight: 900;
-    }
-    .p-subagent-item {
-      background: #fff;
-      border: 1px solid #12100e;
-      border-radius: 6px;
-      padding: 6px 8px;
-      font-size: 10.5px;
-    }
-    .p-user-bubble {
-      align-self: flex-end;
-      background: #ffd84f;
-      border: 2px solid #12100e;
-      border-radius: 14px 14px 2px 14px;
-      padding: 8px 14px;
-      font-size: 12.5px;
-      font-weight: 800;
-      color: #12100e;
-      max-width: 82%;
-      box-shadow: 0 1.5px 0 #12100e;
-    }
-    .p-action-capsules {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-top: 4px;
-    }
-    .p-capsule-btn {
-      background: #fff;
-      border: 1.5px solid #12100e;
-      border-radius: 999px;
-      padding: 3px 10px;
-      font-size: 10.5px;
-      font-weight: 800;
-      cursor: pointer;
-      box-shadow: 0 1px 0 #12100e;
-      transition: transform 0.1s;
-    }
-    .p-capsule-btn:active {
-      transform: translateY(1px);
-      box-shadow: none;
-    }
-
-    /* Inside Phone: Composer */
-    .p-composer-wrap {
-      padding: 8px 12px 12px 12px;
-      background: #f8f6f0;
-      border-top: 1.5px solid rgba(18, 16, 14, 0.1);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .p-input-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .p-chat-input {
-      flex: 1;
-      height: 42px;
-      background: #fff;
-      border: 2px solid #12100e;
-      border-radius: 21px;
-      padding: 0 16px;
-      font-size: 13px;
-      font-weight: 700;
-      color: #12100e;
-      outline: none;
-      box-shadow: 0 1.5px 0 #12100e;
-    }
-    .p-send-btn {
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      background: #00f2fe;
-      border: 2px solid #12100e;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      cursor: pointer;
-      box-shadow: 0 1.5px 0 #12100e;
-    }
-
-    /* Inside Phone: Bottom Nav Tabs */
-    .p-bottom-nav {
-      height: 58px;
-      background: #fffdf7;
-      border-top: 2px solid #12100e;
-      display: flex;
-      align-items: center;
-      justify-content: space-around;
-      padding: 0 6px;
-    }
-    .p-nav-tab {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      background: transparent;
-      border: none;
-      font-size: 10px;
-      font-weight: 800;
-      color: #78716c;
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 8px;
-    }
-    .p-nav-tab.active {
-      color: #0284c7;
-      background: #e0f2fe;
-    }
-    .p-nav-icon {
-      font-size: 17px;
-    }
-
-    /* Dual Console Box (Desktop Pair) */
-    .dual-console-box {
-      flex: 1;
-      max-width: 640px;
-      height: 840px;
-      background: var(--code-bg);
-      border: 1px solid var(--border-medium);
-      border-radius: 32px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      box-shadow: var(--shadow-card);
-    }
-    @media (max-width: 1080px) {
-      .dual-console-box { width: 100%; max-width: 720px; height: 500px; }
-    }
-    .console-header {
-      height: 44px;
-      background: var(--terminal-header);
-      padding: 0 18px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .console-dots {
-      display: flex;
-      gap: 6px;
-    }
-    .c-dot { width: 11px; height: 11px; border-radius: 50%; }
-    .c-dot.red { background: #ef4444; }
-    .c-dot.yellow { background: #f59e0b; }
-    .c-dot.green { background: #10b981; }
-
-    .console-title {
-      font-family: 'Fira Code', monospace;
-      font-size: 12px;
-      color: var(--text-sub);
-      font-weight: 600;
-    }
-    .console-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      font-family: 'Fira Code', monospace;
-      font-size: 12.5px;
-      line-height: 1.8;
-      color: #cbd5e1;
-    }
-
-    /* Drawer Overlay inside Phone */
-    .p-drawer-overlay {
-      position: absolute;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 100;
-      display: none;
-      backdrop-filter: blur(2px);
-    }
-    .p-drawer-overlay.open {
-      display: block;
-    }
-    .p-drawer-pane {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      width: 290px;
-      background: #f8f6f0;
-      border-right: 2px solid #12100e;
-      padding: 20px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      box-shadow: 4px 0 20px rgba(0, 0, 0, 0.2);
-    }
-
-    /* Virtual Keyboard */
-    .p-keyboard {
-      background: #d1d5db;
-      border-top: 2px solid #12100e;
-      padding: 8px 6px;
-      display: none;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .p-keyboard.open {
-      display: flex;
-    }
-    .kb-row {
-      display: flex;
-      justify-content: center;
-      gap: 5px;
-    }
-    .kb-key {
-      flex: 1;
-      height: 36px;
-      background: #fff;
-      border: 1px solid #9ca3af;
-      border-radius: 5px;
-      font-size: 13px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      user-select: none;
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
-    }
-    .kb-key.action-key {
-      background: #e5e7eb;
-      font-size: 11px;
-    }
-
-    /* ==========================================================================
-       5. BENTO GRID: 6 核心技术架构创新
-       ========================================================================== */
-    .bento-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
-    }
-    @media (max-width: 960px) {
-      .bento-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 640px) {
-      .bento-grid { grid-template-columns: 1fr; }
-    }
-    .bento-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 28px;
-      padding: 36px 30px;
-      backdrop-filter: blur(14px);
-      box-shadow: var(--shadow-card);
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      position: relative;
-      overflow: hidden;
-    }
-    .bento-card:hover {
-      transform: translateY(-5px);
-      border-color: var(--border-focus);
-      box-shadow: var(--shadow-elevated);
-    }
-    .bento-icon-wrap {
-      width: 52px;
-      height: 52px;
-      border-radius: 16px;
-      background: var(--accent-cyan-subtle);
-      border: 1px solid var(--border-medium);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      color: var(--accent-cyan);
-    }
-    .bento-card-title {
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--text-bright);
-    }
-    .bento-card-desc {
-      font-size: 14.5px;
-      color: var(--text-sub);
-      line-height: 1.7;
-    }
-    .bento-tag {
-      margin-top: auto;
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--accent-cyan);
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-    }
-
-    /* ==========================================================================
-       6. REAL-WORLD SCENARIOS (四大真实场景卡片)
-       ========================================================================== */
-    .scenario-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 24px;
-    }
-    @media (max-width: 1100px) {
-      .scenario-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 640px) {
-      .scenario-grid { grid-template-columns: 1fr; }
-    }
-    .sc-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 24px;
-      padding: 30px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      backdrop-filter: blur(14px);
-      box-shadow: var(--shadow-card);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .sc-card:hover {
-      transform: translateY(-4px);
-      border-color: var(--border-focus);
-      box-shadow: var(--shadow-elevated);
-    }
-    .sc-emoji {
-      font-size: 32px;
-      margin-bottom: 2px;
-    }
-    .sc-title {
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--text-bright);
-    }
-    .sc-desc {
-      font-size: 14px;
-      color: var(--text-sub);
-      line-height: 1.65;
-    }
-    .sc-badge {
-      margin-top: auto;
-      font-size: 11.5px;
-      font-weight: 800;
-      color: var(--accent-cyan);
-    }
-
-    /* ==========================================================================
-       7. MATRIX COMPARISON TABLE (全景横向对比)
-       ========================================================================== */
-    .compare-table-wrap {
-      overflow-x: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 28px;
-      padding: 16px;
-      box-shadow: var(--shadow-card);
-    }
-    .comp-table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 14px;
-    }
-    .comp-table th, .comp-table td {
-      padding: 20px 24px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .comp-table th {
-      font-size: 15px;
-      font-weight: 800;
-      color: var(--text-sub);
-    }
-    .highlight-col {
-      background: var(--accent-cyan-subtle);
-      color: var(--text-bright);
-      font-weight: 700;
-      border-left: 1px solid var(--border-medium);
-      border-right: 1px solid var(--border-medium);
-    }
-    .comp-table th.highlight-col {
-      color: var(--accent-cyan);
-      font-size: 16px;
-    }
-
-    /* ==========================================================================
-       8. USER STORIES & REVIEWS
-       ========================================================================== */
-    .reviews-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
-    }
-    @media (max-width: 900px) {
-      .reviews-grid { grid-template-columns: 1fr; }
-    }
-    .review-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 24px;
-      padding: 32px 28px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 20px;
-      box-shadow: var(--shadow-card);
-    }
-    .review-text {
-      font-size: 14.5px;
-      line-height: 1.7;
-      color: var(--text-sub);
-      font-style: italic;
-    }
-    .review-author {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .author-avatar {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-indigo) 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 900;
-      color: #fff;
-    }
-    .author-name {
-      font-size: 14.5px;
-      font-weight: 800;
-      color: var(--text-bright);
-    }
-    .author-role {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* ==========================================================================
-       9. DEVELOPER QUICKSTART
-       ========================================================================== */
-    .quickstart-box {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 28px;
-      padding: 40px;
-      box-shadow: var(--shadow-card);
-    }
-    .qs-tabs {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 24px;
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 16px;
-    }
-    .qs-tab-btn {
-      background: transparent;
-      border: none;
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text-sub);
-      padding: 8px 16px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .qs-tab-btn.active {
-      background: var(--accent-cyan-subtle);
-      color: var(--accent-cyan);
-    }
-    .qs-code-row {
-      background: var(--code-bg);
-      border: 1px solid var(--border-medium);
-      border-radius: 14px;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      font-family: 'Fira Code', monospace;
-      font-size: 14px;
-      color: #86efac;
-      margin-top: 12px;
-    }
-    .copy-btn {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
-      border-radius: 8px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .copy-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    /* ==========================================================================
-       10. FAQ ACCORDION
-       ========================================================================== */
-    .faq-list {
-      max-width: 860px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .faq-item {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 18px;
-      overflow: hidden;
-      box-shadow: var(--shadow-card);
-      transition: border-color 0.2s ease;
-    }
-    .faq-item.open {
-      border-color: var(--border-focus);
-    }
-    .faq-q {
-      padding: 22px 26px;
-      font-size: 16px;
-      font-weight: 800;
-      color: var(--text-bright);
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      user-select: none;
-    }
-    .faq-chevron {
-      font-size: 18px;
-      transition: transform 0.2s ease;
-    }
-    .faq-item.open .faq-chevron {
-      transform: rotate(90deg);
-    }
-    .faq-a {
-      display: none;
-      padding: 0 26px 22px 26px;
-      font-size: 14.5px;
-      line-height: 1.7;
-      color: var(--text-sub);
-      border-top: 1px dashed var(--border-subtle);
-    }
-    .faq-item.open .faq-a {
-      display: block;
-    }
-
-    /* ==========================================================================
-       11. FOOTER
-       ========================================================================== */
-    .site-footer {
-      background: var(--bg-surface);
-      border-top: 1px solid var(--border-subtle);
-      padding: 80px 0 40px 0;
-      margin-top: 80px;
-    }
-    .footer-content {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: 40px;
-      margin-bottom: 60px;
-    }
-    @media (max-width: 860px) {
-      .footer-content { grid-template-columns: 1fr 1fr; }
-    }
-    @media (max-width: 520px) {
-      .footer-content { grid-template-columns: 1fr; }
-    }
-    .footer-col-title {
-      font-size: 15px;
-      font-weight: 800;
-      color: var(--text-bright);
-      margin-bottom: 18px;
-    }
-    .footer-links {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .footer-links a {
-      color: var(--text-sub);
-      text-decoration: none;
-      font-size: 13.5px;
-      transition: color 0.15s ease;
-    }
-    .footer-links a:hover {
-      color: var(--accent-cyan);
-    }
-    .footer-bottom {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 30px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 13px;
-      color: var(--text-muted);
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    /* Toast Notification */
-    .toast-box {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      background: var(--bg-surface-elevated);
-      border: 1px solid var(--border-focus);
-      color: var(--text-bright);
-      padding: 12px 22px;
-      border-radius: 999px;
-      font-size: 13.5px;
-      font-weight: 700;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      z-index: 9999;
-    }
-    .toast-box.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  </style>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&family=Noto+Serif+SC:wght@600;900&display=swap">
+  <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
+  <a class="skip" href="#main">跳到正文</a>
 
-  <!-- Ambient Glow -->
-  <div class="ambient-glow-top"></div>
-  <div class="ambient-grid"></div>
-
-  <!-- NAVIGATION BAR -->
-  <nav class="site-nav">
-    <div class="container nav-inner">
-      <a href="#" class="brand-wrap">
-        <div class="brand-icon">🤖</div>
-        <div class="brand-text">
-          <div class="brand-title">
-            MyAI
-            <span class="brand-badge">v2.0 Pro</span>
-          </div>
-          <span class="brand-sub">Go + Expo React Native</span>
-        </div>
+  <!-- ================= NAV ================= -->
+  <header class="nav" id="nav">
+    <div class="wrap nav-inner">
+      <a href="#top" class="brand" aria-label="MyAI 首页">
+        <img src="assets/img/logo.svg" alt="" width="32" height="32">
+        <span class="brand-word">MyAI</span>
       </a>
-
-      <ul class="nav-menu">
-        <li><a href="#features" class="nav-link">核心特性</a></li>
-        <li><a href="#live-rig" class="nav-link">真机实验室</a></li>
-        <li><a href="#scenarios" class="nav-link">应用场景</a></li>
-        <li><a href="#comparison" class="nav-link">架构对比</a></li>
-        <li><a href="#quickstart" class="nav-link">快速接入</a></li>
-        <li><a href="#faq" class="nav-link">常见问题</a></li>
-      </ul>
-
+      <nav class="nav-links" id="nav-links" aria-label="主导航">
+        <a href="#flow">产品演示</a>
+        <a href="#features">能力</a>
+        <a href="#architecture">架构</a>
+        <a href="#security">安全</a>
+        <a href="#start">快速开始</a>
+        <a href="#docs">文档</a>
+      </nav>
       <div class="nav-actions">
-        <button id="theme-toggle" class="theme-toggle-btn" title="切换浅色 / 深色主题">🌙</button>
-        <button id="sound-toggle" class="nav-btn" title="切换全局音效">
-          <span>🔊</span>
-          <span id="sound-label">音效: 开</span>
+        <a class="btn btn-ghost btn-sm" href="https://github.com/yourGaomu/myai" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <button class="nav-toggle" id="nav-toggle" aria-label="打开菜单" aria-expanded="false" aria-controls="nav-links">
+          <span></span><span></span>
         </button>
-        <a href="https://github.com/myai/core" target="_blank" class="nav-btn">
-          <span>★</span>
-          <span>GitHub 1.2k</span>
-        </a>
-        <a href="#live-rig" class="nav-btn primary-btn">
-          <span>试玩真机</span>
-          <span>⚡</span>
-        </a>
       </div>
     </div>
-  </nav>
+  </header>
 
-  <!-- HERO SECTION -->
-  <section class="hero-section">
-    <div class="container">
-      <div class="hero-announce">
-        <span class="hero-announce-tag">2026 RELEASE</span>
-        <span>首创移动端子代理群并发调度与 Git 原子时光机系统</span>
-        <span>➔</span>
-      </div>
-
-      <h1 class="hero-h1">
-        手机上的<span class="gradient-text">全域自主编程</span>智能体
-      </h1>
-
-      <p class="hero-sub">
-        告别端坐电脑前的束缚。随时随地<strong>派遣并发子代理</strong>探查代码、审查<strong>两阶段安全 Diff</strong> 与执行 <strong>Git 秒级时光机回滚</strong>。真自主 · 真安全 · 真随身。
-      </p>
-
-      <div class="hero-cta-group">
-        <a href="#live-rig" class="cta-glow-btn">
-          <span>立即试玩交互真机</span>
-          <span>⚡</span>
-        </a>
-        <div class="hero-terminal-pill" onclick="copyText('go run . relay --addr 0.0.0.0:18080')">
-          <span>$ go run . relay --addr 0.0.0.0:18080</span>
-          <span class="terminal-copy-badge">📋 点击复制</span>
-        </div>
-      </div>
-
-      <!-- Supported Platforms Bar -->
-      <div class="platforms-bar">
-        <span style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; margin-right: 6px;">全端协同支持:</span>
-        <div class="platform-pill" onclick="showToast('Android: React Native 像素级原生触控，视口防遮挡')">📱 Android 原生</div>
-        <div class="platform-pill" onclick="showToast('iOS: 支持 PWA 与移动 Safari 快速安装')">🍎 iOS WebApp</div>
-        <div class="platform-pill" onclick="showToast('Go CLI: 单二进制零外部依赖，极速中继')">⚡ Go CLI 核心</div>
-        <div class="platform-pill" onclick="showToast('Docker: compose.prod.yaml 一键拉起完整集群')">🐳 Docker 集群</div>
-        <div class="platform-pill" onclick="showToast('跨平台: Windows, macOS, Linux 均已完全原生适配')">💻 Windows / macOS / Linux</div>
-      </div>
-
-      <!-- 4 Key Metrics -->
-      <div class="metrics-grid">
-        <div class="metric-card">
-          <div class="metric-val">14ms</div>
-          <div class="metric-label">Go WebSocket 神经中继延迟</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-val">100%</div>
-          <div class="metric-label">源码本地隐私驻留（绝不出内网）</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-val">10+</div>
-          <div class="metric-label">子代理群 (Subagent Swarm) 并发协同</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-val">0 侵入</div>
-          <div class="metric-label">Git 原子快照秒级回滚安全网</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- LIVE RIG SECTION (深空钛金真机交互实验室) -->
-  <section class="section-wrap" id="live-rig" style="padding-top: 40px;">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Live Interactive Lab</div>
-        <h2 class="section-title">MyAI 在线真机交互实验室</h2>
-        <p class="section-desc">1:1 还原移动客户端的真实操作。支持软键盘智能顶起、子代理动态并发派发与五大标签页漫游。</p>
-      </div>
-
-      <!-- Control Bar -->
-      <div class="rig-ctrl-bar">
-        <div class="rig-mode-group">
-          <button class="rig-pill-btn active" id="btn-mode-phone">📱 手机真机实测</button>
-          <button class="rig-pill-btn" id="btn-mode-dual">📱⚡💻 手机与电脑终端双端协同</button>
-        </div>
-
-        <div class="preset-chips-group">
-          <span style="font-size: 12px; color: var(--text-muted); font-weight: 700;">交互预设:</span>
-          <button class="preset-chip active" id="chip-preset-subagent">🌿 派遣子代理探查</button>
-          <button class="preset-chip" id="chip-preset-diff">🔀 审查方案 A Diff</button>
-          <button class="preset-chip" id="chip-preset-cron">⏱️ 巡检定时任务</button>
-          <button class="preset-chip" id="chip-preset-knowledge">🧠 向量知识库与记忆</button>
-          <button class="preset-chip" id="chip-preset-files">📁 工作区源文件浏览</button>
-        </div>
-      </div>
-
-      <!-- Main Stage Container -->
-      <div class="rig-stage-container">
-        
-        <!-- PHONE CHASSIS -->
-        <div class="phone-chassis">
-          <div class="phone-screen">
-            
-            <!-- Android Status Bar -->
-            <div class="p-status-bar">
-              <span>11:51</span>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 9.5px; color: #555;">2.04 KB/s</span>
-                <span>5G</span>
-                <span>84%</span>
-              </div>
-            </div>
-
-            <!-- App Header with Dynamic Island -->
-            <div class="p-app-header">
-              <button class="p-circle-btn" id="p-btn-drawer" title="打开侧边工作区抽屉">☰</button>
-
-              <div class="p-island-box">
-                <div class="p-avatar-circle" title="MyAI 智能体">🤖</div>
-                <div class="p-identity-row">
-                  <span class="p-island-title">MyAI</span>
-                  <span class="p-device-tag">server-agent</span>
-                </div>
-                <div class="p-status-row">
-                  <span class="p-status-dot"></span>
-                  <span style="color: #12100e;">在线</span>
-                  <span style="color: #999;">·</span>
-                  <button class="p-mode-pill" id="p-mode-toggle" title="切换对话与规划模式">
-                    <span id="p-mode-text">💬 对话模式</span>
-                    <span style="font-size: 8px;">▾</span>
-                  </button>
-                </div>
-              </div>
-
-              <button class="p-circle-btn" id="p-btn-settings" title="偏好设置">⚙</button>
-            </div>
-
-            <!-- Scrollable Content Stage -->
-            <div class="p-scroll-stage" id="phone-scroll-stage">
-              
-              <!-- TAB 1: CHAT VIEW -->
-              <div id="p-view-chat" style="display: flex; flex-direction: column; gap: 12px;">
-                
-                <!-- Agent Turn Card with Subagent Swarms -->
-                <div class="p-turn-card">
-                  <div class="p-accordion-header" id="turn-accordion-toggle">
-                    <span>用时 3.9秒 · 派遣 2 个并发子代理</span>
-                    <span id="accordion-chevron">⌄</span>
-                  </div>
-
-                  <div id="turn-accordion-body" style="display: flex; flex-direction: column; gap: 8px;">
-                    <div style="font-size: 11.5px; color: #555; line-height: 1.5;">
-                      任务已智能拆解：由代码库探查代理并发扫描源码，测试分析代理核验边界。
-                    </div>
-
-                    <!-- Subagent Swarm Tree -->
-                    <div class="p-subagent-box">
-                      <div class="p-subagent-head">
-                        <span style="color: #0369a1;">🌿 并发子代理任务群 (Subagent Swarm)</span>
-                        <span style="font-size: 9.5px; background: #e0f2fe; color: #0284c7; padding: 1px 6px; border-radius: 4px;">2/2 已完成</span>
-                      </div>
-                      <div class="p-subagent-item">
-                        <div style="display: flex; justify-content: space-between; font-weight: 800; color: #0369a1;">
-                          <span>🔍 Codebase Researcher</span>
-                          <span style="color: #666; font-size: 9.5px;">core/remote</span>
-                        </div>
-                        <div style="color: #444; margin-top: 2px;">定位到 <span style="font-family: monospace;">server.go</span> 的握手协议与重连死锁点。</div>
-                      </div>
-                      <div class="p-subagent-item">
-                        <div style="display: flex; justify-content: space-between; font-weight: 800; color: #7e22ce;">
-                          <span>🧪 Test Analyzer</span>
-                          <span style="color: #666; font-size: 9.5px;">tests/</span>
-                        </div>
-                        <div style="color: #444; margin-top: 2px;">核验了 Mock WebSocket 断线用例，边界完备。</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="font-size: 12px; color: #12100e; font-weight: 700; margin-top: 2px;">
-                    已为你规划重构方案。随时可以点击下方快速开始：
-                  </div>
-
-                  <div class="p-action-capsules">
-                    <button class="p-capsule-btn" onclick="sendMobileChat('帮我派遣子代理深入重构 WebSocket 自动重连逻辑，并补充单元测试')">🌿 派遣重构子代理</button>
-                    <button class="p-capsule-btn" onclick="switchMobileTab('changes')">🔀 审查方案 A 代码 Diff</button>
-                    <button class="p-capsule-btn" onclick="sendMobileChat('配置每 30 分钟检查一次 Docker 容器运行状态')">⏱️ 配置巡检 Cron</button>
-                  </div>
-                </div>
-
-                <!-- User Message Bubble -->
-                <div class="p-user-bubble">
-                  你好，请帮我分析下中继服务的断线重连机制
-                </div>
-              </div>
-
-              <!-- TAB 2: CHANGES VIEW -->
-              <div id="p-view-changes" style="display: none; flex-direction: column; gap: 10px;">
-                <div class="p-turn-card">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 900; font-size: 13px; color: #dc2626;">⚠ 待人工审批变更 (方案 A 分离式)</span>
-                    <button class="p-capsule-btn" onclick="switchMobileTab('chat')">返回对话 ➔</button>
-                  </div>
-                  <div style="font-size: 11px; color: #666; font-family: monospace;">core/remote/relay/server.go</div>
-                  
-                  <div style="background: #1e1e1e; border: 1.5px solid #12100e; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; color: #d4d4d4; line-height: 1.6; overflow-x: auto;">
-                    <span style="color: #858585;">@@ -45,6 +45,10 @@</span><br>
-                    <span style="color: #4ade80;">+ func (s *RelayServer) reconnectWithBackoff(attempt int) time.Duration {</span><br>
-                    <span style="color: #4ade80;">+     base := 500 * time.Millisecond</span><br>
-                    <span style="color: #4ade80;">+     return min(base * (1 &lt;&lt; attempt), 30 * time.Second)</span><br>
-                    <span style="color: #4ade80;">+ }</span>
-                  </div>
-
-                  <div style="display: flex; gap: 8px; margin-top: 6px;">
-                    <button class="p-capsule-btn" style="flex: 1; background: #10b981; color: #fff; border-color: #059669; padding: 6px;" onclick="approveDiffAction()">✔ 确认提交代码变更</button>
-                    <button class="p-capsule-btn" style="flex: 1; background: #ef4444; color: #fff; border-color: #dc2626; padding: 6px;" onclick="rejectDiffAction()">✕ 拒绝修改</button>
-                  </div>
-
-                  <div style="border-top: 1px dashed rgba(18,16,14,0.15); padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10.5px; color: #666;">Git 时光机基线: <strong style="color: #12100e;">#a8f9c1</strong></span>
-                    <button class="p-capsule-btn" onclick="rollbackAction()">⏪ 一键回滚到修改前</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- TAB 3: FILES VIEW -->
-              <div id="p-view-files" style="display: none; flex-direction: column; gap: 10px;">
-                <div class="p-turn-card">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 900; font-size: 13px;">📁 工作区文件浏览器</span>
-                    <span style="font-size: 10.5px; color: #666;">d:\Go_All\myai</span>
-                  </div>
-                  
-                  <div style="display: flex; flex-direction: column; gap: 6px; font-family: monospace; font-size: 11.5px;">
-                    <div style="padding: 8px; background: #f4f5f7; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="previewFileCode('server.go')">
-                      <span>📄 core/remote/relay/server.go</span>
-                      <span style="color: #0284c7; font-weight: 800;">查看 ➔</span>
-                    </div>
-                    <div style="padding: 8px; background: #f4f5f7; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="previewFileCode('main.go')">
-                      <span>📄 main.go</span>
-                      <span style="color: #0284c7; font-weight: 800;">查看 ➔</span>
-                    </div>
-                    <div style="padding: 8px; background: #f4f5f7; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="previewFileCode('go.mod')">
-                      <span>📄 go.mod</span>
-                      <span style="color: #0284c7; font-weight: 800;">查看 ➔</span>
-                    </div>
-                  </div>
-
-                  <div id="file-preview-box" style="display: none; background: #1e1e1e; color: #86efac; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 11px; max-height: 180px; overflow-y: auto;">
-                    // 正在预览文件内容...
-                  </div>
-                </div>
-              </div>
-
-              <!-- TAB 4: KNOWLEDGE & MEMORY VIEW -->
-              <div id="p-view-knowledge" style="display: none; flex-direction: column; gap: 10px;">
-                <div class="p-turn-card">
-                  <span style="font-weight: 900; font-size: 13px; color: #7e22ce;">🧠 分层混合知识库与自进化记忆</span>
-                  <div style="font-size: 11px; color: #666; line-height: 1.5;">
-                    支持 Milvus 远程向量 + sqlite-vec 本地热点 + SQLite FTS5 关键词全文检索。
-                  </div>
-
-                  <div style="background: #f4f2ea; border: 1.5px solid #12100e; border-radius: 8px; padding: 10px; font-size: 11px;">
-                    <div style="font-weight: 800; margin-bottom: 4px;">🌙 Nightly Dream 经验沉淀网络:</div>
-                    • 已提取经验: <strong>WebSocket 重连幂等性保护</strong><br>
-                    • 踩坑记录: <strong>Gorilla WS 在 Windows 下缓冲溢出规避</strong><br>
-                    • 存储状态: <strong>独立 AI 记忆库（不污染用户私有数据）</strong>
-                  </div>
-                </div>
-              </div>
-
-              <!-- TAB 5: SETTINGS VIEW -->
-              <div id="p-view-settings" style="display: none; flex-direction: column; gap: 10px;">
-                <div class="p-turn-card">
-                  <span style="font-weight: 900; font-size: 13px;">⚙ 系统设置与模型路由</span>
-                  <div style="font-size: 11px; color: #4a453e; line-height: 1.6;">
-                    • 中继地址: <span style="font-family: monospace;">ws://127.0.0.1:18080/ws/agent</span><br>
-                    • 当前接入模型: <strong>Claude 3.5 Sonnet / DeepSeek-V3</strong><br>
-                    • 安全审批拦截 (Ask Mode): <strong style="color: #059669;">严格启用 (方案 A)</strong><br>
-                    • 源码本地隐私驻留: <strong style="color: #059669;">100% 宿主机本地</strong>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <!-- Composer Area -->
-            <div class="p-composer-wrap" id="p-composer-section">
-              <div class="p-input-row">
-                <input type="text" class="p-chat-input" id="p-chat-input" placeholder="输入需求，如：帮我重构心跳保活..." />
-                <button class="p-send-btn" id="p-send-btn" title="发送">➔</button>
-              </div>
-            </div>
-
-            <!-- Virtual Keyboard -->
-            <div class="p-keyboard" id="p-keyboard">
-              <div class="kb-row">
-                <div class="kb-key" onclick="kbType('Q')">Q</div>
-                <div class="kb-key" onclick="kbType('W')">W</div>
-                <div class="kb-key" onclick="kbType('E')">E</div>
-                <div class="kb-key" onclick="kbType('R')">R</div>
-                <div class="kb-key" onclick="kbType('T')">T</div>
-                <div class="kb-key" onclick="kbType('Y')">Y</div>
-                <div class="kb-key" onclick="kbType('U')">U</div>
-                <div class="kb-key" onclick="kbType('I')">I</div>
-                <div class="kb-key" onclick="kbType('O')">O</div>
-                <div class="kb-key" onclick="kbType('P')">P</div>
-              </div>
-              <div class="kb-row">
-                <div class="kb-key" onclick="kbType('A')">A</div>
-                <div class="kb-key" onclick="kbType('S')">S</div>
-                <div class="kb-key" onclick="kbType('D')">D</div>
-                <div class="kb-key" onclick="kbType('F')">F</div>
-                <div class="kb-key" onclick="kbType('G')">G</div>
-                <div class="kb-key" onclick="kbType('H')">H</div>
-                <div class="kb-key" onclick="kbType('J')">J</div>
-                <div class="kb-key" onclick="kbType('K')">K</div>
-                <div class="kb-key" onclick="kbType('L')">L</div>
-              </div>
-              <div class="kb-row">
-                <div class="kb-key action-key" onclick="kbBackspace()">⌫</div>
-                <div class="kb-key" onclick="kbType('Z')">Z</div>
-                <div class="kb-key" onclick="kbType('X')">X</div>
-                <div class="kb-key" onclick="kbType('C')">C</div>
-                <div class="kb-key" onclick="kbType('V')">V</div>
-                <div class="kb-key" onclick="kbType('B')">B</div>
-                <div class="kb-key" onclick="kbType('N')">N</div>
-                <div class="kb-key" onclick="kbType('M')">M</div>
-                <div class="kb-key action-key" onclick="hideKeyboard()">关闭 ▾</div>
-              </div>
-              <div class="kb-row">
-                <div class="kb-key action-key" style="flex: 3;" onclick="kbSpace()">空格 Space</div>
-                <div class="kb-key action-key" style="flex: 1.5; background: #00f2fe; color: #000; font-weight: 800;" onclick="submitKeyboard()">发送 ➔</div>
-              </div>
-            </div>
-
-            <!-- Bottom Nav Tabs -->
-            <div class="p-bottom-nav">
-              <button class="p-nav-tab active" data-tab="chat" onclick="switchMobileTab('chat')">
-                <span class="p-nav-icon">💬</span>
-                <span>对话</span>
-              </button>
-              <button class="p-nav-tab" data-tab="changes" onclick="switchMobileTab('changes')">
-                <span class="p-nav-icon">🔀</span>
-                <span>变更</span>
-              </button>
-              <button class="p-nav-tab" data-tab="files" onclick="switchMobileTab('files')">
-                <span class="p-nav-icon">📁</span>
-                <span>文件</span>
-              </button>
-              <button class="p-nav-tab" data-tab="knowledge" onclick="switchMobileTab('knowledge')">
-                <span class="p-nav-icon">🧠</span>
-                <span>知识库</span>
-              </button>
-              <button class="p-nav-tab" data-tab="settings" onclick="switchMobileTab('settings')">
-                <span class="p-nav-icon">⚙</span>
-                <span>设置</span>
-              </button>
-            </div>
-
-            <!-- Drawer Inside Phone -->
-            <div class="p-drawer-overlay" id="p-drawer">
-              <div class="p-drawer-pane">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #12100e; padding-bottom: 10px;">
-                  <span style="font-weight: 900; font-size: 15px;">工作区与会话</span>
-                  <button class="p-circle-btn" style="width: 30px; height: 30px; font-size: 13px;" onclick="closeDrawer()">✕</button>
-                </div>
-
-                <div style="font-size: 12px; font-weight: 800; color: #666;">活跃工作区:</div>
-                <div style="background: #fff; border: 1.5px solid #12100e; border-radius: 8px; padding: 8px; font-family: monospace; font-size: 11px;">
-                  💻 local / pc-local<br>
-                  <span style="color: #0284c7;">d:\Go_All\myai</span>
-                </div>
-
-                <div style="font-size: 12px; font-weight: 800; color: #666; margin-top: 8px;">历史会话:</div>
-                <div style="display: flex; flex-direction: column; gap: 6px;">
-                  <div style="background: #e0f2fe; border: 1.5px solid #0284c7; border-radius: 8px; padding: 8px; font-size: 11.5px; font-weight: 700; cursor: pointer;" onclick="closeDrawer(); switchMobileTab('chat');">
-                    🟢 重构 WebSocket 心跳与重连
-                  </div>
-                  <div style="background: #fff; border: 1.5px solid #12100e; border-radius: 8px; padding: 8px; font-size: 11.5px; cursor: pointer;" onclick="showToast('已载入会话: RAG 分层索引迁移'); closeDrawer();">
-                    ⚪ RAG 分层索引优化
-                  </div>
-                  <div style="background: #fff; border: 1.5px solid #12100e; border-radius: 8px; padding: 8px; font-size: 11.5px; cursor: pointer;" onclick="showToast('已载入会话: Docker 集群配置'); closeDrawer();">
-                    ⚪ Docker Compose 生产部署
-                  </div>
-                </div>
-
-                <button class="p-capsule-btn" style="margin-top: auto; padding: 8px; background: #ffd84f;" onclick="showToast('已新建空白开发会话'); closeDrawer();">+ 新建开发会话</button>
-              </div>
-            </div>
-
+  <main id="main">
+    <!-- ================= HERO ================= -->
+    <section class="hero" id="top">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="dot-live"></span>
+            开源 AI 编程 Agent · 电脑执行 / 手机控制
+          </p>
+          <h1 class="hero-title">
+            把电脑里的<br>
+            AI 程序员，<br>
+            <span class="mark">装进口袋</span>。
+          </h1>
+          <p class="hero-sub">
+            MyAI 在电脑的工作区里读代码、改文件、跑测试。你用手机下达任务、决定是否放行工具、查看改了哪些行，并按需还原文件。
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-ink" href="#flow">
+              试用交互演示
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="#start">在电脑上运行</a>
+          </div>
+          <div class="hero-proof" aria-label="运行方式">
+            <span><b>01</b> 电脑运行</span><i>→</i><span><b>02</b> 手机审批</span><i>→</i><span><b>03</b> 按需还原</span>
           </div>
         </div>
 
-        <!-- DUAL CONSOLE WINDOW (DESKTOP PAIR) -->
-        <div class="dual-console-box" id="dual-console-box">
-          <div class="console-header">
-            <div class="console-dots">
-              <span class="c-dot red"></span>
-              <span class="c-dot yellow"></span>
-              <span class="c-dot green"></span>
-            </div>
-            <span class="console-title">Go Relay Daemon & Core Agent Terminal (ws://127.0.0.1:18080)</span>
-            <span style="font-size: 11px; color: #86efac; font-family: monospace;">● LIVE 14ms</span>
+        <div class="hero-stage" role="img" aria-label="界面示意：手机已连接 PC Agent，展示任务计划与待审批的测试命令">
+          <div class="stage-sticker sticker-relay">
+            <span class="dot-live"></span> 界面示意 · Relay ⇄ PC Agent
           </div>
-          <div class="console-body" id="console-stream">
-            <span style="color: #64748b;">[11:51:02]</span> <span style="color: #38bdf8;">[INIT]</span> MyAI Relay Server v2.0 listening on 0.0.0.0:18080<br>
-            <span style="color: #64748b;">[11:51:03]</span> <span style="color: #86efac;">[AUTH]</span> Bearer token verified for agent 'pc-local'<br>
-            <span style="color: #64748b;">[11:51:03]</span> <span style="color: #ffd84f;">[PAIR]</span> Mobile client paired (Expo React Native Android Client)<br>
-            <span style="color: #64748b;">[11:51:05]</span> <span style="color: #c084fc;">[WORKSPACE]</span> Bound directory: D:\Go_All\myai (SQLite baseline active)<br>
-            <span style="color: #64748b;">[11:51:10]</span> <span style="color: #38bdf8;">[SWARM]</span> Dispatching Subagent Swarm (Researcher + Test Analyzer)...<br>
-            <span style="color: #64748b;">[11:51:14]</span> <span style="color: #86efac;">[DIFF]</span> Two-stage sandbox generated diff for core/remote/relay/server.go<br>
-            <span style="color: #64748b;">[11:51:14]</span> <span style="color: #f43f5e;">[ASK_MODE]</span> Option A: Waiting for explicit user approval on mobile...<br>
-            <span style="color: #64748b;">[11:51:20]</span> <span style="color: #38bdf8;">[HEARTBEAT]</span> WS ping/pong ok. Latency: 14.2ms<br>
-          </div>
-        </div>
+          <div class="stage-sticker sticker-diff mono">diff · 2 files</div>
+          <svg class="spark spark-a" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2q4 14 18 18q-14 4-18 18q-4-14-18-18q14-4 18-18z"/></svg>
+          <svg class="spark spark-b" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2q4 14 18 18q-14 4-18 18q-4-14-18-18q14-4 18-18z"/></svg>
 
-      </div>
-    </div>
-  </section>
+          <img class="hero-mascot" src="assets/img/mascot-idle.webp" alt="" width="400" height="400">
 
-  <!-- BENTO FEATURES GRID -->
-  <section class="section-wrap" id="features">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Architecture & Innovation</div>
-        <h2 class="section-title">全域自主智能体六大技术底座</h2>
-        <p class="section-desc">从底层极速中继到两阶段安全阻断，为移动全域自主编程树立全新工业标准。</p>
-      </div>
-
-      <div class="bento-grid">
-        <!-- 01 Relay -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">⚡</div>
-          <h3 class="bento-card-title">Go 极速神经中继 (Relay)</h3>
-          <p class="bento-card-desc">
-            基于 Gorilla WebSocket 与轻量级 Go 协程构建。无需内网穿透公网打洞，毫秒级流式中转，断线指数退避自动重连。
-          </p>
-          <div class="bento-tag">14ms 极低延迟 ➔</div>
-        </div>
-
-        <!-- 02 Subagents -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">🌿</div>
-          <h3 class="bento-card-title">子代理群并发调度</h3>
-          <p class="bento-card-desc">
-            主 Agent 智能分解目标，并发派发专属 Researcher、Coder 与 Tester 子代理群，多线程无锁协同探查大型仓库。
-          </p>
-          <div class="bento-tag">并发并行探索 ➔</div>
-        </div>
-
-        <!-- 03 Option A Safe Approval -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">🛡️</div>
-          <h3 class="bento-card-title">方案 A 分离式安全审批</h3>
-          <p class="bento-card-desc">
-            思考规划与高危工具执行彻底解耦。代码覆写与 Shell 执行受只读沙箱阻断，必须经工程师手机端显式核验方可落地。
-          </p>
-          <div class="bento-tag">零惊扰安全防线 ➔</div>
-        </div>
-
-        <!-- 04 Git Time Machine -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">⏪</div>
-          <h3 class="bento-card-title">Git 原子时光机回滚</h3>
-          <p class="bento-card-desc">
-            智能体执行前自动建立 SQLite 历史快照与 Git 基线。即使智能体发生理解偏差，轻点手机即可一秒无损撤回。
-          </p>
-          <div class="bento-tag">秒级无损撤回 ➔</div>
-        </div>
-
-        <!-- 05 Hybrid RAG -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">🧠</div>
-          <h3 class="bento-card-title">分层混合知识库 RAG</h3>
-          <p class="bento-card-desc">
-            Milvus 远程向量检索 + sqlite-vec 本地热点缓存 + SQLite FTS5 关键词全文检索 + MinIO 原文存储，智能按需召回。
-          </p>
-          <div class="bento-tag">本地优先混合检索 ➔</div>
-        </div>
-
-        <!-- 06 AI Memory -->
-        <div class="bento-card">
-          <div class="bento-icon-wrap">🌙</div>
-          <h3 class="bento-card-title">AI 自进化经验记忆网络</h3>
-          <p class="bento-card-desc">
-            独立的 AI 经验沉淀系统。夜间自动抽取目标、方案、踩坑点与重构经验，独立版本化存储，越用越懂你的工程习惯。
-          </p>
-          <div class="bento-tag">Nightly Dream 经验沉淀 ➔</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- SCENARIOS -->
-  <section class="section-wrap" id="scenarios" style="background: var(--bg-surface-elevated);">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Real-World Use Cases</div>
-        <h2 class="section-title">为工程师日常高频场景而生</h2>
-        <p class="section-desc">不论是地铁突发线上告警救急，还是躺在床上审查重构代码，随时随地从容应对。</p>
-      </div>
-
-      <div class="scenario-grid">
-        <div class="sc-card">
-          <div class="sc-emoji">🚨</div>
-          <h3 class="sc-title">移动应急排障</h3>
-          <p class="sc-desc">
-            周末外出或地铁通勤突发告警，无需找电脑开机。手机直连工作机与生产集群，快速定位日志、审查 Diff 并一键提交。
-          </p>
-          <span class="sc-badge">5 分钟极速救急 ➔</span>
-        </div>
-
-        <div class="sc-card">
-          <div class="sc-emoji">🌿</div>
-          <h3 class="sc-title">巨型仓库子代理探查</h3>
-          <p class="sc-desc">
-            面对数十万行陌生模块，主 Agent 并发派遣 Researcher 与 Tester 子代理无锁阅读代码，秒级生成清晰架构报告。
-          </p>
-          <span class="sc-badge">并发探查不卡顿 ➔</span>
-        </div>
-
-        <div class="sc-card">
-          <div class="sc-emoji">🛡️</div>
-          <h3 class="sc-title">高危指令人工核验</h3>
-          <p class="sc-desc">
-            修改数据库、执行 Shell 命令必须经由手机端查看完整参数并点击批准，彻底杜绝智能体误删误改文件的失控风险。
-          </p>
-          <span class="sc-badge">只读沙箱硬核防护 ➔</span>
-        </div>
-
-        <div class="sc-card">
-          <div class="sc-emoji">⏱️</div>
-          <h3 class="sc-title">24/7 守护与运维</h3>
-          <p class="sc-desc">
-            云端中继守护进程持续运行。自动按需执行 Docker 状态扫描、定时巡检服务日志，网络抖动自动指数退避重连。
-          </p>
-          <span class="sc-badge">全天候无人值守 ➔</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- COMPARISON TABLE -->
-  <section class="section-wrap" id="comparison">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Benchmark Matrix</div>
-        <h2 class="section-title">与传统 AI 编程方案全景对比</h2>
-        <p class="section-desc">为什么真正的移动端全域编程需要专门的智能体中继系统？</p>
-      </div>
-
-      <div class="compare-table-wrap">
-        <table class="comp-table">
-          <thead>
-            <tr>
-              <th>特性维度</th>
-              <th class="highlight-col">MyAI 智能体系统 (PRO)</th>
-              <th>传统桌面 AI 编辑器</th>
-              <th>普通 Web 聊天助手</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>移动端人机工学定制</strong></td>
-              <td class="highlight-col">✔ 像素级原生触控，输入法智能顶起防遮挡</td>
-              <td>✕ 无法在移动端原生操作</td>
-              <td>△ 移动浏览器打字常被软键盘遮挡</td>
-            </tr>
-            <tr>
-              <td><strong>子代理群 (Subagent Swarm) 并发</strong></td>
-              <td class="highlight-col">✔ 支持 Researcher / Coder 多代理无锁并行</td>
-              <td>✕ 单线程串行执行</td>
-              <td>✕ 无工程子代理概念</td>
-            </tr>
-            <tr>
-              <td><strong>源码隐私与安全边界</strong></td>
-              <td class="highlight-col">✔ 100% 源码宿主机本地驻留，绝不出内网</td>
-              <td>△ 需将代码切片上传云端</td>
-              <td>✕ 必须上传完整代码到第三方</td>
-            </tr>
-            <tr>
-              <td><strong>工具调用审批防线</strong></td>
-              <td class="highlight-col">✔ 方案 A 分离式只读沙箱，手机显式批准</td>
-              <td>△ 仅支持简单的本地命令行确认</td>
-              <td>✕ 无法直接执行本地宿主机工具</td>
-            </tr>
-            <tr>
-              <td><strong>Git 原子时光机回滚</strong></td>
-              <td class="highlight-col">✔ 自动 SQLite 快照，手机一键秒级撤销</td>
-              <td>△ 需手动通过 Git 命令行比对恢复</td>
-              <td>✕ 无工作区版本恢复能力</td>
-            </tr>
-            <tr>
-              <td><strong>混合 RAG 与自进化记忆</strong></td>
-              <td class="highlight-col">✔ Milvus + sqlite-vec + FTS5 + 独立 AI 记忆</td>
-              <td>△ 仅基础本地代码索引</td>
-              <td>✕ 仅依赖对话上下文窗口</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- USER REVIEWS -->
-  <section class="section-wrap" style="background: var(--bg-surface-elevated);">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Wall of Love</div>
-        <h2 class="section-title">工程师的真实口碑背书</h2>
-        <p class="section-desc">来自一线创业团队 CTO、SRE 架构师与开源极客的使用体验。</p>
-      </div>
-
-      <div class="reviews-grid">
-        <div class="review-card">
-          <p class="review-text">
-            “上周五晚上聚餐，生产环境支付网关突发报错。我不用找网吧开电脑，直接在手机上派子代理检索日志，2 分钟定位到 NPE，生成 Diff 在手机上点击确认提交，救了整个上线日！”
-          </p>
-          <div class="review-author">
-            <div class="author-avatar">张</div>
-            <div>
-              <div class="author-name">张工 (CTO)</div>
-              <div class="author-role">某 SaaS 创业团队 · 8年架构师</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="review-card">
-          <p class="review-text">
-            “最惊艳的是它的子代理并发调度。在庞大的几十万行 Go 仓库里，一个子代理翻文档，一个扫安全鉴权，3 秒内完成并行检索，体验丝滑到像有一个团队随时在手机里待命。”
-          </p>
-          <div class="review-author">
-            <div class="author-avatar">李</div>
-            <div>
-              <div class="author-name">李工 (SRE 负责人)</div>
-              <div class="author-role">大型云原生基础设施团队</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="review-card">
-          <p class="review-text">
-            “方案 A 分离式审批和 Git 时光机让我敢放心在手机上让它跑代码。哪怕智能体改错了，手机点一下‘撤销’直接回到修改前，这种安全感比以往任何 AI 助手都更让人安心。”
-          </p>
-          <div class="review-author">
-            <div class="author-avatar">陈</div>
-            <div>
-              <div class="author-name">陈同学</div>
-              <div class="author-role">清华大学计算机系研二 · 开源贡献者</div>
+          <div class="phone">
+            <div class="phone-notch"></div>
+            <div class="phone-screen">
+              <div class="phone-top">
+                <img src="assets/img/avatar.png" alt="" width="28" height="28">
+                <div>
+                  <div class="phone-title">MyAI · pc-local</div>
+                  <div class="phone-subtitle"><span class="dot-live sm"></span> 界面示意 · 运行中</div>
+                </div>
+              </div>
+              <div class="chat">
+                <div class="msg msg-user">修复重复重试的问题，补一个回归测试。</div>
+                <div class="msg msg-ai plan-card">
+                  <div class="plan-h">执行计划 <span>2 / 3</span></div>
+                  <div class="plan-step ok"><b></b>检查重试逻辑</div>
+                  <div class="plan-step ok"><b></b>修复逻辑并补充测试</div>
+                  <div class="plan-step"><b></b>运行测试</div>
+                </div>
+                <div class="msg msg-ai perm-card">
+                  <div class="perm-h">等待权限审批</div>
+                  <code>go test ./...</code>
+                  <div class="perm-actions"><span>拒绝</span><span>允许本次</span></div>
+                </div>
+              </div>
+              <div class="phone-composer">
+                <span>给 Agent 下达任务…</span>
+                <span class="send">↑</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- DEVELOPER QUICKSTART -->
-  <section class="section-wrap" id="quickstart">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">Quickstart Deployment</div>
-        <h2 class="section-title">2 分钟极速接入生产环境</h2>
-        <p class="section-desc">支持 Docker Compose 一键拉起完整集群，或通过 Go CLI 单二进制启动。</p>
-      </div>
-
-      <div class="quickstart-box">
-        <div class="qs-tabs">
-          <button class="qs-tab-btn active" onclick="switchQsTab('docker', this)">🐳 Docker Compose 一键集群 (推荐)</button>
-          <button class="qs-tab-btn" onclick="switchQsTab('cli', this)">⚡ 原生 Go CLI 单二进制启动</button>
-          <button class="qs-tab-btn" onclick="switchQsTab('mobile', this)">📱 移动端配对连接</button>
-        </div>
-
-        <!-- Docker Content -->
-        <div id="qs-docker" class="qs-content">
-          <p style="font-size: 14px; color: var(--text-sub);">一键拉起高可用 Relay 中继与 Agent 容器网络：</p>
-          <div class="qs-code-row">
-            <span>$ docker compose -f compose.prod.yaml up -d</span>
-            <button class="copy-btn" onclick="copyText('docker compose -f compose.prod.yaml up -d')">复制命令</button>
-          </div>
-          <div style="font-size: 12.5px; color: var(--text-muted); margin-top: 10px;">
-            在根目录 <span style="font-family: monospace; color: var(--accent-cyan);">.env</span> 配置 <span style="font-family: monospace;">MYAI_RELAY_TOKEN</span> 与大模型 API Key 即可。
-          </div>
-        </div>
-
-        <!-- CLI Content -->
-        <div id="qs-cli" class="qs-content" style="display: none;">
-          <p style="font-size: 14px; color: var(--text-sub);">1. 启动轻量高并发 Relay 中继守护进程 (延迟 14ms):</p>
-          <div class="qs-code-row">
-            <span>$ go run . relay --addr 0.0.0.0:18080 --agent-token "secret-token"</span>
-            <button class="copy-btn" onclick="copyText('go run . relay --addr 0.0.0.0:18080 --agent-token &quot;secret-token&quot;')">复制</button>
-          </div>
-
-          <p style="font-size: 14px; color: var(--text-sub); margin-top: 16px;">2. 挂载本地代码库启动 PC Agent:</p>
-          <div class="qs-code-row">
-            <span>$ go run . agent --server ws://127.0.0.1:18080/ws/agent --workspace .</span>
-            <button class="copy-btn" onclick="copyText('go run . agent --server ws://127.0.0.1:18080/ws/agent --workspace .')">复制</button>
-          </div>
-        </div>
-
-        <!-- Mobile Content -->
-        <div id="qs-mobile" class="qs-content" style="display: none;">
-          <p style="font-size: 14px; color: var(--text-sub);">在手机端打开 MyAI App，输入中继地址与设备凭据完成秒级配对：</p>
-          <div class="qs-code-row">
-            <span>ws://你的服务器公网IP:18080/ws/agent (支持 TLS wss://)</span>
-            <button class="copy-btn" onclick="copyText('ws://127.0.0.1:18080/ws/agent')">复制地址</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- FAQ SECTION -->
-  <section class="section-wrap" id="faq" style="background: var(--bg-surface-elevated);">
-    <div class="container">
-      <div class="section-head">
-        <div class="badge-capsule">FAQ</div>
-        <h2 class="section-title">常见问题答疑</h2>
-        <p class="section-desc">关于安全性、开源协议与跨平台支持的权威解答。</p>
-      </div>
-
-      <div class="faq-list">
-        <div class="faq-item open">
-          <div class="faq-q" onclick="toggleFaq(this)">
-            <span>❓ MyAI 与 GitHub Copilot / Cursor 的根本区别是什么？</span>
-            <span class="faq-chevron">›</span>
-          </div>
-          <div class="faq-a">
-            <strong>移动掌控与全域自主：</strong>传统 Copilot 仅限于电脑桌面 IDE 内的代码补全；而 MyAI 是完整的全域自主智能体系统，首创通过手机端随时随地调度子代理群、审查 Diff 与 Git 快照回滚。无论身处地铁、咖啡馆还是在床上，都能随时掌控代码库。
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-q" onclick="toggleFaq(this)">
-            <span>🔒 我的私有代码会被上传到云端或用于模型训练吗？</span>
-            <span class="faq-chevron">›</span>
-          </div>
-          <div class="faq-a">
-            <strong>绝对不会：</strong>MyAI 秉持 100% 源码本地驻留架构。代码文件只在您的宿主机开发机读写，绝不经过任何第三方中间服务器存储，彻底杜绝源码泄露风险。
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-q" onclick="toggleFaq(this)">
-            <span>💰 MyAI 是免费开源的吗？有商业限制吗？</span>
-            <span class="faq-chevron">›</span>
-          </div>
-          <div class="faq-a">
-            <strong>完全开源免费：</strong>核心框架基于 Apache 2.0 协议开源，完全支持自由部署和二开。您只需配置自己的大模型 API Key（OpenAI / Anthropic / DeepSeek / 本地 Ollama 均可）。
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-q" onclick="toggleFaq(this)">
-            <span>📱 支持 iOS 吗？只能用 Android？</span>
-            <span class="faq-chevron">›</span>
-          </div>
-          <div class="faq-a">
-            <strong>全平台支持：</strong>Android 端为 React Native 原生打包；iOS 端支持通过移动 Safari“添加到主屏幕”作为 PWA WebApp 体验，功能完全一致。
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <div class="faq-q" onclick="toggleFaq(this)">
-            <span>📱 手机端打字时输入框真的不会遮挡上面的对话内容吗？</span>
-            <span class="faq-chevron">›</span>
-          </div>
-          <div class="faq-a">
-            <strong>移动原生防遮挡：</strong>我们针对移动端进行了像素级视口适配（支持虚拟键盘智能顶起与视口滚动避让）。输入框聚焦弹起键盘时，历史对话自动无缝上推，100% 保持视野开阔。
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="site-footer">
-    <div class="container">
-      <div class="footer-content">
-        <div>
-          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
-            <div class="brand-icon" style="width: 36px; height: 36px; font-size: 18px;">🤖</div>
-            <span style="font-size: 20px; font-weight: 900; color: var(--text-bright);">MyAI Framework</span>
-            <span class="brand-badge">v2.0 Pro</span>
-          </div>
-          <p style="font-size: 13.5px; color: var(--text-muted); line-height: 1.7; max-width: 340px;">
-            手机上的全域自主编程智能体系统。支持多子代理群并发调度、方案 A 分离式安全审批、Git 原子时光机回滚与毫秒级 Go WebSocket 神经中继通道。
-          </p>
-        </div>
-
-        <div>
-          <div class="footer-col-title">产品与功能</div>
-          <ul class="footer-links">
-            <li><a href="#live-rig">真机实验室</a></li>
-            <li><a href="#features">核心架构</a></li>
-            <li><a href="#scenarios">使用场景</a></li>
-            <li><a href="#comparison">对比评测</a></li>
-          </ul>
-        </div>
-
-        <div>
-          <div class="footer-col-title">平台与下载</div>
-          <ul class="footer-links">
-            <li><a href="#quickstart">Docker Compose 集群</a></li>
-            <li><a href="#quickstart">Go CLI 单二进制</a></li>
-            <li><a href="#quickstart">Android 原生 APK</a></li>
-            <li><a href="#quickstart">iOS 移动 WebApp</a></li>
-          </ul>
-        </div>
-
-        <div>
-          <div class="footer-col-title">开源与社区</div>
-          <ul class="footer-links">
-            <li><a href="https://github.com/myai/core" target="_blank">GitHub 仓库 (1.2k ★)</a></li>
-            <li><a href="#">更新日志 (Changelog)</a></li>
-            <li><a href="#">Apache 2.0 开源协议</a></li>
-            <li><a href="#">开发者社区交流</a></li>
+      <div class="model-strip">
+        <div class="wrap model-strip-inner">
+          <span class="model-strip-label">接入你自己的模型</span>
+          <ul aria-label="支持的模型协议">
+            <li>OpenAI Chat Completions</li><li>Anthropic Messages</li><li>Google Generative AI</li><li>Mistral Chat</li><li>Ollama Chat</li>
           </ul>
         </div>
       </div>
+    </section>
 
-      <div class="footer-bottom">
-        <div>© 2026 MyAI Framework. Released under Apache 2.0 Open Source License.</div>
-        <div style="display: flex; align-items: center; gap: 16px;">
-          <span>Designed with Modern Tech Aesthetic</span>
-          <span>·</span>
-          <span>Powered by Go 1.24 & React Native</span>
+    <!-- ================= PRODUCT DEMO ================= -->
+    <section class="section" id="flow">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="kicker">01 / 产品演示</p>
+          <h2>手机上交代，<br><em>电脑上完成</em>。</h2>
+          <p class="lead">跟着一个修复任务走一遍：在手机发任务，等电脑准备好工具调用，再由你审批、检查 diff 或还原文件。</p>
+        </header>
+
+        <div class="product-demo" id="product-demo" data-scene="task">
+          <div class="demo-top">
+            <div class="demo-case"><span class="demo-index mono">CASE / 01</span><strong>修复重复重试</strong></div>
+            <span class="demo-caption">交互示意 · 不连接你的电脑</span>
+          </div>
+          <ol class="demo-steps" id="demo-steps" aria-label="切换演示场景" hidden>
+            <li><button type="button" data-demo-scene="task" aria-pressed="true"><span>01</span> 发任务</button></li>
+            <li><button type="button" data-demo-scene="approve" aria-pressed="false"><span>02</span> 审批工具</button></li>
+            <li><button type="button" data-demo-scene="review" aria-pressed="false"><span>03</span> 查看 diff</button></li>
+            <li><button type="button" data-demo-scene="reverted" aria-pressed="false"><span>04</span> 还原文件</button></li>
+          </ol>
+          <div class="demo-devices">
+            <div class="demo-device demo-pc">
+              <div class="demo-device-bar"><span class="demo-window-dots" aria-hidden="true"><i></i><i></i><i></i></span><strong>电脑 · PC Agent</strong><code>pc-local</code></div>
+              <div class="demo-terminal" id="demo-terminal">
+                <p class="demo-terminal-path mono">~/work/retry-service</p>
+                <h3>先找到多重试一次的原因</h3>
+                <ul class="demo-log" aria-label="电脑端执行记录">
+                  <li><code>read_file</code><span>查看 <code>internal/retry.go</code></span></li>
+                  <li><code>plan</code><span>修正重试边界，补充回归测试</span></li>
+                  <li><code>next</code><span>准备执行前，请求工具权限</span></li>
+                </ul>
+              </div>
+            </div>
+            <div class="demo-device demo-mobile">
+              <div class="demo-device-bar"><img src="assets/img/avatar.png" alt="" width="24" height="24" loading="lazy"><strong>手机 · MyAI</strong><span class="demo-online">已连接</span></div>
+              <div class="demo-mobile-content" id="demo-mobile">
+                <h3 tabindex="-1">发出任务</h3>
+                <p class="demo-bubble">修复重复重试的问题，并补一个回归测试。</p>
+                <p>Agent 会先读取指定工作区。你可以在手机上查看计划和工具动态。</p>
+              </div>
+            </div>
+          </div>
+          <div class="demo-footer">
+            <p id="demo-status" role="status">任务通过 Relay 送到电脑，代码读写和测试由 PC Agent 执行。</p>
+            <button type="button" class="demo-reset" id="demo-reset" hidden>重新演示 <span aria-hidden="true">↺</span></button>
+          </div>
+          <noscript>
+            <p class="demo-fallback">后续步骤：在手机上审批工具调用 → 到「变更」查看文件差异 → 按需还原可恢复的文件。</p>
+          </noscript>
         </div>
       </div>
+    </section>
+
+    <!-- ================= FEATURES ================= -->
+    <section class="section section-alt" id="features">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="kicker">02 / 能力</p>
+          <h2>从改一行代码，<br>到<em>接手一个复杂任务</em>。</h2>
+        </header>
+
+        <div class="bento">
+          <article class="card card-xl card-cyan">
+            <div class="card-tag mono">mobile</div>
+            <h3>在手机上管理你的工作区</h3>
+            <p>配对后，手机就能续聊、切换模型与模式、预览电脑工作区里的文件。需要确认改了什么，打开「变更」直接看差异。</p>
+            <ul class="chips">
+              <li>会话</li><li>文件</li><li>变更</li><li>模型</li><li>上下文</li><li>Plan</li><li>知识库</li><li>记忆</li>
+            </ul>
+            <div class="mini-phone" aria-hidden="true">
+              <div class="mp-row"><b></b><span>server.go</span><em>M</em></div>
+              <div class="mp-row"><b></b><span>relay/hub.go</span><em class="a">A</em></div>
+              <div class="mp-row"><b></b><span>mobile/App.tsx</span><em>M</em></div>
+              <div class="mp-btn">还原所选文件</div>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="15" cy="18" r="2"/></svg>
+            </div>
+            <h3>Plan 模式 · AutoPlan</h3>
+            <p>先看 Agent 打算改哪里，再决定是否执行。也可以启用 AutoPlan，让规划和执行在一次请求里接续完成。</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg>
+            </div>
+            <h3>子智能体</h3>
+            <p>把排查或补测试拆给子智能体，查看各自的运行进度和工具调用。使用隔离工作区时，可审阅子任务的改动，然后选择应用或丢弃。</p>
+          </article>
+
+          <article class="card card-yellow">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+            </div>
+            <h3>权限审批</h3>
+            <p>为工具设置询问、放行或拒绝策略。需要审批时，先在手机上看清命令，再决定是否允许本次调用。</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></svg>
+            </div>
+            <h3>工作区时光机</h3>
+            <p>用基线对比查看每个文件具体改了哪些行。对可恢复的变更，可以只还原选中的文件。</p>
+          </article>
+
+          <article class="card card-lg card-ink">
+            <div class="card-tag mono">rag</div>
+            <h3>本地优先的知识库</h3>
+            <p>把项目规范和内部文档放进知识库，按会话圈定 Agent 可以查阅的资料。既能按需手动检索，也能让 Agent 自动检索或每轮检索。</p>
+            <div class="stack mono" aria-hidden="true">
+              <span>MinIO</span><span>Mongo</span><span>Milvus</span><span>sqlite-vec</span><span>FTS5</span>
+            </div>
+          </article>
+
+          <article class="card card-coral">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>
+            </div>
+            <h3>审阅后再复用的 AI 记忆</h3>
+            <p>把运行中总结出的解决方案和经验留给下一次任务。你可以审核、编辑记忆，并限定它的使用范围。</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg>
+            </div>
+            <h3>MCP · Skills · Hooks · Plugins</h3>
+            <p>用 MCP 接入自己的工具，用 Skills 沉淀操作流程。也可以通过 Hooks 和 Plugins 扩展 Agent 的运行方式。</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M9 9l2 2-2 2M13 13h3"/></svg>
+            </div>
+            <h3>五种模型协议</h3>
+            <p>OpenAI、Anthropic、Google、Mistral、Ollama，全部流式输出。为聊天、记忆提取分别配置模型。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ARCHITECTURE ================= -->
+    <section class="section section-ink" id="architecture">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="kicker">03 / 架构</p>
+          <h2>三个进程，<em>各司其职</em>。</h2>
+          <p class="lead">Relay 不是业务后端，它只负责配对、鉴权和转发。真正读写代码、调用模型、执行工具的，是跑在你电脑上的 PC Agent。</p>
+        </header>
+
+        <div class="arch">
+          <svg class="arch-svg" viewBox="0 0 1000 420" role="img" aria-labelledby="arch-title">
+            <title id="arch-title">Mobile 通过 Relay 连接 PC Agent，PC Agent 连接模型与存储</title>
+            <defs>
+              <linearGradient id="g-wire" x1="0" x2="1">
+                <stop offset="0" stop-color="#4FD8EE" stop-opacity=".2"/>
+                <stop offset=".5" stop-color="#4FD8EE" stop-opacity=".9"/>
+                <stop offset="1" stop-color="#4FD8EE" stop-opacity=".2"/>
+              </linearGradient>
+            </defs>
+
+            <!-- wires -->
+            <path id="w1" class="wire" d="M200 150 H400"/>
+            <path id="w2" class="wire" d="M600 150 H800"/>
+            <path id="w3" class="wire thin" d="M880 200 V260 H150 V320"/>
+            <path id="w4" class="wire thin" d="M880 200 V260 H320 V320"/>
+            <path id="w5" class="wire thin" d="M880 200 V260 H490 V320"/>
+            <path id="w6" class="wire thin" d="M880 200 V260 H660 V320"/>
+            <path id="w7" class="wire thin" d="M880 200 V320"/>
+
+            <!-- packets -->
+            <circle r="5" class="pkt"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+            <circle r="5" class="pkt"><animateMotion dur="2.4s" begin="1.2s" repeatCount="indefinite"><mpath href="#w2"/></animateMotion></circle>
+            <circle r="5" class="pkt y"><animateMotion dur="2.4s" begin=".6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w2"/></animateMotion></circle>
+            <circle r="5" class="pkt y"><animateMotion dur="2.4s" begin="1.8s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w1"/></animateMotion></circle>
+            <circle r="3.5" class="pkt c"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#w3"/></animateMotion></circle>
+            <circle r="3.5" class="pkt c"><animateMotion dur="3s" begin=".7s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle>
+            <circle r="3.5" class="pkt c"><animateMotion dur="3s" begin="1.4s" repeatCount="indefinite"><mpath href="#w6"/></animateMotion></circle>
+            <circle r="3.5" class="pkt c"><animateMotion dur="2s" begin=".3s" repeatCount="indefinite"><mpath href="#w7"/></animateMotion></circle>
+
+            <!-- main nodes -->
+            <g class="node">
+              <rect x="40" y="100" width="160" height="100" rx="16"/>
+              <text x="120" y="142" class="n-t">Mobile</text>
+              <text x="120" y="168" class="n-s">Expo React Native</text>
+            </g>
+            <g class="node node-relay">
+              <rect x="400" y="100" width="200" height="100" rx="16"/>
+              <text x="500" y="142" class="n-t">Relay</text>
+              <text x="500" y="168" class="n-s">配对 · 鉴权 · 转发</text>
+            </g>
+            <g class="node node-agent">
+              <rect x="800" y="100" width="160" height="100" rx="16"/>
+              <text x="880" y="142" class="n-t">PC Agent</text>
+              <text x="880" y="168" class="n-s">Go · 执行端</text>
+            </g>
+            <text x="300" y="134" class="w-label">/ws/client</text>
+            <text x="700" y="134" class="w-label">/ws/agent</text>
+
+            <!-- leaves -->
+            <g class="leaf"><rect x="85" y="320" width="130" height="56" rx="12"/><text x="150" y="353">LLM Provider</text></g>
+            <g class="leaf"><rect x="255" y="320" width="130" height="56" rx="12"/><text x="320" y="353">MongoDB</text></g>
+            <g class="leaf"><rect x="425" y="320" width="130" height="56" rx="12"/><text x="490" y="353">Redis</text></g>
+            <g class="leaf"><rect x="595" y="320" width="130" height="56" rx="12"/><text x="660" y="353">SQLite 历史</text></g>
+            <g class="leaf"><rect x="815" y="320" width="130" height="56" rx="12"/><text x="880" y="353">MCP · 工作区</text></g>
+          </svg>
+        </div>
+
+        <div class="arch-cards">
+          <div class="arch-card">
+            <span class="mono">myai relay</span>
+            <h4>只转发，不思考</h4>
+            <p>每个 Agent Token 绑定到固定的 user / device。多台电脑各用各的凭据，不共享 Token。</p>
+          </div>
+          <div class="arch-card">
+            <span class="mono">myai agent</span>
+            <h4>代码在你指定的工作区执行</h4>
+            <p>文件读写和工具执行由 PC Agent 发起；使用远程模型时，推理所需的上下文会发送给所配置的模型服务。</p>
+          </div>
+          <div class="arch-card">
+            <span class="mono">core/</span>
+            <h4>分层 + 六边形架构</h4>
+            <p>应用层只依赖接口，Mongo、Redis、LLM、工具等适配器实现接口，由 composition 显式装配。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SECURITY ================= -->
+    <section class="section" id="security">
+      <div class="wrap security">
+        <div class="security-copy">
+          <p class="kicker">04 / 安全</p>
+          <h2>放权给 AI，<br><em>但不失控</em>。</h2>
+          <p class="lead">让 Agent 真正动手，前提是每一步都看得见、拦得住、退得回。</p>
+          <img class="security-mascot" src="assets/img/mascot-attention.webp" alt="" width="400" height="400" loading="lazy">
+        </div>
+        <ul class="checklist">
+          <li><span class="ck">01</span><div><h4>六位码配对</h4><p>绑定码只用于换取客户端 Token，不直接作为 WebSocket 凭据。</p></div></li>
+          <li><span class="ck">02</span><div><h4>身份绑定的 Relay</h4><p>Agent Token 与 user / device 一一对应。部署时仍需自行配置强随机凭据、网络边界和 HTTPS/TLS。</p></div></li>
+          <li><span class="ck">03</span><div><h4>逐次审批</h4><p>需要审批的工具调用会等手机确认；拒绝时，该次工具调用不会运行。</p></div></li>
+          <li><span class="ck">04</span><div><h4>路径与进程策略</h4><p>工作区边界与进程策略限制 Agent 能碰到的文件和命令。</p></div></li>
+          <li><span class="ck">05</span><div><h4>可选沙箱</h4><p>集成 OpenSandbox，<code>myai sandbox doctor</code> 一条命令做冒烟测试。</p></div></li>
+          <li><span class="ck">06</span><div><h4>按文件还原</h4><p>以已保存的工作区历史为基线，检查并还原可恢复的文件改动。</p></div></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= QUICK START ================= -->
+    <section class="section section-alt" id="start">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="kicker">05 / 快速开始</p>
+          <h2>从配置模型开始，<br><em>再连接你的设备</em>。</h2>
+        </header>
+
+        <div class="start">
+          <div class="start-steps">
+          <article class="quick-step">
+            <span class="demo-index mono">STEP 01</span>
+            <h3>准备 Go 与项目目录</h3>
+            <p class="panel-note">需要安装 Go 1.25+。先克隆仓库，再按下一步安装模型配置。</p>
+            <div class="code">
+              <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code><span class="c"># 从仓库根目录开始</span>
+git clone https://github.com/yourGaomu/myai.git
+cd myai
+
+<span class="c"># 确认 Go 版本</span>
+go version
+
+<span class="c"># 下一步：安装模型配置</span></code></pre>
+            </div>
+          </article>
+          <article class="quick-step">
+            <span class="demo-index mono">STEP 02</span>
+            <h3>安装示例配置并填入模型</h3>
+            <p class="panel-note">MyAI 默认读取 <code>resource/application.yaml</code>。示例文件里有默认模型名；按你实际使用的服务填写 <code>provider</code>、<code>protocol</code>、API 地址、密钥和模型名。</p>
+            <div class="code">
+              <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code><span class="c"># Windows PowerShell · 在仓库根目录执行</span>
+New-Item -ItemType Directory -Force resource | Out-Null
+Copy-Item config/application.example.yaml resource/application.yaml
+
+<span class="c"># 用你熟悉的编辑器填写模型配置</span>
+notepad resource/application.yaml</code></pre>
+            </div>
+          </article>
+          <div class="tabs" role="tablist" aria-label="选择本地聊天或手机远程控制" hidden>
+            <button role="tab" aria-selected="true" aria-controls="tab-local" id="t-local">本地对话</button>
+            <button role="tab" aria-selected="false" aria-controls="tab-remote" id="t-remote">远程 Agent</button>
+            <button role="tab" aria-selected="false" aria-controls="tab-mobile" id="t-mobile">手机端</button>
+          </div>
+          <div class="tab-panels">
+            <div class="tab-panel" id="tab-local" role="tabpanel" aria-labelledby="t-local">
+              <p class="panel-note">模型配置完成后，在仓库根目录运行：</p>
+              <div class="code">
+                <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code>go run . chat</code></pre>
+              </div>
+            </div>
+            <div class="tab-panel" id="tab-remote" role="tabpanel" aria-labelledby="t-remote" hidden>
+              <p class="panel-note">Relay 和 Agent 要分别运行。示例中的 <code>replace-with-a-strong-token</code> 请换成你自己生成的长随机 Token。</p>
+              <div class="code">
+                <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code><span class="c"># 终端一：启动 Relay</span>
+go run . relay --addr 0.0.0.0:18080 `
+  --agent-token "replace-with-a-strong-token" `
+  --agent-user local --agent-device pc-local</code></pre>
+              </div>
+              <div class="code follow-up-code">
+                <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code><span class="c"># 终端二：启动 PC Agent（替换成实际工作区路径）</span>
+go run . agent --server ws://127.0.0.1:18080/ws/agent `
+  --relay-token "replace-with-a-strong-token" `
+  --user local --device pc-local `
+  --workspace "D:\your\project"</code></pre>
+              </div>
+              <p class="panel-tip"><b>提示</b> 手机上的 Relay 地址需要手机可访问。绑定码由 Agent 启动时打印，Token 必须换成你生成的随机值。</p>
+            </div>
+            <div class="tab-panel" id="tab-mobile" role="tabpanel" aria-labelledby="t-mobile" hidden>
+              <p class="panel-note">从仓库根目录启动移动开发服务器，再在 Expo Go 或 Android 模拟器中打开项目。</p>
+              <div class="code">
+                <button class="copy-btn" type="button" hidden>复制</button>
+<pre><code>cd mobile
+npm ci
+npm start
+
+<span class="c"># Android 模拟器 Relay 地址：http://10.0.2.2:18080</span>
+<span class="c"># 真机请用 PC 的局域网 IP，例如 http://192.168.1.23:18080</span></code></pre>
+              </div>
+              <p class="panel-tip"><b>提醒</b> MyAI 不会自动启动 Relay、注册模型服务或替你创建 API 密钥。手机与 PC Agent 也需使用相匹配的版本。</p>
+            </div>
+          </div>
+
+          <aside class="cmds">
+            <h4>先看演示，再接真实设备</h4>
+            <p>在线演示使用静态示例数据，不会连接本机、调用模型或执行命令。</p>
+            <a class="quick-link" href="https://github.com/yourGaomu/myai/blob/master/README.md" target="_blank" rel="noopener">查看远程运行说明 →</a>
+            <p><a class="quick-link" href="https://github.com/yourGaomu/myai/blob/master/config/application.example.yaml" target="_blank" rel="noopener">阅读模型配置示例 →</a></p>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= DOCS ================= -->
+    <section class="section" id="docs">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="kicker">06 / 文档</p>
+          <h2>想看得更深？<em>源码之外，还有文档</em>。</h2>
+        </header>
+        <div class="docs">
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/PROJECT_ARCHITECTURE_GUIDE.md" target="_blank" rel="noopener"><span class="mono">guide</span><h4>项目与架构指南</h4><p>三个进程、分层与依赖方向、Spring Boot 对照。</p><i>→</i></a>
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/DEVELOPER_FLOW_GUIDE.md" target="_blank" rel="noopener"><span class="mono">flow</span><h4>开发者流程指南</h4><p>真实启动参数、协议消息与函数调用链。</p><i>→</i></a>
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/FEATURE_PLAN_MODE_IMPLEMENTATION.md" target="_blank" rel="noopener"><span class="mono">plan</span><h4>Plan 模式</h4><p>先规划再执行，AutoPlan 如何串起两阶段。</p><i>→</i></a>
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/FEATURE_SUBAGENT_IMPLEMENTATION.md" target="_blank" rel="noopener"><span class="mono">subagent</span><h4>自动规划与子智能体</h4><p>Task、Run、ChangeSet 与移动端协议。</p><i>→</i></a>
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/RAG_ARCHITECTURE_DESIGN.md" target="_blank" rel="noopener"><span class="mono">rag</span><h4>RAG 架构设计</h4><p>文档解析、分块、索引与本地优先检索。</p><i>→</i></a>
+          <a class="doc" href="https://github.com/yourGaomu/myai/blob/master/doc/FEATURE_AI_MEMORY_IMPLEMENTATION.md" target="_blank" rel="noopener"><span class="mono">memory</span><h4>AI 记忆系统</h4><p>提取、审核、版本、作用域与 Dream 质检。</p><i>→</i></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FAQ ================= -->
+    <section class="section section-alt" id="faq">
+      <div class="wrap faq-wrap">
+        <header class="section-head">
+          <p class="kicker">07 / 常见问题</p>
+          <h2>你可能想问。</h2>
+        </header>
+        <div class="faq">
+          <details>
+            <summary>MyAI 和 IDE 里的代码补全工具有什么不同？</summary>
+            <p>补全工具在你写代码时给建议；MyAI 是一个能独立完成任务的 Agent：它会规划、调用工具、修改文件和运行命令，按你的权限策略请求审批。加上 Relay 和手机端，你不坐在电脑前也能指挥它。</p>
+          </details>
+          <details>
+            <summary>用手机控制电脑，安全吗？</summary>
+            <p>Relay 只负责配对、鉴权与转发，Token 绑定到具体的 user / device；需要审批的工具调用会等你在手机上确认；工作区历史支持还原可恢复的文件。你也可以自建 Relay 并配置 TLS。</p>
+          </details>
+          <details>
+            <summary>运行它需要哪些依赖？</summary>
+            <p>本地对话需要 Go 1.25 或更新版本，以及一份可用的模型配置。手机控制还需要 Relay 和移动客户端；持久化和知识库所需的服务按部署配置启用。</p>
+          </details>
+          <details>
+            <summary>支持哪些大模型？</summary>
+            <p>支持 OpenAI Chat Completions、Anthropic Messages、Google Generative AI、Mistral Chat 与 Ollama Chat 五种协议及其流式响应，也可接入实现相应协议的服务，或通过 Ollama 使用本地模型。</p>
+          </details>
+          <details>
+            <summary>手机端支持哪些平台？</summary>
+            <p>客户端基于 Expo React Native，目前主要在 Android 与 Expo Web 上使用和验证。</p>
+          </details>
+          <details>
+            <summary>我能给它加自己的工具吗？</summary>
+            <p>可以。接入兼容的 MCP 服务，或在工作区 <code>plugins/</code> 目录放置带 <code>plugin.json</code> 的插件（以 MCP stdio 进程运行）；也可以通过 <code>myai skill</code> 安装 Skills，用 Hooks 介入生命周期。</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CTA ================= -->
+    <section class="cta">
+      <div class="wrap cta-inner">
+        <img src="assets/img/mascot-done.webp" alt="" width="400" height="400" loading="lazy" class="cta-mascot">
+        <div>
+          <h2>下一次灵感出现时，<br><span class="mark mark-y">电脑不必在身边</span>。</h2>
+          <div class="hero-cta">
+            <a class="btn btn-ink" href="#start">开始使用</a>
+            <a class="btn btn-ghost" href="https://github.com/yourGaomu/myai" target="_blank" rel="noopener">在 GitHub 上查看</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <span class="footer-word">MyAI</span>
+        <p>把电脑里的 AI 程序员，装进口袋。</p>
+      </div>
+      <div class="footer-cols">
+        <div>
+          <h5>产品</h5>
+          <a href="#flow">产品演示</a>
+          <a href="#features">能力</a>
+          <a href="#architecture">架构</a>
+        </div>
+        <div>
+          <h5>开始</h5>
+          <a href="#start">快速开始</a>
+          <a href="#docs">文档</a>
+          <a href="#faq">常见问题</a>
+        </div>
+        <div>
+          <h5>社区</h5>
+          <a href="https://github.com/yourGaomu/myai" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/yourGaomu/myai/issues" target="_blank" rel="noopener">反馈问题</a>
+        </div>
+      </div>
+    </div>
+    <div class="wrap footer-bottom mono">
+      <span>© <span id="year">2026</span> MyAI</span>
+      <span>Built with Go · Expo React Native</span>
     </div>
   </footer>
 
-  <!-- Toast Notification Box -->
-  <div class="toast-box" id="toast-el">
-    <span>✔</span>
-    <span id="toast-msg">已复制命令到剪贴板！</span>
-  </div>
-
-  <!-- JAVASCRIPT LOGIC -->
-  <script>
-    // --- WEB AUDIO API SOUND SYSTEM ---
-    let audioCtx = null;
-    let soundEnabled = true;
-
-    function initAudio() {
-      if (!audioCtx) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (AudioContext) audioCtx = new AudioContext();
-      }
-      if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
-
-    function playTone(freq = 600, type = 'sine', duration = 0.05) {
-      if (!soundEnabled) return;
-      initAudio();
-      if (!audioCtx) return;
-      try {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
-      } catch (e) {}
-    }
-
-    // --- SOUND TOGGLE ---
-    const soundToggle = document.getElementById('sound-toggle');
-    const soundLabel = document.getElementById('sound-label');
-    if (soundToggle) {
-      soundToggle.addEventListener('click', () => {
-        soundEnabled = !soundEnabled;
-        soundLabel.textContent = soundEnabled ? '音效: 开' : '音效: 关';
-        if (soundEnabled) playTone(800);
-        showToast(soundEnabled ? '已开启音效 🔊' : '音效已静音 🔇');
-      });
-    }
-
-    // --- THEME TOGGLE (LIGHT / DARK) ---
-    const themeToggleBtn = document.getElementById('theme-toggle');
-    let currentTheme = 'dark';
-
-    function setTheme(theme) {
-      currentTheme = theme;
-      document.documentElement.setAttribute('data-theme', theme);
-      if (themeToggleBtn) {
-        themeToggleBtn.textContent = theme === 'dark' ? '🌙' : '☀️';
-      }
-      playTone(theme === 'dark' ? 500 : 700);
-    }
-
-    if (themeToggleBtn) {
-      themeToggleBtn.addEventListener('click', () => {
-        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
-        showToast(currentTheme === 'dark' ? '已切换至深色黑曜模式' : '已切换至浅色钛金模式');
-      });
-    }
-
-    // --- TOAST HELPER ---
-    function showToast(msg) {
-      const el = document.getElementById('toast-el');
-      const msgEl = document.getElementById('toast-msg');
-      if (el && msgEl) {
-        msgEl.textContent = msg;
-        el.classList.add('show');
-        setTimeout(() => el.classList.remove('show'), 2400);
-      }
-    }
-
-    // --- COPY HELPER ---
-    function copyText(str) {
-      playTone(750);
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(str).then(() => {
-          showToast('已复制命令到剪贴板！📋');
-        }).catch(() => {
-          showToast('复制成功：' + str);
-        });
-      } else {
-        showToast('复制成功：' + str);
-      }
-    }
-
-    // --- PHONE TAB SWITCHING ---
-    const phoneViews = {
-      chat: document.getElementById('p-view-chat'),
-      changes: document.getElementById('p-view-changes'),
-      files: document.getElementById('p-view-files'),
-      knowledge: document.getElementById('p-view-knowledge'),
-      settings: document.getElementById('p-view-settings')
-    };
-
-    function switchMobileTab(tabKey) {
-      playTone(600);
-      document.querySelectorAll('.p-nav-tab').forEach(t => {
-        t.classList.toggle('active', t.getAttribute('data-tab') === tabKey);
-      });
-      Object.keys(phoneViews).forEach(k => {
-        if (phoneViews[k]) {
-          phoneViews[k].style.display = k === tabKey ? 'flex' : 'none';
-        }
-      });
-      const composer = document.getElementById('p-composer-section');
-      if (composer) {
-        composer.style.display = tabKey === 'chat' ? 'flex' : 'none';
-      }
-    }
-
-    // --- DRAWER INTERACTION ---
-    const drawerEl = document.getElementById('p-drawer');
-    const btnDrawer = document.getElementById('p-btn-drawer');
-
-    function openDrawer() {
-      if (drawerEl) {
-        drawerEl.classList.add('open');
-        playTone(520);
-      }
-    }
-    function closeDrawer() {
-      if (drawerEl) {
-        drawerEl.classList.remove('open');
-        playTone(400);
-      }
-    }
-    if (btnDrawer) btnDrawer.addEventListener('click', openDrawer);
-
-    // Header Settings Btn
-    const pBtnSettings = document.getElementById('p-btn-settings');
-    if (pBtnSettings) {
-      pBtnSettings.addEventListener('click', () => switchMobileTab('settings'));
-    }
-
-    // Mode Toggle (Chat <-> Plan)
-    const pModeToggle = document.getElementById('p-mode-toggle');
-    const pModeText = document.getElementById('p-mode-text');
-    let isPlanMode = false;
-    if (pModeToggle && pModeText) {
-      pModeToggle.addEventListener('click', () => {
-        isPlanMode = !isPlanMode;
-        pModeText.textContent = isPlanMode ? '🎯 规划模式' : '💬 对话模式';
-        pModeToggle.style.background = isPlanMode ? '#ffd84f' : '#ffffff';
-        playTone(isPlanMode ? 820 : 680);
-        showToast(isPlanMode ? '已切换至【规划模式】：只读沙箱审查，安全审批拦截' : '已切换至【对话模式】：快速响应，子代理并发协力');
-      });
-    }
-
-    // --- CHAT ACCORDION ---
-    const accordionToggle = document.getElementById('turn-accordion-toggle');
-    const accordionBody = document.getElementById('turn-accordion-body');
-    const accordionChevron = document.getElementById('accordion-chevron');
-    let accordionOpen = true;
-
-    if (accordionToggle && accordionBody) {
-      accordionToggle.addEventListener('click', () => {
-        accordionOpen = !accordionOpen;
-        accordionBody.style.display = accordionOpen ? 'flex' : 'none';
-        accordionChevron.textContent = accordionOpen ? '⌄' : '›';
-        playTone(500);
-      });
-    }
-
-    // --- VIRTUAL KEYBOARD & INPUT ---
-    const chatInput = document.getElementById('p-chat-input');
-    const keyboardEl = document.getElementById('p-keyboard');
-    const scrollStage = document.getElementById('phone-scroll-stage');
-
-    function showKeyboard() {
-      if (keyboardEl) {
-        keyboardEl.classList.add('open');
-        playTone(440);
-        setTimeout(() => {
-          if (scrollStage) scrollStage.scrollTop = scrollStage.scrollHeight;
-        }, 50);
-      }
-    }
-    function hideKeyboard() {
-      if (keyboardEl) {
-        keyboardEl.classList.remove('open');
-        playTone(360);
-      }
-    }
-    if (chatInput) {
-      chatInput.addEventListener('focus', showKeyboard);
-      chatInput.addEventListener('click', showKeyboard);
-    }
-
-    function kbType(char) {
-      if (chatInput) {
-        chatInput.value += char;
-        chatInput.focus();
-        playTone(650);
-      }
-    }
-    function kbBackspace() {
-      if (chatInput && chatInput.value.length > 0) {
-        chatInput.value = chatInput.value.slice(0, -1);
-        playTone(420);
-      }
-    }
-    function kbSpace() {
-      if (chatInput) {
-        chatInput.value += ' ';
-        playTone(520);
-      }
-    }
-    function submitKeyboard() {
-      if (chatInput) {
-        sendMobileChat(chatInput.value);
-        hideKeyboard();
-      }
-    }
-
-    // --- SEND MESSAGE SIMULATOR ---
-    function sendMobileChat(msg) {
-      if (!msg || !msg.trim()) return;
-      playTone(850);
-
-      const chatView = phoneViews.chat;
-      if (!chatView) return;
-
-      // Add user bubble
-      const userBubble = document.createElement('div');
-      userBubble.className = 'p-user-bubble';
-      userBubble.textContent = msg;
-      chatView.appendChild(userBubble);
-
-      if (chatInput) chatInput.value = '';
-      if (scrollStage) scrollStage.scrollTop = scrollStage.scrollHeight;
-
-      // Log to Dual Console
-      logToDualConsole(`[CLIENT] User sent: "${msg}"`);
-
-      // Simulated Agent Thinking & Reply
-      setTimeout(() => {
-        playTone(720);
-        const replyCard = document.createElement('div');
-        replyCard.className = 'p-turn-card';
-        
-        replyCard.innerHTML = `
-          <div class="p-accordion-header">
-            <span>用时 2.4秒 · 意图拆解完成</span>
-            <span>✓</span>
-          </div>
-          <div style="font-size: 12px; color: #12100e; line-height: 1.5;">
-            已解析任务指令：针对 <strong>${escapeHtml(msg)}</strong> 进行了全域探查并生成方案。<br>
-            • 已在只读沙箱完成静态检查<br>
-            • 可随时切换至【变更】页审查代码 Diff！
-          </div>
-          <div class="p-action-capsules">
-            <button class="p-capsule-btn" onclick="switchMobileTab('changes')">🔀 审查生成代码 Diff</button>
-            <button class="p-capsule-btn" onclick="switchMobileTab('files')">📁 打开工作区文件</button>
-          </div>
-        `;
-        chatView.appendChild(replyCard);
-        if (scrollStage) scrollStage.scrollTop = scrollStage.scrollHeight;
-        logToDualConsole(`[AGENT] Plan and Diff ready for execution.`);
-        showToast('Agent 已生成最新回复');
-      }, 700);
-    }
-
-    const pSendBtn = document.getElementById('p-send-btn');
-    if (pSendBtn) {
-      pSendBtn.addEventListener('click', () => {
-        if (chatInput) sendMobileChat(chatInput.value);
-      });
-    }
-    if (chatInput) {
-      chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          sendMobileChat(chatInput.value);
-          hideKeyboard();
-        }
-      });
-    }
-
-    function escapeHtml(str) {
-      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function logToDualConsole(text) {
-      const stream = document.getElementById('console-stream');
-      if (stream) {
-        const line = document.createElement('div');
-        const now = new Date().toTimeString().split(' ')[0];
-        line.innerHTML = `<span style="color: #64748b;">[${now}]</span> <span style="color: #38bdf8;">${escapeHtml(text)}</span>`;
-        stream.appendChild(line);
-        stream.scrollTop = stream.scrollHeight;
-      }
-    }
-
-    // --- ACTION BUTTONS IN RIG ---
-    function approveDiffAction() {
-      playTone(900);
-      showToast('✔ 已通过方案 A 人工审批，代码变更成功落地！');
-      logToDualConsole('[APPROVAL] User explicitly APPROVED diff for server.go. Changes committed.');
-    }
-    function rejectDiffAction() {
-      playTone(350);
-      showToast('✕ 已安全拦截并拒绝本次代码变更。');
-      logToDualConsole('[APPROVAL] User REJECTED diff. Workspace unmodified.');
-    }
-    function rollbackAction() {
-      playTone(700);
-      showToast('⏪ Git 原子时光机：已一秒回滚到基线快照 #a8f9c1！');
-      logToDualConsole('[ROLLBACK] Restored workspace baseline #a8f9c1 from SQLite history.');
-    }
-
-    // File Preview inside Phone
-    function previewFileCode(filename) {
-      playTone(550);
-      const box = document.getElementById('file-preview-box');
-      if (box) {
-        box.style.display = 'block';
-        if (filename === 'server.go') {
-          box.innerHTML = `// core/remote/relay/server.go<br>package relay<br><br>type RelayServer struct {<br>&nbsp;&nbsp;addr string<br>&nbsp;&nbsp;token string<br>}<br><br>func (s *RelayServer) Start() error { ... }`;
-        } else if (filename === 'main.go') {
-          box.innerHTML = `// main.go<br>package main<br><br>func main() {<br>&nbsp;&nbsp;cmd.Execute()<br>}`;
-        } else {
-          box.innerHTML = `// go.mod<br>module github.com/myai/core<br><br>go 1.24`;
-        }
-        showToast('已加载文件: ' + filename);
-      }
-    }
-
-    // Mode Switcher (Single Phone vs Dual Stream)
-    const btnModePhone = document.getElementById('btn-mode-phone');
-    const btnModeDual = document.getElementById('btn-mode-dual');
-    const dualConsoleBox = document.getElementById('dual-console-box');
-
-    if (btnModePhone && btnModeDual && dualConsoleBox) {
-      btnModePhone.addEventListener('click', () => {
-        playTone(500);
-        btnModePhone.classList.add('active');
-        btnModeDual.classList.remove('active');
-        dualConsoleBox.style.display = 'none';
-        showToast('已切换至单机真机视图');
-      });
-      btnModeDual.addEventListener('click', () => {
-        playTone(800);
-        btnModeDual.classList.add('active');
-        btnModePhone.classList.remove('active');
-        dualConsoleBox.style.display = 'flex';
-        showToast('已展开【手机与 PC 终端双端协同视图】');
-      });
-    }
-
-    // Preset Chips
-    const presetHandlers = {
-      'chip-preset-subagent': () => {
-        switchMobileTab('chat');
-        sendMobileChat('帮我派遣子代理深入检索 docs/ 与 core/ 目录中的 Relay 握手协议');
-      },
-      'chip-preset-diff': () => {
-        switchMobileTab('changes');
-        showToast('已切换至代码 Diff 审查与 Git 原子快照');
-      },
-      'chip-preset-cron': () => {
-        switchMobileTab('chat');
-        sendMobileChat('配置每 30 分钟检查一次 Docker 容器运行状态');
-      },
-      'chip-preset-knowledge': () => {
-        switchMobileTab('knowledge');
-        showToast('已切换至分层混合知识库与自进化记忆');
-      },
-      'chip-preset-files': () => {
-        switchMobileTab('files');
-        showToast('已切换至工作区文件浏览器');
-      }
-    };
-
-    Object.keys(presetHandlers).forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.addEventListener('click', () => {
-          document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
-          el.classList.add('active');
-          presetHandlers[id]();
-        });
-      }
-    });
-
-    // Quickstart Tabs
-    function switchQsTab(type, btn) {
-      playTone(550);
-      document.querySelectorAll('.qs-tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.querySelectorAll('.qs-content').forEach(c => c.style.display = 'none');
-      const target = document.getElementById('qs-' + type);
-      if (target) target.style.display = 'block';
-    }
-
-    // FAQ Accordion
-    function toggleFaq(headerEl) {
-      const item = headerEl.parentElement;
-      const isOpen = item.classList.contains('open');
-      document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
-      if (!isOpen) {
-        item.classList.add('open');
-        playTone(550);
-      }
-    }
-  </script>
+  <script src="assets/js/main.js" defer></script>
 </body>
 </html>

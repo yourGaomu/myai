@@ -488,8 +488,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   haloStaticRing: {
-    borderWidth: 1.5,
-    opacity: 0.72,
+    borderWidth: 1,
+    opacity: 0.46,
     position: "absolute",
   },
   haloPulseRing: {

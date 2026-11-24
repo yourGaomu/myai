@@ -124,7 +124,7 @@ export function ChatEmptyState({
   return (
     <View style={styles.wrap}>
       <Animated.View style={[styles.heroWrap, stageStyle(0)]}>
-        <CharacterHalo ringSize={140}>
+        <CharacterHalo ringSize={164}>
           <CharacterAvatar accessibilityLabel="MyAI 角色" height={158} size={158} slot="idle" variant="full" />
         </CharacterHalo>
       </Animated.View>

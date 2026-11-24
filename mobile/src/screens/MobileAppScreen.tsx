@@ -65,7 +65,7 @@ import { SubagentInspectionModal } from "../components/subagents/SubagentInspect
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
-import { agentActivity } from "../utils/agentActivity";
+import { agentActivity, shouldHoldDoneActivity, type AgentActivity } from "../utils/agentActivity";
 import { newRequestID } from "../utils/ids";
 import { formatBytes } from "../utils/format";
 import { activityToMotionSlot } from "../utils/motionRegistry";
@@ -1194,7 +1194,7 @@ function PairedWorkspace({
       ).length,
     [subagentTasks],
   );
-  const currentActivity = useMemo(
+  const rawActivity = useMemo(
     () =>
       agentActivity({
         connected,
@@ -1219,6 +1219,30 @@ function PairedWorkspace({
       runningSubagentCount,
     ],
   );
+  const [doneHoldSessionID, setDoneHoldSessionID] = useState("");
+  const prevActivityRef = useRef<{ sessionID: string; activity: AgentActivity }>({ sessionID, activity: rawActivity });
+  useEffect(() => {
+    const prev = prevActivityRef.current;
+    prevActivityRef.current = { sessionID, activity: rawActivity };
+    if (prev.sessionID !== sessionID || rawActivity !== "idle") {
+      if (doneHoldSessionID) setDoneHoldSessionID("");
+      return;
+    }
+    const latestMessage = currentChat.messages[currentChat.messages.length - 1];
+    const latestFailed = Boolean(
+      latestMessage &&
+      (latestMessage.role === "error" || latestMessage.status === "error" || latestMessage.status === "paused"),
+    );
+    if (!shouldHoldDoneActivity(prev.activity, rawActivity, latestFailed)) {
+      return;
+    }
+    setDoneHoldSessionID(sessionID);
+    const timer = setTimeout(() => {
+      setDoneHoldSessionID((current) => (current === sessionID ? "" : current));
+    }, 2400);
+    return () => clearTimeout(timer);
+  }, [currentChat.messages, doneHoldSessionID, rawActivity, sessionID]);
+  const currentActivity: AgentActivity = rawActivity === "idle" && doneHoldSessionID === sessionID ? "done" : rawActivity;
   const currentActivitySlot = activityToMotionSlot(currentActivity);
   const isEmptyHome =
     currentChat.messages.length === 0 &&
@@ -1854,14 +1878,14 @@ function PairedWorkspace({
         visible={confirmRevertFile}
       />
 
-      {listRenameDraft ? (
-        <ResponsiveFormModal
-          buttonFeedback={buttonFeedback}
-          footer={null}
-          onClose={() => closeRename("list")}
-          title="重命名对话"
-          visible
-        >
+      <ResponsiveFormModal
+        buttonFeedback={buttonFeedback}
+        footer={null}
+        onClose={() => closeRename("list")}
+        title="重命名对话"
+        visible={Boolean(listRenameDraft)}
+      >
+        {listRenameDraft ? (
           <SessionRenameEditor
             connected={canRenameSessions}
             draft={listRenameDraft}
@@ -1869,8 +1893,8 @@ function PairedWorkspace({
             onChange={editRename}
             onSave={saveRename}
           />
-        </ResponsiveFormModal>
-      ) : null}
+        ) : null}
+      </ResponsiveFormModal>
 
       {/* 会话设置：模型、对话/规划、工具权限、上下文 */}
       <SessionSheet
