@@ -3,6 +3,8 @@ package local
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/google/uuid"
 
 	domaintool "myai/core/domain/tool"
 	"myai/core/imageasset"
@@ -21,8 +25,9 @@ import (
 )
 
 type AttachImageTool struct {
-	workspace string
-	files     files.Service
+	workspace      string
+	files          files.Service
+	localRegistrar files.SessionAssetRegistrar
 }
 
 type attachImageResult struct {
@@ -35,14 +40,18 @@ type attachImageResult struct {
 	Checksum    string `json:"checksum,omitempty"`
 }
 
-func NewAttachImageToolWithWorkspaceAndFiles(workspace string, service files.Service) *AttachImageTool {
-	return &AttachImageTool{workspace: workspace, files: service}
+func NewAttachImageToolWithWorkspaceAndFiles(workspace string, service files.Service, registrars ...files.SessionAssetRegistrar) *AttachImageTool {
+	tool := &AttachImageTool{workspace: workspace, files: service}
+	if len(registrars) > 0 {
+		tool.localRegistrar = registrars[0]
+	}
+	return tool
 }
 
 func (*AttachImageTool) Name() string { return "attach_image" }
 
 func (*AttachImageTool) Description() string {
-	return "Attach a JPEG or PNG from the current workspace to this chat as a private asset. Each upload requires explicit user approval."
+	return "Attach a JPEG, PNG, GIF, or WebP from the current workspace to this chat as a private asset. Each attachment requires explicit user approval."
 }
 
 func (*AttachImageTool) Schema() any {
@@ -51,7 +60,7 @@ func (*AttachImageTool) Schema() any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to a regular JPEG or PNG inside the current workspace, up to 10 MiB.",
+				"description": "Path to a regular JPEG, PNG, GIF, or WebP inside the current workspace, up to 16 MiB.",
 			},
 		},
 		"required": []string{"path"},
@@ -63,9 +72,6 @@ func (*AttachImageTool) Permission() tooldef.Permission { return tooldef.Permiss
 func (*AttachImageTool) RequiresExplicitApproval() bool { return true }
 
 func (t *AttachImageTool) Call(ctx context.Context, args json.RawMessage) (tooldef.ToolOutput, error) {
-	if t.files == nil {
-		return tooldef.ToolOutput{}, errors.New("MCP files service is not configured")
-	}
 	if err := ctx.Err(); err != nil {
 		return tooldef.ToolOutput{}, err
 	}
@@ -92,19 +98,36 @@ func (t *AttachImageTool) Call(ctx context.Context, args json.RawMessage) (toold
 	}
 
 	fileName, size := filepath.Base(relative), int64(len(data))
-	asset, err := t.files.Upload(ctx, files.UploadRequest{
-		Reader: bytes.NewReader(data), FileName: fileName, ContentType: contentType, Size: size,
-	})
-	if err != nil {
-		return tooldef.ToolOutput{}, err
-	}
-	assetID := asset.AssetID
-	if !files.IsSessionAssetID(assetID) {
-		return tooldef.ToolOutput{}, errors.New("upload backend returned an invalid asset_id")
+	assetID, businessID, checksum := "", "", ""
+	if t.files != nil {
+		asset, err := t.files.Upload(ctx, files.UploadRequest{
+			Reader: bytes.NewReader(data), FileName: fileName, ContentType: contentType, Size: size,
+		})
+		if err != nil {
+			return tooldef.ToolOutput{}, err
+		}
+		assetID, businessID, checksum = asset.AssetID, asset.BusinessID, asset.Checksum
+		if !files.IsSessionAssetID(assetID) {
+			return tooldef.ToolOutput{}, errors.New("upload backend returned an invalid asset_id")
+		}
+	} else {
+		assetID = "ast_local_" + uuid.NewString()
+		sum := sha256.Sum256(data)
+		checksum = hex.EncodeToString(sum[:])
 	}
 	result := attachImageResult{
-		AssetID: assetID, BusinessID: asset.BusinessID, FileName: fileName, ContentType: contentType,
-		Size: size, Path: filepath.ToSlash(relative), Checksum: asset.Checksum,
+		AssetID: assetID, BusinessID: businessID, FileName: fileName, ContentType: contentType,
+		Size: size, Path: filepath.ToSlash(relative), Checksum: checksum,
+	}
+	if t.files == nil && t.localRegistrar != nil {
+		execution, _ := toolruntime.CurrentExecution(ctx)
+		workspaceRoot, err := toolWorkspace(toolruntime.WorkspaceRoot(ctx, t.workspace))
+		if err != nil {
+			return tooldef.ToolOutput{}, err
+		}
+		if err := t.localRegistrar.RegisterLocalSessionAsset(ctx, execution.SessionID, files.Asset{AssetID: assetID, FileName: fileName, ContentType: contentType, Size: size, Checksum: checksum}.WithLocalImage(result.Path, workspaceRoot)); err != nil {
+			return tooldef.ToolOutput{}, err
+		}
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {

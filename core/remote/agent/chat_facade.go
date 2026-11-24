@@ -4,10 +4,12 @@ import (
 	"context"
 
 	agentrunresult "myai/core/application/agentrun/result"
+	imageresult "myai/core/application/imagemodel/result"
 	modelcommand "myai/core/application/model/command"
 	lifecycleresult "myai/core/application/session/lifecycle/result"
 	sessionresult "myai/core/application/session/result"
 	"myai/core/domain/generation"
+	domainimagemodel "myai/core/domain/imagemodel"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	"myai/core/service"
@@ -73,6 +75,13 @@ type CatalogFacade interface {
 	SetDefaultModel(ctx context.Context, command modelcommand.SetDefault) error
 	DeleteModelConfig(ctx context.Context, command modelcommand.DeleteConfig) error
 	TestModelConfig(ctx context.Context, command modelcommand.AddConfig) (int64, error)
+	ListImageModelConfigs(ctx context.Context) ([]domainimagemodel.Summary, string, error)
+	AddImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.MutationResult, error)
+	TestImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.TestResult, error)
+	UpdateImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.MutationResult, error)
+	DeleteImageModelConfig(ctx context.Context, id string) (imageresult.MutationResult, error)
+	SetImageModelEnabled(ctx context.Context, id string, enabled bool) (imageresult.MutationResult, error)
+	SetDefaultImageModel(ctx context.Context, id string) (imageresult.MutationResult, error)
 	ListSkills(ctx context.Context) ([]skill.Skill, error)
 	ReloadSkills(ctx context.Context, reason string) ([]skill.Skill, error)
 	SkillRoot() string

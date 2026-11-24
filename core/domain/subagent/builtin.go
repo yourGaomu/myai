@@ -24,7 +24,7 @@ func BuiltinDefinitions() []Definition {
 			ID: "implementer", Name: "Implementer",
 			Description:    "Implements one isolated plan step, verifies the result, and reports the exact changes.",
 			SystemPrompt:   "You are an implementation subagent. Treat the assigned plan step as a complete task and begin immediately. Inspect the relevant workspace files before editing, make the smallest correct change that satisfies the instruction, and run focused verification when available. Work only inside the provided isolated workspace. Report exact files changed, commands run, and any remaining blocker. Do not ask the parent for another message.",
-			AllowedTools:   []string{"list_files", "read_file", "search_files", "read_asset", "knowledge_search", "edit_file", "write_file", "shell", "spawn_agent", "send_message", "followup_task", "list_agents", "wait_agent", "interrupt_agent"},
+			AllowedTools:   []string{"list_files", "read_file", "search_files", "read_asset", "knowledge_search", "edit_file", "write_file", "shell", "generate_image", "spawn_agent", "send_message", "followup_task", "list_agents", "wait_agent", "interrupt_agent"},
 			CapabilityMode: CapabilityModeAll, IsolationMode: domainworkspace.IsolationModeSnapshot,
 			MaxTurns: 24, TimeoutSeconds: 900, Enabled: true, Version: 1, Source: DefinitionSourceBuiltin,
 		},

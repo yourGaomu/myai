@@ -25,6 +25,7 @@ import (
 	contenthashid "myai/core/adapter/id/contenthash"
 	snowflakeid "myai/core/adapter/id/snowflake"
 	uuidadapter "myai/core/adapter/id/uuid"
+	imagemodeladapter "myai/core/adapter/imagemodel"
 	jevclient "myai/core/adapter/intent/jev"
 	intentstore "myai/core/adapter/intent/store"
 	sqlitefts5 "myai/core/adapter/keywordstore/sqlitefts5"
@@ -33,6 +34,7 @@ import (
 	adaptermodel "myai/core/adapter/model/langchaingo"
 	minioadapter "myai/core/adapter/objectstorage/minio"
 	agentrunmemory "myai/core/adapter/persistence/memory/agentrun"
+	imagemodelmemory "myai/core/adapter/persistence/memory/imagemodel"
 	aimemory "myai/core/adapter/persistence/memory/memory"
 	agentrunmongo "myai/core/adapter/persistence/mongo/agentrun/repository"
 	knowledgemongo "myai/core/adapter/persistence/mongo/knowledge/repository"
@@ -57,6 +59,8 @@ import (
 	workspaceRouter "myai/core/adapter/workspace/router"
 	snapshotworkspace "myai/core/adapter/workspace/snapshot"
 	agentrunservice "myai/core/application/agentrun/service"
+	imagemodelapi "myai/core/application/imagemodel/api"
+	imagemodelservice "myai/core/application/imagemodel/service"
 	catalogapi "myai/core/application/knowledge/catalog/api"
 	catalogservice "myai/core/application/knowledge/catalog/service"
 	documentapi "myai/core/application/knowledge/document/api"
@@ -88,6 +92,7 @@ import (
 	subagentservice "myai/core/application/subagent/service"
 	chatcomposition "myai/core/composition/chat"
 	appconfig "myai/core/config"
+	domainimagemodel "myai/core/domain/imagemodel"
 	domainmemory "myai/core/domain/memory"
 	"myai/core/hook"
 	"myai/core/infra"
@@ -99,6 +104,7 @@ import (
 	executionport "myai/core/port/execution"
 	filesport "myai/core/port/files"
 	historyport "myai/core/port/history"
+	imagemodelport "myai/core/port/imagemodel"
 	intentport "myai/core/port/intent"
 	knowledgeport "myai/core/port/knowledge"
 	documentprocessorport "myai/core/port/knowledge/documentprocessor"
@@ -128,6 +134,10 @@ type Application struct {
 	store                       persistenceport.Store
 	agentRunRepository          agentrunport.Repository
 	memoryStore                 memoryport.Store
+	imageModelRegistry          *imagemodeladapter.Registry
+	imageModelRepository        imagemodelport.Repository
+	imageModelConfigService     imagemodelapi.ConfigService
+	imageModelFactory           imagemodeladapter.HTTPFactory
 	memoryCatalogService        memorycatalogapi.Service
 	memoryDreamService          memorydreamapi.Service
 	memoryExtractionService     *memoryextractionservice.Service
@@ -212,6 +222,7 @@ func InitApp() {
 		instance.InitCache()
 		//初始化模型信息，有哪些模型可以调用
 		instance.InitClient()
+		instance.InitImageModels()
 		//一次性初始化 4 大记忆相关服务
 		instance.InitMemoryServices()
 		instance.InitSessionMemory()
@@ -725,6 +736,62 @@ func (app *Application) InitClient() {
 	app.defaultModelID = result.DefaultModelID
 }
 
+func (app *Application) InitImageModels() {
+	app.imageModelFactory = imagemodeladapter.NewFactory()
+	app.imageModelRegistry = imagemodeladapter.NewRegistry()
+	if app.store != nil {
+		repository, ok := app.store.(imagemodelport.Repository)
+		if !ok {
+			panic("Mongo store does not implement image model configuration repository")
+		}
+		app.imageModelRepository = repository
+	} else {
+		app.imageModelRepository = imagemodelmemory.NewRepository()
+	}
+	configs, err := app.imageModelRepository.List(context.Background())
+	if err != nil {
+		panic(fmt.Errorf("load image model configurations failed: %w", err))
+	}
+	if len(configs) == 0 {
+		for _, seed := range app.properties.ImageGeneration.Models {
+			enabled := seed.Enabled == nil || *seed.Enabled
+			config := domainimagemodel.Config{ID: seed.ID, Name: seed.Name, Provider: seed.Provider, Protocol: domainimagemodel.Protocol(seed.Protocol), AuthType: domainimagemodel.AuthType(seed.AuthType), BaseURL: seed.BaseURL, APIKey: seed.APIKey, ModelName: seed.Model, Enabled: enabled, IsDefault: seed.IsDefault}
+			if config.ID == "" || config.ModelName == "" {
+				panic("image_generation model requires id and model")
+			}
+			if config.Name == "" {
+				config.Name = config.ID
+			}
+			if config.Provider == "" {
+				config.Provider = string(config.Protocol)
+			}
+			if config.AuthType == "" {
+				config.AuthType = domainimagemodel.DefaultAuthType(config.Protocol)
+			}
+			if config.AuthType == domainimagemodel.AuthTypeGoogleADC {
+				config.APIKey = ""
+			}
+			if config.CreatedAt.IsZero() {
+				config.CreatedAt = time.Now()
+			}
+			config.UpdatedAt = config.CreatedAt
+			if config.Enabled {
+				if _, err := app.imageModelFactory.Build(config); err != nil {
+					panic(fmt.Errorf("invalid image_generation model %q: %w", config.ID, err))
+				}
+			}
+			if err := app.imageModelRepository.Save(context.Background(), config); err != nil {
+				panic(fmt.Errorf("save image model seed failed: %w", err))
+			}
+			configs = append(configs, config)
+		}
+	}
+	if err := app.imageModelRegistry.Replace(configs, app.imageModelFactory); err != nil {
+		panic(fmt.Errorf("initialize image model registry failed: %w", err))
+	}
+	app.imageModelConfigService = &imagemodelservice.ConfigService{Repository: app.imageModelRepository, Registry: app.imageModelRegistry, Factory: app.imageModelFactory}
+}
+
 func (app *Application) InitSessionMemory() {
 	app.sessionMemory = memorysession.NewStore(app.defaultModelID)
 }
@@ -796,6 +863,8 @@ func (app *Application) InitChatService() {
 	app.chatService = chatcomposition.NewService(chatcomposition.Configuration{
 		IntentController:    intentController,
 		Models:              app.client,
+		ImageModels:         app.imageModelRegistry,
+		ImageModelConfig:    app.imageModelConfigService,
 		ModelFactory:        adaptermodel.NewFactory(),
 		Sessions:            app.sessionMemory,
 		Store:               app.store,
@@ -1187,6 +1256,10 @@ func (app *Application) GetMemoryExtractionService() memoryextractionapi.Service
 	return app.memoryExtractionService
 }
 
+func (app *Application) GetImageModelRegistry() imagemodelport.Registry {
+	return app.imageModelRegistry
+}
+
 func (app *Application) GetMemoryDreamService() memorydreamapi.Service {
 	return app.memoryDreamService
 }
@@ -1208,7 +1281,10 @@ func (app *Application) InitRegister() *tool.RegisterTools {
 	localTools = append(localTools, local.NewReadAssetToolWithFiles(app.fileService, func(ctx context.Context, sessionID, assetID string) (filesport.Asset, error) {
 		return app.chatService.LookupSessionAsset(ctx, sessionID, assetID)
 	}))
-	localTools = append(localTools, local.NewAttachImageToolWithWorkspaceAndFiles(app.workspace, app.fileService))
+	localTools = append(localTools, local.NewAttachImageToolWithWorkspaceAndFiles(app.workspace, app.fileService, app.chatService))
+	localTools = append(localTools, local.NewGenerateImageTool(app.workspace, app.imageModelRegistry, app.fileService, func(ctx context.Context, sessionID, assetID string) (filesport.Asset, error) {
+		return app.chatService.LookupSessionAsset(ctx, sessionID, assetID)
+	}, app.HistoryStoreFactory(), app.chatService))
 	localTools = append(localTools, local.NewShareFileToolWithWorkspaceAndFiles(app.workspace, app.fileService))
 	if app.knowledgeSearchService != nil {
 		localTools = append(localTools, local.NewKnowledgeSearchTool(app.knowledgeSearchService))

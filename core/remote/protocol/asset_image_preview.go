@@ -1,11 +1,10 @@
 package protocol
 
 import (
-	"bytes"
 	"errors"
-	"image/jpeg"
 	"strings"
 
+	"myai/core/imageasset"
 	"myai/core/port/files"
 )
 
@@ -13,10 +12,10 @@ const (
 	TypeAssetImagePreview       MessageType = "asset_image_preview"
 	TypeAssetImagePreviewResult MessageType = "asset_image_preview_result"
 
-	AssetImagePreviewMaxBytes            = 256 * 1024
-	AssetImagePreviewMaxDimension        = 1024
+	AssetImagePreviewMaxBytes            = 2 * 1024 * 1024
+	AssetImagePreviewMaxDimension        = 2048
 	AssetImagePreviewRequestMaxJSONBytes = 8 * 1024
-	AssetImagePreviewMaxJSONBytes        = 512 * 1024
+	AssetImagePreviewMaxJSONBytes        = 3 * 1024 * 1024
 )
 
 type AssetImagePreviewPayload struct {
@@ -49,15 +48,18 @@ func AssetImagePreviewResult(message Message) (AssetImagePreviewResultPayload, e
 		return AssetImagePreviewResultPayload{}, errors.New("invalid image preview result")
 	}
 	payload, err := DecodePayload[AssetImagePreviewResultPayload](message)
-	if err != nil || !files.IsSessionAssetID(payload.AssetID) || payload.ContentType != "image/jpeg" ||
-		len(payload.Data) < 3 || len(payload.Data) > AssetImagePreviewMaxBytes ||
-		payload.Data[0] != 0xff || payload.Data[1] != 0xd8 || payload.Data[2] != 0xff ||
+	if err != nil || !files.IsSessionAssetID(payload.AssetID) ||
+		len(payload.Data) == 0 || len(payload.Data) > AssetImagePreviewMaxBytes ||
 		payload.Width < 1 || payload.Height < 1 || payload.Width > AssetImagePreviewMaxDimension || payload.Height > AssetImagePreviewMaxDimension {
 		return AssetImagePreviewResultPayload{}, errors.New("invalid image preview result")
 	}
-	config, err := jpeg.DecodeConfig(bytes.NewReader(payload.Data))
-	if err != nil || config.Width != payload.Width || config.Height != payload.Height {
-		return AssetImagePreviewResultPayload{}, errors.New("invalid image preview dimensions")
+	info, err := imageasset.Inspect(payload.Data)
+	if err != nil || info.MIMEType != payload.ContentType || info.Width != payload.Width || info.Height != payload.Height {
+		return AssetImagePreviewResultPayload{}, errors.New("invalid image preview data or dimensions")
+	}
+	decoded, mimeType, err := imageasset.Decode(payload.Data)
+	if err != nil || mimeType != payload.ContentType || decoded.Bounds().Dx() != payload.Width || decoded.Bounds().Dy() != payload.Height {
+		return AssetImagePreviewResultPayload{}, errors.New("invalid image preview data or dimensions")
 	}
 	return payload, nil
 }

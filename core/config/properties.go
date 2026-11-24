@@ -2,6 +2,7 @@ package config
 
 type Properties struct {
 	Model            ModelProperties
+	ImageGeneration  ImageGenerationProperties
 	Memory           MemoryProperties
 	Mongo            MongoProperties
 	Redis            RedisProperties
@@ -15,6 +16,22 @@ type Properties struct {
 	MCP              MCPProperties
 	WorkspaceHistory WorkspaceHistoryProperties
 	Persistence      PersistenceProperties
+}
+
+type ImageGenerationProperties struct {
+	Models []ImageModelProperties `mapstructure:"models"`
+}
+type ImageModelProperties struct {
+	ID        string `mapstructure:"id"`
+	Name      string `mapstructure:"name"`
+	Provider  string `mapstructure:"provider"`
+	Protocol  string `mapstructure:"protocol"`
+	AuthType  string `mapstructure:"auth_type"`
+	BaseURL   string `mapstructure:"base_url"`
+	APIKey    string `mapstructure:"api_key"`
+	Model     string `mapstructure:"model"`
+	Enabled   *bool  `mapstructure:"enabled"`
+	IsDefault bool   `mapstructure:"is_default"`
 }
 
 type PersistenceProperties struct {

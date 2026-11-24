@@ -48,7 +48,6 @@ func sessionAssetLookup(store repository.SessionRepository, reader repository.Se
 		return files.Asset{
 			AssetID: record.AssetID, BusinessID: record.BusinessID, FileName: record.FileName,
 			ContentType: record.ContentType, Size: record.Size, Checksum: record.Checksum,
-			CreatedAt: record.CreatedAt,
-		}, nil
+			CreatedAt: record.CreatedAt}.WithLocalImage(record.LocalPath, current.WorkspaceRoot), nil
 	}
 }

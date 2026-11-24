@@ -58,6 +58,23 @@ func TestIntentResponsesFinishTheirRoutes(t *testing.T) {
 	}
 }
 
+func TestImageModelResponsesFinishTheirRoutes(t *testing.T) {
+	cases := []struct{ request, response protocol.MessageType }{
+		{protocol.TypeImageModelList, protocol.TypeImageModelListResult},
+		{protocol.TypeImageModelConfigAdd, protocol.TypeImageModelConfigAddResult},
+		{protocol.TypeImageModelConfigTest, protocol.TypeImageModelConfigTestResult},
+		{protocol.TypeImageModelConfigUpdate, protocol.TypeImageModelConfigMutationResult},
+		{protocol.TypeImageModelConfigDelete, protocol.TypeImageModelConfigMutationResult},
+		{protocol.TypeImageModelConfigEnabledSet, protocol.TypeImageModelConfigMutationResult},
+		{protocol.TypeImageModelConfigDefaultSet, protocol.TypeImageModelConfigMutationResult},
+	}
+	for _, tc := range cases {
+		if !isTerminalResponseForRequest(tc.request, tc.response) || !isTerminalResponseForRequest(tc.request, protocol.TypeError) {
+			t.Fatalf("%s does not terminate %s", tc.response, tc.request)
+		}
+	}
+}
+
 func TestAgentRegistrationSupersedesPreviousPeer(t *testing.T) {
 	server := newTestServer()
 	previous := &peer{}
@@ -952,6 +969,23 @@ func TestRelayForwardsModelMessages(t *testing.T) {
 	}
 
 	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	imageRequest := protocol.Message{Type: protocol.TypeImageModelList, RequestID: "image-model-list-1", UserID: "local", DeviceID: "pc-local", ClientToken: clientToken, Payload: json.RawMessage(`{}`)}
+	writeTestMessage(t, clientConn, imageRequest)
+	forwardedImageRequest := readTestMessage(t, agentConn, protocol.TypeImageModelList)
+	if forwardedImageRequest.RequestID != imageRequest.RequestID {
+		t.Fatalf("wrong image model request route: %s", forwardedImageRequest.RequestID)
+	}
+	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
+	writeTestMessage(t, agentConn, protocol.Message{Type: protocol.TypeImageModelListResult, RequestID: imageRequest.RequestID, UserID: "local", DeviceID: "pc-local", Payload: json.RawMessage(`{"models":[],"default_model_id":""}`)})
+	forwardedImageResponse := readTestMessage(t, clientConn, protocol.TypeImageModelListResult)
+	if forwardedImageResponse.RequestID != imageRequest.RequestID {
+		t.Fatalf("wrong image model response route: %s", forwardedImageResponse.RequestID)
+	}
+	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
+	if !isTerminalResponseForRequest(protocol.TypeImageModelList, protocol.TypeImageModelListResult) {
+		t.Fatal("image model list response did not terminate its route")
+	}
+
 	writeTestMessage(t, clientConn, protocol.Message{
 		Type:        protocol.TypeModelSwitch,
 		RequestID:   "model-switch-1",

@@ -3,9 +3,10 @@ package repository
 import "time"
 
 const (
-	AssetSourceUpload      = "asset_upload"
-	AssetSourceAttachImage = "attach_image"
-	AssetSourceShareFile   = "share_file"
+	AssetSourceUpload        = "asset_upload"
+	AssetSourceAttachImage   = "attach_image"
+	AssetSourceShareFile     = "share_file"
+	AssetSourceGenerateImage = "generate_image"
 )
 
 // IsSessionAttachment excludes metadata-only tool results from authorization.
@@ -14,7 +15,7 @@ func (a AssetRecord) IsSessionAttachment() bool {
 		return false
 	}
 	switch a.ToolName {
-	case AssetSourceUpload, AssetSourceAttachImage, AssetSourceShareFile:
+	case AssetSourceUpload, AssetSourceAttachImage, AssetSourceShareFile, AssetSourceGenerateImage:
 		return true
 	default:
 		return false

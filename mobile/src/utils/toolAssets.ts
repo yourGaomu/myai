@@ -32,7 +32,7 @@ export function assetSummaryToSharedAsset(summary: AssetSummary): SharedAsset {
 }
 
 export function isAssistantAssetTool(toolName?: string) {
-  return toolName === "attach_image" || toolName === "share_file";
+  return toolName === "attach_image" || toolName === "generate_image" || toolName === "share_file";
 }
 
 // Whitelist metadata from authenticated completions and the session asset list.
@@ -167,9 +167,9 @@ export function isPreviewableImageAsset(asset: SharedAsset) {
 
 export function isRelayPreviewImageAsset(asset: SharedAsset) {
   const contentType = asset.contentType?.toLowerCase().split(";", 1)[0].trim();
-  if (contentType && ["image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/x-png"].includes(contentType)) return true;
+  if (contentType && ["image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/x-png", "image/gif", "image/webp"].includes(contentType)) return true;
   if (contentType && contentType !== "application/octet-stream" && contentType !== "image/*") return false;
-  return /\.(?:jpe?g|png)$/i.test(asset.fileName || asset.path || "");
+  return /\.(?:jpe?g|png|gif|webp)$/i.test(asset.fileName || asset.path || "");
 }
 
 export function assetPublicURL(value: unknown): string | undefined {

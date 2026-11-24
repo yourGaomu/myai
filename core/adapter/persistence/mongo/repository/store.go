@@ -14,17 +14,19 @@ import (
 	mongomapper "myai/core/adapter/persistence/mongo/mapper"
 	"myai/core/adapter/persistence/mongo/po"
 	mongotemplate "myai/core/adapter/persistence/mongo/template"
+	domainimagemodel "myai/core/domain/imagemodel"
 	domainmodel "myai/core/domain/model"
 	repository "myai/core/port/repository"
 	"myai/core/session"
 )
 
 const (
-	sessionsCollection     = "sessions"
-	messagesCollection     = "messages"
-	modelConfigsCollection = "model_configs"
-	assetsCollection       = "assets"
-	messageSourceIndexName = "messages_session_source_unique"
+	sessionsCollection          = "sessions"
+	messagesCollection          = "messages"
+	modelConfigsCollection      = "model_configs"
+	imageModelConfigsCollection = "image_model_configs"
+	assetsCollection            = "assets"
+	messageSourceIndexName      = "messages_session_source_unique"
 )
 
 type Store struct {
@@ -590,7 +592,7 @@ func (m *Store) FindSessionAttachment(ctx context.Context, sessionID, assetID st
 	filter := bson.M{
 		"session_id": sessionID,
 		"asset_id":   assetID,
-		"tool_name":  bson.M{"$in": bson.A{repository.AssetSourceUpload, repository.AssetSourceAttachImage, repository.AssetSourceShareFile}},
+		"tool_name":  bson.M{"$in": bson.A{repository.AssetSourceUpload, repository.AssetSourceAttachImage, repository.AssetSourceShareFile, repository.AssetSourceGenerateImage}},
 		"deleted":    bson.M{"$ne": true},
 		"deleted_at": nil,
 	}
@@ -633,4 +635,45 @@ func (m *Store) ListAssets(ctx context.Context, sessionID string, limit int) ([]
 		assets = append(assets, mongomapper.AssetRecordFromDocument(document))
 	}
 	return assets, nil
+}
+
+func (m *Store) Save(ctx context.Context, config domainimagemodel.Config) error {
+	document := bson.M{"name": config.Name, "provider": config.Provider, "protocol": string(config.Protocol), "auth_type": string(config.AuthType), "base_url": config.BaseURL, "api_key": config.APIKey, "model_name": config.ModelName, "enabled": config.Enabled, "is_default": config.IsDefault, "created_at": config.CreatedAt, "updated_at": config.UpdatedAt}
+	_, err := m.template.UpdateOne(ctx, imageModelConfigsCollection, bson.M{"_id": config.ID}, bson.M{"$set": document}, options.UpdateOne().SetUpsert(true))
+	return err
+}
+
+func (m *Store) Get(ctx context.Context, id string) (domainimagemodel.Config, error) {
+	var document po.ImageModelConfigDocument
+	if err := m.template.FindOne(ctx, imageModelConfigsCollection, bson.M{"_id": id}, &document); err != nil {
+		return domainimagemodel.Config{}, repositoryError(err)
+	}
+	return imageModelConfigFromDocument(document), nil
+}
+
+func (m *Store) List(ctx context.Context) ([]domainimagemodel.Config, error) {
+	var documents []po.ImageModelConfigDocument
+	if err := m.template.FindAll(ctx, imageModelConfigsCollection, bson.M{}, &documents, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})); err != nil {
+		return nil, repositoryError(err)
+	}
+	configs := make([]domainimagemodel.Config, 0, len(documents))
+	for _, document := range documents {
+		configs = append(configs, imageModelConfigFromDocument(document))
+	}
+	return configs, nil
+}
+
+func (m *Store) Delete(ctx context.Context, id string) error {
+	result, err := m.template.DeleteMany(ctx, imageModelConfigsCollection, bson.M{"_id": id})
+	if err != nil {
+		return repositoryError(err)
+	}
+	if result.DeletedCount == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+func imageModelConfigFromDocument(document po.ImageModelConfigDocument) domainimagemodel.Config {
+	return domainimagemodel.Config{ID: document.ID, Name: document.Name, Provider: document.Provider, Protocol: domainimagemodel.Protocol(document.Protocol), AuthType: domainimagemodel.AuthType(document.AuthType), BaseURL: document.BaseURL, APIKey: document.APIKey, ModelName: document.ModelName, Enabled: document.Enabled, IsDefault: document.IsDefault, CreatedAt: document.CreatedAt, UpdatedAt: document.UpdatedAt}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -310,6 +311,28 @@ func (l ViperLoader) Map(v *viper.Viper, workspace string) (Properties, error) {
 	}
 	if err := v.UnmarshalKey("rag.embedding", &properties.RAG.Embedding); err != nil {
 		return Properties{}, err
+	}
+	if err := v.UnmarshalKey("image_generation", &properties.ImageGeneration); err != nil {
+		return Properties{}, err
+	}
+	envPattern := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+	for index := range properties.ImageGeneration.Models {
+		model := &properties.ImageGeneration.Models[index]
+		model.ID = strings.TrimSpace(model.ID)
+		model.Name = strings.TrimSpace(model.Name)
+		model.Provider = strings.TrimSpace(model.Provider)
+		model.Protocol = strings.ToLower(strings.TrimSpace(model.Protocol))
+		model.AuthType = strings.ToLower(strings.TrimSpace(model.AuthType))
+		model.BaseURL = strings.TrimSpace(model.BaseURL)
+		model.Model = strings.TrimSpace(model.Model)
+		model.APIKey = envPattern.ReplaceAllStringFunc(model.APIKey, func(match string) string { name := envPattern.FindStringSubmatch(match)[1]; return os.Getenv(name) })
+		if model.Name == "" {
+			model.Name = model.ID
+		}
+		if model.Enabled == nil {
+			enabled := true
+			model.Enabled = &enabled
+		}
 	}
 	for index := range properties.RAG.Embedding.Models {
 		model := &properties.RAG.Embedding.Models[index]

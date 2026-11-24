@@ -382,6 +382,15 @@ func (a *Agent) readLoopWithConnectionContext(ctx, connectionCtx context.Context
 			}
 			continue
 		}
+		if isImageModelConfigRequest(message.Type) {
+			if err := protocol.ValidateImageModelConfigMessage(message); err != nil {
+				if writeErr := a.writeHandlerError(conn, message, err); writeErr != nil {
+					done <- writeErr
+					return
+				}
+				continue
+			}
+		}
 		if message.Type == protocol.TypeMCPDetail && len(raw) > protocol.MCPDetailRequestMaxJSONBytes {
 			if writeErr := a.writeHandlerError(conn, message, errors.New("mcp detail request is too large")); writeErr != nil {
 				done <- writeErr
@@ -503,6 +512,20 @@ func (a *Agent) handleRelayMessage(ctx context.Context, conn *websocket.Conn, me
 		return a.handleModelConfigEnabledSet(ctx, conn, message)
 	case protocol.TypeModelConfigDefaultSet:
 		return a.handleModelConfigDefaultSet(ctx, conn, message)
+	case protocol.TypeImageModelList:
+		return a.handleImageModelList(ctx, conn, message)
+	case protocol.TypeImageModelConfigAdd:
+		return a.handleImageModelConfigAdd(ctx, conn, message)
+	case protocol.TypeImageModelConfigTest:
+		return a.handleImageModelConfigTest(ctx, conn, message)
+	case protocol.TypeImageModelConfigUpdate:
+		return a.handleImageModelConfigUpdate(ctx, conn, message)
+	case protocol.TypeImageModelConfigDelete:
+		return a.handleImageModelConfigDelete(ctx, conn, message)
+	case protocol.TypeImageModelConfigEnabledSet:
+		return a.handleImageModelConfigEnabledSet(ctx, conn, message)
+	case protocol.TypeImageModelConfigDefaultSet:
+		return a.handleImageModelConfigDefaultSet(ctx, conn, message)
 	case protocol.TypeIntentConfigQuery:
 		return a.handleIntentConfigQuery(ctx, conn, message)
 	case protocol.TypeIntentConfigSet:
@@ -795,4 +818,13 @@ func newBindingCode() string {
 		return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
 	}
 	return fmt.Sprintf("%06d", n.Int64())
+}
+
+func isImageModelConfigRequest(messageType protocol.MessageType) bool {
+	switch messageType {
+	case protocol.TypeImageModelList, protocol.TypeImageModelConfigAdd, protocol.TypeImageModelConfigTest, protocol.TypeImageModelConfigUpdate, protocol.TypeImageModelConfigDelete, protocol.TypeImageModelConfigEnabledSet, protocol.TypeImageModelConfigDefaultSet:
+		return true
+	default:
+		return false
+	}
 }

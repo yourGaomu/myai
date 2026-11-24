@@ -214,3 +214,23 @@ func TestAttachImageFailsWithoutAnUploadReceipt(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachImageUsesLocalSessionAssetWhenMCPIsUnavailable(t *testing.T) {
+	workspace := t.TempDir()
+	data := attachmentImageBytes(t, "image/png")
+	writeAttachmentFixture(t, workspace, "generated/transparent.png", data)
+	output, err := NewAttachImageToolWithWorkspaceAndFiles(workspace, nil).Call(context.Background(), attachImageArguments(t, "generated/transparent.png"))
+	if err != nil || output.Failed() || output.SharedAsset == nil {
+		t.Fatalf("local attach failed: %+v / %v", output, err)
+	}
+	var receipt attachImageResult
+	if err := json.Unmarshal([]byte(output.Content), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if len(receipt.AssetID) < len("ast_local_") || receipt.AssetID[:len("ast_local_")] != "ast_local_" || receipt.Path != "generated/transparent.png" || receipt.Checksum == "" {
+		t.Fatalf("invalid local asset receipt: %+v", receipt)
+	}
+	if output.SharedAsset.AssetID != receipt.AssetID || output.SharedAsset.LocalPath != receipt.Path || output.SharedAsset.Checksum != receipt.Checksum {
+		t.Fatalf("typed asset diverged from receipt: %+v / %+v", output.SharedAsset, receipt)
+	}
+}

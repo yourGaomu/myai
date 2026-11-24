@@ -4,8 +4,8 @@ import { newRequestID } from "./ids";
 
 const requestType = "asset_image_preview";
 const requestPrefix = "asset-image-preview-";
-export const maxPreviewBytes = 256 * 1024;
-const maxPreviewDimension = 1024;
+export const maxPreviewBytes = 2 * 1024 * 1024;
+const maxPreviewDimension = 2048;
 const maxQueuedPreviews = 32;
 
 export type AssetImagePreview = { uri: string; width: number; height: number };
@@ -50,19 +50,40 @@ function sameConnection(left: Readonly<RelayScope>, right: Readonly<RelayScope>)
 
 export function decodeAssetImagePreview(payload: unknown): AssetImagePreview | null {
   const result = payload as Partial<AssetImagePreviewResultPayload> | null | undefined;
-  if (!result || result.content_type !== "image/jpeg") return null;
+  if (!result) return null;
+  const mime = result.content_type;
+  if (mime !== "image/jpeg" && mime !== "image/png" && mime !== "image/gif" && mime !== "image/webp") return null;
   const { data, width, height } = result;
   if (typeof width !== "number" || !Number.isInteger(width) || width < 1 || width > maxPreviewDimension ||
       typeof height !== "number" || !Number.isInteger(height) || height < 1 || height > maxPreviewDimension) return null;
-  if (typeof data !== "string" || data.length > Math.ceil(maxPreviewBytes / 3) * 4 || data.length % 4 ||
-      !data.startsWith("/9j/") || /[^A-Za-z0-9+/=]/.test(data)) return null;
+  if (typeof data !== "string" || data.length > Math.ceil(maxPreviewBytes / 3) * 4 || data.length % 4 || /[^A-Za-z0-9+/=]/.test(data)) return null;
   const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
   const firstPadding = data.indexOf("=");
   if ((firstPadding >= 0 && firstPadding !== data.length - padding) || data.length / 4 * 3 - padding > maxPreviewBytes) return null;
+  const prefix = data.slice(0, 16);
+  const signatures: Record<string, string[]> = {
+    "image/jpeg": ["/9j/"],
+    "image/png": ["iVBORw0KGgo"],
+    "image/gif": ["R0lGODdh", "R0lGODlh"],
+  };
+  if (mime === "image/webp") {
+    const bytes = decodeBase64Prefix(data, 12);
+    if (!bytes || bytes.length < 12 || String.fromCharCode(...bytes.slice(0,4)) !== "RIFF" || String.fromCharCode(...bytes.slice(8,12)) !== "WEBP") return null;
+  } else if (!signatures[mime].some((signature) => prefix.startsWith(signature))) return null;
+  return { uri: `data:${mime};base64,${data}`, width, height };
+}
 
-  // Only correlated, bounded JPEG bytes receive a renderable URI. Never pass
-  // markdown targets, tool short links or arbitrary data URIs into Image.
-  return { uri: `data:image/jpeg;base64,${data}`, width, height };
+function decodeBase64Prefix(value: string, maxBytes: number): number[] | null {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const result: number[] = [];
+  for (let index = 0; index + 3 < value.length && result.length < maxBytes; index += 4) {
+    const a=alphabet.indexOf(value[index]),b=alphabet.indexOf(value[index+1]);
+    const c=value[index+2]==="="?0:alphabet.indexOf(value[index+2]);
+    const d=value[index+3]==="="?0:alphabet.indexOf(value[index+3]);
+    if(a<0||b<0||c<0||d<0)return null;
+    result.push((a<<2)|(b>>4));if(value[index+2]!=="="&&result.length<maxBytes)result.push(((b&15)<<4)|(c>>2));if(value[index+3]!=="="&&result.length<maxBytes)result.push(((c&3)<<6)|d);
+  }
+  return result;
 }
 
 export function createAssetImagePreviewLoader({

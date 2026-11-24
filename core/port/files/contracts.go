@@ -49,3 +49,10 @@ type Service interface {
 	Info(context.Context, string) (Asset, error)
 	Download(context.Context, DownloadRequest) (Download, error)
 }
+
+
+// SessionAssetRegistrar binds locally stored image bytes to a live session so
+// they remain addressable when no remote files service is configured.
+type SessionAssetRegistrar interface {
+	RegisterLocalSessionAsset(ctx context.Context, sessionID string, asset Asset) error
+}

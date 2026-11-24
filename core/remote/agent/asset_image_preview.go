@@ -14,7 +14,7 @@ const assetImagePreviewTimeout = 18 * time.Second
 const maxConcurrentAssetPreviews = 2
 
 type sessionImagePreviewer interface {
-	SessionImagePreview(ctx context.Context, sessionID, assetID string) ([]byte, int, int, error)
+	SessionImagePreview(ctx context.Context, sessionID, assetID string) ([]byte, string, int, int, error)
 }
 
 func (a *Agent) startAssetImagePreview(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
@@ -39,7 +39,7 @@ func (a *Agent) startAssetImagePreview(ctx context.Context, conn *websocket.Conn
 		defer a.activeImagePreviews.Add(-1)
 		previewCtx, cancel := context.WithTimeout(ctx, assetImagePreviewTimeout)
 		defer cancel()
-		data, width, height, err := previewer.SessionImagePreview(previewCtx, message.SessionID, payload.AssetID)
+		data, contentType, width, height, err := previewer.SessionImagePreview(previewCtx, message.SessionID, payload.AssetID)
 		if ctx.Err() != nil {
 			return
 		}
@@ -50,7 +50,7 @@ func (a *Agent) startAssetImagePreview(ctx context.Context, conn *websocket.Conn
 			return
 		}
 		result := protocol.AssetImagePreviewResultPayload{
-			AssetID: payload.AssetID, ContentType: "image/jpeg", Data: data, Width: width, Height: height,
+			AssetID: payload.AssetID, ContentType: contentType, Data: data, Width: width, Height: height,
 		}
 		if a.writeRemoteMessage(conn, protocol.TypeAssetImagePreviewResult, message.RequestID, message.SessionID, result) != nil {
 			_ = conn.Close()
