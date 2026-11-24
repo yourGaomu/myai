@@ -1,6 +1,6 @@
 ---
 name: algorithmic-poster-philosophy
-description: 当用户提到海报、视觉设计、品牌视觉、排版系统、极简风格、设计哲学、美学方案，或说"帮我做张海报"时，必须触发此技能。该技能先构建一套设计哲学（Algorithmic Philosophy），再基于该哲学用 show_widget 生成可渲染的 SVG 海报 artifact。即使用户没有明确提到"哲学"或"系统"，只要涉及视觉设计或海报生成，都应触发。适用于品牌视觉、作品集封面、极简主义海报、AI 生成艺术、任何需要系统性美学表达的场景。
+description: 当用户提到海报、视觉设计、品牌视觉、排版系统、极简风格、设计哲学、美学方案，或说"帮我做张海报"时，必须触发此技能。先构建设计哲学，再根据需求使用 generate_image 生成栅格视觉，或把 SVG/HTML 渲染为 PNG 后用 attach_image 回传。即使用户没有明确提到"哲学"或"系统"，只要涉及视觉设计或海报生成，都应触发。适用于品牌视觉、作品集封面、极简主义海报、AI 生成艺术以及系统性美学表达。
 ---
 
 # Algorithmic Poster Philosophy Generator
@@ -13,12 +13,12 @@ This skill transforms the task from:
 into:
 - "create a design philosophy and express it visually"
 
-Philosophy always comes first.  
+Philosophy always comes first.
 The visual output is only an expression of the system.
 
 **Output tools**:
 - Philosophy → written inline as structured markdown
-- Poster → rendered as SVG via `show_widget` (never described in text, always rendered)
+- Poster → use `generate_image` for artistic raster visuals; use rendered SVG/HTML plus `attach_image` when typography must be exact.
 
 ---
 
@@ -60,7 +60,7 @@ Convert design into variables:
 - Color count (≤ 2 recommended)
 - Number of active elements (≤ 5 recommended)
 
-Avoid result-based descriptions (e.g. "cool style").  
+Avoid result-based descriptions (e.g. "cool style").
 Focus on controllable parameters.
 
 ### 5. Emergence
@@ -81,21 +81,14 @@ Explain what the system produces when executed:
 
 ---
 
-# STEP 2 — Visual Expression (SVG Poster via show_widget)
+# STEP 2 — Visual Expression
 
-Based on the philosophy, call `show_widget` to render an inline SVG poster.
+Choose the output workflow based on what matters most:
 
-**Never describe the poster in text. Always render it directly.**
+- **Artistic image, texture, photography, or illustration:** call `generate_image` and describe the philosophy as concrete composition, palette, lighting, and material constraints. This produces a raster image, not SVG.
+- **Exact typography, logos, or dense copy:** create an SVG/HTML artifact in the workspace, render it to PNG with an available renderer, then use `attach_image` to return the rendered image. Do not claim that `generate_image` executes or renders SVG code.
 
----
-
-## SVG Poster Specifications
-
-- Format: SVG
-- Aspect ratio: 3:4 (recommended: `viewBox="0 0 600 800"`)
-- Background: white or near-black only
-- Font: load via `<style>@import url('https://fonts.googleapis.com/css2?family=...')</style>` inside SVG
-- Rendering: inline via `show_widget`
+The final visual should be rendered and attached/embedded; do not substitute a text-only description when the user asked for a poster.
 
 ---
 
@@ -148,7 +141,7 @@ Think: "A hidden reference inside the system — felt, not read."
 
 Variation is allowed, but always within constraints.
 
-This is not randomness.  
+This is not randomness.
 This is designed, intentional variation operating within a defined system.
 
 ---
@@ -171,8 +164,8 @@ Like a poster that a senior designer spent a week on.
 Written inline as structured markdown (4–6 paragraphs, following the 5-section structure above).
 
 ## 2 — Poster
-Rendered directly as SVG via `show_widget`.  
-Aspect ratio 3:4. Typography-driven. No decorative elements.  
+Generated with `generate_image` as a raster visual; use `attach_image` only for a separately rendered SVG/HTML export.
+Aspect ratio 3:4. Typography-driven. No decorative elements.
 The poster is the system made visible — not a summary of it.
 
 ---
@@ -195,7 +188,7 @@ The poster is the system made visible — not a summary of it.
 **Emergence**: The viewer experiences stillness. The eye finds one point, then rests. Meaning accumulates in what is not shown.
 
 ## Poster Output
-→ `show_widget` renders a 600×800 SVG:  
+→ `generate_image` creates a portrait raster image guided by these layout constraints:
 Single large word near vertical center, slight left offset. One line of small meta text at bottom-right. No rules, no borders. Pure typographic silence.
 
 ---
@@ -205,5 +198,5 @@ Single large word near vertical center, slight left offset. One line of small me
 Do NOT generate just a poster.
 
 ALWAYS generate:
-→ a philosophy system  
-→ then express it as a rendered SVG artifact via `show_widget`
+→ a philosophy system
+→ then express it as a raster image via `generate_image`, or as rendered SVG/HTML via `attach_image` when exact typography is essential

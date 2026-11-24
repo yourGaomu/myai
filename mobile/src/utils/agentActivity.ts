@@ -83,6 +83,13 @@ export function agentActivity({
   return "thinking";
 }
 
+export function shouldHoldDoneActivity(prev: AgentActivity, next: AgentActivity, latestFailed = false): boolean {
+  if (latestFailed || next !== "idle") {
+    return false;
+  }
+  return prev === "thinking" || prev === "tool" || prev === "subagent" || prev === "uploading";
+}
+
 function lastIndex<T>(items: T[], matches: (item: T) => boolean) {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     if (matches(items[index])) {

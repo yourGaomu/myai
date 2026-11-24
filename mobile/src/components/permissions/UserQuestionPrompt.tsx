@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -8,7 +8,7 @@ import type { ButtonFeedback } from "../../types/ui";
 import { font, radius, weight } from "../../constants/theme";
 import { useAppTheme, useThemedStyles } from "../../theme/ThemeProvider";
 import { CharacterAvatar } from "../common/CharacterAvatar";
-import { FadeSlideView } from "../common/MotionEffects";
+import { FadeSlideView, useReduceMotion } from "../common/MotionEffects";
 
 type Props = {
   buttonFeedback: ButtonFeedback;
@@ -21,9 +21,13 @@ type Props = {
 export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, question }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
+  const reduceMotion = useReduceMotion();
   const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(() => question.draftAnswers || {});
   const answers = onChangeDraft ? question.draftAnswers || localAnswers : localAnswers;
   const [activeIndex, setActiveIndex] = useState(0);
+  const [dismissing, setDismissing] = useState(false);
+  const cardOpacity = useRef(new Animated.Value(1)).current;
+  const cardScale = useRef(new Animated.Value(1)).current;
   const autoAdvance = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(autoAdvance.current), []);
 
@@ -51,8 +55,42 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, qu
     setActiveIndex(index);
   };
 
+  const handleDismiss = () => {
+    if (dismissing) return;
+    if (Platform.OS !== "web") {
+      void Haptics.selectionAsync().catch(() => {});
+    }
+    if (reduceMotion) {
+      onAnswer({}, true);
+      return;
+    }
+    setDismissing(true);
+    Animated.parallel([
+      Animated.timing(cardOpacity, { duration: 140, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true }),
+      Animated.timing(cardScale, { duration: 140, easing: Easing.in(Easing.quad), toValue: 0.96, useNativeDriver: true }),
+    ]).start(({ finished }) => {
+      if (finished && !onAnswer({}, true)) {
+        setDismissing(false);
+        cardOpacity.setValue(1);
+        cardScale.setValue(1);
+      }
+    });
+  };
+
+  const handleConfirm = () => {
+    if (dismissing) return;
+    if (Platform.OS !== "web") {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
+    if (!reduceMotion) {
+      cardScale.setValue(0.985);
+      Animated.spring(cardScale, { bounciness: 6, speed: 24, toValue: 1, useNativeDriver: true }).start();
+    }
+    onAnswer(answers);
+  };
+
   return (
-    <View style={styles.questionBox}>
+    <Animated.View style={[styles.questionBox, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
       <View style={styles.head}>
         <CharacterAvatar circular size={24} slot="attention" variant="avatar" />
         <View style={styles.headBody}>
@@ -98,7 +136,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, qu
                   key={option}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  disabled={question.submitted}
+                  disabled={question.submitted || dismissing}
                   onPress={() => {
                     if (Platform.OS !== "web") {
                       void Haptics.selectionAsync().catch(() => {});
@@ -118,7 +156,7 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, qu
             })}
             {currentItem.allow_other || !currentItem.options?.length ? (
               <TextInput
-                editable={!question.submitted}
+                editable={!question.submitted && !dismissing}
                 onChangeText={(value) => setAnswer(currentItem.id, value)}
                 placeholder={currentItem.options?.length ? "或者输入自定义补充答案…" : "输入你的回答"}
                 placeholderTextColor={palette.ink4}
@@ -138,13 +176,15 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, qu
       ) : (
         <View style={styles.row}>
           <Pressable
-            onPress={() => onAnswer({}, true)}
+            disabled={dismissing}
+            onPress={handleDismiss}
             style={({ pressed }) => buttonFeedback([styles.secondaryButton], pressed)}
           >
             <Text style={styles.secondaryButtonText}>暂不回答</Text>
           </Pressable>
           {total > 1 && safeIndex < total - 1 ? (
             <Pressable
+              disabled={dismissing}
               onPress={() => selectQuestion(safeIndex + 1)}
               style={({ pressed }) => buttonFeedback([styles.nextButton, styles.flex], pressed)}
             >
@@ -152,16 +192,16 @@ export function UserQuestionPrompt({ buttonFeedback, onAnswer, onChangeDraft, qu
             </Pressable>
           ) : (
             <Pressable
-              disabled={!canSubmit}
-              onPress={() => onAnswer(answers)}
-              style={({ pressed }) => buttonFeedback([styles.primaryButton, styles.flex, !canSubmit && styles.disabled], pressed)}
+              disabled={!canSubmit || dismissing}
+              onPress={handleConfirm}
+              style={({ pressed }) => buttonFeedback([styles.primaryButton, styles.flex, (!canSubmit || dismissing) && styles.disabled], pressed)}
             >
               <Text style={styles.primaryButtonText}>确认提交</Text>
             </Pressable>
           )}
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 

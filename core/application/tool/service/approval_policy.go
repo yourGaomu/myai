@@ -29,6 +29,9 @@ func assessAskApproval(command toolcommand.Permission) askApproval {
 		if (command.Name == "write_file" || command.Name == "edit_file") && pathInsideWorkspace(command.WorkspaceRoot, argumentPath(command.Arguments)) {
 			return askApprovalAuto
 		}
+		if command.Name == "generate_image" && !generateImagePathsRequireApproval(command) {
+			return askApprovalAuto
+		}
 	case tooldef.PermissionExecute:
 		return assessExecuteApproval(command)
 	}
@@ -45,7 +48,11 @@ func requiresExplicitApproval(command toolcommand.Permission) bool {
 	case "share_file", "install_skill":
 		return true
 	}
-	for _, field := range []string{"path", "work_dir", "destination", "source", "target"} {
+	fields := []string{"path", "work_dir", "destination", "source", "target"}
+	if command.Name == "generate_image" {
+		fields = append(fields, "output_path", "mask_image")
+	}
+	for _, field := range fields {
 		path := jsonStringField(command.Arguments, field)
 		if path == "" {
 			continue
@@ -55,6 +62,16 @@ func requiresExplicitApproval(command toolcommand.Permission) bool {
 		}
 		if command.WorkspaceRoot != "" && (pathpolicy.Policy{WorkspaceRoot: command.WorkspaceRoot}).RequiresApproval(path) {
 			return true
+		}
+	}
+	if command.Name == "generate_image" {
+		for _, path := range jsonStringArrayField(command.Arguments, "reference_images") {
+			if strings.HasPrefix(path, "asset:ast_") || strings.HasPrefix(path, "ast_") {
+				continue
+			}
+			if pathpolicy.IsProtected(path) || command.WorkspaceRoot != "" && (pathpolicy.Policy{WorkspaceRoot: command.WorkspaceRoot}).RequiresApproval(path) {
+				return true
+			}
 		}
 	}
 	if command.Name == "shell" {
@@ -84,6 +101,60 @@ func assessExecuteApproval(command toolcommand.Permission) askApproval {
 		}
 	}
 	return askApprovalAsk
+}
+
+func generateImagePathsRequireApproval(command toolcommand.Permission) bool {
+	if command.WorkspaceRoot == "" {
+		return true
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(command.Arguments), &payload) != nil {
+		return true
+	}
+	paths := make([]string, 0, 6)
+	for _, raw := range []any{payload["output_path"], payload["mask_image"]} {
+		if raw == nil {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			return true
+		}
+		paths = append(paths, value)
+	}
+	if payload["reference_images"] != nil {
+		values, ok := payload["reference_images"].([]any)
+		if !ok {
+			return true
+		}
+		for _, raw := range values {
+			value, ok := raw.(string)
+			if !ok {
+				return true
+			}
+			paths = append(paths, value)
+		}
+	}
+	for _, raw := range paths {
+		path := strings.TrimSpace(raw)
+		if path == "" || strings.HasPrefix(path, "asset:ast_") || strings.HasPrefix(path, "ast_") {
+			continue
+		}
+		if pathpolicy.IsProtected(path) || (pathpolicy.Policy{WorkspaceRoot: command.WorkspaceRoot}).RequiresApproval(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func jsonStringArrayField(arguments, field string) []string {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(strings.TrimSpace(arguments)), &payload) != nil {
+		return nil
+	}
+	var values []string
+	_ = json.Unmarshal(payload[field], &values)
+	return values
 }
 
 func argumentPath(arguments string) string {

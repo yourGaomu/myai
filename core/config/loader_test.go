@@ -204,3 +204,23 @@ func TestViperLoaderEnvironmentOverridesConfig(t *testing.T) {
 		t.Fatalf("expected environment model override, got %q", properties.Model.ID)
 	}
 }
+
+func TestViperLoaderMapsImageGenerationModelsAndExpandsAPIKey(t *testing.T) {
+	t.Setenv("IMAGE_MODEL_API_KEY", "image-secret")
+	path := filepath.Join(t.TempDir(), "application.yaml")
+	contents := "image_generation:\n  models:\n    - id: demo\n      protocol: openai-images\n      auth_type: bearer\n      base_url: https://images.example.test/v1\n      api_key: ${IMAGE_MODEL_API_KEY}\n      model: image-model\n      is_default: true\n"
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	properties, err := (ViperLoader{ConfigFile: path}).Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(properties.ImageGeneration.Models) != 1 {
+		t.Fatalf("models=%+v", properties.ImageGeneration.Models)
+	}
+	model := properties.ImageGeneration.Models[0]
+	if model.ID != "demo" || model.Protocol != "openai-images" || model.AuthType != "bearer" || model.Model != "image-model" || model.APIKey != "image-secret" || model.Enabled == nil || !*model.Enabled || !model.IsDefault {
+		t.Fatalf("unexpected image model properties: %+v", model)
+	}
+}

@@ -103,3 +103,27 @@ func TestPathInsideWorkspaceRejectsParentEscape(t *testing.T) {
 		t.Fatal("other drive must not count as inside workspace")
 	}
 }
+
+func TestGenerateImageApprovalCoversAllPathInputs(t *testing.T) {
+	workspace := t.TempDir()
+	cases := []struct {
+		name, args string
+		want       askApproval
+	}{
+		{"default output", `{"prompt":"scene"}`, askApprovalAuto},
+		{"workspace reference", `{"reference_images":["images/ref.png"]}`, askApprovalAuto},
+		{"workspace output", `{"output_path":"generated/scene.png"}`, askApprovalAuto},
+		{"protected output", `{"output_path":".env"}`, askApprovalAsk},
+		{"outside reference", `{"reference_images":["../outside.png"]}`, askApprovalAsk},
+		{"protected mask", `{"mask_image":"config/secret.png"}`, askApprovalAsk},
+		{"malformed reference type", `{"reference_images":"images/ref.png"}`, askApprovalAsk},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := assessAskApproval(toolcommand.Permission{Name: "generate_image", Arguments: tc.args, Permission: tooldef.PermissionWrite, WorkspaceRoot: workspace})
+			if got != tc.want {
+				t.Fatalf("approval=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}

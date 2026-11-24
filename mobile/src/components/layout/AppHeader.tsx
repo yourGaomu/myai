@@ -142,7 +142,7 @@ export function AppHeader({
                 />
                 {busy ? (
                   <View pointerEvents="none" style={styles.avatarRing}>
-                    <Spinner color={palette.brandLight} size={50} />
+                    <Spinner color={palette.brandLight} size={52} />
                   </View>
                 ) : null}
               </View>
@@ -244,7 +244,7 @@ const makeStyles = ({ palette, shadow }: ReturnType<typeof useAppTheme>) =>
     },
     avatarContainer: {
       alignItems: "center",
-      height: 50,
+      height: 52,
       justifyContent: "center",
       position: "relative",
       width: 52,

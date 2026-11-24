@@ -228,7 +228,7 @@ test("session changes, disconnect and re-pair retire old requests and clear prev
   assert.deepEqual(h.subscribe("ast_cache").results, []);
 });
 
-test("only bounded typed JPEG payloads are usable and old Relay errors stay on the preview", (t) => {
+test("only bounded typed JPEG/PNG/GIF/WebP payloads are usable and old Relay errors stay on the preview", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = previewHarness(t, { requestTimeoutMs: 50 });
   const legacy = h.subscribe("ast_legacy");
@@ -239,7 +239,7 @@ test("only bounded typed JPEG payloads are usable and old Relay errors stay on t
   const malformed = h.subscribe("ast_malformed");
   h.accept(h.requests.at(-1), {}, { content_type: "image/svg+xml" });
   assert.deepEqual(malformed.results, [{ status: "error", reason: "invalid" }]);
-  for (const fields of [{ width: 1025 }, { height: 0 }, { width: 2.5 }, { width: "80" }, { data: "data:image/jpeg;base64,/9j/" }, { data: "/9j/2Q=A" }]) {
+  for (const fields of [{ width: 2049 }, { height: 0 }, { width: 2.5 }, { width: "80" }, { data: "data:image/jpeg;base64,/9j/" }, { data: "/9j/2Q=A" }]) {
     assert.equal(decodeAssetImagePreview(jpegPayload("ast_bad", fields)), null);
   }
   for (const size of [maxPreviewBytes, maxPreviewBytes + 1]) {
@@ -247,6 +247,17 @@ test("only bounded typed JPEG payloads are usable and old Relay errors stay on t
     bytes.set([255, 216, 255]);
     assert.equal(Boolean(decodeAssetImagePreview(jpegPayload("ast_image", { data: bytes.toString("base64") }))), size === maxPreviewBytes);
   }
+  const formats = [
+    ["image/jpeg", Buffer.from([0xff,0xd8,0xff,0xd9])],
+    ["image/png", Buffer.from([137,80,78,71,13,10,26,10])],
+    ["image/gif", Buffer.from("GIF89a")],
+    ["image/webp", Buffer.from("RIFF\x04\x00\x00\x00WEBP")],
+  ];
+  for (const [content_type, bytes] of formats) {
+    const preview=decodeAssetImagePreview({asset_id:"ast_format",content_type,data:bytes.toString("base64"),width:32,height:24});
+    assert.equal(preview.uri,`data:${content_type};base64,${bytes.toString("base64")}`);
+  }
+  assert.equal(decodeAssetImagePreview({asset_id:"ast_bad",content_type:"image/webp",data:Buffer.from("RIFFxxxxWAVE").toString("base64"),width:10,height:10}),null);
   const unanswered = h.subscribe("ast_absent");
   t.mock.timers.tick(50);
   assert.deepEqual(unanswered.results, [{ status: "error", reason: "timeout" }]);

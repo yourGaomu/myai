@@ -28,6 +28,7 @@ import (
 	planservice "myai/core/application/chat/plan/service"
 	chatretrievalapi "myai/core/application/chat/retrieval/api"
 	chatretrievalservice "myai/core/application/chat/retrieval/service"
+	imagemodelapi "myai/core/application/imagemodel/api"
 	searchapi "myai/core/application/knowledge/search/api"
 	modelservice "myai/core/application/model/service"
 	planserviceapp "myai/core/application/plan/service"
@@ -49,6 +50,7 @@ import (
 	cacheport "myai/core/port/cache"
 	filesport "myai/core/port/files"
 	historyport "myai/core/port/history"
+	imagemodelport "myai/core/port/imagemodel"
 	modelport "myai/core/port/model"
 	outboxport "myai/core/port/outbox"
 	persistenceport "myai/core/port/persistence"
@@ -72,6 +74,8 @@ type ModelRegistry interface {
 type Configuration struct {
 	// Configuration 只接收进程已经创建好的基础设施，BuildDependencies 再把它们装配成应用服务。
 	Models              ModelRegistry
+	ImageModels         imagemodelport.Registry
+	ImageModelConfig    imagemodelapi.ConfigService
 	ModelFactory        modelport.Factory
 	Sessions            *memorysession.Store
 	Store               persistenceport.Store
@@ -428,6 +432,8 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		CurrentState:     currentState,
 		SessionBootstrap: bootstrap,
 
+		ImageModels:      configuration.ImageModels,
+		ImageModelConfig: configuration.ImageModelConfig,
 		ModelConfig: modelservice.ConfigService{
 			Repository: configuration.Store,
 			Registry:   configuration.Models,

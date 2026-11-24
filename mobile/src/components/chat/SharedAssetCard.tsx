@@ -93,10 +93,17 @@ function RemoteAssetPreview({ assetID, buttonFeedback, loader, sessionID, title 
   if (result?.status === "ready") {
     const image = result.image;
     return (
-      <PreviewImage buttonFeedback={buttonFeedback} onError={() => {
-        loader.discard(sessionID, assetID, image);
-        setResult((current) => current === result ? { status: "error", reason: "invalid" } : current);
-      }} title={title} uri={image.uri} />
+      <PreviewImage
+        buttonFeedback={buttonFeedback}
+        height={image.height}
+        onError={() => {
+          loader.discard(sessionID, assetID, image);
+          setResult((current) => current === result ? { status: "error", reason: "invalid" } : current);
+        }}
+        title={title}
+        uri={image.uri}
+        width={image.width}
+      />
     );
   }
   return <PreviewPlaceholder reason={result?.reason} onRetry={() => {
@@ -130,16 +137,22 @@ function PreviewPlaceholder({ reason, onRetry }: { reason?: AssetImagePreviewErr
   );
 }
 
-function PreviewImage({ buttonFeedback, onError, title, uri }: {
+function PreviewImage({ buttonFeedback, height, onError, title, uri, width }: {
   buttonFeedback: ButtonFeedback;
+  height?: number;
   onError: () => void;
   title: string;
   uri: string;
+  width?: number;
 }) {
   const { palette } = useAppTheme();
   const styles = useChatStyles();
   const [loading, setLoading] = useState(true);
   const [fullScreen, setFullScreen] = useState(false);
+  const hasDimensions = Boolean(width && height && width > 0 && height > 0);
+  const rawRatio = hasDimensions ? width! / height! : undefined;
+  const clampedRatio = rawRatio !== undefined ? Math.max(0.78, Math.min(1.85, rawRatio)) : undefined;
+  const useContain = rawRatio !== undefined && clampedRatio !== undefined && Math.abs(rawRatio - clampedRatio) > 0.08;
   return (
     <>
       <Pressable
@@ -147,9 +160,20 @@ function PreviewImage({ buttonFeedback, onError, title, uri }: {
         accessibilityRole="button"
         disabled={loading}
         onPress={() => setFullScreen(true)}
-        style={({ pressed }) => buttonFeedback([styles.assetPreviewButton, styles.assetPreviewFrame], pressed)}
+        style={({ pressed }) => buttonFeedback([
+          styles.assetPreviewButton,
+          styles.assetPreviewFrame,
+          clampedRatio !== undefined ? { aspectRatio: clampedRatio } : null,
+        ], pressed)}
       >
-        <Image cachePolicy="none" contentFit="cover" onError={onError} onLoad={() => setLoading(false)} source={{ uri }} style={styles.assetPreviewImage} />
+        <Image
+          cachePolicy="memory"
+          contentFit={useContain ? "contain" : "cover"}
+          onError={onError}
+          onLoad={() => setLoading(false)}
+          source={{ uri }}
+          style={styles.assetPreviewImage}
+        />
         {loading ? (
           <View style={styles.assetPreviewOverlay}>
             <ActivityIndicator color={palette.ink1} size="small" />
@@ -173,7 +197,7 @@ function PreviewImage({ buttonFeedback, onError, title, uri }: {
               </Pressable>
             </View>
             <Pressable onPress={() => setFullScreen(false)} style={styles.imageModalContent}>
-              <Image cachePolicy="none" contentFit="contain" onError={onError} source={{ uri }} style={styles.imageModalFullImage} />
+              <Image cachePolicy="memory" contentFit="contain" onError={onError} source={{ uri }} style={styles.imageModalFullImage} />
             </Pressable>
           </View>
         </Modal>

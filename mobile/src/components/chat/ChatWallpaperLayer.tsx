@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AppState, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, AppState, Easing, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { BlurTargetView, BlurView } from "expo-blur";
 import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -44,9 +44,14 @@ export function ChatWallpaperLayer({ active = true, settingsOverride, style }: P
 
   const preset = getWallpaperPreset(settings.presetId);
   const playing = active && appActive;
+  const isAndroid = Platform.OS === "android";
+  const effectiveBlur = isAndroid ? Math.min(26, Math.round(settings.blurAmount * 0.52)) : settings.blurAmount;
+  const compensatedDim = isAndroid && settings.blurAmount > 26
+    ? Math.min(0.78, settings.dimOpacity + (settings.blurAmount - 26) * 0.0035)
+    : settings.dimOpacity;
   const overlayColor = isDark
-    ? `rgba(10, 12, 16, ${settings.dimOpacity})`
-    : `rgba(246, 248, 252, ${settings.dimOpacity})`;
+    ? `rgba(10, 12, 16, ${compensatedDim})`
+    : `rgba(246, 248, 252, ${compensatedDim})`;
   const topVignette = isDark ? "rgba(10, 12, 16, 0.36)" : "rgba(245, 247, 250, 0.32)";
   const bottomVignette = isDark ? "rgba(10, 12, 16, 0.44)" : "rgba(245, 247, 250, 0.38)";
 
@@ -83,11 +88,11 @@ export function ChatWallpaperLayer({ active = true, settingsOverride, style }: P
         ) : null}
       </BlurTargetView>
 
-      {settings.blurAmount > 0 ? (
+      {effectiveBlur > 0 ? (
         <BlurView
           blurMethod="dimezisBlurViewSdk31Plus"
           blurTarget={blurTargetRef}
-          intensity={settings.blurAmount}
+          intensity={effectiveBlur}
           pointerEvents="none"
           style={StyleSheet.absoluteFill}
           tint={isDark ? "dark" : "light"}
@@ -115,7 +120,7 @@ function WallpaperVideoPlayer({
   resizeMode: WallpaperResizeMode;
   uri: string;
 }) {
-  const [ready, setReady] = useState(false);
+  const videoFade = useRef(new Animated.Value(0)).current;
 
   const player = useVideoPlayer(uri, (instance) => {
     instance.loop = true;
@@ -129,6 +134,11 @@ function WallpaperVideoPlayer({
   });
 
   useEffect(() => {
+    videoFade.stopAnimation();
+    videoFade.setValue(0);
+  }, [uri, videoFade]);
+
+  useEffect(() => {
     try {
       if (playing) {
         player.play();
@@ -140,24 +150,29 @@ function WallpaperVideoPlayer({
     }
   }, [player, playing]);
 
+  const handleFirstFrame = () => {
+    Animated.timing(videoFade, {
+      duration: 220,
+      easing: Easing.out(Easing.quad),
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
-    <VideoView
-      allowsPictureInPicture={false}
-      contentFit={resizeMode}
-      nativeControls={false}
-      onFirstFrameRender={() => setReady(true)}
-      player={player}
-      playsInline
-      pointerEvents="none"
-      style={[StyleSheet.absoluteFill, !ready && styles.hiddenUntilFirstFrame]}
-      surfaceType="textureView"
-      useExoShutter={false}
-    />
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: videoFade }]}>
+      <VideoView
+        allowsPictureInPicture={false}
+        contentFit={resizeMode}
+        nativeControls={false}
+        onFirstFrameRender={handleFirstFrame}
+        player={player}
+        playsInline
+        pointerEvents="none"
+        style={StyleSheet.absoluteFill}
+        surfaceType="textureView"
+        useExoShutter={false}
+      />
+    </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  hiddenUntilFirstFrame: {
-    opacity: 0,
-  },
-});

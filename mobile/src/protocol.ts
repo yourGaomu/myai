@@ -73,6 +73,17 @@ export type MessageType =
   | "model_config_enabled_set"
   | "model_config_default_set"
   | "model_config_mutation_result"
+  | "image_model_list"
+  | "image_model_list_result"
+  | "image_model_config_add"
+  | "image_model_config_add_result"
+  | "image_model_config_test"
+  | "image_model_config_test_result"
+  | "image_model_config_update"
+  | "image_model_config_delete"
+  | "image_model_config_enabled_set"
+  | "image_model_config_default_set"
+  | "image_model_config_mutation_result"
   | "intent_config_query"
   | "intent_config_query_result"
   | "intent_config_set"
@@ -1265,8 +1276,9 @@ export type UploadedAssetPayload = {
 
 export type AssetImagePreviewPayload = { asset_id: string };
 
+export type AssetImagePreviewContentType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 export type AssetImagePreviewResultPayload = AssetImagePreviewPayload & {
-  content_type: "image/jpeg";
+  content_type: AssetImagePreviewContentType;
   data: string;
   width: number;
   height: number;
@@ -1832,3 +1844,20 @@ export type HistoryRevertResultPayload = {
   paths?: string[];
   message?: string;
 };
+
+
+export type ImageModelSummary = {
+  id: string; name: string; provider: string; protocol: "openai-images" | "gemini-native-image" | "google-imagen";
+  auth_type: "bearer" | "x-goog-api-key" | "google-adc" | "none"; base_url: string; model_name: string; has_api_key: boolean;
+  enabled: boolean; is_default: boolean; supports_reference_images: boolean; created_at: string; updated_at: string;
+};
+export type ImageModelListResultPayload = { models: ImageModelSummary[]; default_model_id: string };
+export type ImageModelConfigAddPayload = { id:string; name?:string; provider?:string; protocol:ImageModelSummary["protocol"]; auth_type?:ImageModelSummary["auth_type"]; base_url?:string; api_key?:string; model_name:string; is_default?:boolean };
+export type ImageModelConfigUpdatePayload = Omit<ImageModelConfigAddPayload,"is_default">;
+export type ImageModelConfigTestPayload = Omit<ImageModelConfigAddPayload,"id"|"name"|"provider"|"is_default"> & {id?:string};
+export type ImageModelConfigDeletePayload = {id:string};
+export type ImageModelConfigEnabledSetPayload = {id:string;enabled:boolean};
+export type ImageModelConfigDefaultSetPayload = {id:string};
+export type ImageModelConfigAddResultPayload = {model:ImageModelSummary;models:ImageModelSummary[];default_model_id:string};
+export type ImageModelConfigTestResultPayload = {ok:boolean;message:string;latency_ms:number;mime_type?:string};
+export type ImageModelConfigMutationResultPayload = {action:"update"|"delete"|"set_enabled"|"set_default";model?:ImageModelSummary;models:ImageModelSummary[];default_model_id:string;message:string};

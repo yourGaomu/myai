@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
@@ -36,16 +37,23 @@ export function PermissionSheet({
 }: Props) {
   const { palette } = useAppTheme();
   const styles = useThemedStyles(makeStyles);
-  const name = permission?.name || "";
-  const body = permission ? permissionBody(name, permission.arguments) : "";
-  const cwd = permission ? toolCwd(permission.arguments) : "";
+  // 退场动画期间冻结最后一条有效权限请求，防止清空 pendingPermission 后面板瞬间掏空坍塌。
+  const lastPermissionRef = useRef<PermissionState | null>(permission);
+  if (permission) {
+    lastPermissionRef.current = permission;
+  }
+  const active = Boolean(visible && permission);
+  const displayPermission = permission ?? lastPermissionRef.current;
+  const name = displayPermission?.name || "";
+  const body = displayPermission ? permissionBody(name, displayPermission.arguments) : "";
+  const cwd = displayPermission ? toolCwd(displayPermission.arguments) : "";
   const isShell = toolKind(name) === "shell";
-  const scopeLabel = permission?.permission
-    ? `本会话始终允许此类（${permission.permission}）操作`
+  const scopeLabel = displayPermission?.permission
+    ? `本会话始终允许此类（${displayPermission.permission}）操作`
     : `本会话始终允许调用 ${name}`;
 
   return (
-    <BottomSheet accessibilityLabel="权限确认" onDismiss={onMinimize} visible={visible && Boolean(permission)}>
+    <BottomSheet accessibilityLabel="权限确认" onDismiss={active ? onMinimize : () => {}} visible={active}>
       <View style={styles.head}>
         <View style={styles.avatarWrap}>
           <CharacterAvatar circular size={42} slot="attention" variant="avatar" />
@@ -74,7 +82,7 @@ export function PermissionSheet({
       <View style={styles.kv}>
         <View style={styles.kvRow}>
           <Text style={styles.kvKey}>工具</Text>
-          <Text style={styles.kvValue}>{name}{permission?.permission ? ` · ${permission.permission}` : ""}</Text>
+          <Text style={styles.kvValue}>{name}{displayPermission?.permission ? ` · ${displayPermission.permission}` : ""}</Text>
         </View>
         {cwd ? (
           <View style={styles.kvRow}>
@@ -85,19 +93,20 @@ export function PermissionSheet({
       </View>
 
       <View style={styles.buttons}>
-        <Pressable accessibilityRole="button" onPress={onDeny} style={({ pressed }) => [styles.button, styles.deny, pressed && styles.pressed]}>
+        <Pressable accessibilityRole="button" disabled={!active} onPress={onDeny} style={({ pressed }) => [styles.button, styles.deny, pressed && styles.pressed]}>
           <Text style={styles.denyText}>拒绝本次</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={onAllow} style={({ pressed }) => [styles.button, styles.allow, pressed && styles.pressed]}>
+        <Pressable accessibilityRole="button" disabled={!active} onPress={onAllow} style={({ pressed }) => [styles.button, styles.allow, pressed && styles.pressed]}>
           <Text style={styles.allowText}>{isShell ? "允许运行" : "允许本次"}</Text>
         </Pressable>
       </View>
 
-      {permission?.requireFreshConsent ? (
+      {displayPermission?.requireFreshConsent ? (
         <Text style={styles.sub}>此操作需要单独确认。</Text>
       ) : onAllowSession ? (
         <Pressable
           accessibilityRole="button"
+          disabled={!active}
           onPress={onAllowSession}
           style={({ pressed }) => [styles.sessionAllowBtn, pressed && styles.pressed]}
         >
@@ -106,7 +115,7 @@ export function PermissionSheet({
         </Pressable>
       ) : null}
 
-      <Pressable accessibilityRole="button" onPress={onOpenPolicy} style={({ pressed }) => [styles.policy, pressed && styles.pressed]}>
+      <Pressable accessibilityRole="button" disabled={!active} onPress={onOpenPolicy} style={({ pressed }) => [styles.policy, pressed && styles.pressed]}>
         <Feather color={palette.ink3} name="shield" size={14} />
         <Text style={styles.policyText}>
           当前会话策略：<Text style={styles.policyValue}>{policyLabel}</Text> · 调整

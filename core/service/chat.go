@@ -18,6 +18,7 @@ import (
 	planport "myai/core/application/chat/plan/port"
 	chatretrievalcommand "myai/core/application/chat/retrieval/command"
 	chatretrievalresult "myai/core/application/chat/retrieval/result"
+	imageresult "myai/core/application/imagemodel/result"
 	modelcommand "myai/core/application/model/command"
 	bootstrapcommand "myai/core/application/session/bootstrap/command"
 	bootstrapresult "myai/core/application/session/bootstrap/result"
@@ -33,10 +34,12 @@ import (
 	compaction "myai/core/domain/compaction"
 	domaingeneration "myai/core/domain/generation"
 	generation "myai/core/domain/generation"
+	domainimagemodel "myai/core/domain/imagemodel"
 	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	"myai/core/llm"
 	agentplan "myai/core/plan"
+	filesport "myai/core/port/files"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 	"myai/core/skill"
@@ -62,6 +65,8 @@ type ChatService struct {
 	generations           map[string]*sessionGeneration
 	lifecycleBlocks       map[string]string
 	fileUploadEpochs      map[string]uint64
+	localAssetMu          sync.RWMutex
+	localAssets           map[string]map[string]filesport.Asset
 	userAcceptanceMu      sync.Mutex
 	pendingUserAcceptance map[string]generationcommand.PersistUserMessage
 	userAcceptanceSlots   map[string]bool
@@ -1397,6 +1402,49 @@ func (s *ChatService) CompactSession(ctx context.Context, sessionID string) (Con
 	}
 	defer unlock()
 	return s.dependencies.SessionCompaction.Compact(ctx, compactioncommand.CompactSession{SessionID: sessionID})
+}
+
+func (s *ChatService) ListImageModelConfigs(ctx context.Context) ([]domainimagemodel.Summary, string, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return nil, "", errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.List(ctx)
+}
+func (s *ChatService) AddImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.MutationResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.MutationResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.Add(ctx, config)
+}
+func (s *ChatService) TestImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.TestResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.TestResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.Test(ctx, config)
+}
+func (s *ChatService) UpdateImageModelConfig(ctx context.Context, config domainimagemodel.Config) (imageresult.MutationResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.MutationResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.Update(ctx, config)
+}
+func (s *ChatService) DeleteImageModelConfig(ctx context.Context, id string) (imageresult.MutationResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.MutationResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.Delete(ctx, id)
+}
+func (s *ChatService) SetImageModelEnabled(ctx context.Context, id string, enabled bool) (imageresult.MutationResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.MutationResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.SetEnabled(ctx, id, enabled)
+}
+func (s *ChatService) SetDefaultImageModel(ctx context.Context, id string) (imageresult.MutationResult, error) {
+	if s == nil || s.dependencies.ImageModelConfig == nil {
+		return imageresult.MutationResult{}, errors.New("image model configuration is not available")
+	}
+	return s.dependencies.ImageModelConfig.SetDefault(ctx, id)
 }
 
 func (s *ChatService) AddModelConfig(ctx context.Context, command modelcommand.AddConfig) error {

@@ -11,6 +11,10 @@ import (
 	searchresult "myai/core/application/knowledge/search/result"
 	memoryretrievalcommand "myai/core/application/memory/retrieval/command"
 	memoryretrievalresult "myai/core/application/memory/retrieval/result"
+	appconfig "myai/core/config"
+	domainimagemodel "myai/core/domain/imagemodel"
+	imagemodelport "myai/core/port/imagemodel"
+	"myai/core/tool/local"
 )
 
 type appFakeRetrievalService struct{}
@@ -99,3 +103,34 @@ type appFakeMemoryContextPreparer struct{}
 func (appFakeMemoryContextPreparer) Prepare(context.Context, memoryretrievalcommand.Prepare) (memoryretrievalresult.Context, error) {
 	return memoryretrievalresult.Context{}, nil
 }
+
+func TestInitRegisterAddsImageGenerationToolWithDynamicModelList(t *testing.T) {
+	disabled := false
+	app := &Application{workspace: t.TempDir(), properties: appconfig.Properties{ImageGeneration: appconfig.ImageGenerationProperties{Models: []appconfig.ImageModelProperties{
+		{ID: "image-default", Name: "Image Default", Protocol: string(domainimagemodel.ProtocolOpenAIImages), AuthType: string(domainimagemodel.AuthTypeNone), Model: "test-model", Enabled: boolPointer(true), IsDefault: true},
+		{ID: "image-disabled", Name: "Hidden", Protocol: string(domainimagemodel.ProtocolGoogleImagen), Model: "hidden", Enabled: &disabled},
+	}}}}
+	app.InitImageModels()
+	registry := app.InitRegister()
+	registered, err := registry.GetTool("generate_image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageTool, ok := registered.(*local.GenerateImageTool)
+	if !ok {
+		t.Fatalf("tool type %T", registered)
+	}
+	description := imageTool.Description()
+	if !strings.Contains(description, "image-default") || !strings.Contains(description, "default") || strings.Contains(description, "image-disabled") {
+		t.Fatalf("unexpected model description: %s", description)
+	}
+	if _, _, ok := app.imageModelRegistry.Get("image-default"); !ok {
+		t.Fatal("enabled image generator missing from registry")
+	}
+	if _, _, ok := app.imageModelRegistry.Get("image-disabled"); ok {
+		t.Fatal("disabled image model was callable")
+	}
+	var _ imagemodelport.Registry = app.imageModelRegistry
+}
+
+func boolPointer(value bool) *bool { return &value }

@@ -193,7 +193,17 @@ export function Composer(props: Props) {
           </Pressable>
           <View style={styles.spacer} />
           {showStop ? (
-            <Pressable accessibilityLabel="停止" disabled={pendingPause} onPress={props.onPause} style={({ pressed }) => [styles.send, styles.sendStop, pressed && styles.pressed]}>
+            <Pressable
+              accessibilityLabel="停止"
+              disabled={pendingPause}
+              onPress={() => {
+                if (Platform.OS !== "web") {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                }
+                props.onPause();
+              }}
+              style={({ pressed }) => [styles.send, styles.sendStop, pressed && styles.stopPressed]}
+            >
               {pendingPause ? <ActivityIndicator color={palette.canvas} size="small" /> : <View style={styles.stopSquare} />}
             </Pressable>
           ) : (
@@ -348,6 +358,7 @@ const makeStyles = ({ font, palette, shadow }: AppTheme) =>
     send: { alignItems: "center", backgroundColor: palette.well, borderRadius: radius.pill, height: 38, justifyContent: "center", width: 38 },
     sendReady: { backgroundColor: palette.brand },
     sendStop: { backgroundColor: palette.ink1 },
+    stopPressed: { opacity: 0.82, transform: [{ scale: 0.92 }] },
     stopSquare: { backgroundColor: palette.canvas, borderRadius: 3, height: 12, width: 12 },
     sheetTitle: { color: palette.ink1, fontSize: font.title, fontWeight: weight.semibold, marginBottom: 8 },
     sheetRow: { alignItems: "center", borderRadius: radius.md, flexDirection: "row", gap: 12, minHeight: 62, paddingHorizontal: 4 },

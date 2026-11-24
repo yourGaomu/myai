@@ -11,6 +11,7 @@ import (
 	planapi "myai/core/application/chat/plan/api"
 	planport "myai/core/application/chat/plan/port"
 	chatretrievalapi "myai/core/application/chat/retrieval/api"
+	imagemodelapi "myai/core/application/imagemodel/api"
 	modelapi "myai/core/application/model/api"
 	bootstrapapi "myai/core/application/session/bootstrap/api"
 	currentapi "myai/core/application/session/current/api"
@@ -21,6 +22,7 @@ import (
 	settingsapi "myai/core/application/session/settings/api"
 	skillapi "myai/core/application/skill/api"
 	filesport "myai/core/port/files"
+	imagemodelport "myai/core/port/imagemodel"
 	modelport "myai/core/port/model"
 	repository "myai/core/port/repository"
 )
@@ -61,6 +63,8 @@ type ChatDependencies struct {
 	SessionBootstrap bootstrapapi.Service
 
 	ModelConfig         modelapi.ConfigService
+	ImageModels         imagemodelport.Registry
+	ImageModelConfig    imagemodelapi.ConfigService
 	ModelQueries        modelapi.QueryService
 	SkillCatalog        skillapi.CatalogService
 	Events              ChatEventPublisher

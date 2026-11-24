@@ -1,3 +1,30 @@
+image_generation:
+  models: []
+  # Example provider declarations (credentials can use environment references).
+  # For Google Imagen on Vertex AI, set base_url to
+  # https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT/locations/LOCATION
+  # and auth_type: google-adc. ADC refreshes credentials from the runtime identity.
+  # models:
+  #   - id: "vertex-imagen"
+  #     name: "Imagen 4"
+  #     provider: "google-vertex"
+  #     protocol: "google-imagen"
+  #     auth_type: "google-adc"
+  #     base_url: "https://us-central1-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/us-central1"
+  #     model: "imagen-4.0-generate-001"
+  #     enabled: true
+  #     is_default: true
+  #   - id: "gpt-image"
+  #     name: "GPT Image"
+  #     provider: "openai-compatible"
+  #     protocol: "openai-images"
+  #     auth_type: "bearer"
+  #     base_url: "https://api.openai.com"
+  #     api_key: "${IMAGE_MODEL_API_KEY}"
+  #     model: "gpt-image-1"
+  #     enabled: true
+  #     is_default: true
+
 myai:
   provider: "openai"
   protocol: "openai-chat-completions"

@@ -219,3 +219,18 @@ type PlanStepDocument struct {
 	StartedAt    *time.Time `bson:"started_at,omitempty"`
 	CompletedAt  *time.Time `bson:"completed_at,omitempty"`
 }
+
+type ImageModelConfigDocument struct {
+	ID        string    `bson:"_id"`
+	Name      string    `bson:"name"`
+	Provider  string    `bson:"provider"`
+	Protocol  string    `bson:"protocol"`
+	AuthType  string    `bson:"auth_type"`
+	BaseURL   string    `bson:"base_url,omitempty"`
+	APIKey    string    `bson:"api_key,omitempty"`
+	ModelName string    `bson:"model_name"`
+	Enabled   bool      `bson:"enabled"`
+	IsDefault bool      `bson:"is_default"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
+}

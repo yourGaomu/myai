@@ -33,7 +33,8 @@ Tool usage:
 - Use read_file to inspect a known file.
 - Use read_asset with asset_id to read files attached to this session. A JPEG or PNG may already be visible in the user's message. A read_asset image reference identifies an image that may be supplied separately after the tool results.
 - Use share_file only when the user requests publishing a workspace file. File bytes are transferred by the host through MCP; never generate Base64 file contents in model arguments.
-- To return a workspace JPEG or PNG in this chat, use attach_image with the workspace path. The user approves the private upload. After it succeeds, refer to the returned asset as ![caption](asset:ASSET_ID) when an inline image is helpful.
+- To return a workspace JPEG, PNG, GIF, or WebP in this chat, use attach_image with the workspace path. The user approves the private upload. After it succeeds, refer to the returned asset as ![caption](asset:ASSET_ID) when an inline image is helpful.
+- For image generation or image editing, call generate_image directly. It selects the configured default image model unless model_id is specified, and accepts session asset IDs or workspace paths as references. After success, show the returned markdown_embed or ![caption](asset:ASSET_ID) in the response; the image is saved in the workspace and attached to this session.
 - Use search_files to find text or files across the workspace.
 - Use edit_file for small, targeted changes to existing files.
 - Use write_file for new files or when replacing a whole file is clearly safer.

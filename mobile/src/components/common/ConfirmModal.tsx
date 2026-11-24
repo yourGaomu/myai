@@ -36,46 +36,67 @@ export function ConfirmModal({
   const styles = useThemedStyles(makeStyles);
   const reduceMotion = useReduceMotion();
   const { palette } = theme;
-  const accentColor = danger ? palette.err : palette.brand;
+
+  // 退场动画期间冻结最后一次展示内容，避免父层提前置空目标对象引发文案闪变。
+  const snapshotRef = useRef({ cancelLabel, confirmLabel, danger, icon, message, title });
+  if (visible) {
+    snapshotRef.current = { cancelLabel, confirmLabel, danger, icon, message, title };
+  }
+  const shown = visible ? { cancelLabel, confirmLabel, danger, icon, message, title } : snapshotRef.current;
+  const accentColor = shown.danger ? palette.err : palette.brand;
 
   const [mounted, setMounted] = useState(visible);
-  const fade = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.9)).current;
+  const mountedRef = useRef(visible);
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  const scale = useRef(new Animated.Value(visible ? 1 : 0.9)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    fade.stopAnimation();
+    scale.stopAnimation();
     if (visible) {
-      setMounted(true);
-      if (reduceMotion) {
+      if (!mountedRef.current) {
+        mountedRef.current = true;
+        setMounted(true);
+        if (reduceMotion) {
+          fade.setValue(1);
+          scale.setValue(1);
+          return;
+        }
+        fade.setValue(0);
+        scale.setValue(0.88);
+      } else if (reduceMotion) {
         fade.setValue(1);
         scale.setValue(1);
         return;
       }
-      fade.setValue(0);
-      scale.setValue(0.88);
       Animated.parallel([
         Animated.timing(fade, { duration: 180, easing: Easing.out(Easing.quad), toValue: 1, useNativeDriver: true }),
         Animated.spring(scale, { bounciness: 6, speed: 20, toValue: 1, useNativeDriver: true }),
       ]).start();
       return;
     }
-    if (!mounted) return;
+    if (!mountedRef.current) return;
     if (reduceMotion) {
+      mountedRef.current = false;
       setMounted(false);
       return;
     }
     Animated.parallel([
-      Animated.timing(fade, { duration: 140, toValue: 0, useNativeDriver: true }),
-      Animated.timing(scale, { duration: 140, toValue: 0.92, useNativeDriver: true }),
+      Animated.timing(fade, { duration: 140, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true }),
+      Animated.timing(scale, { duration: 140, easing: Easing.in(Easing.quad), toValue: 0.92, useNativeDriver: true }),
     ]).start(({ finished }) => {
-      if (finished) setMounted(false);
+      if (finished) {
+        mountedRef.current = false;
+        setMounted(false);
+      }
     });
-  }, [fade, mounted, reduceMotion, scale, visible]);
+  }, [fade, reduceMotion, scale, visible]);
 
   useEffect(() => {
     pulse.stopAnimation();
     pulse.setValue(0);
-    if (!visible || !danger || reduceMotion) return;
+    if (!visible || !shown.danger || reduceMotion) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { duration: 1500, easing: Easing.out(Easing.cubic), toValue: 1, useNativeDriver: true }),
@@ -84,7 +105,7 @@ export function ConfirmModal({
     );
     loop.start();
     return () => loop.stop();
-  }, [danger, pulse, reduceMotion, visible]);
+  }, [pulse, reduceMotion, shown.danger, visible]);
 
   if (!mounted) {
     return null;
@@ -92,17 +113,18 @@ export function ConfirmModal({
 
   const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.38] });
   const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+  const actionsDisabled = pending || !visible;
 
   return (
-    <Modal animationType="none" onRequestClose={pending ? undefined : onCancel} statusBarTranslucent transparent visible>
+    <Modal animationType="none" onRequestClose={actionsDisabled ? undefined : onCancel} statusBarTranslucent transparent visible>
       <View style={styles.root}>
         <Animated.View style={[styles.backdrop, { opacity: fade }]}>
-          <Pressable disabled={pending} onPress={onCancel} style={StyleSheet.absoluteFill} />
+          <Pressable disabled={actionsDisabled} onPress={onCancel} style={StyleSheet.absoluteFill} />
         </Animated.View>
         <Animated.View style={[styles.card, { opacity: fade, transform: [{ scale }] }]}>
           <View style={styles.head}>
             <View style={styles.iconWrap}>
-              {danger && !reduceMotion ? (
+              {shown.danger && !reduceMotion ? (
                 <Animated.View
                   pointerEvents="none"
                   style={[
@@ -119,43 +141,43 @@ export function ConfirmModal({
                 style={[
                   styles.iconBox,
                   {
-                    backgroundColor: danger ? palette.errWash : palette.brandWash,
-                    borderColor: danger ? palette.errBorder : palette.brandDeep,
+                    backgroundColor: shown.danger ? palette.errWash : palette.brandWash,
+                    borderColor: shown.danger ? palette.errBorder : palette.brandDeep,
                   },
                 ]}
               >
-                <Feather color={accentColor} name={icon} size={18} />
+                <Feather color={accentColor} name={shown.icon} size={18} />
               </View>
             </View>
-            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.title}>{shown.title}</Text>
           </View>
           <ScrollView style={styles.messageScroll}>
-            <Text style={styles.message}>{message}</Text>
+            <Text style={styles.message}>{shown.message}</Text>
           </ScrollView>
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
-              disabled={pending}
+              disabled={actionsDisabled}
               onPress={onCancel}
               style={({ pressed }) => [styles.btn, styles.cancelBtn, pressed && styles.pressed]}
             >
-              <Text style={styles.cancelText}>{cancelLabel}</Text>
+              <Text style={styles.cancelText}>{shown.cancelLabel}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              disabled={pending}
+              disabled={actionsDisabled}
               onPress={onConfirm}
               style={({ pressed }) => [
                 styles.btn,
-                danger ? styles.dangerBtn : styles.primaryBtn,
+                shown.danger ? styles.dangerBtn : styles.primaryBtn,
                 pressed && styles.pressed,
                 pending && styles.disabled,
               ]}
             >
               {pending ? (
-                <ActivityIndicator color={danger ? "#FFFFFF" : palette.inkInverse} size="small" />
+                <ActivityIndicator color={shown.danger ? "#FFFFFF" : palette.inkInverse} size="small" />
               ) : (
-                <Text style={[styles.confirmText, { color: danger ? "#FFFFFF" : palette.inkInverse }]}>{confirmLabel}</Text>
+                <Text style={[styles.confirmText, { color: shown.danger ? "#FFFFFF" : palette.inkInverse }]}>{shown.confirmLabel}</Text>
               )}
             </Pressable>
           </View>
