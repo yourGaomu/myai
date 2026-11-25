@@ -122,6 +122,11 @@ func (t *ListFilesTool) Call(ctx context.Context, args json.RawMessage) (tooldef
 	}
 	resultOutput := tooldef.SuccessOutput(string(output))
 	resultOutput.Truncated = truncated
+	if !truncated {
+		if tracker := toolruntime.WorkspaceInspectionTrackerFrom(ctx); tracker != nil {
+			tracker.Record(t.Name(), workspace, input.Path)
+		}
+	}
 	return resultOutput, nil
 }
 

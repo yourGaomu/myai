@@ -6,6 +6,7 @@ const state = {
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestions: [],
+  pendingQuestionList: null,
   resolvedQuestionIDs: new Set(),
   pendingSessionRequestID: "",
   sessions: [],
@@ -48,6 +49,7 @@ const el = {
   userQuestionContent: document.querySelector("#userQuestionContent"),
   dismissUserQuestion: document.querySelector("#dismissUserQuestion"),
   submitUserQuestion: document.querySelector("#submitUserQuestion"),
+  adoptUserQuestion: document.querySelector("#adoptUserQuestion"),
 };
 
 function websocketURL() {
@@ -61,6 +63,7 @@ function setConnected(connected) {
   el.connectButton.textContent = connected ? "Reconnect" : "Connect";
   el.sendButton.disabled = !connected;
   renderSessions(state.sessions);
+  renderUserQuestion();
 }
 
 function connect() {
@@ -101,6 +104,7 @@ function connect() {
     }
   });
   socket.addEventListener("message", (event) => {
+    if (state.socket !== socket) return;
     try {
       handleMessage(JSON.parse(event.data));
     } catch (err) {
@@ -525,30 +529,31 @@ function handleMessage(message) {
     case "user_question":
       showUserQuestion(message);
       break;
-    case "user_question_resolved": {
+    case "user_question_resolved":
+      resolveUserQuestion(readPayload(message).question_id, readPayload(message).status);
+      break;
+    case "background_turn_event": {
       const payload = readPayload(message);
-      rememberResolvedQuestion(payload.question_id);
-      state.pendingQuestions = state.pendingQuestions.filter((item) => item.questionID !== payload.question_id);
-      renderUserQuestion();
-      if (payload.status && payload.status !== "answered") {
-        addMessage("event", `User question ended: ${payload.status}`);
+      if (payload.kind === "user_question") {
+        showUserQuestion({ request_id: payload.turn_id, session_id: payload.session_id, payload: payload.question });
+      } else if (payload.kind === "user_question_resolved") {
+        resolveUserQuestion(payload.question?.question_id, payload.status);
+      } else if (payload.kind === "resync_required") {
+        requestPendingUserQuestions();
       }
       break;
     }
     case "user_question_list_result": {
+      const request = state.pendingQuestionList;
+      if (!request || message.request_id !== request.id) break;
+      state.pendingQuestionList = null;
       const payload = readPayload(message);
       for (const questionID of payload.resolved_question_ids || []) {
         rememberResolvedQuestion(questionID);
       }
       state.pendingQuestions = state.pendingQuestions.filter((item) => !state.resolvedQuestionIDs.has(item.questionID));
       for (const item of payload.questions || []) {
-        const question = item.question || {};
-        if (state.resolvedQuestionIDs.has(question.question_id)) continue;
-        showUserQuestion({
-          request_id: item.request_id || "",
-          session_id: item.session_id || "",
-          payload: question,
-        });
+        showUserQuestion({ request_id: item.request_id, session_id: item.session_id, payload: item.question }, request.submitted);
       }
       renderUserQuestion();
       break;
@@ -567,6 +572,9 @@ function handleMessage(message) {
         clearPairing("Pairing expired. Pair this browser again");
       }
       clearPermissionsForRequest(message.request_id);
+      if (state.pendingQuestions.some((item) => item.submitted && matchesQuestionRequest(item, message))) {
+        requestPendingUserQuestions();
+      }
       break;
     }
     default:
@@ -578,10 +586,16 @@ function requestPendingUserQuestions() {
   if (!state.clientToken || !state.connected) {
     return;
   }
-  sendEnvelope("user_question_list", {
-    request_id: newRequestID(),
+  const requestID = newRequestID();
+  if (sendEnvelope("user_question_list", {
+    request_id: requestID,
     payload: { known_question_ids: state.pendingQuestions.map((item) => item.questionID) },
-  });
+  })) {
+    state.pendingQuestionList = {
+      id: requestID,
+      submitted: new Set(state.pendingQuestions.filter((item) => item.submitted)),
+    };
+  }
 }
 
 function readPayload(message) {
@@ -593,7 +607,8 @@ function isSessionMessage(type) {
 }
 
 function isPassiveMessage(type) {
-  return isSessionMessage(type) || type === "user_question_list_result";
+  return isSessionMessage(type) || type === "user_question_list_result" ||
+    type === "user_question" || type === "user_question_resolved" || type === "background_turn_event";
 }
 
 function isTrackedRequest(requestID) {
@@ -603,7 +618,16 @@ function isTrackedRequest(requestID) {
   );
 }
 
+function matchesQuestionRequest(question, message) {
+  return question.requestID === message.request_id && question.sessionID === message.session_id;
+}
+
 function shouldHandleMessage(message) {
+  if (message.type === "user_question" || message.type === "user_question_resolved" ||
+      message.type === "user_question_list_result" || message.type === "background_turn_event") {
+    if (!state.clientToken || (message.user_id && message.user_id !== el.userId.value.trim()) ||
+        (message.device_id && message.device_id !== el.deviceId.value.trim())) return false;
+  }
   if (!message.request_id) {
     return true;
   }
@@ -611,7 +635,8 @@ function shouldHandleMessage(message) {
     return true;
   }
   if (message.type === "error") {
-    return isTrackedRequest(message.request_id) || !state.activeRequestID;
+    return isTrackedRequest(message.request_id) || !state.activeRequestID ||
+      state.pendingQuestions.some((item) => matchesQuestionRequest(item, message));
   }
   if (!state.activeRequestID) {
     return true;
@@ -744,35 +769,52 @@ function clearPermissionsForRequest(requestID) {
   }
 }
 
-function showUserQuestion(message) {
+function showUserQuestion(message, submittedAtQuery) {
   const payload = readPayload(message);
-  if (!payload.question_id || !Array.isArray(payload.questions) || payload.questions.length === 0) {
-    addMessage("error", "User question payload is invalid");
+  if (!message.request_id || !message.session_id || typeof payload.question_id !== "string" || !payload.question_id ||
+      payload.schema_version !== 2 || !Array.isArray(payload.questions) || payload.questions.length === 0 || payload.questions.length > 5) {
+    addMessage("error", "问答协议版本不匹配或载荷无效，请同时升级 Agent 与 Relay Web。");
     return;
   }
-  if (state.resolvedQuestionIDs.has(payload.question_id)) {
-    return;
+  const ids = new Set();
+  for (const item of payload.questions) {
+    if (!item || typeof item.id !== "string" || !item.id.trim() || ids.has(item.id) ||
+        typeof item.prompt !== "string" || !item.prompt.trim() || typeof item.multi_select !== "boolean" ||
+        typeof item.allow_other !== "boolean" || !Array.isArray(item.choices) || item.choices.length > 8 ||
+        (!item.choices.length && !item.allow_other) ||
+        item.choices.some((choice) => !choice || typeof choice.label !== "string" || !choice.label.trim())) {
+      addMessage("error", "问答协议无效，请同时升级 Agent 与 Relay Web。");
+      return;
+    }
+    ids.add(item.id);
   }
+  if (state.resolvedQuestionIDs.has(payload.question_id)) return;
   const existing = state.pendingQuestions.find((item) => item.questionID === payload.question_id);
   if (existing) {
-    existing.requestID = message.request_id || existing.requestID;
-    existing.sessionID = message.session_id || existing.sessionID;
-    existing.title = payload.title || existing.title;
-    existing.sourceTaskID = payload.source_task_id || existing.sourceTaskID;
-    existing.questions = payload.questions;
-    renderUserQuestion();
+    if (submittedAtQuery?.has(existing) && matchesQuestionRequest(existing, message)) existing.submitted = false;
     return;
   }
   state.pendingQuestions.push({
     questionID: payload.question_id,
-    requestID: message.request_id || "",
-    sessionID: message.session_id || "",
+    requestID: message.request_id,
+    sessionID: message.session_id,
     title: payload.title || "The Agent needs a clarification",
     sourceTaskID: payload.source_task_id || "",
     questions: payload.questions,
+    drafts: new Map(),
     submitted: false,
   });
+  if (!submittedAtQuery && state.pendingQuestions.length === 1) renderUserQuestion();
+}
+
+function resolveUserQuestion(questionID, status) {
+  if (!questionID) return;
+  const wasPending = state.pendingQuestions.some((item) => item.questionID === questionID);
+  rememberResolvedQuestion(questionID);
+  if (!wasPending) return;
+  state.pendingQuestions = state.pendingQuestions.filter((item) => item.questionID !== questionID);
   renderUserQuestion();
+  if (status && status !== "answered") addMessage("event", `User question ended: ${status}`);
 }
 
 function rememberResolvedQuestion(questionID) {
@@ -799,83 +841,114 @@ function renderUserQuestion() {
   question.questions.forEach((item, index) => {
     const group = document.createElement("fieldset");
     group.className = "user-question-item";
+    group.disabled = question.submitted || !state.connected;
     const legend = document.createElement("legend");
-    legend.textContent = item.prompt;
+    legend.textContent = `${item.prompt}${item.multi_select ? "（多选）" : ""}`;
     group.appendChild(legend);
-    const name = `user-question-${index}`;
-    const addChoice = (label, value) => {
-      const wrapper = document.createElement("label");
-      wrapper.className = "user-question-choice";
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = name;
-      radio.value = value;
-      radio.disabled = question.submitted;
-      wrapper.append(radio, document.createTextNode(label));
-      group.appendChild(wrapper);
-    };
-    (item.options || []).forEach((option) => addChoice(option, option));
-    if (item.allow_other || !item.options?.length) {
-      const wrapper = document.createElement("label");
-      wrapper.className = "user-question-choice";
-      if (item.options?.length) {
-        const radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = name;
-        radio.value = "__other__";
-        radio.disabled = question.submitted;
-        wrapper.append(radio, document.createTextNode("Other"));
-      }
-      const input = document.createElement("input");
-      input.type = "text";
-      input.dataset.otherQuestionIndex = String(index);
-      input.placeholder = item.options?.length ? "Other answer" : "Type your answer";
-      input.disabled = question.submitted;
-      input.addEventListener("input", () => {
-        if (input.value.trim()) {
-          const radio = group.querySelector(`input[name="${name}"][value="__other__"]`);
-          if (radio) radio.checked = true;
-        }
+    const draft = question.drafts.get(item.id) || { selected: [], other: "" };
+    const controls = [];
+    const otherInput = item.allow_other ? document.createElement("input") : null;
+    const saveDraft = () => {
+      question.drafts.set(item.id, {
+        selected: controls.filter((input) => input.checked).map((input) => input.value),
+        other: otherInput?.value || "",
       });
-      wrapper.appendChild(input);
+      updateQuestionActions(question);
+    };
+    for (const choice of item.choices) {
+      const wrapper = document.createElement("label");
+      wrapper.className = "user-question-choice";
+      const input = document.createElement("input");
+      input.type = item.multi_select ? "checkbox" : "radio";
+      input.name = `user-question-${index}`;
+      input.value = choice.label;
+      input.checked = draft.selected.includes(choice.label);
+      input.addEventListener("change", () => {
+        if (!item.multi_select && otherInput) otherInput.value = "";
+        saveDraft();
+      });
+      controls.push(input);
+      wrapper.append(input, document.createTextNode(choice.label));
+      if (choice.recommended) {
+        const badge = document.createElement("strong");
+        badge.className = "user-question-recommended";
+        badge.textContent = "推荐";
+        wrapper.appendChild(badge);
+      }
       group.appendChild(wrapper);
+      if (choice.description) {
+        const description = document.createElement("small");
+        description.className = "user-question-description";
+        description.textContent = choice.description;
+        group.appendChild(description);
+      }
+    }
+    if (otherInput) {
+      otherInput.type = "text";
+      otherInput.value = draft.other;
+      otherInput.placeholder = item.multi_select ? "补充要求（可与已选项同时生效）" : "输入自定义回答";
+      otherInput.addEventListener("input", () => {
+        if (!item.multi_select && otherInput.value.trim()) {
+          for (const input of controls) input.checked = false;
+        }
+        saveDraft();
+      });
+      group.appendChild(otherInput);
     }
     el.userQuestionContent.appendChild(group);
   });
-  el.submitUserQuestion.disabled = question.submitted;
-  el.dismissUserQuestion.disabled = question.submitted;
-  el.submitUserQuestion.textContent = question.submitted ? "已提交" : "提交回答";
+  updateQuestionActions(question);
   el.userQuestionBox.classList.remove("hidden");
 }
 
-function submitUserQuestion(cancelled = false) {
-  const question = state.pendingQuestions[0];
-  if (!question || question.submitted) {
-    return;
-  }
-  const answers = {};
-  if (!cancelled) {
-    for (let index = 0; index < question.questions.length; index += 1) {
-      const item = question.questions[index];
-      const name = `user-question-${index}`;
-      const selected = el.userQuestionContent.querySelector(`input[name="${name}"]:checked`);
-      if (selected?.value === "__other__") {
-        answers[item.id] = el.userQuestionContent.querySelector(`[data-other-question-index="${index}"]`)?.value.trim() || "";
-      } else if (selected) {
-        answers[item.id] = selected.value;
-      } else if (!item.options?.length) {
-        answers[item.id] = el.userQuestionContent.querySelector(`[data-other-question-index="${index}"]`)?.value.trim() || "";
-      }
-      if (!answers[item.id]) {
-        addMessage("error", "Please answer each question before submitting");
-        return;
-      }
+function updateQuestionActions(question) {
+  const unanswered = question.questions.filter((item) => {
+    const draft = question.drafts.get(item.id);
+    return !draft?.selected.length && !draft?.other.trim();
+  });
+  const canAdopt = unanswered.length > 0 && unanswered.every((item) => item.choices.some((choice) => choice.recommended));
+  const locked = question.submitted || !state.connected;
+  el.adoptUserQuestion.classList.toggle("hidden", question.submitted || !canAdopt);
+  el.adoptUserQuestion.disabled = locked || !canAdopt;
+  el.submitUserQuestion.disabled = locked || unanswered.length > 0;
+  el.dismissUserQuestion.disabled = locked;
+  el.submitUserQuestion.textContent = question.submitted ? "已提交" : "提交回答";
+}
+
+function collectStructuredQuestionAnswers(question, adoptRecommendations = false) {
+  return Object.fromEntries(question.questions.map((item) => {
+    const draft = question.drafts.get(item.id);
+    let selected = draft?.selected || [];
+    const other = draft?.other.trim() || "";
+    if (adoptRecommendations && !selected.length && !other) {
+      selected = item.choices.filter((choice) => choice.recommended).map((choice) => choice.label);
     }
+    if (!selected.length && !other) throw new Error("请回答每个问题后再提交。");
+    return [item.id, {
+      ...(selected.length ? { selected } : {}),
+      ...(other ? { other } : {}),
+    }];
+  }));
+}
+
+function submitUserQuestion(cancelled = false, adoptRecommendations = false) {
+  const question = state.pendingQuestions[0];
+  if (!question || question.submitted || !state.connected) return;
+  let structuredAnswers = {};
+  if (!cancelled) {
+    try { structuredAnswers = collectStructuredQuestionAnswers(question, adoptRecommendations); }
+    catch (error) { addMessage("error", error.message); return; }
   }
   const sent = sendEnvelope("user_question_answer", {
     request_id: question.requestID,
     session_id: question.sessionID,
-    payload: { question_id: question.questionID, answers, cancelled },
+    payload: {
+      schema_version: 2,
+      question_id: question.questionID,
+      structured_answers: structuredAnswers,
+      adopted_defaults: adoptRecommendations || undefined,
+      cancelled,
+    },
   });
   if (sent) {
     question.submitted = true;
@@ -912,6 +985,7 @@ function clearPairing(text) {
   state.clientToken = "";
   state.sessions = [];
   state.pendingQuestions = [];
+  state.pendingQuestionList = null;
   state.resolvedQuestionIDs.clear();
   renderUserQuestion();
   localStorage.removeItem("myai_client_token");
@@ -931,6 +1005,7 @@ el.refreshAuth.addEventListener("click", loadAuthorizations);
 el.allowPermission.addEventListener("click", () => sendPermissionResult(true));
 el.denyPermission.addEventListener("click", () => sendPermissionResult(false));
 el.submitUserQuestion.addEventListener("click", () => submitUserQuestion());
+el.adoptUserQuestion.addEventListener("click", () => submitUserQuestion(false, true));
 el.dismissUserQuestion.addEventListener("click", () => submitUserQuestion(true));
 el.userId.addEventListener("change", () => clearPairing("Pair required for edited target"));
 el.deviceId.addEventListener("change", () => clearPairing("Pair required for edited target"));

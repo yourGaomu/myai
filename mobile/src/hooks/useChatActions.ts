@@ -1,7 +1,8 @@
 import { useCallback, useRef, type RefObject } from "react";
 
 import type { AgentRunSnapshot, PermissionApprovalScope, PermissionResultPayload, RelayMessage, TokenUsage } from "../protocol";
-import type { PermissionState, RelayScope, UserQuestionState } from "../types/app";
+import type { PermissionState, RelayScope, UserQuestionAnswerSubmission, UserQuestionState } from "../types/app";
+import { formatSubmittedCardSummary } from "../utils/userQuestion";
 import type { ChatAttachment } from "../types/chat";
 import { userMessageEcho } from "../utils/attachments";
 import { buildChatTurns } from "../utils/chatRenderItems";
@@ -107,20 +108,27 @@ export function useChatActions({
   }, [pendingPermission?.permission, sendPermissionResult]);
   const denyPermission = useCallback(() => sendPermissionResult(false), [sendPermissionResult]);
 
-  const answerUserQuestion = useCallback((question: UserQuestionState, answers: Record<string, string>, cancelled = false) => {
+  const answerUserQuestion = useCallback((question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled = false) => {
     if (!isCurrent() || question.sessionID !== sessionID.trim() || !question.requestID) return false;
     const current = getSessionChat(question.sessionID).pendingQuestions.find((item) =>
       item.sessionID === question.sessionID && item.requestID === question.requestID && item.questionID === question.questionID,
     );
     if (!current || current.submitted) return false;
-    const draftAnswers = cancelled ? current.draftAnswers : { ...answers };
+    const draftAnswers = current.draftAnswers;
     const sent = sendEnvelope("user_question_answer", {
       request_id: current.requestID,
       session_id: current.sessionID,
-      payload: { question_id: current.questionID, answers, cancelled },
+      payload: {
+        schema_version: 2,
+        question_id: current.questionID,
+        structured_answers: submission.structuredAnswers,
+        adopted_defaults: submission.adoptedDefaults || undefined,
+        cancelled,
+      },
     });
     if (sent) {
-      setSessionPendingQuestion(current.sessionID, { ...current, draftAnswers, submitted: true });
+      const submittedSummary = cancelled ? "已跳过澄清" : formatSubmittedCardSummary(current.questions, submission);
+      setSessionPendingQuestion(current.sessionID, { ...current, draftAnswers, submittedSummary, submitted: true });
       requestUserQuestionSync();
     } else if (!cancelled) {
       setSessionPendingQuestion(current.sessionID, { ...current, draftAnswers });

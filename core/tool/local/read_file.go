@@ -124,6 +124,11 @@ func (t *ReadFileTool) Call(ctx context.Context, args json.RawMessage) (tooldef.
 		}
 		content += fmt.Sprintf("\n\n[read_file truncated: returned at most %d bytes of file data. Continue with read_file %s]", maxReadFileBytes, continuation)
 	}
+	if !more {
+		if tracker := toolruntime.WorkspaceInspectionTrackerFrom(ctx); tracker != nil {
+			tracker.Record(t.Name(), workspace, path)
+		}
+	}
 	return tooldef.SuccessOutput(content), nil
 }
 

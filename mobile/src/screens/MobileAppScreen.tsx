@@ -50,6 +50,8 @@ import { useRelaySender } from "../hooks/useRelaySender";
 import { useRemoteRequests } from "../hooks/useRemoteRequests";
 import { useSessionContext } from "../hooks/useSessionContext";
 import { useSessionModelActions } from "../hooks/useSessionModelActions";
+import { useImageModelActions } from "../hooks/useImageModelActions";
+import { useImageModelState } from "../hooks/useImageModelState";
 import { useSessionModelState } from "../hooks/useSessionModelState";
 import { useSessionRename } from "../hooks/useSessionRename";
 import { useSessionSettingsActions } from "../hooks/useSessionSettingsActions";
@@ -181,6 +183,7 @@ function PairedWorkspace({
     setSessionCompact,
     setSessions,
   } = useSessionModelState();
+  const imageModelState = useImageModelState();
   const {
     applyError: setSessionGenerationError,
     applyPreferences: setSessionGenerationPreferences,
@@ -406,6 +409,13 @@ function PairedWorkspace({
     sessionIDRef,
     socketRef,
   });
+  const imageModelActions = useImageModelActions({ sendEnvelope, startPending, stopPending });
+  useEffect(() => {
+    if (!connected) {
+      imageModelState.clear();
+      stopPending("imageModels");
+    }
+  }, [connected, imageModelState.clear, stopPending]);
   const {
     clearSessionContexts,
     handleContextMessage,
@@ -983,6 +993,11 @@ function PairedWorkspace({
     applyModelConfigTest,
     applyModelConfigMutation,
     applyModelConfigError,
+    applyImageModelList: imageModelState.applyList,
+    applyImageModelConfigAdd: imageModelState.applyAdd,
+    applyImageModelConfigTest: imageModelState.applyTest,
+    applyImageModelConfigMutation: imageModelState.applyMutation,
+    applyImageModelConfigError: imageModelState.applyError,
     handleModelDeleteMessage,
     handleSessionRenameMessage: renameTracker.handleMessage,
     isModelOperationPending: pendingActions.models,
@@ -1710,6 +1725,20 @@ function PairedWorkspace({
             setModelMessageError(false);
           },
           onTestModelConfig: testModelConfig,
+          imageModels: imageModelState.models,
+          imageModelDefaultID: imageModelState.defaultModelID,
+          imageModelMessage: imageModelState.message,
+          imageModelMessageError: imageModelState.messageError,
+          imageModelTestResult: imageModelState.testResult,
+          imageModelLoading: Boolean(pendingActions.imageModels),
+          onRefreshImageModels: imageModelActions.refresh,
+          onAddImageModel: imageModelActions.add,
+          onUpdateImageModel: imageModelActions.update,
+          onTestImageModel: imageModelActions.test,
+          onDeleteImageModel: imageModelActions.remove,
+          onSetImageModelEnabled: imageModelActions.setEnabled,
+          onSetDefaultImageModel: imageModelActions.setDefault,
+          onClearImageModelMessage: imageModelState.clearMessage,
           onRequestIntentConfig: requestIntentConfig,
           onSaveIntentConfig: saveIntentConfig,
           onTestIntentConfig: testIntentConfig,

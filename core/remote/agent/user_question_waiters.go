@@ -73,7 +73,7 @@ func (registry *userQuestionWaiterRegistry) list(sessionID string, knownQuestion
 		request := waiter.request
 		request.Questions = append([]domaininteraction.Question(nil), request.Questions...)
 		for index := range request.Questions {
-			request.Questions[index].Options = append([]string(nil), request.Questions[index].Options...)
+			request.Questions[index].Choices = append([]domaininteraction.Option(nil), request.Questions[index].Choices...)
 		}
 		requests = append(requests, request)
 	}

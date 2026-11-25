@@ -115,6 +115,8 @@ func (s AgentLoopService) Run(ctx context.Context, command generationcommand.Run
 	maxToolRounds := s.maxToolRounds(command.Session)
 	runCtx := toolruntime.WithKnowledgeSearchBudget(ctx, toolruntime.NewKnowledgeSearchBudget(s.maxKnowledgeSearchCalls()))
 	runCtx = toolruntime.WithMemorySearchBudget(runCtx, toolruntime.NewMemorySearchBudget(s.maxMemorySearchCalls()))
+	runCtx = toolruntime.WithWorkspaceInspectionTracker(runCtx, toolruntime.NewWorkspaceInspectionTracker(command.Session.WorkspaceRoot))
+	runCtx = toolruntime.WithAskUserBudget(runCtx, toolruntime.NewAskUserBudget())
 	reasoningParts := make([]string, 0, maxToolRounds)
 	stopContinuations := 0
 	overflowRetried := false

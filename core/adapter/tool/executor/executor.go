@@ -49,7 +49,7 @@ func (e Executor) Execute(ctx context.Context, command generationcommand.ToolExe
 		// here made nested spawn_agent calls attach to the grandparent.
 		TaskID:        metadata.TaskID,
 		WorkspaceRoot: command.Session.WorkspaceRoot, SandboxID: command.Session.WorkspaceSandboxID,
-		ModelID: command.Session.Model,
+		ModelID: command.Session.Model, IsSubagent: command.Session.Kind == session.KindSubagent,
 	})
 
 	result, err := toolservice.ExecutionService{

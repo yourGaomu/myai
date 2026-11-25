@@ -9,6 +9,7 @@ import { SettingsHome, type SettingsSection } from "./SettingsHome";
 import { AppearanceSettings } from "./sections/AppearanceSettings";
 import { MCPCatalogSection, type MCPCatalogControls } from "./sections/MCPCatalogSection";
 import { MotionSettings } from "./sections/MotionSettings";
+import { ImageModelSettingsSection } from "./ImageModelSettingsSection";
 import { SubagentPanel } from "../subagents/SubagentPanel";
 import { PluginPanel } from "../plugins/PluginPanel";
 import { mobileAndroidVersionCode, mobileAppVersion } from "../../constants/app";
@@ -27,6 +28,10 @@ import type {
   IntentConfigTestResultPayload,
   IntentStrategy,
   IntentTracePayload,
+  ImageModelConfigAddPayload,
+  ImageModelConfigTestPayload,
+  ImageModelConfigUpdatePayload,
+  ImageModelSummary,
   ModelSummary,
   PluginInfo,
   SessionGenerationPreferences,
@@ -139,6 +144,20 @@ type Props = {
   modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
+  imageModels: ImageModelSummary[];
+  imageModelDefaultID: string;
+  imageModelMessage: string;
+  imageModelMessageError: boolean;
+  imageModelTestResult: { ok: boolean; message: string; latency_ms: number; mime_type?: string } | null;
+  onRefreshImageModels: () => boolean;
+  onAddImageModel: (payload: ImageModelConfigAddPayload) => boolean;
+  onUpdateImageModel: (payload: ImageModelConfigUpdatePayload) => boolean;
+  onTestImageModel: (payload: ImageModelConfigTestPayload) => boolean;
+  onDeleteImageModel: (id: string) => boolean;
+  onSetImageModelEnabled: (id: string, enabled: boolean) => boolean;
+  onSetDefaultImageModel: (id: string) => boolean;
+  onClearImageModelMessage: () => void;
+  imageModelLoading: boolean;
   normalizedRelayURL: string;
   connectionStatus: string;
   pairedRelayURL: string;
@@ -308,6 +327,20 @@ export function SettingsPanel({
   modelMessageError,
   deviceID,
   models,
+  imageModels,
+  imageModelDefaultID,
+  imageModelMessage,
+  imageModelMessageError,
+  imageModelTestResult,
+  onRefreshImageModels,
+  onAddImageModel,
+  onUpdateImageModel,
+  onTestImageModel,
+  onDeleteImageModel,
+  onSetImageModelEnabled,
+  onSetDefaultImageModel,
+  onClearImageModelMessage,
+  imageModelLoading,
   normalizedRelayURL,
   connectionStatus,
   pairedRelayURL,
@@ -2748,6 +2781,26 @@ export function SettingsPanel({
     />
   );
 
+  const imageModelSection = (
+    <ImageModelSettingsSection
+      buttonFeedback={buttonFeedback}
+      connected={connected}
+      defaultModelID={imageModelDefaultID}
+      loading={imageModelLoading}
+      message={imageModelMessage}
+      messageError={imageModelMessageError}
+      models={imageModels}
+      testResult={imageModelTestResult}
+      onRefresh={onRefreshImageModels}
+      onAdd={onAddImageModel}
+      onUpdate={onUpdateImageModel}
+      onTest={onTestImageModel}
+      onDelete={onDeleteImageModel}
+      onSetEnabled={onSetImageModelEnabled}
+      onSetDefault={onSetDefaultImageModel}
+      onClearMessage={onClearImageModelMessage}
+    />
+  );
   const motion = useMotion();
   const sectionContent: Record<SettingsSection, ReactNode> = {
     appearance: <AppearanceSettings />,
@@ -2758,6 +2811,7 @@ export function SettingsPanel({
     generation: generationSection,
     general: generalSection,
     model: modelSection,
+    imageModel: imageModelSection,
     plugin: pluginSection,
     permission: permissionSection,
     session: sessionSection,
@@ -2785,7 +2839,8 @@ export function SettingsPanel({
     {
       label: "模型与生成",
       rows: [
-        { icon: "cpu" as const, key: "model" as const, label: "模型", value: activeModel ? modelDisplayName(activeModel) : activeSession?.model || "" },
+        { icon: "cpu" as const, key: "model" as const, label: "聊天模型", value: activeModel ? modelDisplayName(activeModel) : activeSession?.model || "" },
+        { icon: "image" as const, key: "imageModel" as const, label: "生图模型", value: imageModels.length ? `${imageModels.length} 个` : "未配置" },
         { icon: "sliders" as const, key: "generation" as const, label: "生成参数与回复风格" },
       ],
     },

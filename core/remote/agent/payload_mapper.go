@@ -170,11 +170,11 @@ func sessionHistoryMessages(records []sessionresult.MessageListItem) []protocol.
 		messages = append(messages, protocol.SessionHistoryMessage{
 			ID:            record.ID,
 			Role:          record.Role,
-			Content:       record.Content,
+			Content:       remoteToolResult(record.ToolName, record.Content),
 			Reasoning:     record.Reasoning,
 			ToolCallID:    record.ToolCallID,
 			ToolName:      record.ToolName,
-			ToolArguments: record.ToolArguments,
+			ToolArguments: remoteToolArguments(record.ToolName, record.ToolArguments),
 			ToolError:     record.ToolError,
 			ToolStatus:    record.ToolStatus,
 			ToolErrorCode: record.ToolErrorCode,

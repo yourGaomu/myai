@@ -12,7 +12,7 @@ import {
 import { Feather } from "@expo/vector-icons";
 
 import type { AgentRunSnapshot, AssetSummary, ChangeEntry, Plan, SubagentTask } from "../../protocol";
-import type { UserQuestionState } from "../../types/app";
+import type { UserQuestionAnswerSubmission, UserQuestionDraftAnswer, UserQuestionState } from "../../types/app";
 import type { ChatItem } from "../../types/chat";
 import type { ButtonFeedback } from "../../types/ui";
 import { latestRegeneratableTurnID } from "../../hooks/useChatActions";
@@ -46,8 +46,8 @@ type Props = {
   greetingName: string;
   loadingHistory: boolean;
   messages: ChatItem[];
-  onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
-  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
+  onAnswerUserQuestion?: (question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => void;
   onExecutePlan?: () => void;
   onInspectSubagent?: (taskID: string) => void;
   onNearHeaderChange?: (near: boolean) => void;
@@ -391,8 +391,8 @@ function SessionChatPanel({
               <UserQuestionPrompt
                 buttonFeedback={buttonFeedback}
                 key={JSON.stringify([question.sessionID, question.requestID, question.questionID])}
-                onAnswer={(answers, cancelled) => onAnswerUserQuestion?.(question, answers, cancelled) ?? false}
-                onChangeDraft={onChangeUserQuestionDraft ? (answers) => onChangeUserQuestionDraft(question, answers) : undefined}
+                onAnswer={(submission, cancelled) => onAnswerUserQuestion?.(question, submission, cancelled) ?? false}
+                onChangeDraft={onChangeUserQuestionDraft ? (drafts) => onChangeUserQuestionDraft(question, drafts) : undefined}
                 question={question}
               />
             ))}

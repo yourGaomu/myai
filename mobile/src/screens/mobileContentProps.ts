@@ -18,6 +18,10 @@ import type {
   IntentConfigResultPayload,
   IntentConfigTestResultPayload,
   IntentTracePayload,
+  ImageModelConfigAddPayload,
+  ImageModelConfigTestPayload,
+  ImageModelConfigUpdatePayload,
+  ImageModelSummary,
   ModelSummary,
   Plan,
   PluginInfo,
@@ -40,7 +44,7 @@ import type {
   SubagentTaskEvent,
   SubagentTask,
 } from "../protocol";
-import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, UserQuestionState, ViewMode } from "../types/app";
+import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, UserQuestionAnswerSubmission, UserQuestionDraftAnswer, UserQuestionState, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
 import type { DocumentImportStatus, KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
@@ -93,6 +97,20 @@ export type SettingsContentProps = {
   modelMessageError: boolean;
   deviceID: string;
   models: ModelSummary[];
+  imageModels: ImageModelSummary[];
+  imageModelDefaultID: string;
+  imageModelMessage: string;
+  imageModelMessageError: boolean;
+  imageModelTestResult: { ok: boolean; message: string; latency_ms: number; mime_type?: string } | null;
+  imageModelLoading: boolean;
+  onRefreshImageModels: () => boolean;
+  onAddImageModel: (payload: ImageModelConfigAddPayload) => boolean;
+  onUpdateImageModel: (payload: ImageModelConfigUpdatePayload) => boolean;
+  onTestImageModel: (payload: ImageModelConfigTestPayload) => boolean;
+  onDeleteImageModel: (id: string) => boolean;
+  onSetImageModelEnabled: (id: string, enabled: boolean) => boolean;
+  onSetDefaultImageModel: (id: string) => boolean;
+  onClearImageModelMessage: () => void;
   normalizedRelayURL: string;
   onBindCodeChange: (value: string) => void;
   onCloseSettings: () => void;
@@ -184,8 +202,8 @@ export type ChatContentProps = {
   connected: boolean;
   deviceID: string;
   greetingName: string;
-  onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
-  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
+  onAnswerUserQuestion?: (question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => void;
   onExecutePlan?: () => void;
   onNearHeaderChange?: (near: boolean) => void;
   onOpenChangePath?: (path: string) => void;
@@ -303,8 +321,8 @@ export type PermissionContentProps = {
   onAllowPermission: () => void;
   onDenyPermission: () => void;
   pendingPermission: PermissionState | null;
-  onAnswerUserQuestion: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
-  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
+  onAnswerUserQuestion: (question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => void;
   pendingQuestions: UserQuestionState[];
 };
 

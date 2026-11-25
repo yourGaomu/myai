@@ -132,7 +132,7 @@ func TestExecutionServiceQuestionBarrierDefersOtherToolsInSameBatch(t *testing.T
 		if request.ToolCallID != "question-call" {
 			t.Fatalf("question is not bound to its tool call: %#v", request)
 		}
-		return domaininteraction.Answer{Answers: map[string]string{"question_1": "small"}}, nil
+		return domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"scope": {Selected: []string{"small"}}}}, nil
 	})
 	result, err := (ExecutionService{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
 		"write_file": sideEffectTool{calls: &writes},
@@ -141,7 +141,7 @@ func TestExecutionServiceQuestionBarrierDefersOtherToolsInSameBatch(t *testing.T
 		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
 		Calls: []domainmessage.ToolCall{
 			{ID: "write-call", Name: "write_file", Arguments: `{"path":"x","content":"y"}`},
-			{ID: "question-call", Name: "ask_user", Arguments: `{"questions":[{"prompt":"Scope?","options":["small","large"]}]}`},
+			{ID: "question-call", Name: "ask_user", Arguments: `{"decision_impact":"high","decision_reason":"Scope changes implementation effort.","context_evidence":[{"source":"conversation","finding":"The user did not specify scope."}],"title":"Scope","questions":[{"id":"scope","prompt":"Scope?","multi_select":false,"choices":[{"label":"small"},{"label":"large"}]}]}`},
 		},
 	})
 	if err != nil {
@@ -168,15 +168,15 @@ func TestExecutionServiceExecutesOnlyFirstQuestionBarrierInBatch(t *testing.T) {
 	ctx := toolruntime.WithExecution(context.Background(), toolruntime.Execution{SessionID: "session-1"})
 	ctx = toolruntime.WithUserQuestionHandler(ctx, func(_ context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
 		questionCalls.Add(1)
-		return domaininteraction.Answer{Answers: map[string]string{"question_1": request.Title}}, nil
+		return domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"question_1": {Other: request.Title}}}, nil
 	})
 	result, err := (ExecutionService{Registry: fakeRegistry{tools: map[string]tooldef.Tool{
 		"ask_user": localtools.NewAskUserTool(),
 	}}}).Execute(ctx, ExecutionCommand{
 		SessionID: "session-1", PermissionMode: session.PermissionModeFull,
 		Calls: []domainmessage.ToolCall{
-			{ID: "first-question", Name: "ask_user", Arguments: `{"title":"first","questions":[{"prompt":"First?"}]}`},
-			{ID: "second-question", Name: "ask_user", Arguments: `{"title":"second","questions":[{"prompt":"Second?"}]}`},
+			{ID: "first-question", Name: "ask_user", Arguments: `{"decision_impact":"high","decision_reason":"The choice is consequential.","context_evidence":[{"source":"conversation","finding":"No answer supplied."}],"title":"first","questions":[{"id":"question_1","prompt":"First?","multi_select":false,"choices":[]}]}`},
+			{ID: "second-question", Name: "ask_user", Arguments: `{"decision_impact":"high","decision_reason":"The choice is consequential.","context_evidence":[{"source":"conversation","finding":"No answer supplied."}],"title":"second","questions":[{"id":"question_1","prompt":"Second?","multi_select":false,"choices":[]}]}`},
 		},
 	})
 	if err != nil {

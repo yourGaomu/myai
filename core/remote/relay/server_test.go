@@ -286,8 +286,8 @@ func TestRelayRoutesUserQuestionAndAnswerWithoutReplacingChatRoute(t *testing.T)
 	readTestMessage(t, clientConn, protocol.TypeHeartbeat)
 
 	questionPayload, err := json.Marshal(protocol.UserQuestionPayload{
-		QuestionID: "question-1", Title: "Choose a scope", Questions: []protocol.UserQuestionItemPayload{{
-			ID: "scope", Prompt: "How much?", Options: []string{"small", "large"},
+		SchemaVersion: 2, QuestionID: "question-1", Title: "Choose a scope", Questions: []protocol.UserQuestionItemPayload{{
+			ID: "scope", Prompt: "How much?", Choices: []protocol.UserQuestionOptionPayload{{Label: "small"}, {Label: "large"}},
 		}},
 	})
 	if err != nil {
@@ -301,7 +301,7 @@ func TestRelayRoutesUserQuestionAndAnswerWithoutReplacingChatRoute(t *testing.T)
 	readTestMessage(t, agentConn, protocol.TypeHeartbeat)
 
 	answerPayload, err := json.Marshal(protocol.UserQuestionAnswerPayload{
-		QuestionID: "question-1", Answers: map[string]string{"scope": "large"},
+		SchemaVersion: 2, QuestionID: "question-1", StructuredAnswers: map[string]protocol.UserQuestionStructuredAnswerPayload{"scope": {Selected: []string{"large"}}},
 	})
 	if err != nil {
 		t.Fatal(err)

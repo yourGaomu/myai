@@ -76,6 +76,19 @@ func (invalidImageGenerator) Generate(context.Context, port.GenerateRequest) (po
 	return port.GenerateResult{Data: []byte("not an image"), MIMEType: "image/png"}, nil
 }
 
+func TestConfigServiceCanTestUnsavedImageModelDraft(t *testing.T) {
+	service, _ := newTestConfigService(memory.NewRepository(), &fakeFactory{})
+	config := imageConfig("", "draft-secret")
+	result, err := service.Test(context.Background(), config)
+	if err != nil || !result.OK || result.MIMEType != "image/png" {
+		t.Fatalf("test result=%+v err=%v", result, err)
+	}
+	models, _, err := service.List(context.Background())
+	if err != nil || len(models) != 0 {
+		t.Fatalf("testing draft persisted a model: models=%+v err=%v", models, err)
+	}
+}
+
 func TestConfigServiceAllowsGoogleADCWithoutAPIKey(t *testing.T) {
 	repo := memory.NewRepository()
 	service, _ := newTestConfigService(repo, &fakeFactory{})

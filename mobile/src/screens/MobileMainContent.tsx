@@ -66,6 +66,20 @@ export function MobileMainContent({
           modelMessageError={settings.modelMessageError}
           deviceID={settings.deviceID}
           models={settings.models}
+          imageModels={settings.imageModels}
+          imageModelDefaultID={settings.imageModelDefaultID}
+          imageModelMessage={settings.imageModelMessage}
+          imageModelMessageError={settings.imageModelMessageError}
+          imageModelTestResult={settings.imageModelTestResult}
+          imageModelLoading={settings.imageModelLoading}
+          onRefreshImageModels={settings.onRefreshImageModels}
+          onAddImageModel={settings.onAddImageModel}
+          onUpdateImageModel={settings.onUpdateImageModel}
+          onTestImageModel={settings.onTestImageModel}
+          onDeleteImageModel={settings.onDeleteImageModel}
+          onSetImageModelEnabled={settings.onSetImageModelEnabled}
+          onSetDefaultImageModel={settings.onSetDefaultImageModel}
+          onClearImageModelMessage={settings.onClearImageModelMessage}
           normalizedRelayURL={settings.normalizedRelayURL}
           onBindCodeChange={settings.onBindCodeChange}
           onClose={settings.onCloseSettings}
@@ -326,8 +340,8 @@ export function MobileMainContent({
             <UserQuestionPrompt
               key={JSON.stringify([question.sessionID, question.requestID, question.questionID])}
               buttonFeedback={common.buttonFeedback}
-              onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
-              onChangeDraft={permission.onChangeUserQuestionDraft ? (answers) => permission.onChangeUserQuestionDraft?.(question, answers) : undefined}
+              onAnswer={(submission, cancelled) => permission.onAnswerUserQuestion(question, submission, cancelled)}
+              onChangeDraft={permission.onChangeUserQuestionDraft ? (drafts) => permission.onChangeUserQuestionDraft?.(question, drafts) : undefined}
               question={question}
             />
           ))}

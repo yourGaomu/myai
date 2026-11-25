@@ -75,8 +75,8 @@ func subagentTaskPayload(task domainsubagent.Task) protocol.SubagentTaskSummary 
 func subagentEventPayload(event subagentport.TaskEvent) protocol.SubagentTaskResultPayload {
 	payload := protocol.SubagentTaskResultPayload{
 		Task: subagentTaskPayload(event.Task), Sequence: event.Sequence, Kind: event.Kind, EmittedAt: event.EmittedAt,
-		RunID: event.RunID, ToolCallID: event.ToolCallID, Content: event.Content,
-		ToolName: event.ToolName, Arguments: event.Arguments, Status: event.Status,
+		RunID: event.RunID, ToolCallID: event.ToolCallID, Content: remoteToolResult(event.ToolName, event.Content),
+		ToolName: event.ToolName, Arguments: remoteToolArguments(event.ToolName, event.Arguments), Status: event.Status,
 		ErrorCode: event.ErrorCode, ErrorMessage: event.ErrorMessage, Truncated: event.Truncated, Delta: event.Delta,
 	}
 	for _, asset := range event.Assets {

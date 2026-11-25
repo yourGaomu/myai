@@ -389,6 +389,21 @@ textarea:focus {
   min-width: 0;
 }
 
+.user-question-recommended {
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #075985;
+  background: #e0f2fe;
+  font-size: 0.75rem;
+}
+
+.user-question-description {
+  display: block;
+  margin: -3px 0 4px 24px;
+  color: #667085;
+  line-height: 1.4;
+}
+
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
