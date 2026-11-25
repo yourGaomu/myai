@@ -9,7 +9,15 @@ const maxPreviewDimension = 2048;
 const maxQueuedPreviews = 32;
 
 export type AssetImagePreview = { uri: string; width: number; height: number };
-export type AssetImagePreviewError = "offline" | "timeout" | "unsupported" | "unavailable" | "invalid" | "busy";
+export type AssetImagePreviewError = "offline" | "timeout" | "unsupported" | "unavailable" | "invalid" | "busy" | "attachment" | "download" | "too_large";
+const previewErrorReasons: ReadonlyMap<string, AssetImagePreviewError> = new Map([
+  ["asset_preview_attachment_unavailable", "attachment"],
+  ["asset_preview_download_failed", "download"],
+  ["asset_preview_invalid_image", "invalid"],
+  ["asset_preview_too_large", "too_large"],
+  ["asset_preview_timeout", "timeout"],
+]);
+
 export type AssetImagePreviewResult =
   | { status: "ready"; image: AssetImagePreview }
   | { status: "error"; reason: AssetImagePreviewError };
@@ -243,7 +251,8 @@ export function createAssetImagePreviewLoader({
       if ((error?.request_type && error.request_type !== requestType) ||
           (error?.asset_id !== undefined && error.asset_id !== entry.target.assetID)) return true;
       const unsupported = typeof error?.message === "string" && /(?:unsupported|unknown)(?:\s+\w+){0,2}\s+(?:message|request|type)/i.test(error.message);
-      finish(entry, { status: "error", reason: error?.transport_error ? "offline" : unsupported ? "unsupported" : "unavailable" });
+      const knownReason = previewErrorReasons.get(error?.code || "");
+      finish(entry, { status: "error", reason: error?.transport_error ? "offline" : knownReason || (unsupported ? "unsupported" : "unavailable") });
     } else {
       const result = message.payload as Partial<AssetImagePreviewResultPayload> | undefined;
       if (result?.asset_id !== entry.target.assetID) return true;

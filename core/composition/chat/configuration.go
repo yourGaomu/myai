@@ -85,6 +85,7 @@ type Configuration struct {
 	Skills              *skill.Manager
 	Hooks               *hook.Manager
 	DefaultModel        string
+	DefaultWorkspace    string
 	UserID              string
 	KnowledgeSearch     searchapi.Service
 	AgentRuns           agentrunport.Repository
@@ -176,7 +177,7 @@ func BuildDependencies(configuration Configuration) service.ChatDependencies {
 		sessionQueue = generationadapter.NewSessionQueue(asyncTasks)
 	}
 	attachmentReader, _ := configuration.Store.(repository.SessionAttachmentReader)
-	lookupSessionAsset := sessionAssetLookup(configuration.Store, attachmentReader, sessionQueue)
+	lookupSessionAsset := sessionAssetLookup(configuration.Store, attachmentReader, sessionQueue, configuration.DefaultWorkspace)
 	var submitRecords func(context.Context, outboxport.Batch) error
 	if sessionQueue.Durable() {
 		submitRecords = sessionQueue.SubmitRecords

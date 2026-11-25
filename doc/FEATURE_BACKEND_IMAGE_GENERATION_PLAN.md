@@ -62,12 +62,9 @@ flowchart LR
 4. **同步扩充 `core/tool/local/attach_image.go`**：
    - 使用 `imageasset.Inspect` 替代只允许 `jpeg`/`png` 的旧 `Decode`，使工作区产出的 **JPEG / PNG / GIF / WebP** 均可私有挂载回显（Tool Description 同步更新说明）。
 
-### 3.2 本地无 MCP 会话预览兜底（`core/service/session_image.go` & `core/composition/chat/session_assets.go`）
+### 3.2 优先读取已校验的会话原图（`core/service/session_image.go`）
 
-- 当 `SessionImagePreview(ctx, sessionID, assetID)` 查询到的 `AssetRecord` 使用本地占位 ID（`ast_local_` 前缀）或 `s.dependencies.AssetFiles == nil` 时：
-  1. 校验该 `AssetRecord` 确属当前 `sessionID` 且未删除；
-  2. 通过 `os.OpenRoot` 安全打开会话对应 `WorkspaceRoot` 下的 `AssetRecord.LocalPath`（复用反符号链接穿越校验），校验文件大小 `<= 16 MiB` 并比对 `SHA256(data) == asset.Checksum`；
-  3. 调用 `imageasset.PreviewBytes(ctx, data)` 返回自适应格式的预览字节与真实宽高。
+`SessionImagePreview` 先确认资产归属当前会话，然后通过 `os.OpenRoot` 读取会话工作区内已记录的原图。路径、字节数和 SHA-256 全部匹配时，直接生成预览。已上传的资产在本地原图缺失或校验失败时，继续使用 MCP 私有下载，并核对上传记录。仅有本地 ID 的资产使用工作区原图。移动端按错误码区分会话资产不可用、对象回读失败、解码失败、超出限制和超时。
 
 ---
 

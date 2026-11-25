@@ -7,7 +7,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"myai/core/imageasset"
+	"myai/core/port/files"
 	"myai/core/remote/protocol"
+	"myai/core/service"
 )
 
 const assetImagePreviewTimeout = 18 * time.Second
@@ -44,7 +47,8 @@ func (a *Agent) startAssetImagePreview(ctx context.Context, conn *websocket.Conn
 			return
 		}
 		if err != nil {
-			if a.writeHandlerError(conn, message, err) != nil {
+			failure := assetPreviewErrorPayload(err)
+			if a.writeRemoteMessage(conn, protocol.TypeError, message.RequestID, message.SessionID, failure) != nil {
 				_ = conn.Close()
 			}
 			return
@@ -57,4 +61,21 @@ func (a *Agent) startAssetImagePreview(ctx context.Context, conn *websocket.Conn
 		}
 	}()
 	return nil
+}
+
+func assetPreviewErrorPayload(err error) protocol.AssetImagePreviewErrorPayload {
+	payload := protocol.ErrorPayload{Message: "image preview is unavailable"}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		payload = protocol.ErrorPayload{Code: protocol.AssetPreviewErrorTimeout, Message: "image preview timed out"}
+	case errors.Is(err, files.ErrSessionAssetUnavailable):
+		payload = protocol.ErrorPayload{Code: protocol.AssetPreviewErrorAttachmentUnavailable, Message: "the image is unavailable in this session"}
+	case errors.Is(err, service.ErrImagePreviewDownload):
+		payload = protocol.ErrorPayload{Code: protocol.AssetPreviewErrorDownload, Message: "the Agent could not read the image from object storage"}
+	case errors.Is(err, imageasset.ErrUnsupported):
+		payload = protocol.ErrorPayload{Code: protocol.AssetPreviewErrorInvalidImage, Message: "the stored image cannot be decoded"}
+	case errors.Is(err, imageasset.ErrTooLarge):
+		payload = protocol.ErrorPayload{Code: protocol.AssetPreviewErrorTooLarge, Message: "the image exceeds preview limits"}
+	}
+	return protocol.AssetImagePreviewErrorPayload{ErrorPayload: payload, RequestType: protocol.TypeAssetImagePreview}
 }

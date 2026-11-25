@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -127,8 +128,10 @@ func (s *ChatService) assetReadEpoch(sessionID string) (uint64, error) {
 	return s.fileUploadEpochs[sessionID], nil
 }
 
-// SessionImagePreview returns a bounded image preview. Local-only assets are
-// opened beneath their session workspace and verified against their checksum.
+// ErrImagePreviewDownload means the authorized image could not be recovered from object storage.
+var ErrImagePreviewDownload = errors.New("could not download the attached image")
+
+// SessionImagePreview verifies an authorized local copy before requesting the stored object.
 func (s *ChatService) SessionImagePreview(ctx context.Context, sessionID, assetID string) ([]byte, string, int, int, error) {
 	if s == nil {
 		return nil, "", 0, 0, errors.New("image preview is not available on this Agent")
@@ -145,29 +148,18 @@ func (s *ChatService) SessionImagePreview(ctx context.Context, sessionID, assetI
 		return nil, "", 0, 0, imageasset.ErrTooLarge
 	}
 
-	var source []byte
-	if strings.HasPrefix(assetID, "ast_local_") || s.dependencies.AssetFiles == nil {
-		source, err = readSessionLocalAsset(ctx, asset)
-	} else {
-		var object files.Download
-		object, err = s.dependencies.AssetFiles.Download(ctx, files.DownloadRequest{AssetID: assetID, MaxBytes: imageasset.MaxSourceBytes})
-		if err == nil {
-			if object.Truncated || len(object.Data) > imageasset.MaxSourceBytes {
-				err = imageasset.ErrTooLarge
-			} else if object.Asset.AssetID != assetID || int64(len(object.Data)) != asset.Size ||
-				(asset.BusinessID != "" && asset.BusinessID != object.Asset.BusinessID) ||
-				(asset.Checksum != "" && !strings.EqualFold(asset.Checksum, object.Asset.Checksum)) {
-				err = errors.New("the attached image does not match its upload record")
-			} else {
-				source = object.Data
-			}
-		}
-	}
+	source, err := readSessionLocalAsset(ctx, asset)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, "", 0, 0, ctx.Err()
 		}
-		return nil, "", 0, 0, err
+		if strings.HasPrefix(assetID, "ast_local_") || s.dependencies.AssetFiles == nil {
+			return nil, "", 0, 0, files.ErrSessionAssetUnavailable
+		}
+		source, err = s.downloadSessionPreviewSource(ctx, asset)
+		if err != nil {
+			return nil, "", 0, 0, err
+		}
 	}
 	data, contentType, width, height, err := imageasset.PreviewBytes(ctx, source)
 	if err != nil {
@@ -180,6 +172,25 @@ func (s *ChatService) SessionImagePreview(ctx context.Context, sessionID, assetI
 		return nil, "", 0, 0, err
 	}
 	return data, contentType, width, height, nil
+}
+
+func (s *ChatService) downloadSessionPreviewSource(ctx context.Context, asset files.Asset) ([]byte, error) {
+	object, err := s.dependencies.AssetFiles.Download(ctx, files.DownloadRequest{AssetID: asset.AssetID, MaxBytes: imageasset.MaxSourceBytes})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrImagePreviewDownload, err)
+	}
+	if object.Truncated || len(object.Data) > imageasset.MaxSourceBytes {
+		return nil, imageasset.ErrTooLarge
+	}
+	if object.Asset.AssetID != asset.AssetID || int64(len(object.Data)) != asset.Size ||
+		(asset.BusinessID != "" && asset.BusinessID != object.Asset.BusinessID) ||
+		(asset.Checksum != "" && !strings.EqualFold(asset.Checksum, object.Asset.Checksum)) {
+		return nil, fmt.Errorf("%w: object does not match the session upload record", ErrImagePreviewDownload)
+	}
+	return object.Data, nil
 }
 
 func readSessionLocalAsset(ctx context.Context, asset files.Asset) ([]byte, error) {
