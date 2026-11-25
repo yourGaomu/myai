@@ -91,3 +91,35 @@ func TestSessionAssetLookupSeesPendingUploadAndPersistedAttachment(t *testing.T)
 		t.Fatalf("deleted session was authorized: %v", err)
 	}
 }
+
+func TestGeneratedAssetLookupResolvesItsSessionWorkspace(t *testing.T) {
+	ctx := planRecoveryContext(t)
+	h := newOutboxRecoveryHarness(t, journal.Options{})
+	defaultWorkspace := t.TempDir()
+	explicitWorkspace := t.TempDir()
+	lookup := sessionAssetLookup(h.store, h.store, nil, defaultWorkspace)
+	for _, test := range []struct {
+		session repository.SessionRecord
+		want    string
+	}{
+		{session: repository.SessionRecord{ID: "ordinary"}, want: defaultWorkspace},
+		{session: repository.SessionRecord{ID: "explicit", WorkspaceRoot: explicitWorkspace}, want: explicitWorkspace},
+		{session: repository.SessionRecord{ID: "isolated", WorkspaceSandboxID: "sandbox"}},
+	} {
+		const relative = ".myai/generated/preview.png"
+		const assetID = "ast_preview"
+		if err := h.store.SaveSession(ctx, test.session); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.store.SaveAsset(ctx, repository.AssetRecord{
+			ID: test.session.ID, SessionID: test.session.ID, AssetID: assetID,
+			ToolName: repository.AssetSourceGenerateImage, LocalPath: relative, Size: 42,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		asset, err := lookup(ctx, test.session.ID, assetID)
+		if err != nil || asset.WorkspaceRoot() != test.want || asset.LocalPath() != relative {
+			t.Fatalf("%s workspace = %q, path = %q, err = %v", test.session.ID, asset.WorkspaceRoot(), asset.LocalPath(), err)
+		}
+	}
+}

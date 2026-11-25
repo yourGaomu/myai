@@ -874,6 +874,7 @@ func (app *Application) InitChatService() {
 		Skills:              app.skillManager,
 		Hooks:               app.hookManager,
 		DefaultModel:        app.defaultModelID,
+		DefaultWorkspace:    app.workspace,
 		KnowledgeSearch:     app.knowledgeSearchService,
 		AgentRuns:           app.agentRunRepository,
 		AgentRunObserver:    app.memoryRunObserver(),

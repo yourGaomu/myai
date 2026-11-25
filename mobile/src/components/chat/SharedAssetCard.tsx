@@ -114,7 +114,10 @@ function RemoteAssetPreview({ assetID, buttonFeedback, loader, sessionID, title 
 
 const previewFailureMessage: Record<AssetImagePreviewError, string> = {
   offline: "中继未连接，连接后可预览",
-  timeout: "预览超时，请检查中继或版本后重试",
+  timeout: "等待图片预览超时，请重试",
+  attachment: "当前会话无法读取这张图片",
+  download: "Agent 暂时无法从资源存储读取图片",
+  too_large: "图片超过预览大小或分辨率限制",
   unsupported: "当前中继或 Agent 不支持私有预览",
   unavailable: "此图片暂无法通过中继预览",
   invalid: "无法读取图片预览",

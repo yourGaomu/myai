@@ -9,7 +9,7 @@ import (
 	repository "myai/core/port/repository"
 )
 
-func sessionAssetLookup(store repository.SessionRepository, reader repository.SessionAttachmentReader, queue *generationadapter.SessionQueue) files.SessionAssetLookup {
+func sessionAssetLookup(store repository.SessionRepository, reader repository.SessionAttachmentReader, queue *generationadapter.SessionQueue, defaultWorkspace string) files.SessionAssetLookup {
 	return func(ctx context.Context, sessionID, assetID string) (files.Asset, error) {
 		if store == nil || strings.TrimSpace(sessionID) == "" || !files.IsSessionAssetID(assetID) {
 			return files.Asset{}, files.ErrSessionAssetUnavailable
@@ -45,9 +45,14 @@ func sessionAssetLookup(store repository.SessionRepository, reader repository.Se
 		if record.AssetID != assetID || record.SessionID != sessionID || !record.IsSessionAttachment() || record.Size <= 0 {
 			return files.Asset{}, files.ErrSessionAssetUnavailable
 		}
+		workspace := current.WorkspaceRoot
+		// Ordinary chats use the Agent's configured tool workspace when no session root is stored.
+		if workspace == "" && current.WorkspaceSandboxID == "" {
+			workspace = defaultWorkspace
+		}
 		return files.Asset{
 			AssetID: record.AssetID, BusinessID: record.BusinessID, FileName: record.FileName,
 			ContentType: record.ContentType, Size: record.Size, Checksum: record.Checksum,
-			CreatedAt: record.CreatedAt}.WithLocalImage(record.LocalPath, current.WorkspaceRoot), nil
+			CreatedAt: record.CreatedAt}.WithLocalImage(record.LocalPath, workspace), nil
 	}
 }

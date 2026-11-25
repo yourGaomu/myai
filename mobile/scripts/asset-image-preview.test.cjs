@@ -266,6 +266,28 @@ test("only bounded typed JPEG/PNG/GIF/WebP payloads are usable and old Relay err
   assert.equal(h.requests.length, 3);
 });
 
+test("Agent preview errors identify the failing stage on the matching asset", (t) => {
+  const h = previewHarness(t);
+  for (const [code, reason] of [
+    ["asset_preview_attachment_unavailable", "attachment"],
+    ["asset_preview_download_failed", "download"],
+    ["asset_preview_invalid_image", "invalid"],
+    ["asset_preview_too_large", "too_large"],
+    ["asset_preview_timeout", "timeout"],
+  ]) {
+    const subscription = h.subscribe(`ast_${reason}`);
+    const request = h.requests.at(-1);
+    const message = {
+      type: "error", request_id: request.request_id, session_id: request.session_id,
+      payload: { request_type: "asset_image_preview", asset_id: request.payload.asset_id, code },
+    };
+    h.loader.handleMessage({ ...message, session_id: "another-session" });
+    assert.deepEqual(subscription.results, []);
+    h.loader.handleMessage(message);
+    assert.deepEqual(subscription.results, [{ status: "error", reason }]);
+  }
+});
+
 test("an authenticated connection sends the explicit session without touching the chat request", (t) => {
   const originalWebSocket = globalThis.WebSocket;
   const sockets = [];

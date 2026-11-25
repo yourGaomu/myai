@@ -18,6 +18,19 @@ const (
 	AssetImagePreviewMaxJSONBytes        = 3 * 1024 * 1024
 )
 
+const (
+	AssetPreviewErrorAttachmentUnavailable = "asset_preview_attachment_unavailable"
+	AssetPreviewErrorDownload              = "asset_preview_download_failed"
+	AssetPreviewErrorInvalidImage          = "asset_preview_invalid_image"
+	AssetPreviewErrorTooLarge              = "asset_preview_too_large"
+	AssetPreviewErrorTimeout               = "asset_preview_timeout"
+)
+
+type AssetImagePreviewErrorPayload struct {
+	ErrorPayload
+	RequestType MessageType `json:"request_type"`
+}
+
 type AssetImagePreviewPayload struct {
 	AssetID string `json:"asset_id"`
 }
