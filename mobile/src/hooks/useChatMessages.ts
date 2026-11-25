@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { AssetSummary, TokenUsage, ToolResultPayload } from "../protocol";
 import { mergeAssetSummaries } from "../utils/toolAssets";
-import type { PermissionState, UserQuestionState } from "../types/app";
+import type { PermissionState, UserQuestionDraftAnswer, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
 import { attachmentKey } from "../utils/attachments";
 import { newRequestID } from "../utils/ids";
@@ -385,6 +385,7 @@ export function useChatMessages() {
       const next = existing ? {
         ...question,
         submitted: question.submitted ?? existing.submitted,
+        submittedSummary: question.submittedSummary ?? existing.submittedSummary,
         draftAnswers: question.draftAnswers ?? existing.draftAnswers,
       } : question;
       return { ...current, pendingQuestions: existing
@@ -393,11 +394,11 @@ export function useChatMessages() {
     });
   }, [updateSessionChat]);
 
-  const setSessionQuestionDraft = useCallback((question: UserQuestionState, answers: Record<string, string>) => {
+  const setSessionQuestionDraft = useCallback((question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => {
     updateSessionChat(question.sessionID, (current) => {
       const existing = current.pendingQuestions.find((item) => sameQuestion(item, question));
       if (!existing || existing.submitted) return current;
-      const updated = { ...existing, draftAnswers: { ...answers } };
+      const updated = { ...existing, draftAnswers: { ...drafts } };
       return { ...current, pendingQuestions: current.pendingQuestions.map((item) => item === existing ? updated : item) };
     });
   }, [updateSessionChat]);

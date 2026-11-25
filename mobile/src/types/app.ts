@@ -8,6 +8,16 @@ export type PermissionState = {
   requireFreshConsent?: boolean;
 };
 
+export type UserQuestionDraftAnswer = {
+  selected: string[];
+  other: string;
+};
+
+export type UserQuestionAnswerSubmission = {
+  structuredAnswers: Record<string, import("../protocol").UserQuestionStructuredAnswerPayload>;
+  adoptedDefaults?: boolean;
+};
+
 export type UserQuestionState = {
   questionID: string;
   requestID: string;
@@ -16,7 +26,8 @@ export type UserQuestionState = {
   questions: import("../protocol").UserQuestionItemPayload[];
   sourceTaskID?: string;
   submitted?: boolean;
-  draftAnswers?: Record<string, string>;
+  submittedSummary?: string;
+  draftAnswers?: Record<string, UserQuestionDraftAnswer>;
 };
 
 export type RelayScope = { pairingID: string; connectionID: string };

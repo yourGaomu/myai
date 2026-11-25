@@ -4,18 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"myai/core/adapter/chat/pendinginput"
+	toolcatalog "myai/core/adapter/tool/catalog"
+	toolexecutor "myai/core/adapter/tool/executor"
 	generationcommand "myai/core/application/chat/generation/command"
 	generationresult "myai/core/application/chat/generation/result"
 	"myai/core/contextmgr"
+	domaininteraction "myai/core/domain/interaction"
 	domainmessage "myai/core/domain/message"
 	domainsubagent "myai/core/domain/subagent"
 	modelport "myai/core/port/model"
 	"myai/core/session"
+	"myai/core/tool"
+	"myai/core/tool/local"
 )
 
 type pendingContextProvider struct{}
@@ -273,4 +280,57 @@ func TestRepeatedWaitsAreBoundedWithoutFalseFinalAnswer(t *testing.T) {
 func (acknowledger *pendingTestAcknowledger) Acknowledge(messageID string) error {
 	acknowledger.ids = append(acknowledger.ids, messageID)
 	return nil
+}
+
+func TestAgentLoopResumesAfterStructuredClarification(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("Project overview"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tools := tool.NewRegisterTools()
+	tools.Register(local.NewReadFileToolWithWorkspace(workspace))
+	tools.Register(local.NewAskUserTool())
+	for _, tt := range []struct {
+		name   string
+		answer domaininteraction.Answer
+		result string
+	}{
+		{
+			name: "answered",
+			answer: domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{
+				"style": {Selected: []string{"plain"}},
+			}},
+			result: `{"structured_answers":{"style":{"selected":["plain"]}}}`,
+		},
+		{name: "skipped", answer: domaininteraction.Answer{Cancelled: true}, result: `{"skipped":true}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &pendingModel{responses: []modelport.ChatResult{
+				{ToolCalls: []domainmessage.ToolCall{{ID: "inspect", Name: "read_file", Type: "function", Arguments: `{"path":"README.md"}`}}},
+				{ToolCalls: []domainmessage.ToolCall{{ID: "clarify", Name: "ask_user", Type: "function", Arguments: `{"decision_impact":"high","decision_reason":"The visual direction changes implementation.","context_evidence":[{"source":"workspace","path":"README.md","tool":"read_file","finding":"The project overview lacks branding."}],"title":"Confirm direction","questions":[{"id":"style","prompt":"Which style?","multi_select":false,"choices":[{"label":"plain"}]}]}`}}},
+				{Content: "Continue with the available information"},
+			}}
+			s := AgentLoopService{Contexts: pendingContextProvider{}, Tools: toolcatalog.Catalog{Tools: tools}, ToolExecutor: toolexecutor.Executor{Registry: tools}}
+			asks := 0
+			response, err := s.Run(context.Background(), generationcommand.Run{
+				Model: model, Session: &session.Session{ID: "session", WorkspaceRoot: workspace},
+				Stream: modelport.ChatStreamHandler{OnUserQuestion: func(_ context.Context, request domaininteraction.Request) (domaininteraction.Answer, error) {
+					asks++
+					if request.ToolCallID != "clarify" || len(request.Questions) != 1 {
+						t.Fatalf("unexpected question: %#v", request)
+					}
+					return tt.answer, nil
+				}},
+			})
+			if err != nil || asks != 1 || model.calls != 3 || response.Content != "Continue with the available information" {
+				t.Fatalf("run did not resume: response=%#v errors=%v asks=%d samples=%d", response, err, asks, model.calls)
+			}
+			for _, message := range model.requests[2].Messages {
+				if result, ok := message.FirstToolResult(); ok && result.ToolCallID == "clarify" && result.Content == tt.result {
+					return
+				}
+			}
+			t.Fatal("resumed model sample did not receive the clarification result")
+		})
+	}
 }

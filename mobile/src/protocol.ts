@@ -590,14 +590,14 @@ export type PermissionResultPayload = {
   scope?: PermissionApprovalScope;
 };
 
-export type UserQuestionItemPayload = {
-  id: string;
-  prompt: string;
-  options?: string[];
-  allow_other?: boolean;
+export type UserQuestionOptionPayload = {
+  label: string;
+  description?: string;
+  recommended?: boolean;
 };
 
 export type UserQuestionPayload = {
+  schema_version: 2;
   question_id: string;
   tool_call_id?: string;
   run_id?: string;
@@ -607,9 +607,24 @@ export type UserQuestionPayload = {
   questions: UserQuestionItemPayload[];
 };
 
+export type UserQuestionItemPayload = {
+  id: string;
+  prompt: string;
+  choices: UserQuestionOptionPayload[];
+  multi_select: boolean;
+  allow_other: boolean;
+};
+
+export type UserQuestionStructuredAnswerPayload = {
+  selected?: string[];
+  other?: string;
+};
+
 export type UserQuestionAnswerPayload = {
+  schema_version: 2;
   question_id: string;
-  answers?: Record<string, string>;
+  structured_answers: Record<string, UserQuestionStructuredAnswerPayload>;
+  adopted_defaults?: boolean;
   cancelled?: boolean;
 };
 

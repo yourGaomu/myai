@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -21,10 +22,17 @@ func (a *Agent) handleUserQuestionAnswerContext(ctx context.Context, message pro
 	if err != nil {
 		return fmt.Errorf("decode user question answer failed: %w", err)
 	}
+	if payload.SchemaVersion != 2 {
+		return fmt.Errorf("unsupported user question schema_version %d", payload.SchemaVersion)
+	}
 	if payload.QuestionID == "" {
 		return errors.New("question_id is required")
 	}
-	answer := domaininteraction.Answer{Answers: payload.Answers, Cancelled: payload.Cancelled}
+	structured := make(map[string]domaininteraction.QuestionAnswer, len(payload.StructuredAnswers))
+	for id, value := range payload.StructuredAnswers {
+		structured[id] = domaininteraction.QuestionAnswer{Selected: append([]string(nil), value.Selected...), Other: value.Other}
+	}
+	answer := domaininteraction.Answer{Structured: structured, AdoptedDefaults: payload.AdoptedDefaults, Cancelled: payload.Cancelled}
 	if a.userQuestionWaiters.resolveFor(message.SessionID, message.RequestID, payload.QuestionID, answer) {
 		return nil
 	}
@@ -117,15 +125,49 @@ func (a *Agent) askUserQuestion(ctx context.Context, conn *websocket.Conn, messa
 	}
 }
 
+// The dedicated question payload is the public view of an ask_user call.
+func remoteToolArguments(name, arguments string) string {
+	if name == "ask_user" {
+		return ""
+	}
+	return arguments
+}
+
+func remoteToolResult(name, content string) string {
+	if name != "ask_user" {
+		return content
+	}
+	var result struct {
+		StructuredAnswers map[string]protocol.UserQuestionStructuredAnswerPayload `json:"structured_answers,omitempty"`
+		AdoptedDefaults   bool                                                    `json:"adopted_defaults,omitempty"`
+		Skipped           bool                                                    `json:"skipped,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return ""
+	}
+	public, err := json.Marshal(result)
+	if err != nil {
+		return ""
+	}
+	return string(public)
+}
+
 func userQuestionPayload(request domaininteraction.Request) protocol.UserQuestionPayload {
 	questions := make([]protocol.UserQuestionItemPayload, 0, len(request.Questions))
 	for _, question := range request.Questions {
+		choices := make([]protocol.UserQuestionOptionPayload, 0, len(question.Choices))
+		for _, choice := range question.Choices {
+			choices = append(choices, protocol.UserQuestionOptionPayload{
+				Label: choice.Label, Description: choice.Description, Recommended: choice.Recommended,
+			})
+		}
 		questions = append(questions, protocol.UserQuestionItemPayload{
-			ID: question.ID, Prompt: question.Prompt, Options: question.Options, AllowOther: question.AllowOther,
+			ID: question.ID, Prompt: question.Prompt, Choices: choices,
+			MultiSelect: question.MultiSelect, AllowOther: question.AllowOther,
 		})
 	}
 	return protocol.UserQuestionPayload{
-		QuestionID: request.ID, ToolCallID: request.ToolCallID, RunID: request.RunID,
+		SchemaVersion: 2, QuestionID: request.ID, ToolCallID: request.ToolCallID, RunID: request.RunID,
 		SourceTaskID: request.SourceTaskID, SourceSessionID: request.SourceSessionID,
 		Title: request.Title, Questions: questions,
 	}

@@ -529,14 +529,22 @@ type PermissionResultPayload struct {
 	Scope      string `json:"scope,omitempty"`
 }
 
+type UserQuestionOptionPayload struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+}
+
 type UserQuestionItemPayload struct {
-	ID         string   `json:"id"`
-	Prompt     string   `json:"prompt"`
-	Options    []string `json:"options,omitempty"`
-	AllowOther bool     `json:"allow_other,omitempty"`
+	ID          string                      `json:"id"`
+	Prompt      string                      `json:"prompt"`
+	Choices     []UserQuestionOptionPayload `json:"choices"`
+	MultiSelect bool                        `json:"multi_select"`
+	AllowOther  bool                        `json:"allow_other"`
 }
 
 type UserQuestionPayload struct {
+	SchemaVersion   int                       `json:"schema_version"`
 	QuestionID      string                    `json:"question_id"`
 	ToolCallID      string                    `json:"tool_call_id,omitempty"`
 	RunID           string                    `json:"run_id,omitempty"`
@@ -546,10 +554,17 @@ type UserQuestionPayload struct {
 	Questions       []UserQuestionItemPayload `json:"questions"`
 }
 
+type UserQuestionStructuredAnswerPayload struct {
+	Selected []string `json:"selected,omitempty"`
+	Other    string   `json:"other,omitempty"`
+}
+
 type UserQuestionAnswerPayload struct {
-	QuestionID string            `json:"question_id"`
-	Answers    map[string]string `json:"answers,omitempty"`
-	Cancelled  bool              `json:"cancelled,omitempty"`
+	SchemaVersion     int                                            `json:"schema_version"`
+	QuestionID        string                                         `json:"question_id"`
+	StructuredAnswers map[string]UserQuestionStructuredAnswerPayload `json:"structured_answers"`
+	AdoptedDefaults   bool                                           `json:"adopted_defaults,omitempty"`
+	Cancelled         bool                                           `json:"cancelled,omitempty"`
 }
 
 type UserQuestionResolvedPayload struct {

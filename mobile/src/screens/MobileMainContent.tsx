@@ -340,8 +340,8 @@ export function MobileMainContent({
             <UserQuestionPrompt
               key={JSON.stringify([question.sessionID, question.requestID, question.questionID])}
               buttonFeedback={common.buttonFeedback}
-              onAnswer={(answers, cancelled) => permission.onAnswerUserQuestion(question, answers, cancelled)}
-              onChangeDraft={permission.onChangeUserQuestionDraft ? (answers) => permission.onChangeUserQuestionDraft?.(question, answers) : undefined}
+              onAnswer={(submission, cancelled) => permission.onAnswerUserQuestion(question, submission, cancelled)}
+              onChangeDraft={permission.onChangeUserQuestionDraft ? (drafts) => permission.onChangeUserQuestionDraft?.(question, drafts) : undefined}
               question={question}
             />
           ))}

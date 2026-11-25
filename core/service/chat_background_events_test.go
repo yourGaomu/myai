@@ -54,14 +54,14 @@ func backgroundTestRequest(id string) domaininteraction.Request {
 		RequestID: "model-request", RunID: "question-run", ToolCallID: "question-tool",
 		Title: "Choose the next action",
 		Questions: []domaininteraction.Question{
-			{ID: "color", Prompt: "Which color?", Options: []string{"blue", "green"}},
+			{ID: "color", Prompt: "Which color?", Choices: []domaininteraction.Option{{Label: "blue"}, {Label: "green"}}},
 			{ID: "details", Prompt: "Any details?", AllowOther: true},
 		},
 	}
 }
 
 func backgroundTestAnswer() domaininteraction.Answer {
-	return domaininteraction.Answer{Answers: map[string]string{"color": "blue", "details": "Keep the current layout"}}
+	return domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"color": {Selected: []string{"blue"}}, "details": {Other: "Keep the current layout"}}}
 }
 
 func backgroundTestAskQuestion(stream llm.ChatStreamHandler, ctx context.Context, request domaininteraction.Request) <-chan backgroundTestQuestionResult {
@@ -171,10 +171,10 @@ func TestBackgroundQuestionAnswerValidationAndIdentity(t *testing.T) {
 					t.Fatalf("canceled resolver error = %v", err)
 				}
 				for _, invalid := range []domaininteraction.Answer{
-					{Answers: map[string]string{"color": "blue"}},
-					{Answers: map[string]string{"color": "orange", "details": "details"}},
-					{Answers: map[string]string{"color": "blue", "unknown": "details"}},
-					{Answers: map[string]string{"color": "blue", "details": "  "}},
+					{Structured: map[string]domaininteraction.QuestionAnswer{"color": {Selected: []string{"blue"}}}},
+					{Structured: map[string]domaininteraction.QuestionAnswer{"color": {Selected: []string{"orange"}}, "details": {Other: "details"}}},
+					{Structured: map[string]domaininteraction.QuestionAnswer{"color": {Selected: []string{"blue"}}, "unknown": {Other: "details"}}},
+					{Structured: map[string]domaininteraction.QuestionAnswer{"color": {Selected: []string{"blue"}}, "details": {Other: "  "}}},
 				} {
 					if err := s.ResolveBackgroundQuestion(context.Background(), ask.SessionID, ask.TurnID, ask.Question.ID, invalid); err == nil {
 						t.Fatalf("invalid answer was accepted: %#v", invalid)
@@ -199,7 +199,7 @@ func TestBackgroundQuestionAnswerValidationAndIdentity(t *testing.T) {
 					t.Fatalf("first question response: %v", err)
 				}
 				if !dismissed {
-					answer.Answers["color"] = "mutated after resolving"
+					answer.Structured["color"] = domaininteraction.QuestionAnswer{Selected: []string{"mutated after resolving"}}
 				}
 				if err := s.ResolveBackgroundQuestion(context.Background(), ask.SessionID, ask.TurnID, ask.Question.ID, domaininteraction.Answer{Cancelled: true}); err == nil {
 					t.Fatal("second question response was accepted")
@@ -255,11 +255,11 @@ func TestBackgroundListQuestionsUsesTurnIdentityAndDeepCopies(t *testing.T) {
 			t.Fatalf("ListBackgroundQuestions() = %#v, want %#v", listed, want)
 		}
 		listed[0].Title = "changed listed title"
-		listed[0].Questions[0].Options[0] = "changed listed option"
+		listed[0].Questions[0].Choices[0].Label = "changed listed option"
 		listed[0].Questions[0].Prompt = "changed listed prompt"
 		listed[0].Questions[1] = domaininteraction.Question{ID: "changed-question"}
 		for i := range pending {
-			pending[i].request.Questions[0].Options[0] = "changed source option"
+			pending[i].request.Questions[0].Choices[0].Label = "changed source option"
 			pending[i].request.Questions[0].Prompt = "changed source prompt"
 		}
 		if again := s.ListBackgroundQuestions("session"); !reflect.DeepEqual(again, want) {
@@ -336,7 +336,7 @@ func TestBackgroundSubscriptionReplaysPendingIdentityAndDeepCopies(t *testing.T)
 		permissionFirst.Permission.Arguments = "changed live arguments"
 		questionFirst.Question.Title = "changed live title"
 		questionFirst.Question.Questions[0].Prompt = "changed live prompt"
-		questionFirst.Question.Questions[0].Options[0] = "changed live option"
+		questionFirst.Question.Questions[0].Choices[0].Label = "changed live option"
 		if !reflect.DeepEqual(permissionSecond, wantPermission) || !reflect.DeepEqual(questionSecond, wantQuestion) {
 			t.Fatal("live subscribers share mutable interaction payloads")
 		}
@@ -349,7 +349,7 @@ func TestBackgroundSubscriptionReplaysPendingIdentityAndDeepCopies(t *testing.T)
 			t.Fatalf("pending replay changed identity, sequence, order, or payload: permission=%#v question=%#v", permissionReplay, questionReplay)
 		}
 		permissionReplay.Permission.Name = "changed replay tool"
-		questionReplay.Question.Questions[0].Options[0] = "changed replay option"
+		questionReplay.Question.Questions[0].Choices[0].Label = "changed replay option"
 		questionReplay.Question.Questions[1] = domaininteraction.Question{ID: "changed replay question"}
 		again, stopAgain := s.SubscribeBackgroundTurns(1)
 		defer stopAgain()

@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	tooladapter "myai/core/adapter/tool/executor"
 	generationcommand "myai/core/application/chat/generation/command"
+	sessionresult "myai/core/application/session/result"
+	domainagentrun "myai/core/domain/agentrun"
 	domaininteraction "myai/core/domain/interaction"
 	domainmessage "myai/core/domain/message"
 	"myai/core/llm"
@@ -58,23 +61,23 @@ func TestPermissionRepliesMatchApprovalAndRequest(t *testing.T) {
 func TestUserQuestionRepliesAreValidatedAndFirstAnswerWins(t *testing.T) {
 	registry := newUserQuestionWaiterRegistry()
 	request := domaininteraction.Request{
-		ID: "question-1", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Choose", Options: []string{"A", "B"}}},
+		ID: "question-1", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Choose", Choices: []domaininteraction.Option{{Label: "A"}, {Label: "B"}}}},
 	}
 	waiter, err := registry.register(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if registry.resolve(request.ID, domaininteraction.Answer{Answers: map[string]string{"choice": "C"}}) {
+	if registry.resolve(request.ID, domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"choice": {Selected: []string{"C"}}}}) {
 		t.Fatal("accepted an answer outside the offered options")
 	}
-	answer := domaininteraction.Answer{Answers: map[string]string{"choice": "B"}}
+	answer := domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"choice": {Selected: []string{"B"}}}}
 	if !registry.resolve(request.ID, answer) {
 		t.Fatal("did not resolve a valid answer")
 	}
-	if registry.resolve(request.ID, domaininteraction.Answer{Answers: map[string]string{"choice": "A"}}) {
+	if registry.resolve(request.ID, domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"choice": {Selected: []string{"A"}}}}) {
 		t.Fatal("accepted a duplicate answer")
 	}
-	if received := <-waiter; received.Answers["choice"] != "B" {
+	if received := <-waiter; received.Structured["choice"].Selected[0] != "B" {
 		t.Fatalf("received the wrong answer: %#v", received)
 	}
 }
@@ -82,7 +85,7 @@ func TestUserQuestionRepliesAreValidatedAndFirstAnswerWins(t *testing.T) {
 func TestUserQuestionListReportsResolvedKnownQuestions(t *testing.T) {
 	registry := newUserQuestionWaiterRegistry()
 	request := domaininteraction.Request{
-		ID: "question-active", SessionID: "session-1", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Choose"}},
+		ID: "question-active", SessionID: "session-1", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Choose", AllowOther: true}},
 	}
 	if _, err := registry.register(request); err != nil {
 		t.Fatal(err)
@@ -98,7 +101,7 @@ func TestUserQuestionListReportsResolvedKnownQuestions(t *testing.T) {
 	if len(resolved) != 0 {
 		t.Fatalf("active question in another session was marked resolved: %#v", resolved)
 	}
-	if !registry.resolve(request.ID, domaininteraction.Answer{Answers: map[string]string{"choice": "done"}}) {
+	if !registry.resolve(request.ID, domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"choice": {Other: "done"}}}) {
 		t.Fatal("could not resolve active question")
 	}
 	_, resolved = registry.list("", []string{request.ID})
@@ -281,5 +284,34 @@ func TestForegroundPermissionRemembersAndReusesOrdinaryGrants(t *testing.T) {
 				t.Fatal("remembered grant did not allow ordinary call")
 			}
 		})
+	}
+}
+
+func TestRemoteQuestionPayloadsKeepDecisionEvidenceInternal(t *testing.T) {
+	const internalArguments = `{"decision_reason":"private reasoning","context_evidence":[{"finding":"private evidence"}]}`
+	const internalResult = `{"skipped":true,"safe_default_if_skipped":"private fallback"}`
+	history := sessionHistoryMessages([]sessionresult.MessageListItem{{
+		ToolName: "ask_user", ToolArguments: internalArguments, Content: internalResult,
+	}})
+	runEvent := agentRunEventPayload(domainagentrun.Event{
+		ToolName: "ask_user", Arguments: internalArguments, Content: internalResult,
+	})
+	ordinaryRunEvent := agentRunEventPayload(domainagentrun.Event{
+		ToolName: "read_file", Arguments: `{"path":"README.md"}`, Content: "Project overview",
+	})
+	if ordinaryRunEvent.Arguments != `{"path":"README.md"}` || ordinaryRunEvent.Content != "Project overview" {
+		t.Fatalf("ordinary tool data changed: %#v", ordinaryRunEvent)
+	}
+	payload, err := json.Marshal([]any{history, runEvent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"context_evidence", "decision_reason", "safe_default_if_skipped", "private"} {
+		if strings.Contains(string(payload), token) {
+			t.Fatalf("remote payload exposed %q: %s", token, payload)
+		}
+	}
+	if history[0].Content != `{"skipped":true}` || runEvent.Content != `{"skipped":true}` {
+		t.Fatal("skip status was lost in the remote payload")
 	}
 }

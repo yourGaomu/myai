@@ -69,6 +69,7 @@ import type {
 } from "../protocol";
 import type { PendingAction, PermissionState, QuestionSync, RelayScope, UserQuestionState } from "../types/app";
 import { assetSummariesForSession } from "../utils/toolAssets";
+import { validateQuestionChoices } from "../utils/userQuestion";
 import type { SessionChatState } from "./useChatMessages";
 
 type Args = {
@@ -421,6 +422,15 @@ export function useRemoteMessageHandler({
       function rememberQuestion(sessionID: string, requestID: string, payload: UserQuestionPayload) {
         if (!sessionID || !requestID || !payload.question_id || !payload.questions?.length ||
             resolvedUserQuestionIDsRef.current.has(payload.question_id)) return false;
+        if (payload.schema_version !== 2) {
+          addErrorMessage(sessionID, "问答协议版本不匹配，请同时升级 Agent 与移动端后重试。");
+          return false;
+        }
+        try { payload.questions.forEach(validateQuestionChoices); }
+        catch (error) {
+          addErrorMessage(sessionID, error instanceof Error ? error.message : "问答协议无效，请升级 Agent 与移动端。");
+          return false;
+        }
         const existing = getSessionChat(sessionID).pendingQuestions.some((question) =>
           question.questionID === payload.question_id && question.requestID === requestID);
         if (!existing) {

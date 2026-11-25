@@ -97,7 +97,10 @@ const stored = (id, role, text) => historyMessageToChatItem({
   id, role, content: text, created_at: "2025-01-01T00:00:00Z",
 });
 const permission = (approvalID, requestID, extra = {}) => ({ approvalID, requestID, sessionID: "s", name: "tool", permission: "write", arguments: "{}", ...extra });
-const question = (questionID, requestID, sessionID = "s") => ({ questionID, requestID, sessionID, title: "Confirm", questions: [{ id: "details", prompt: "Details?" }] });
+const question = (questionID, requestID, sessionID = "s") => ({
+  questionID, requestID, sessionID, title: "Confirm",
+  questions: [{ id: "details", prompt: "Details?", multi_select: false, allow_other: true, choices: [] }],
+});
 const turnID = (chat) => latestRegeneratableTurnID(buildChatTurns(chat.messages));
 
 function addTurn(hook, requestID, status = "paused") {
@@ -393,21 +396,29 @@ test("a lost question submission can retry with its draft, while stale callbacks
   const chat = h.render();
   const prompt = question("q1", "run-a");
   chat.setSessionPendingQuestion("s", prompt);
-  chat.setSessionQuestionDraft(prompt, { details: "My input" });
-  assert.equal(chat.answerUserQuestion(prompt, { details: "My input" }), true);
+  const drafts = { details: { selected: [], other: "My input" } };
+  const structuredAnswers = { details: { other: "My input" } };
+  const submissionPayload = { structuredAnswers };
+  const skipPayload = { structuredAnswers: {} };
+  chat.setSessionQuestionDraft(prompt, drafts);
+  assert.equal(chat.answerUserQuestion(prompt, submissionPayload), true);
   const submission = chat.getSessionChat("s").pendingQuestions[0];
   assert.equal(h.questionQueries[0].get("q1"), submission);
-  assert.equal(chat.answerUserQuestion(prompt, { details: "Double tap" }), false);
-  assert.equal(chat.answerUserQuestion(question("q1", "other"), {}, true), false);
+  assert.equal(chat.answerUserQuestion(prompt, submissionPayload), false);
+  assert.equal(chat.answerUserQuestion(question("q1", "other"), skipPayload, true), false);
   chat.removeSessionPendingQuestion("s", "q1", "other");
   h.relayScopeRef.current = { pairingID: "pair", connectionID: "c2" };
   chat.setSessionPendingQuestion("s", { ...prompt, submitted: false });
-  assert.deepEqual(chat.getSessionChat("s").pendingQuestions[0].draftAnswers, { details: "My input" });
-  assert.equal(chat.answerUserQuestion(prompt, {}, true), false);
+  assert.deepEqual(chat.getSessionChat("s").pendingQuestions[0].draftAnswers, drafts);
+  assert.equal(chat.answerUserQuestion(prompt, skipPayload, true), false);
   const reconnected = h.render();
-  assert.equal(reconnected.answerUserQuestion(prompt, { details: "My input" }), true);
+  assert.equal(reconnected.answerUserQuestion(prompt, submissionPayload), true);
   assert.notEqual(h.questionQueries[1].get("q1"), submission);
-  assert.deepEqual(h.sent.map(({ payload }) => payload.answers), [{ details: "My input" }, { details: "My input" }]);
+  for (const { payload } of h.sent) {
+    assert.equal(payload.schema_version, 2);
+    assert.deepEqual(payload.structured_answers, structuredAnswers);
+    assert.equal(Object.hasOwn(payload, "answers"), false);
+  }
 });
 
 test("regenerate rejects old turns, double taps, live runs and stale session callbacks", () => {

@@ -203,7 +203,7 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 			send(protocol.TypeToolCall, protocol.ToolCallPayload{
 				ToolCallID: event.ToolCallID,
 				Name:       event.Name,
-				Arguments:  event.Arguments,
+				Arguments:  remoteToolArguments(event.Name, event.Arguments),
 			})
 		},
 		OnToolResult: func(event llm.ToolResultEvent) {
@@ -211,8 +211,8 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 			send(protocol.TypeToolResult, protocol.ToolResultPayload{
 				ToolCallID:   event.ToolCallID,
 				Name:         event.Name,
-				Arguments:    event.Arguments,
-				Result:       output.Content,
+				Arguments:    remoteToolArguments(event.Name, event.Arguments),
+				Result:       remoteToolResult(event.Name, output.Content),
 				Error:        output.Failed(),
 				Status:       string(output.Status),
 				ErrorCode:    output.ErrorCode,

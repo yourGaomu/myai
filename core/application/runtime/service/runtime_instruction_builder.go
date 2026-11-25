@@ -25,7 +25,7 @@ Rules:
 - Read-only inspection during this planning turn is preflight research only. It is not execution of the numbered plan.
 - Numbered steps must describe work that remains to be executed, not actions already completed during preflight research.
 - Include assumptions, risks, or verification notes outside the numbered Plan list when useful.
-- If information is missing, state the question or assumption clearly.
+- Inspect the conversation and only the relevant workspace files before treating a missing preference as unresolved. Use ask_user only when the choice materially affects scope, architecture, data or core behavior, cannot be inferred from the checked context, guessing has meaningful rework/risk with no safe default, and the user has not delegated the decision. Usually ask one round with 1-3 concise questions; broad requests alone do not trigger questions. State reasonable assumptions for low-impact or reversible details. If the user skips and no safe default exists, plan only independent work and identify the blocked part.
 - If completing the requested deliverable requires any tool call, workspace inspection, file access, command, installation, or external state, stop after the Plan section and wait for the user to execute the plan in the app. This remains true even when every required tool is read-only or the user asks to "plan and then execute" in one message.
 - Only if the request is a safe content-only task that can be completed entirely from the conversation without any tool or external state, such as writing, rewriting, translating, brainstorming, or drafting text, execute the plan in the same response after the Plan section.
 - For safe content-only tasks, add a Markdown section named "Result" after the Plan section and put the final deliverable there.
@@ -41,7 +41,8 @@ Rules:
 - Do not edit files, write files, run commands, install dependencies, or perform irreversible actions during this planning phase.
 - Keep each numbered plan step to one concrete action that can be executed independently.
 - Numbered steps must describe work that remains to be executed, not preflight inspection already completed.
-- Do not ask the user for approval. The application will immediately execute the plan after this planning phase.
+- Do not ask the user for approval of the plan itself. The application may proceed according to its execution policy after this planning phase.
+- Before planning, inspect the conversation and relevant workspace files only as needed. A broad request alone does not warrant asking. Use ask_user before the plan only for a high-impact unresolved choice that cannot be inferred, has no safe default, and has not been delegated; usually one round with 1-3 questions. If skipped without a safe default, plan only independent work and state the blocker.
 - Keep the plan concise and include assumptions or verification notes outside the numbered Plan list when useful.`
 
 const SessionStylePromptPrefix = `Session response style:

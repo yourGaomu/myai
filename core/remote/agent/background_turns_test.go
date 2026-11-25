@@ -46,7 +46,7 @@ func (f *backgroundControlFacade) ResolveBackgroundPermission(_ context.Context,
 func (f *backgroundControlFacade) ResolveBackgroundQuestion(_ context.Context, sessionID, turnID, questionID string, answer domaininteraction.Answer) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.questionPending || sessionID != "session" || turnID != "turn" || questionID != "question" || answer.Answers["choice"] != "yes" {
+	if !f.questionPending || sessionID != "session" || turnID != "turn" || questionID != "question" || answer.Structured["choice"].Selected[0] != "yes" {
 		return errors.New("invalid question answer")
 	}
 	f.questionPending = false
@@ -58,7 +58,7 @@ func (f *backgroundControlFacade) ListBackgroundQuestions(sessionID string) []do
 	if !f.questionPending || sessionID != "" && sessionID != "session" {
 		return nil
 	}
-	return []domaininteraction.Request{{ID: "question", SessionID: "session", RequestID: "turn", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Proceed?", Options: []string{"yes", "no"}}}}}
+	return []domaininteraction.Request{{ID: "question", SessionID: "session", RequestID: "turn", Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Proceed?", Choices: []domaininteraction.Option{{Label: "yes"}, {Label: "no"}}}}}}
 }
 
 func TestBackgroundReplyFacadeValidatesIdentityAndOnlyFirstAnswerWins(t *testing.T) {
@@ -68,7 +68,7 @@ func TestBackgroundReplyFacadeValidatesIdentityAndOnlyFirstAnswerWins(t *testing
 			a := &Agent{chatService: facade, permissionWaiters: newPermissionWaiterRegistry(), userQuestionWaiters: newUserQuestionWaiterRegistry()}
 			messageType, payload := protocol.TypePermissionResult, any(protocol.PermissionResultPayload{ApprovalID: "approval", Allowed: true})
 			if kind == "question" {
-				messageType, payload = protocol.TypeUserQuestionAnswer, protocol.UserQuestionAnswerPayload{QuestionID: "question", Answers: map[string]string{"choice": "yes"}}
+				messageType, payload = protocol.TypeUserQuestionAnswer, protocol.UserQuestionAnswerPayload{SchemaVersion: 2, QuestionID: "question", StructuredAnswers: map[string]protocol.UserQuestionStructuredAnswerPayload{"choice": {Selected: []string{"yes"}}}}
 			}
 			message, err := protocol.NewMessage(messageType, "turn", "user", "device", "session", payload)
 			if err != nil {

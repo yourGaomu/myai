@@ -44,7 +44,7 @@ import type {
   SubagentTaskEvent,
   SubagentTask,
 } from "../protocol";
-import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, UserQuestionState, ViewMode } from "../types/app";
+import type { PendingAction, PermissionState, SessionAgentMode, SessionPermissionMode, UserQuestionAnswerSubmission, UserQuestionDraftAnswer, UserQuestionState, ViewMode } from "../types/app";
 import type { ChatItem } from "../types/chat";
 import type { DocumentImportStatus, KnowledgeBaseChanges } from "../types/knowledge";
 import type { ButtonFeedback } from "../types/ui";
@@ -202,8 +202,8 @@ export type ChatContentProps = {
   connected: boolean;
   deviceID: string;
   greetingName: string;
-  onAnswerUserQuestion?: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
-  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
+  onAnswerUserQuestion?: (question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => void;
   onExecutePlan?: () => void;
   onNearHeaderChange?: (near: boolean) => void;
   onOpenChangePath?: (path: string) => void;
@@ -321,8 +321,8 @@ export type PermissionContentProps = {
   onAllowPermission: () => void;
   onDenyPermission: () => void;
   pendingPermission: PermissionState | null;
-  onAnswerUserQuestion: (question: UserQuestionState, answers: Record<string, string>, cancelled?: boolean) => boolean;
-  onChangeUserQuestionDraft?: (question: UserQuestionState, answers: Record<string, string>) => void;
+  onAnswerUserQuestion: (question: UserQuestionState, submission: UserQuestionAnswerSubmission, cancelled?: boolean) => boolean;
+  onChangeUserQuestionDraft?: (question: UserQuestionState, drafts: Record<string, UserQuestionDraftAnswer>) => void;
   pendingQuestions: UserQuestionState[];
 };
 

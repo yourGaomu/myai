@@ -118,7 +118,7 @@ func cloneBackgroundEvent(event BackgroundTurnEvent) BackgroundTurnEvent {
 		question := *event.Question
 		question.Questions = append([]domaininteraction.Question(nil), question.Questions...)
 		for i := range question.Questions {
-			question.Questions[i].Options = append([]string(nil), question.Questions[i].Options...)
+			question.Questions[i].Choices = append([]domaininteraction.Option(nil), question.Questions[i].Choices...)
 		}
 		event.Question = &question
 	}
@@ -181,9 +181,14 @@ func (s *ChatService) ResolveBackgroundQuestion(ctx context.Context, sessionID, 
 	if err := domaininteraction.ValidateAnswer(*waiter.event.Question, answer); err != nil {
 		return err
 	}
-	copyAnswer := domaininteraction.Answer{Cancelled: answer.Cancelled, Answers: make(map[string]string, len(answer.Answers))}
-	for id, value := range answer.Answers {
-		copyAnswer.Answers[id] = value
+	copyAnswer := domaininteraction.Answer{
+		Cancelled: answer.Cancelled, AdoptedDefaults: answer.AdoptedDefaults,
+		Structured: make(map[string]domaininteraction.QuestionAnswer, len(answer.Structured)),
+	}
+	for id, value := range answer.Structured {
+		copyAnswer.Structured[id] = domaininteraction.QuestionAnswer{
+			Selected: append([]string(nil), value.Selected...), Other: value.Other,
+		}
 	}
 	delete(s.backgroundPending, key)
 	status := "answered"

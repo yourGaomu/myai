@@ -202,7 +202,7 @@ func TestBackgroundInteractionRequiresGrantAndReplaysOnReconnect(t *testing.T) {
 			if kind == "question" {
 				answerType, answerJSON = protocol.TypeUserQuestionAnswer, `{"question_id":"question","answers":{"choice":"yes"}}`
 				event.Kind, event.ApprovalID, event.Permission = "user_question", "", nil
-				event.Question = &protocol.UserQuestionPayload{QuestionID: "question", Questions: []protocol.UserQuestionItemPayload{{ID: "choice", Prompt: "Proceed?", Options: []string{"yes", "no"}}}}
+				event.Question = &protocol.UserQuestionPayload{SchemaVersion: 2, QuestionID: "question", Questions: []protocol.UserQuestionItemPayload{{ID: "choice", Prompt: "Proceed?", Choices: []protocol.UserQuestionOptionPayload{{Label: "yes"}, {Label: "no"}}}}}
 				resolved.Kind, resolved.Question, resolved.ApprovalID = "user_question_resolved", event.Question, ""
 			}
 			answer := protocol.Message{Type: answerType, RequestID: "background", SessionID: "session", UserID: "local", DeviceID: "pc-local", ClientToken: token, Payload: json.RawMessage(answerJSON)}

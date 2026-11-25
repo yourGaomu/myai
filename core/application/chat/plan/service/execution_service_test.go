@@ -409,7 +409,7 @@ func TestExecutionPreservesPermissionsAndInteractionForEveryStep(t *testing.T) {
 						return domaininteraction.Answer{}, errors.New("step lost caller context")
 					}
 					questions = append(questions, request)
-					return domaininteraction.Answer{Answers: map[string]string{"choice": "continue"}}, nil
+					return domaininteraction.Answer{Structured: map[string]domaininteraction.QuestionAnswer{"choice": {Selected: []string{"continue"}}}}, nil
 				},
 			}
 			generation := planGenerationFunc(func(ctx context.Context, task generationcommand.GenerationTask) (generationresult.GenerationResponse, error) {
@@ -440,11 +440,11 @@ func TestExecutionPreservesPermissionsAndInteractionForEveryStep(t *testing.T) {
 					ID: "question-" + metadata.StepID, SessionID: current.ID, SourceSessionID: current.ParentSessionID,
 					SourceTaskID: current.ParentTaskID, RequestID: stream.CorrelationID, RunID: "step-run-" + metadata.StepID,
 					ToolCallID: "question-call-" + metadata.StepID, Title: "Continue step?",
-					Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Continue?", Options: []string{"continue", "stop"}}},
+					Questions: []domaininteraction.Question{{ID: "choice", Prompt: "Continue?", Choices: []domaininteraction.Option{{Label: "continue"}, {Label: "stop"}}}},
 				}
 				wantQuestions = append(wantQuestions, question)
 				answer, err := task.Stream.OnUserQuestion(ctx, question)
-				if err != nil || answer.Cancelled || answer.Answers["choice"] != "continue" {
+				if err != nil || answer.Cancelled || len(answer.Structured["choice"].Selected) != 1 || answer.Structured["choice"].Selected[0] != "continue" {
 					return generationresult.GenerationResponse{}, fmt.Errorf("step %s lost question answer: %#v, %v", metadata.StepID, answer, err)
 				}
 				return generationresult.GenerationResponse{SessionID: task.Session.ID, Result: modelport.ChatResult{Content: metadata.StepID}}, nil

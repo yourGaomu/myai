@@ -114,11 +114,15 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (toold
 
 	matches := make([]searchFileMatch, 0)
 	truncated := false
+	searchedRoot := false
 	err = filepath.WalkDir(input.Path, func(path string, entry os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if walkErr != nil {
+			if path == input.Path {
+				return walkErr
+			}
 			return nil
 		}
 		if len(matches) >= input.Limit {
@@ -132,12 +136,21 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (toold
 			return nil
 		}
 		if entry.IsDir() {
+			if path == input.Path {
+				searchedRoot = true
+			}
 			return nil
 		}
 
 		fileMatches, err := searchOneFile(input.Path, path, input)
 		if err != nil {
+			if path == input.Path {
+				return err
+			}
 			return nil
+		}
+		if path == input.Path {
+			searchedRoot = fileMatches != nil
 		}
 		for _, match := range fileMatches {
 			if len(matches) >= input.Limit {
@@ -172,6 +185,11 @@ func (t *SearchFilesTool) Call(ctx context.Context, args json.RawMessage) (toold
 	}
 	resultOutput := tooldef.SuccessOutput(string(output))
 	resultOutput.Truncated = truncated
+	if searchedRoot && !truncated {
+		if tracker := toolruntime.WorkspaceInspectionTrackerFrom(ctx); tracker != nil {
+			tracker.Record(t.Name(), workspace, input.Path)
+		}
+	}
 	return resultOutput, nil
 }
 

@@ -43,7 +43,7 @@ func permissionAskPayload(approvalID string, request llm.ToolPermissionRequest) 
 	return protocol.PermissionAskPayload{
 		ApprovalID:          approvalID,
 		Name:                request.Name,
-		Arguments:           request.Arguments,
+		Arguments:           remoteToolArguments(request.Name, request.Arguments),
 		Permission:          string(request.Permission),
 		RequireFreshConsent: request.RequireFreshConsent,
 	}
