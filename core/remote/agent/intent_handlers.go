@@ -147,3 +147,24 @@ func (a *Agent) handleIntentTraceClear(ctx context.Context, conn *websocket.Conn
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeIntentTraceClearResult, message.RequestID, message.SessionID, protocol.IntentTraceClearResultPayload{SessionID: payload.SessionID})
 }
+
+// Chat history shows summaries and fetches bodies only when a card is opened.
+func (a *Agent) historyIntentTraces(ctx context.Context, sessionID string, include bool) []protocol.IntentTracePayload {
+	if !include {
+		return nil
+	}
+	service, err := a.intentService()
+	if err != nil {
+		return nil
+	}
+	traces, err := service.ListIntentTraces(ctx, sessionID, 50)
+	if err != nil {
+		return nil
+	}
+	items := make([]protocol.IntentTracePayload, 0, len(traces))
+	for _, trace := range traces {
+		trace.RequestBody, trace.ResponseBody = "", ""
+		items = append(items, intentTraceResult(trace))
+	}
+	return items
+}

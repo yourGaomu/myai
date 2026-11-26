@@ -1,6 +1,7 @@
 import type {
   AssetSummary,
   FileReadResultPayload,
+  IntentTracePayload,
   TokenUsage,
   UploadedAssetPayload,
 } from "../protocol";
@@ -25,6 +26,7 @@ export type ChatItem = {
   completedAt?: string;
   id: string;
   historyID?: string;
+  intentTrace?: IntentTracePayload;
   finalReply?: boolean;
   requestID?: string;
   runID?: string;

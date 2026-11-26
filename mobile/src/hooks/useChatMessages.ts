@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-import type { AssetSummary, TokenUsage, ToolResultPayload } from "../protocol";
+import type { AssetSummary, IntentTracePayload, TokenUsage, ToolResultPayload } from "../protocol";
 import { mergeAssetSummaries } from "../utils/toolAssets";
 import type { PermissionState, UserQuestionDraftAnswer, UserQuestionState } from "../types/app";
 import type { ChatAttachment, ChatItem, ChatMessageStatus } from "../types/chat";
@@ -86,6 +86,40 @@ export function useChatMessages() {
     },
     [updateSessionChat],
   );
+
+
+  const upsertIntentTrace = useCallback((sessionID: string, trace: IntentTracePayload, historical = false) => {
+    if (!sessionID.trim() || !trace.trace_id) return;
+    const id = `intent-trace:${trace.trace_id}`;
+    updateSessionChat(sessionID, (current) => {
+      const index = current.messages.findIndex((item) => item.id === id);
+      const previous = current.messages[index]?.intentTrace;
+      if (previous && previous.status !== "started" && trace.status === "started") return current;
+      const next: ChatItem = {
+        id,
+        requestID: trace.request_id,
+        createdAt: trace.created_at,
+        role: "event",
+        text: "Jev 意图判断",
+        intentTrace: {
+          ...trace,
+          request_body: trace.request_body ?? previous?.request_body,
+          response_body: trace.response_body ?? previous?.response_body,
+        },
+      };
+      const messages = [...current.messages];
+      if (index >= 0) {
+        messages[index] = next;
+      } else if (historical) {
+        const traceTime = Date.parse(trace.created_at);
+        const nextIndex = messages.findIndex((item) => Date.parse(item.createdAt || "") > traceTime);
+        messages.splice(nextIndex < 0 ? messages.length : nextIndex, 0, next);
+      } else {
+        messages.push(next);
+      }
+      return { ...current, messages };
+    });
+  }, [updateSessionChat]);
 
   const markUserMessageQueued = useCallback(
     (sessionID: string, requestID: string) => {
@@ -545,6 +579,7 @@ export function useChatMessages() {
 
   return {
     addMessage,
+    upsertIntentTrace,
     markUserMessageQueued,
     markUserMessageDelivered,
     addToolCall,

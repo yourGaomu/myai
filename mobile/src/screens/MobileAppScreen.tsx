@@ -64,6 +64,7 @@ import { useIntentSettings } from "../hooks/useIntentSettings";
 import { useMCPState } from "../hooks/useMCPState";
 import { useMCPTrust } from "../hooks/useMCPTrust";
 import { SubagentInspectionModal } from "../components/subagents/SubagentInspectionModal";
+import { IntentTraceDetailContext } from "../components/chat/IntentTraceCard";
 import { MobileMainContent } from "./MobileMainContent";
 import { MobileScreenShell } from "./MobileScreenShell";
 import { buttonFeedback } from "../utils/buttonFeedback";
@@ -288,6 +289,7 @@ function PairedWorkspace({
   } = useFileState({ pairingID, sessionID });
   const {
     addMessage,
+    upsertIntentTrace,
     addToolCall,
     addToolResult,
     appendAssistant,
@@ -638,6 +640,7 @@ function PairedWorkspace({
     requestSessions,
     requestAgentRuns,
   } = useRemoteRequests({
+    upsertIntentTrace,
     clearAssets,
     clearFileEntries,
     clearHistory,
@@ -953,6 +956,7 @@ function PairedWorkspace({
     activeRequestIDRef,
     addErrorMessage: (targetSessionID, message) => addMessage(targetSessionID, "error", message),
     addEventMessage: (targetSessionID, message) => addMessage(targetSessionID, "event", message),
+    upsertIntentTrace,
     addToolCall,
     addToolResult,
     applyRunCompleted,
@@ -1526,6 +1530,10 @@ function PairedWorkspace({
       scrollKey={mcpDetailNavKey}
     >
       <AssetPreviewConnectionContext value={previewConnection}>
+      <IntentTraceDetailContext value={{
+        details: intentTraceDetails, errors: intentTraceDetailErrors,
+        loadingID: intentTraceDetailLoadingID, request: requestIntentTraceDetail,
+      }}>
       <MobileMainContent
         changes={{
           canOpenSelectedChangeFile,
@@ -1799,6 +1807,8 @@ function PairedWorkspace({
           userID,
         }}
       />
+
+      </IntentTraceDetailContext>
 
       {/* 2.0 子代理只读实时查看面板（不调用 LoadSession，不改变主会话 ID） */}
       <SubagentInspectionModal

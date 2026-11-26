@@ -15,6 +15,7 @@ import { TurnTokenUsage } from "./TurnTokenUsage";
 import { CharacterAvatar } from "../common/CharacterAvatar";
 import { AssistantReply } from "./AssistantReply";
 import { ChatAttachmentCard } from "./ChatAttachmentCard";
+import { IntentTraceCard } from "./IntentTraceCard";
 import { SharedAssetCard } from "./SharedAssetCard";
 import { useChatStyles } from "./styles";
 import { ThinkingReasoning } from "./ThinkingReasoning";
@@ -49,6 +50,10 @@ export function MessageBubble({ buttonFeedback, catalog, hideReasoning = false, 
       setTimeout(() => setCopied(false), 1800);
     }
   };
+
+  if (message.intentTrace) {
+    return <IntentTraceCard buttonFeedback={buttonFeedback} trace={message.intentTrace} />;
+  }
 
   if (message.role === "tool_call" || message.role === "tool") {
     const isKnowledgeSearch = message.toolName === "knowledge_search";

@@ -3,6 +3,8 @@ const state = {
   connected: false,
   activeRequestID: "",
   activeAssistant: null,
+  jevTraces: new Map(),
+  jevRequests: new Map(),
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestions: [],
@@ -503,6 +505,16 @@ function handleMessage(message) {
     case "heartbeat":
       el.requestText.textContent = `Ack ${message.request_id || ""}`.trim();
       break;
+    case "intent_trace_event":
+      updateJevTrace(readPayload(message));
+      break;
+    case "intent_trace_get_result": {
+      const traceID = state.jevRequests.get(message.request_id);
+      state.jevRequests.delete(message.request_id);
+      const trace = readPayload(message).trace;
+      if (traceID && trace?.trace_id === traceID) updateJevTrace(trace);
+      break;
+    }
     case "assistant_delta":
       appendAssistant(readPayload(message).content || "");
       break;
@@ -534,7 +546,9 @@ function handleMessage(message) {
       break;
     case "background_turn_event": {
       const payload = readPayload(message);
-      if (payload.kind === "user_question") {
+      if (payload.kind === "intent_trace" && payload.session_id === el.sessionId.value.trim()) {
+        updateJevTrace(payload.intent_trace);
+      } else if (payload.kind === "user_question") {
         showUserQuestion({ request_id: payload.turn_id, session_id: payload.session_id, payload: payload.question });
       } else if (payload.kind === "user_question_resolved") {
         resolveUserQuestion(payload.question?.question_id, payload.status);
@@ -566,6 +580,16 @@ function handleMessage(message) {
       addMessage("event", `Session ${shortID(el.sessionId.value)} selected`);
       break;
     case "error": {
+      const traceID = state.jevRequests.get(message.request_id);
+      if (traceID) {
+        state.jevRequests.delete(message.request_id);
+        const entry = state.jevTraces.get(traceID);
+        if (entry) {
+          entry.requestedStatus = "";
+          entry.output.textContent = "Could not load the Jev record. Reopen to retry.";
+        }
+        break;
+      }
       const errorText = readPayload(message).message || "Remote error";
       addMessage("error", errorText);
       if (errorText.includes("client token is invalid or expired")) {
@@ -614,7 +638,8 @@ function isPassiveMessage(type) {
 function isTrackedRequest(requestID) {
   return (
     requestID === state.activeRequestID ||
-    requestID === state.pendingSessionRequestID
+    requestID === state.pendingSessionRequestID ||
+    state.jevRequests.has(requestID)
   );
 }
 
@@ -721,6 +746,60 @@ function addMessage(kind, text) {
   el.messages.appendChild(node);
   el.messages.scrollTop = el.messages.scrollHeight;
   return node;
+}
+
+function updateJevTrace(trace) {
+  if (!trace?.trace_id) return;
+  let entry = state.jevTraces.get(trace.trace_id);
+  if (!entry) {
+    const node = document.createElement("details");
+    node.className = "message event jev-trace";
+    const summary = document.createElement("summary");
+    const inputTitle = document.createElement("strong");
+    inputTitle.textContent = "Input";
+    const input = document.createElement("pre");
+    const outputTitle = document.createElement("strong");
+    outputTitle.textContent = "Output";
+    const output = document.createElement("pre");
+    node.append(summary, inputTitle, input, outputTitle, output);
+    entry = { node, summary, input, output, trace, requestedStatus: "" };
+    node.addEventListener("toggle", () => requestJevTraceDetails(entry));
+    state.jevTraces.set(trace.trace_id, entry);
+    el.messages.appendChild(node);
+    el.messages.scrollTop = el.messages.scrollHeight;
+  }
+  if (entry.trace.status !== "started" && trace.status === "started") return;
+  entry.trace = { ...entry.trace, ...trace };
+  const value = entry.trace;
+  const status = value.status === "started" ? "Checking" : value.status === "succeeded" ? "Complete" : value.status.replaceAll("_", " ");
+  const routes = { plan_only: "plan awaits confirmation", plan_resume: "resume plan", chat: "chat" };
+  const result = value.choice ? ` · ${value.choice} (${Math.round((value.confidence ?? 0) * 100)}%)` : "";
+  const route = value.route ? ` · ${routes[value.route] || value.route}` : "";
+  entry.summary.textContent = `Jev intent check · ${status}${result}${route}`;
+  entry.input.textContent = prettyJevBody(value.request_body) || "Open to load input";
+  entry.output.textContent = prettyJevBody(value.response_body) || (value.status === "started" ? "Waiting for response…" : "No response body");
+  if (value.response_truncated) entry.output.textContent += "\nResponse truncated.";
+  requestJevTraceDetails(entry);
+}
+
+function requestJevTraceDetails(entry) {
+  const trace = entry.trace;
+  if (!entry.node.open || entry.requestedStatus === trace.status ||
+      (trace.request_body && (trace.response_body || trace.status === "started"))) return;
+  const requestID = newRequestID();
+  if (sendEnvelope("intent_trace_get", { request_id: requestID, payload: { trace_id: trace.trace_id } })) {
+    entry.requestedStatus = trace.status;
+    state.jevRequests.set(requestID, trace.trace_id);
+  }
+}
+
+function prettyJevBody(body) {
+  if (!body) return "";
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
 }
 
 function showPermission(message) {
@@ -983,6 +1062,9 @@ function restorePairing() {
 
 function clearPairing(text) {
   state.clientToken = "";
+  for (const entry of state.jevTraces.values()) entry.node.remove();
+  state.jevTraces.clear();
+  state.jevRequests.clear();
   state.sessions = [];
   state.pendingQuestions = [];
   state.pendingQuestionList = null;

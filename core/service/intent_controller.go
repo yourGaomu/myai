@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -116,6 +117,14 @@ func isLoopbackHost(host string) bool {
 }
 
 func (c *IntentController) Classify(ctx context.Context, current *session.Session, input string) (AutoPlanDecision, error) {
+	return c.classify(ctx, current, input, nil)
+}
+
+func (c *IntentController) ClassifyWithTrace(ctx context.Context, current *session.Session, input string, observe func(intentport.Trace)) (AutoPlanDecision, error) {
+	return c.classify(ctx, current, input, observe)
+}
+
+func (c *IntentController) classify(ctx context.Context, current *session.Session, input string, observe func(intentport.Trace)) (AutoPlanDecision, error) {
 	//如果是子代理则不应该触发
 	if (current != nil && current.Kind == session.KindSubagent) || strings.TrimSpace(input) == "" {
 		return AutoPlanDecision{Intent: AutoPlanIntentConversation, Action: AutoPlanActionChat}, nil
@@ -146,15 +155,15 @@ func (c *IntentController) Classify(ctx context.Context, current *session.Sessio
 		if config.APIKey == "" {
 			return AutoPlanDecision{}, errors.New("Jev API key is not configured")
 		}
-		return c.classifyJev(ctx, current, input, config)
+		return c.classifyJev(ctx, current, input, config, observe)
 	default:
 		return AutoPlanDecision{}, errors.New("invalid intent strategy")
 	}
 }
 
-func (c *IntentController) classifyJev(ctx context.Context, current *session.Session, input string, config intentport.Config) (AutoPlanDecision, error) {
+func (c *IntentController) classifyJev(ctx context.Context, current *session.Session, input string, config intentport.Config, observe func(intentport.Trace)) (AutoPlanDecision, error) {
 	history := recentIntentUserMessages(current)
-	result, err := c.evaluateJev(ctx, current, input, history, config, false)
+	result, err := c.evaluateJev(ctx, current, input, history, config, false, observe)
 	if err != nil {
 		return AutoPlanDecision{}, err
 	}
@@ -169,15 +178,8 @@ func (c *IntentController) classifyJev(ctx context.Context, current *session.Ses
 	}
 	// The trace is finalized before the caller is allowed to plan or execute.
 	result.Trace.Action = string(decision.Action)
-	result.Trace.Route = "chat"
-	if decision.Action == AutoPlanActionResumePlan {
-		result.Trace.Route = "plan_resume"
-	} else if decision.Action == AutoPlanActionPlanOnly {
-		result.Trace.Route = "plan_only"
-	} else if decision.Action == AutoPlanActionPlanExecute {
-		result.Trace.Route = "plan_execute"
-	}
-	if err := c.store.SaveTrace(ctx, result.Trace); err != nil {
+	result.Trace.Route = string(effectiveAutoPlanAction(decision.Action, current))
+	if err := c.finishJevTrace(ctx, result.Trace, observe); err != nil {
 		return AutoPlanDecision{}, fmt.Errorf("record Jev decision: %w", err)
 	}
 	return decision, nil
@@ -195,7 +197,7 @@ type jevResult struct {
 	Trace      intentport.Trace
 }
 
-func (c *IntentController) evaluateJev(ctx context.Context, current *session.Session, input string, history []string, config intentport.Config, test bool) (jevResult, error) {
+func (c *IntentController) evaluateJev(ctx context.Context, current *session.Session, input string, history []string, config intentport.Config, test bool, observe func(intentport.Trace)) (jevResult, error) {
 	runes := []rune(input)
 	if len(runes) > 4000 {
 		input = string(runes[:4000])
@@ -224,7 +226,7 @@ func (c *IntentController) evaluateJev(ctx context.Context, current *session.Ses
 		ExpiresAt:      started.Add(intentTraceRetention),
 		BaseURL:        config.BaseURL,
 		RequestedModel: config.Model,
-		RequestBody:    strings.ReplaceAll(string(requestBody), config.APIKey, "[REDACTED]"),
+		RequestBody:    redactJevBody(requestBody, config.APIKey),
 		Status:         "started",
 	}
 	if test {
@@ -233,21 +235,27 @@ func (c *IntentController) evaluateJev(ctx context.Context, current *session.Ses
 	if err := c.store.SaveTrace(ctx, trace); err != nil {
 		return jevResult{}, fmt.Errorf("record Jev request: %w", err)
 	}
+	if observe != nil {
+		observe(trace)
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	//发送请求
 	responseBody, httpStatus, sendErr := c.client.Send(requestCtx, config, requestBody)
 	trace.DurationMS = time.Since(started).Milliseconds()
 	trace.HTTPStatus = httpStatus
-	trace.ResponseBody = strings.ReplaceAll(string(responseBody), config.APIKey, "[REDACTED]")
+	trace.ResponseBody = redactJevBody(responseBody, config.APIKey)
 	trace.ResponseTruncated = errors.Is(sendErr, intentport.ErrResponseTooLarge)
 	if sendErr != nil {
 		trace.Status = "http_error"
 		trace.ErrorCode = "request_failed"
-		if errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
+		switch requestCtx.Err() {
+		case context.DeadlineExceeded:
 			trace.Status, trace.ErrorCode = "timeout", "timeout"
+		case context.Canceled:
+			trace.Status, trace.ErrorCode = "cancelled", "cancelled"
 		}
-		if saveErr := c.saveFinalTrace(ctx, trace); saveErr != nil {
+		if saveErr := c.finishJevTrace(ctx, trace, observe); saveErr != nil {
 			return jevResult{}, fmt.Errorf("record failed Jev response: %w", saveErr)
 		}
 		return jevResult{}, sendErr
@@ -255,7 +263,7 @@ func (c *IntentController) evaluateJev(ctx context.Context, current *session.Ses
 	var decoded map[string]json.RawMessage
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
 		trace.Status, trace.ErrorCode = "invalid_response", "invalid_json"
-		if saveErr := c.saveFinalTrace(ctx, trace); saveErr != nil {
+		if saveErr := c.finishJevTrace(ctx, trace, observe); saveErr != nil {
 			return jevResult{}, saveErr
 		}
 		return jevResult{}, errors.New("invalid Jev response JSON")
@@ -270,20 +278,51 @@ func (c *IntentController) evaluateJev(ctx context.Context, current *session.Ses
 	answerErr := json.Unmarshal(answers["intent"], &answer)
 	if answersErr != nil || answerErr != nil || answer.Type != "choice" || answer.Confidence == nil || *answer.Confidence < 0 || *answer.Confidence > 1 || (answer.Choice != "conversation" && answer.Choice != "explanation" && answer.Choice != "implementation" && answer.Choice != "resume_plan") {
 		trace.Status, trace.ErrorCode = "invalid_response", "invalid_choice"
-		if saveErr := c.saveFinalTrace(ctx, trace); saveErr != nil {
+		if saveErr := c.finishJevTrace(ctx, trace, observe); saveErr != nil {
 			return jevResult{}, saveErr
 		}
 		return jevResult{}, errors.New("invalid Jev choice response")
 	}
 	var responseModel string
 	_ = json.Unmarshal(decoded["model"], &responseModel)
-	trace.Status, trace.Choice, trace.Confidence, trace.ResponseModel = "succeeded", answer.Choice, *answer.Confidence, responseModel
+	trace.Status, trace.Choice, trace.Confidence, trace.ResponseModel = "succeeded", answer.Choice, *answer.Confidence, strings.ReplaceAll(responseModel, config.APIKey, "[REDACTED]")
 	if test {
 		if err := c.saveFinalTrace(ctx, trace); err != nil {
 			return jevResult{}, err
 		}
 	}
 	return jevResult{Choice: answer.Choice, Confidence: *answer.Confidence, Trace: trace}, nil
+}
+
+var jevJSONString = regexp.MustCompile(`"(?:[^"\\\x00-\x1f]|\\.)*"`)
+
+func redactJevBody(body []byte, key string) string {
+	if key == "" {
+		return string(body)
+	}
+	// Providers can echo the bearer value with JSON escapes. Decode each quoted
+	// string for comparison and preserve the wire representation elsewhere.
+	redacted := jevJSONString.ReplaceAllStringFunc(string(body), func(token string) string {
+		var text string
+		if json.Unmarshal([]byte(token), &text) != nil || !strings.Contains(text, key) {
+			return token
+		}
+		encoded, _ := json.Marshal(strings.ReplaceAll(text, key, "[REDACTED]"))
+		return string(encoded)
+	})
+	quoted, _ := json.Marshal(key)
+	return strings.NewReplacer(key, "[REDACTED]", string(quoted[1:len(quoted)-1]), "[REDACTED]").Replace(redacted)
+}
+
+func (c *IntentController) finishJevTrace(ctx context.Context, trace intentport.Trace, observe func(intentport.Trace)) error {
+	err := c.saveFinalTrace(ctx, trace)
+	if observe != nil {
+		if err != nil {
+			trace.Status, trace.ErrorCode, trace.Route = "record_error", "trace_save_failed", "chat"
+		}
+		observe(trace)
+	}
+	return err
 }
 
 func (c *IntentController) saveFinalTrace(ctx context.Context, trace intentport.Trace) error {
@@ -360,7 +399,7 @@ func (c *IntentController) TestJev(ctx context.Context, input intentport.Config)
 	if err := validateIntentConfig(input); err != nil {
 		return 0, err
 	}
-	result, err := c.evaluateJev(ctx, nil, "你好", nil, input, true)
+	result, err := c.evaluateJev(ctx, nil, "你好", nil, input, true, nil)
 	return result.Trace.DurationMS, err
 }
 

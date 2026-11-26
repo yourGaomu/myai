@@ -5,6 +5,7 @@ export type MessageType =
   | "user_message_queued"
   | "assistant_delta"
   | "assistant_done"
+  | "intent_trace_event"
   | "agent_run_started"
   | "agent_run_event"
   | "agent_run_completed"
@@ -507,6 +508,7 @@ export type AgentRunListResultPayload = {
 };
 
 export type BackgroundTurnKind =
+  | "intent_trace"
   | "started"
   | "delta"
   | "run_event"
@@ -518,6 +520,7 @@ export type BackgroundTurnKind =
   | "resync_required";
 
 export type BackgroundTurnEventPayload = {
+  intent_trace?: IntentTracePayload;
   message_id?: string;
   assets?: AssetSummary[];
   turn_id?: string;
@@ -748,6 +751,7 @@ export type SessionHistoryMessage = {
 };
 
 export type SessionHistoryResultPayload = {
+  intent_traces?: IntentTracePayload[];
   session_id: string;
   messages?: SessionHistoryMessage[];
   count?: number;
@@ -762,6 +766,7 @@ export type SessionHistoryMetaPayload = {
 };
 
 export type SessionHistoryMetaResultPayload = {
+  intent_traces?: IntentTracePayload[];
   session_id: string;
   message_count?: number;
   last_message_id?: string;
@@ -1082,6 +1087,8 @@ export type IntentTraceStatus =
   | "http_error"
   | "timeout"
   | "invalid_response"
+  | "cancelled"
+  | "record_error"
   | string;
 
 export type IntentTraceRoute =

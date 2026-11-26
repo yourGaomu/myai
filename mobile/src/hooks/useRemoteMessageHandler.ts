@@ -34,6 +34,7 @@ import type {
   IntentTraceClearResultPayload,
   IntentTraceGetResultPayload,
   IntentTraceListResultPayload,
+  IntentTracePayload,
   KnowledgeCatalogResultPayload,
   KnowledgeDocumentListResultPayload,
   KnowledgeProfileListResultPayload,
@@ -82,6 +83,7 @@ type Args = {
   activeRequestIDRef: RefObject<string>;
   addErrorMessage: (sessionID: string, message: string) => void;
   addEventMessage: (sessionID: string, message: string) => void;
+  upsertIntentTrace: (sessionID: string, trace: IntentTracePayload) => void;
   addToolCall: (
     sessionID: string,
     name: string,
@@ -258,6 +260,7 @@ export function useRemoteMessageHandler({
   activeRequestIDRef,
   addErrorMessage,
   addEventMessage,
+  upsertIntentTrace,
   addToolCall,
   addToolResult,
   applyRunCompleted,
@@ -465,6 +468,14 @@ export function useRemoteMessageHandler({
           if (sessionID !== null) appendAssistant(sessionID, message.request_id, payload.content || "", payload.reasoning || "");
           break;
         }
+        case "intent_trace_event": {
+          const sessionID = resolveTurnSession(message);
+          const trace = message.payload as IntentTracePayload | undefined;
+          if (sessionID && trace?.trace_id && trace.session_id === sessionID && trace.request_id === message.request_id) {
+            upsertIntentTrace(sessionID, trace);
+          }
+          break;
+        }
         case "agent_run_started":
           if (resolveTurnSession(message) !== null) applyRunStarted(message.payload as AgentRunStartedPayload | undefined);
           break;
@@ -587,6 +598,11 @@ export function useRemoteMessageHandler({
           }
 
           switch (payload.kind) {
+            case "intent_trace": {
+              const trace = payload.intent_trace;
+              if (trace?.trace_id && trace.session_id === targetSessionID) upsertIntentTrace(targetSessionID, trace);
+              break;
+            }
             case "permission_ask": {
               const permission = payload.permission;
               const approvalID = payload.approval_id || permission?.approval_id;
@@ -1231,6 +1247,7 @@ export function useRemoteMessageHandler({
       activeRequestIDRef,
       addErrorMessage,
       addEventMessage,
+      upsertIntentTrace,
       addToolCall,
       addToolResult,
       applyRunCompleted,

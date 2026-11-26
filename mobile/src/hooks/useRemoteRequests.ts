@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
-import type { AgentRunListResultPayload, AssetListResultPayload, ErrorPayload, RelayMessage, SessionListResultPayload } from "../protocol";
+import type { IntentTracePayload, AgentRunListResultPayload, AssetListResultPayload, ErrorPayload, RelayMessage, SessionListResultPayload } from "../protocol";
 import type { PendingAction, RelayScope } from "../types/app";
 import type { ChatItem } from "../types/chat";
 import { newRequestID } from "../utils/ids";
@@ -28,6 +28,7 @@ type Args = {
   pendingHistorySessionIDRef: RefObject<string>;
   relayScopeRef: RefObject<RelayScope>;
   sessionIDRef: RefObject<string>;
+  upsertIntentTrace: (sessionID: string, trace: IntentTracePayload, historical?: boolean) => void;
   mergeSessionHistory: (sessionID: string, messages: ChatItem[], source: "cache" | "server") => void;
   requestSubagentTasks: (sessionID: string) => boolean;
   sendEnvelope: SendEnvelope;
@@ -51,6 +52,7 @@ export function useRemoteRequests({
   pendingHistorySessionIDRef,
   relayScopeRef,
   sessionIDRef,
+  upsertIntentTrace,
   mergeSessionHistory,
   requestSubagentTasks,
   sendEnvelope,
@@ -61,6 +63,7 @@ export function useRemoteRequests({
   const readRequestsRef = useRef(new Map<string, ReadRequest>());
   const { requestHistoryWithCache, requestSessionHistoryFull, handleSessionHistoryMessage, resetHistorySync } = useSessionHistorySync({
     historySessionIDRef, pendingHistorySessionIDRef, relayScopeRef, sessionIDRef,
+    upsertIntentTrace,
     mergeSessionHistory, sendEnvelope, startPending, stopPending,
   });
 
