@@ -12,6 +12,7 @@ import (
 	domaininteraction "myai/core/domain/interaction"
 	domaintool "myai/core/domain/tool"
 	"myai/core/llm"
+	intentport "myai/core/port/intent"
 )
 
 // BackgroundTurnEvent belongs to one background turn, independent of a client.
@@ -26,6 +27,7 @@ type BackgroundTurnEvent struct {
 	Permission                              *llm.ToolPermissionRequest
 	Question                                *domaininteraction.Request
 	Assets                                  []domaintool.SharedAsset
+	IntentTrace                             *intentport.Trace
 }
 
 type backgroundInteraction struct {
@@ -281,7 +283,11 @@ func (s *ChatService) backgroundStreamForContext(ctx context.Context, sessionID,
 		return s.awaitBackgroundInteraction(askCtx, event)
 	}
 	stream := llm.ChatStreamHandler{
-		CorrelationID:  turnID,
+		CorrelationID: turnID,
+		OnIntentTrace: func(trace intentport.Trace) {
+			trace.RequestBody, trace.ResponseBody = "", ""
+			emit(BackgroundTurnEvent{Kind: "intent_trace", IntentTrace: &trace})
+		},
 		OnRunStarted:   func(run domainagentrun.Run) { emit(BackgroundTurnEvent{Kind: "started", Status: "running", Run: &run}) },
 		OnRunEvent:     func(event domainagentrun.Event) { emit(BackgroundTurnEvent{Kind: "run_event", Event: &event}) },
 		OnRunCompleted: func(run domainagentrun.Run) { mu.Lock(); finishedRun = &run; mu.Unlock() },

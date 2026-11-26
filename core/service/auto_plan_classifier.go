@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+
+	intentport "myai/core/port/intent"
 	"myai/core/session"
 )
 
@@ -29,6 +31,19 @@ const (
 	AutoPlanActionResumePlan  AutoPlanAction = "plan_resume"
 )
 
+func effectiveAutoPlanAction(action AutoPlanAction, current *session.Session) AutoPlanAction {
+	switch action {
+	case AutoPlanActionPlanExecute:
+		// A new plan must be reviewed before execution.
+		return AutoPlanActionPlanOnly
+	case AutoPlanActionResumePlan:
+		if !hasExecutablePlan(current) {
+			return AutoPlanActionChat
+		}
+	}
+	return action
+}
+
 // AutoPlanDecision is the structured result used by ChatService before it
 // appends the user turn. Action is intentionally explicit instead of being
 // inferred from Intent so a classifier can refuse planning for an
@@ -45,4 +60,10 @@ type AutoPlanDecision struct {
 // session; classification happens before the user message is appended.
 type AutoPlanClassifier interface {
 	Classify(ctx context.Context, current *session.Session, input string) (AutoPlanDecision, error)
+}
+
+// IntentTraceClassifier optionally streams classifier request/response traces
+// to the active chat without changing the normal classifier contract.
+type IntentTraceClassifier interface {
+	ClassifyWithTrace(ctx context.Context, current *session.Session, input string, observe func(intentport.Trace)) (AutoPlanDecision, error)
 }

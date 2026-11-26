@@ -193,6 +193,10 @@ func (a *Agent) streamChatResponse(ctx context.Context, conn *websocket.Conn, me
 
 	response, err := run(llm.ChatStreamHandler{
 		CorrelationID: message.RequestID,
+		OnIntentTrace: func(trace intentport.Trace) {
+			// Trace delivery is observational. The chat can continue after a client disconnects.
+			_ = a.writeRemoteMessage(conn, protocol.TypeIntentTraceEvent, message.RequestID, sessionID, intentTraceResult(trace))
+		},
 		OnReasoning: func(text string) {
 			send(protocol.TypeAssistantDelta, protocol.AssistantDeltaPayload{Reasoning: text})
 		},

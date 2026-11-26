@@ -39,6 +39,10 @@ func backgroundTurnPayload(event service.BackgroundTurnEvent) protocol.Backgroun
 	if event.Kind == "completed" && event.Status == "succeeded" {
 		payload.Assets = completionAssetSummaries(event.SessionID, event.Assets)
 	}
+	if event.IntentTrace != nil {
+		trace := intentTraceResult(*event.IntentTrace)
+		payload.IntentTrace = &trace
+	}
 	if event.Permission != nil {
 		permission := permissionAskPayload(event.ApprovalID, *event.Permission)
 		payload.Permission = &permission

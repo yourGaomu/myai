@@ -499,7 +499,7 @@ func (s *Server) handleAgentMessage(p *peer, remoteAddr string, message protocol
 		return s.forwardToClient(message)
 	case protocol.TypeUserMessageQueued:
 		return s.forwardToClient(message)
-	case protocol.TypeIntentConfigQueryResult, protocol.TypeIntentConfigSetResult, protocol.TypeIntentConfigTestResult, protocol.TypeIntentTraceListResult, protocol.TypeIntentTraceGetResult, protocol.TypeIntentTraceClearResult:
+	case protocol.TypeIntentTraceEvent, protocol.TypeIntentConfigQueryResult, protocol.TypeIntentConfigSetResult, protocol.TypeIntentConfigTestResult, protocol.TypeIntentTraceListResult, protocol.TypeIntentTraceGetResult, protocol.TypeIntentTraceClearResult:
 		return s.forwardToClient(message)
 	case protocol.TypeSubagentTaskDetailResult, protocol.TypeSubagentTaskEventsResult:
 		return s.forwardToClient(message)

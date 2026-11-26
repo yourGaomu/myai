@@ -5,6 +5,7 @@ import (
 	domaininteraction "myai/core/domain/interaction"
 	domaintool "myai/core/domain/tool"
 	agentplan "myai/core/plan"
+	intentport "myai/core/port/intent"
 )
 
 type ToolResultEvent struct {
@@ -34,4 +35,5 @@ type ChatStreamHandler struct {
 	OnRunEvent      func(event domainagentrun.Event)
 	OnRunCompleted  func(run domainagentrun.Run)
 	OnPlanUpdate    func(plan *agentplan.Plan)
+	OnIntentTrace   func(trace intentport.Trace)
 }

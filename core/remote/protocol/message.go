@@ -19,6 +19,7 @@ const (
 	TypeUserMessageQueued                MessageType = "user_message_queued"
 	TypeAssistantDelta                   MessageType = "assistant_delta"
 	TypeAssistantDone                    MessageType = "assistant_done"
+	TypeIntentTraceEvent                 MessageType = "intent_trace_event"
 	TypeAgentRunStarted                  MessageType = "agent_run_started"
 	TypeAgentRunEvent                    MessageType = "agent_run_event"
 	TypeBackgroundTurnEvent              MessageType = "background_turn_event"
@@ -452,23 +453,24 @@ type AgentRunCompletedPayload struct {
 // BackgroundTurnEventPayload is an unsolicited session-scoped event. TurnID
 // identifies a new continuation, never the foreground request that spawned it.
 type BackgroundTurnEventPayload struct {
-	TurnID     string                `json:"turn_id"`
-	RequestID  string                `json:"request_id,omitempty"`
-	SessionID  string                `json:"session_id"`
-	RunID      string                `json:"run_id,omitempty"`
-	Sequence   uint64                `json:"sequence"`
-	Kind       string                `json:"kind"`
-	Status     string                `json:"status,omitempty"`
-	MessageID  string                `json:"message_id,omitempty"`
-	Assets     []AssetSummary        `json:"assets,omitempty"`
-	Content    string                `json:"content,omitempty"`
-	Reasoning  string                `json:"reasoning,omitempty"`
-	Error      string                `json:"error,omitempty"`
-	Run        *AgentRun             `json:"run,omitempty"`
-	Event      *AgentRunEvent        `json:"event,omitempty"`
-	ApprovalID string                `json:"approval_id,omitempty"`
-	Permission *PermissionAskPayload `json:"permission,omitempty"`
-	Question   *UserQuestionPayload  `json:"question,omitempty"`
+	TurnID      string                `json:"turn_id"`
+	RequestID   string                `json:"request_id,omitempty"`
+	SessionID   string                `json:"session_id"`
+	RunID       string                `json:"run_id,omitempty"`
+	Sequence    uint64                `json:"sequence"`
+	Kind        string                `json:"kind"`
+	Status      string                `json:"status,omitempty"`
+	MessageID   string                `json:"message_id,omitempty"`
+	Assets      []AssetSummary        `json:"assets,omitempty"`
+	Content     string                `json:"content,omitempty"`
+	Reasoning   string                `json:"reasoning,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	Run         *AgentRun             `json:"run,omitempty"`
+	Event       *AgentRunEvent        `json:"event,omitempty"`
+	ApprovalID  string                `json:"approval_id,omitempty"`
+	Permission  *PermissionAskPayload `json:"permission,omitempty"`
+	Question    *UserQuestionPayload  `json:"question,omitempty"`
+	IntentTrace *IntentTracePayload   `json:"intent_trace,omitempty"`
 }
 
 type AgentRunListPayload struct {
@@ -680,7 +682,8 @@ type SessionChangedPayload struct {
 }
 
 type SessionHistoryPayload struct {
-	SessionID string `json:"session_id,omitempty"`
+	SessionID           string `json:"session_id,omitempty"`
+	IncludeIntentTraces bool   `json:"include_intent_traces,omitempty"`
 }
 
 type SessionHistoryMessage struct {
@@ -700,12 +703,14 @@ type SessionHistoryMessage struct {
 }
 
 type SessionHistoryResultPayload struct {
-	SessionID string                  `json:"session_id"`
-	Messages  []SessionHistoryMessage `json:"messages"`
-	Count     int                     `json:"count"`
+	SessionID    string                  `json:"session_id"`
+	Messages     []SessionHistoryMessage `json:"messages"`
+	Count        int                     `json:"count"`
+	IntentTraces []IntentTracePayload    `json:"intent_traces,omitempty"`
 }
 
 type SessionHistoryMetaPayload struct {
+	IncludeIntentTraces       bool   `json:"include_intent_traces,omitempty"`
 	SessionID                 string `json:"session_id,omitempty"`
 	LocalMessageCount         int    `json:"local_message_count,omitempty"`
 	LocalLastMessageID        string `json:"local_last_message_id,omitempty"`
@@ -714,13 +719,14 @@ type SessionHistoryMetaPayload struct {
 }
 
 type SessionHistoryMetaResultPayload struct {
-	SessionID            string     `json:"session_id"`
-	MessageCount         int64      `json:"message_count"`
-	LastMessageID        string     `json:"last_message_id,omitempty"`
-	LastMessageCreatedAt *time.Time `json:"last_message_created_at,omitempty"`
-	HistoryVersion       int64      `json:"history_version"`
-	UpToDate             bool       `json:"up_to_date"`
-	CanDelta             bool       `json:"can_delta"`
+	SessionID            string               `json:"session_id"`
+	MessageCount         int64                `json:"message_count"`
+	LastMessageID        string               `json:"last_message_id,omitempty"`
+	LastMessageCreatedAt *time.Time           `json:"last_message_created_at,omitempty"`
+	HistoryVersion       int64                `json:"history_version"`
+	UpToDate             bool                 `json:"up_to_date"`
+	CanDelta             bool                 `json:"can_delta"`
+	IntentTraces         []IntentTracePayload `json:"intent_traces,omitempty"`
 }
 
 type SessionHistoryDeltaPayload struct {

@@ -449,3 +449,26 @@ test("an unanswered newer input rules out regenerating the older paused reply", 
   chat.addMessage("s", "user", "Newer input", "new");
   assert.equal(turnID(chat.getSessionChat("s")), undefined);
 });
+
+
+test("Jev updates one card for its own request and ignores a stale started snapshot", () => {
+  const h = harness();
+  const chat = h.render();
+  h.requestSessionMapRef.current.r = "s";
+  const trace = {
+    trace_id: "trace", session_id: "s", request_id: "r",
+    created_at: "2026-11-27T09:00:00Z", status: "started", request_body: '{"state":{"latest_request":"test"}}',
+  };
+  const event = { type: "intent_trace_event", request_id: "r", session_id: "s", payload: trace };
+  chat.remote(event);
+  assert.equal(chat.getSessionChat("s").messages[0]?.intentTrace?.status, "started");
+  chat.remote({ ...event, payload: { ...trace, trace_id: "wrong", session_id: "other" } });
+  chat.remote({ ...event, payload: { ...trace, status: "succeeded", route: "chat", response_body: '{"answer":"conversation"}' } });
+  chat.upsertIntentTrace("s", { ...trace, request_body: undefined }, true);
+  const messages = chat.getSessionChat("s").messages;
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].intentTrace.status, "succeeded");
+  assert.equal(messages[0].intentTrace.request_body, trace.request_body);
+  assert.equal(messages[0].intentTrace.response_body, '{"answer":"conversation"}');
+  assert.equal(buildChatTurns(messages, [])[0].type, "event");
+});

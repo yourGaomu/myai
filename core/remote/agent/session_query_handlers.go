@@ -154,9 +154,10 @@ func (a *Agent) handleSessionHistory(ctx context.Context, conn *websocket.Conn, 
 	}
 
 	payloadResult := protocol.SessionHistoryResultPayload{
-		SessionID: sessionID,
-		Messages:  sessionHistoryMessages(records),
-		Count:     len(records),
+		SessionID:    sessionID,
+		Messages:     sessionHistoryMessages(records),
+		Count:        len(records),
+		IntentTraces: a.historyIntentTraces(ctx, sessionID, payload.IncludeIntentTraces),
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryResult, message.RequestID, sessionID, payloadResult)
 }
@@ -184,6 +185,7 @@ func (a *Agent) handleSessionHistoryMeta(ctx context.Context, conn *websocket.Co
 		LastMessageCreatedAt: meta.LastMessageCreatedAt,
 		HistoryVersion:       meta.HistoryVersion,
 		UpToDate:             upToDate,
+		IntentTraces:         a.historyIntentTraces(ctx, sessionID, payload.IncludeIntentTraces),
 		CanDelta:             !upToDate && strings.TrimSpace(payload.LocalLastMessageID) != "" && int64(payload.LocalMessageCount) <= meta.MessageCount,
 	}
 	return a.writeRemoteMessage(conn, protocol.TypeSessionHistoryMetaResult, message.RequestID, sessionID, result)

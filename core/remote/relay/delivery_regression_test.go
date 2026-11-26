@@ -118,6 +118,41 @@ func TestClientHeartbeatAckAndUnrelatedErrorPreserveWireShape(t *testing.T) {
 	}
 }
 
+func TestIntentTraceTraversesRelayAsPartOfChatRequest(t *testing.T) {
+	s := newTestServer()
+	server := httptest.NewServer(s.routes())
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	agent := dialTestWebSocket(t, wsURL+"/ws/agent")
+	defer agent.Close()
+	writeAgentOnline(t, agent, "local", "pc-local", "123456")
+	readTestMessage(t, agent, protocol.TypeHeartbeat)
+	token := pairTestClient(t, server, "123456")
+	client := dialTestWebSocket(t, wsURL+"/ws/client")
+	defer client.Close()
+	writeTestMessage(t, client, protocol.Message{Type: protocol.TypeUserMessage, RequestID: "turn", UserID: "local", DeviceID: "pc-local", SessionID: "session", ClientToken: token})
+	readTestMessage(t, agent, protocol.TypeUserMessage)
+	readTestMessage(t, client, protocol.TypeHeartbeat)
+	for _, status := range []string{"started", "succeeded"} {
+		payload := protocol.IntentTracePayload{TraceID: "trace", SessionID: "session", RequestID: "turn", Status: status, RequestBody: `{ "input": "demo" }`}
+		if status == "succeeded" {
+			payload.ResponseBody = `{ "intent": "conversation" }`
+		}
+		message, err := protocol.NewMessage(protocol.TypeIntentTraceEvent, "turn", "local", "pc-local", "session", payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestMessage(t, agent, message)
+		response := readTestMessage(t, client, protocol.TypeIntentTraceEvent)
+		got, err := protocol.DecodePayload[protocol.IntentTracePayload](response)
+		if err != nil || response.RequestID != "turn" || got.TraceID != "trace" || got.Status != status || got.RequestBody != payload.RequestBody || got.ResponseBody != payload.ResponseBody {
+			t.Fatalf("unexpected intent event: %#v %v", response, err)
+		}
+	}
+	writeTestMessage(t, agent, protocol.Message{Type: protocol.TypeAssistantDone, RequestID: "turn", UserID: "local", DeviceID: "pc-local", SessionID: "session"})
+	readTestMessage(t, client, protocol.TypeAssistantDone)
+}
+
 func TestQueuedMessageTraversesRelayAndFinishesRoute(t *testing.T) {
 	s := newTestServer()
 	httpServer := httptest.NewServer(s.routes())

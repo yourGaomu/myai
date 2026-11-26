@@ -40,6 +40,7 @@ import (
 	"myai/core/llm"
 	agentplan "myai/core/plan"
 	filesport "myai/core/port/files"
+	intentport "myai/core/port/intent"
 	modelport "myai/core/port/model"
 	"myai/core/session"
 	"myai/core/skill"
@@ -376,7 +377,6 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 	}
 	var currentBefore *session.Session
 	autoPlanAction := AutoPlanActionChat
-	var autoPlanDecision AutoPlanDecision
 	var err error
 	// Load one stable pre-turn snapshot for both plan classification and
 	// deterministic (always-mode) retrieval. AppendUserMessage deliberately
@@ -394,18 +394,8 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 		// The selected intent strategy classifies both new implementation work and
 		// requests to resume an existing plan. The final plan-state check remains
 		// local so a classifier can never execute a nonexistent or completed plan.
-		autoPlanDecision = s.classifyAutoPlanRequest(ctx, currentBefore, input)
-		autoPlanAction = autoPlanDecision.Action
-		if autoPlanAction == AutoPlanActionPlanExecute {
-			// Planning decisions describe the work; execution requires a later
-			// explicit confirmation of the captured draft.
-			autoPlanAction = AutoPlanActionPlanOnly
-		}
-		if autoPlanAction == AutoPlanActionResumePlan && !hasExecutablePlan(currentBefore) {
-			// A classifier is advisory. Never execute a missing, completed, or
-			// otherwise non-executable plan based only on its response.
-			autoPlanAction = AutoPlanActionChat
-		}
+		autoPlanDecision := s.classifyAutoPlanRequest(ctx, currentBefore, input, stream.OnIntentTrace)
+		autoPlanAction = effectiveAutoPlanAction(autoPlanDecision.Action, currentBefore)
 	}
 
 	// RAG Context 与运行时指令都位于本轮消息尾部，不改变固定 System Prompt 和历史缓存前缀。
@@ -468,13 +458,19 @@ func (s *ChatService) sendMessageLocked(ctx context.Context, sessionID string, i
 	}
 }
 
-func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *session.Session, input string) AutoPlanDecision {
+func (s *ChatService) classifyAutoPlanRequest(ctx context.Context, current *session.Session, input string, observe func(intentport.Trace)) AutoPlanDecision {
 	classifier := s.dependencies.AutoPlanClassifier
 	if classifier == nil {
 		//使用兜底识别
 		classifier = RuleBasedAutoPlanClassifier{}
 	}
-	decision, err := classifier.Classify(ctx, current, input)
+	var decision AutoPlanDecision
+	var err error
+	if traced, ok := classifier.(IntentTraceClassifier); ok && observe != nil {
+		decision, err = traced.ClassifyWithTrace(ctx, current, input, observe)
+	} else {
+		decision, err = classifier.Classify(ctx, current, input)
+	}
 	if err != nil {
 		// Classification failure must fail closed. A normal chat turn is safer
 		// than unexpectedly entering a workflow that can modify the workspace.
@@ -804,7 +800,8 @@ func (s *ChatService) continuePendingStreamForSession(ctx context.Context, sessi
 			if background {
 				turnStream, finish = s.backgroundStreamForContext(ctx, sessionID, "", item.ID)
 			}
-			queuedResponse, queuedErr := s.sendMessageLocked(ctx, sessionID, item.Content, turnStream, item.ID, domaingeneration.PendingTurnSourceUserMessage)
+			turnCtx := intentport.WithRequestID(ctx, item.ID)
+			queuedResponse, queuedErr := s.sendMessageLocked(turnCtx, sessionID, item.Content, turnStream, item.ID, domaingeneration.PendingTurnSourceUserMessage)
 			if finish != nil {
 				finish(queuedResponse, queuedErr)
 			}

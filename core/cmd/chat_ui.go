@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	sessionresult "myai/core/application/session/result"
 	"myai/core/llm"
+	intentport "myai/core/port/intent"
 	"myai/core/service"
 	"myai/core/skill"
 )
@@ -134,6 +136,14 @@ func printAssistantHeader() {
 	fmt.Println(roleAIStyle.Render("Assistant"))
 }
 
+func intentTraceText(body string) string {
+	if json.Valid([]byte(body)) {
+		return body
+	}
+	// An HTTP failure may return arbitrary bytes, including terminal escapes.
+	return strconv.Quote(body)
+}
+
 func newChatStreamHandler(reader *bufio.Scanner) llm.ChatStreamHandler {
 	reasoningStarted := false
 	answerStarted := false
@@ -142,6 +152,24 @@ func newChatStreamHandler(reader *bufio.Scanner) llm.ChatStreamHandler {
 	answerPrinter := newStreamPrinter(bodyStyle)
 
 	return llm.ChatStreamHandler{
+		OnIntentTrace: func(trace intentport.Trace) {
+			if trace.Status == "started" {
+				fmt.Println(mutedStyle.Render("Jev intent check started"))
+				printBlockText("Input: " + intentTraceText(trace.RequestBody))
+				return
+			}
+			summary := fmt.Sprintf("Jev intent check: %s (%d ms)", trace.Status, trace.DurationMS)
+			if trace.Choice != "" {
+				summary += fmt.Sprintf(" · %s · %.0f%% · %s", trace.Choice, trace.Confidence*100, trace.Route)
+			}
+			fmt.Println(mutedStyle.Render(summary))
+			if trace.ResponseBody != "" {
+				printBlockText("Output: " + intentTraceText(trace.ResponseBody))
+			}
+			if trace.ResponseTruncated {
+				fmt.Println(mutedStyle.Render("Jev output was truncated"))
+			}
+		},
 		OnReasoning: func(text string) {
 			if !reasoningStarted {
 				printReasoningHeader()

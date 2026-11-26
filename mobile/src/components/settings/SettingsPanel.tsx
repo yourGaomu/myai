@@ -271,7 +271,7 @@ const intentStrategies: Array<{
     icon: "crosshair",
     label: "Jev 远程判断 (jev)",
     badge: "远程意图分类",
-    meta: "发送当前用户消息与最近几条用户历史到 Jev 服务，按置信度阈值决定仅规划或规划后直执。",
+    meta: "发送当前用户消息与最近几条用户历史到 Jev 服务，按置信度阈值选择普通对话、生成计划或恢复已有计划。",
   },
   {
     strategy: "off",
@@ -1954,7 +1954,7 @@ export function SettingsPanel({
       {/* 边界说明提示 */}
       <View style={styles.contextNote}>
         <Text style={styles.contextNoteText}>
-          自动判断仅在会话处于「对话 (Chat)」模式时生效；当你手动将会话切为「计划 (Plan)」模式时，直接使用手动 Plan 模式，不会调用自动判断。Jev 是专用意图分类模型，不会加入普通聊天模型列表或会话模型切换器。
+          Jev 是独立的意图分类模型。聊天中的「Jev 意图判断」卡片会显示调用进度和判断结果。
         </Text>
       </View>
 
@@ -2120,7 +2120,7 @@ export function SettingsPanel({
             value={intentBaseURL}
           />
           <Text style={styles.generationMeta}>
-            远程请求路径为 {"${BaseURL}/v1/judge"}；非本地地址必须使用 HTTPS。
+            远程请求路径为 {"${BaseURL}/v1/systemone"}；非本地地址必须使用 HTTPS。
           </Text>
         </View>
 
@@ -2256,7 +2256,7 @@ export function SettingsPanel({
               value={intentExecuteConfidence}
             />
             <Text style={styles.generationMeta}>
-              置信度 ≥ 该值时生成计划并自动执行 (plan_execute)
+              置信度达到该阈值时，可按用户要求恢复已有计划。新计划仍需确认后执行。
             </Text>
           </View>
         </View>

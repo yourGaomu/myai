@@ -89,6 +89,39 @@ func TestIntentControllerJevRoutesAndRecordsExactBodies(t *testing.T) {
 	}
 }
 
+func TestIntentControllerStreamsJevTraceLifecycle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"intent":{"type":"choice","choice":"implementation","confidence":0.91}}}`))
+	}))
+	defer server.Close()
+	controller, err := NewIntentController(context.Background(), intentstore.NewMemory(), jevclient.Client{}, RuleBasedAutoPlanClassifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := intentport.DefaultConfig()
+	config.Strategy, config.BaseURL, config.APIKey = intentport.StrategyJev, server.URL, "secret"
+	if _, err := controller.SaveConfig(context.Background(), config, false); err != nil {
+		t.Fatal(err)
+	}
+	var events []intentport.Trace
+	decision, err := controller.ClassifyWithTrace(intentport.WithRequestID(context.Background(), "request-live"), &session.Session{ID: "session-live", Kind: session.KindUser}, "修复上传功能", func(trace intentport.Trace) {
+		events = append(events, trace)
+	})
+	if err != nil || decision.Action != AutoPlanActionPlanExecute {
+		t.Fatalf("decision=%#v err=%v", decision, err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("trace lifecycle emitted %d events: %#v", len(events), events)
+	}
+	started, completed := events[0], events[1]
+	if started.Status != "started" || !strings.Contains(started.RequestBody, "修复上传功能") || started.RequestID != "request-live" {
+		t.Fatalf("started trace omitted request input: %#v", started)
+	}
+	if completed.Status != "succeeded" || completed.Choice != "implementation" || completed.Confidence != 0.91 || completed.Action != "plan_execute" || completed.Route != "plan_only" || !strings.Contains(completed.ResponseBody, "jev-latest") {
+		t.Fatalf("completed trace omitted model output/decision: %#v", completed)
+	}
+}
+
 func TestIntentControllerJevCanResumeExecutablePlan(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
@@ -136,7 +169,7 @@ func TestIntentControllerJevCanResumeExecutablePlan(t *testing.T) {
 
 func TestIntentControllerFailsClosedAndRecordsInvalidResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"answers":{"intent":{"type":"choice","choice":"implementation"}}}`))
+		_, _ = w.Write([]byte(`{"answers":{"intent":{"type":"choice","choice":"implementation"}},"echo":"\u0073ecret"}`))
 	}))
 	defer server.Close()
 	store := intentstore.NewMemory()
@@ -149,8 +182,15 @@ func TestIntentControllerFailsClosedAndRecordsInvalidResponse(t *testing.T) {
 	if _, err := controller.SaveConfig(context.Background(), config, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.Classify(context.Background(), &session.Session{ID: "session-1"}, "修复代码"); err == nil {
+	var events []intentport.Trace
+	_, err = controller.ClassifyWithTrace(context.Background(), &session.Session{ID: "session-1"}, "修复代码", func(trace intentport.Trace) {
+		events = append(events, trace)
+	})
+	if err == nil {
 		t.Fatal("missing confidence must fail closed")
+	}
+	if len(events) != 2 || events[1].Status != "invalid_response" || !strings.Contains(events[1].ResponseBody, `"echo":"[REDACTED]"`) {
+		t.Fatalf("invalid response did not produce a redacted terminal event: %#v", events)
 	}
 	traces, err := controller.ListTraces(context.Background(), "session-1", 10)
 	if err != nil || len(traces) != 1 || traces[0].Status != "invalid_response" {

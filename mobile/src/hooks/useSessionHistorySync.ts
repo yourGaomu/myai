@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
-import type { RelayMessage, SessionHistoryDeltaResultPayload, SessionHistoryMessage, SessionHistoryMetaResultPayload, SessionHistoryResultPayload } from "../protocol";
+import type { IntentTracePayload, RelayMessage, SessionHistoryDeltaResultPayload, SessionHistoryMessage, SessionHistoryMetaResultPayload, SessionHistoryResultPayload } from "../protocol";
 import { loadCachedSessionHistory, replaceCachedSessionHistory } from "../storage/sessionHistoryCache";
 import type { PendingAction, RelayScope } from "../types/app";
 import type { ChatItem } from "../types/chat";
@@ -29,6 +29,7 @@ type Args = {
   pendingHistorySessionIDRef: RefObject<string>;
   relayScopeRef: RefObject<RelayScope>;
   sessionIDRef: RefObject<string>;
+  upsertIntentTrace: (sessionID: string, trace: IntentTracePayload, historical?: boolean) => void;
   mergeSessionHistory: (sessionID: string, messages: ChatItem[], source: "cache" | "server") => void;
   sendEnvelope: (type: RelayMessage["type"], overrides?: Partial<RelayMessage>) => boolean;
   startPending: (action: PendingAction) => void;
@@ -37,7 +38,7 @@ type Args = {
 
 export function useSessionHistorySync({
   historySessionIDRef, pendingHistorySessionIDRef, relayScopeRef, sessionIDRef,
-  mergeSessionHistory, sendEnvelope, startPending, stopPending,
+  upsertIntentTrace, mergeSessionHistory, sendEnvelope, startPending, stopPending,
 }: Args) {
   const syncsRef = useRef(new Map<string, Sync>());
   const cacheWritesRef = useRef(new Map<string, Promise<void>>());
@@ -108,7 +109,7 @@ export function useSessionHistorySync({
     sync.requestID = newRequestID();
     sync.phase = phase;
     armTimeout(sessionID, sync);
-    const sent = sendEnvelope(phase, { request_id: sync.requestID, session_id: sessionID, payload: { ...payload, session_id: sessionID } });
+    const sent = sendEnvelope(phase, { request_id: sync.requestID, session_id: sessionID, payload: { ...payload, session_id: sessionID, ...(phase !== "session_history_delta" ? { include_intent_traces: true } : {}) } });
     if (!sent) finish(sessionID, sync, false);
     return sent;
   }, [armTimeout, finish, isCurrent, sendEnvelope]);
@@ -209,8 +210,13 @@ export function useSessionHistorySync({
         commit(sessionID, sync, sync.messages, true);
       }
     }
+    if ("intent_traces" in payload) {
+      for (const trace of [...(payload.intent_traces || [])].reverse()) {
+        if (trace.session_id === sessionID) upsertIntentTrace(sessionID, trace, true);
+      }
+    }
     return true;
-  }, [commit, finish, isCurrent, send]);
+  }, [commit, finish, isCurrent, send, upsertIntentTrace]);
 
   return { requestHistoryWithCache, requestSessionHistoryFull, handleSessionHistoryMessage, resetHistorySync };
 }

@@ -303,6 +303,17 @@ textarea:focus {
   font-size: 13px;
 }
 
+.jev-trace summary {
+  cursor: pointer;
+}
+
+.jev-trace pre {
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .message.error {
   align-self: stretch;
   max-width: 100%;
