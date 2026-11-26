@@ -463,16 +463,17 @@ func TestMistralCompatibleClientPreservesPathMessagesToolsAndSettings(t *testing
 							Name string `json:"name"`
 						} `json:"function"`
 					} `json:"tools"`
-					MaxTokens   int     `json:"max_tokens"`
-					Temperature float64 `json:"temperature"`
-					TopP        float64 `json:"top_p"`
+					MaxTokens      int     `json:"max_tokens"`
+					Temperature    float64 `json:"temperature"`
+					TopP           float64 `json:"top_p"`
+					PromptCacheKey string  `json:"prompt_cache_key"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 					w.WriteHeader(400)
 					return
 				}
-				if payload.Model != "mistral-local" || len(payload.Messages) != 1 || payload.Messages[0].Role != "user" || payload.Messages[0].Content != "hello" || len(payload.Tools) != 1 || payload.Tools[0].Function.Name != "read_file" || payload.MaxTokens != 128 || payload.Temperature != 0.2 || payload.TopP != 0.8 {
+				if payload.Model != "mistral-local" || len(payload.Messages) != 1 || payload.Messages[0].Role != "user" || payload.Messages[0].Content != "hello" || len(payload.Tools) != 1 || payload.Tools[0].Function.Name != "read_file" || payload.MaxTokens != 128 || payload.Temperature != 0.2 || payload.TopP != 0.8 || payload.PromptCacheKey != "" {
 					t.Error("Mistral messages, tools, model or settings changed")
 				}
 				writeAnswer(w, "ok", "stop")

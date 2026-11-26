@@ -1,6 +1,6 @@
 # 缓存命中率检查与修复
 
-检查日期：2026-11-24
+检查日期：2026-11-26
 
 ## 修复结论
 
@@ -16,6 +16,7 @@
 - [`core/adapter/model/langchaingo/anthropic_cache_transport.go`](../core/adapter/model/langchaingo/anthropic_cache_transport.go)：稳定 system/tools 之后的完整消息历史成为缓存检查点候选范围；检查点可落在已完成的 assistant 文本或完整 tool result 之后，不会落在未配对的 tool call 中间。仍遵守请求中最多四个缓存控制点及已有 caller 标记。
 
 图片映射和普通工具调用不需要更改：已有代码把同一附件绑定回原消息并校验图片哈希，工具调用/结果按追加方式记录。上下文压缩、图片改变、工具权限/schema 改变仍会改变请求前缀，这是输入变化的预期行为。
+- 官方 OpenAI HTTPS Chat Completions 端点额外发送稳定的 `prompt_cache_key`：由模型名、开头固定 system/developer 消息及工具 schema 计算；不包含会话 ID 或对话正文，让共享相同固定前缀的会话落入同一缓存路由组。请求目标会再次校验为 `api.openai.com`；Mistral 和其他兼容中转端点不会收到这个 OpenAI 专用字段。
 
 ## 本地验证
 
@@ -31,3 +32,9 @@
 ## 限制
 
 保留每轮有作用域的 runtime/RAG/计划上下文会增加长对话中的输入 token，可能让上下文压缩更早触发；压缩后前缀缩短属于预期变化。前缀更稳定只表示请求更有机会复用上游缓存，并不等于服务商已经命中。真实命中仍由服务商的 cached input token 统计确认；不同服务商的缓存键、最小缓存长度、图片处理和缓存保留规则可能不同。
+
+## 2026-11-26 复核
+
+本次复核针对后续图片回显、主动澄清、工具和子代理相关开发；OpenAI 路由键及缓存相关 Go 测试通过。没有发现这些功能会随机重排历史消息或改变已回放图片的绑定；权限、agent mode、工具 schema、system prompt、图片内容或上下文压缩发生变化时，缓存前缀会按设计改变。子代理拥有独立 session 和任务指令，首次请求通常无法复用父会话完整前缀，后续子代理工具轮仍可复用自身稳定前缀。
+
+官方 OpenAI 路由键是辅助分流提示，不会强制产生缓存命中；第三方 OpenAI-compatible 服务的缓存行为仍由各服务决定。Anthropic 与 Gemini 的缓存分别依赖显式缓存控制点/服务端上下文缓存策略和上游用量报告。仓库测试只能验证请求序列、路由键和用量解析，无法替代线上服务返回的缓存 token 数据。
